@@ -52,7 +52,7 @@ make clean
 ```
 
 ## コーディング規約
-基本は https://doc.rust-lang.org/1.1.0/style/README.html に従ってください。
+基本は https://doc.rust-lang.org/1.1.0/style/style/naming/README.html に従ってください。
 コード整形はrustfmtを使用します。  
 (本人が守れてないかも)
 
