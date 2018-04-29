@@ -88,7 +88,7 @@ fn memman_init(info: &MultiBootInformation, mbiaddr: usize) -> MemoryManager {
 fn load_mbi(addr: usize) -> mbi::MultiBootInformation {
     let mbi_total_size = mbi::total_size(addr);
     if mbi_total_size == 0 {
-        puts!("Hmm..Total_size is zero.\n");
+        panic!("Invalid Multi Boot Information.");
     }
     let info = mbi::MultiBootInformation::new(addr); //Result型などがあり利用してみるのもいいかも
     info
