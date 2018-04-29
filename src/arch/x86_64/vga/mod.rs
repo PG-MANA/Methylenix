@@ -33,6 +33,15 @@ impl VgaText {
             match code {//if多用するより良さそう
                 b'\n'/*('\n' as u8)*/ => self.count += self.width - self.count % self.width,
                 b'\r' => self.count -= self.count % self.width,
+                b'\x08' => {
+                    if self.count > 1 {
+                        self.count -= 1;
+                        let t: u16 = 0x0b00 | (' ' as u16);
+                        unsafe {
+                            *((self.buf + self.count *2) as *mut u16) = t;
+                        }
+                    }
+                },
                 code => {
                     let t: u16 = 0x0b00 | (code as u16);
                     unsafe {

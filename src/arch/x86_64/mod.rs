@@ -18,7 +18,6 @@ pub mod memman;
 pub mod interrupt;
 pub mod device;
 
-//use
 use arch::target_arch::device::{cpu, keyboard};
 use arch::target_arch::mbi::*;
 use arch::target_arch::memman::MemoryManager;
@@ -32,7 +31,7 @@ pub extern "C" fn boot_main(
     gdt: u64,    /*現在のセグメント:8*/
 ) {
     //おそらくこの関数はCLIされた状態で呼ばれる。
-    puts!("Methylenix ver.0.0.1\n");
+    print!("Methylenix ver.0.0.1\n");
     //PIC初期化
     unsafe {
         device::pic::pic_init();
@@ -55,27 +54,27 @@ pub extern "C" fn boot_main(
     unsafe {
         cpu::sti();
     }
-
-    //memman::init(&info.meminfo);
-    //memman::set_elf(info.elfinfo);
-    //puts!("MemMan will have been initialized...perhaps...\n");
-    //println!("Alloc the {}th page,{}th page,{}th page",memman::alloc4k(),memman::alloc4k(),memman::alloc4k());
-    //memman::show();
     hlt();
 }
 
 fn memman_init(info: &MultiBootInformation, mbiaddr: usize) -> MemoryManager {
     //カーネルサイズの計算
-    let mut elfinfo = info.elfinfo.clone();
-    let kernel_loader_start = elfinfo.map(|section| section.addr()).min().unwrap();
-    elfinfo = info.elfinfo.clone();
-    let kernel_loader_end = elfinfo.map(|section| section.addr()).max().unwrap();
+    let kernel_loader_start = info.elfinfo
+        .clone()
+        .map(|section| section.addr())
+        .min()
+        .unwrap();
+    let kernel_loader_end = info.elfinfo
+        .clone()
+        .map(|section| section.addr())
+        .max()
+        .unwrap();
     let mbi_start = mbiaddr;
     let mbi_end = mbiaddr + mbi::total_size(mbiaddr) as usize;
     println!(
-        "KernelLoader Size:{}KB,MultiBootInformation Size:{}KB",
+        "KernelLoader Size:{}KB,MultiBootInformation Size:{}B",
         (kernel_loader_end - kernel_loader_start) / 1024 as usize,
-        mbi::total_size(mbiaddr) / 1024
+        mbi::total_size(mbiaddr)
     );
     memman::MemoryManager::new(
         info.memmapinfo.clone(),
@@ -96,16 +95,20 @@ fn load_mbi(addr: usize) -> mbi::MultiBootInformation {
 }
 
 fn hlt() {
-    let mut cnt = 1;
+    const KEYCODE_MAP: [u8; 0x36] = [
+        b'0', b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'=',
+        b'\x08', b'\t', b'q', b'w', b'e', b'r', b't', b'y', b'u', b'i', b'o', b'p', b'[', b']',
+        b'\n', b'0', b'a', b's', b'd', b'f', b'g', b'h', b'j', b'k', b'l', b';', b'\'', b'`', b'0',
+        b'\\', b'z', b'x', b'c', b'v', b'b', b'n', b'm', b',', b'.', b'/',
+    ];
+    print!("keyboard test:/ $");
     loop {
         unsafe {
             cpu::hlt();
         }
-        print!(
-            "interrupted {}th. Key code:{:02x} (print from Kernel))\r",
-            cnt,
-            keyboard::Keyboard::dequeue_key().unwrap()
-        );
-        cnt += 1;
+        let keycode = keyboard::Keyboard::dequeue_key().unwrap() as usize;
+        if keycode < KEYCODE_MAP.len() {
+            print!("{}", KEYCODE_MAP[keycode] as char);
+        }
     }
 }
