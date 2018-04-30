@@ -95,11 +95,11 @@ fn load_mbi(addr: usize) -> mbi::MultiBootInformation {
 }
 
 fn hlt() {
-    const KEYCODE_MAP: [u8; 0x36] = [
+    const KEYCODE_MAP: [u8; 0x3a] = [
         b'0', b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'=',
         b'\x08', b'\t', b'q', b'w', b'e', b'r', b't', b'y', b'u', b'i', b'o', b'p', b'[', b']',
         b'\n', b'0', b'a', b's', b'd', b'f', b'g', b'h', b'j', b'k', b'l', b';', b'\'', b'`', b'0',
-        b'\\', b'z', b'x', b'c', b'v', b'b', b'n', b'm', b',', b'.', b'/',
+        b'\\', b'z', b'x', b'c', b'v', b'b', b'n', b'm', b',', b'.', b'/', b'0', b'*', b'0', b' ',
     ];
     print!("keyboard test:/ $");
     loop {

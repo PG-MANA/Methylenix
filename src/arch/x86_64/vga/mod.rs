@@ -34,11 +34,10 @@ impl VgaText {
                 b'\n'/*('\n' as u8)*/ => self.count += self.width - self.count % self.width,
                 b'\r' => self.count -= self.count % self.width,
                 b'\x08' => {
-                    if self.count > 1 {
+                    if self.count > 0 {
                         self.count -= 1;
-                        let t: u16 = 0x0b00 | (' ' as u16);
                         unsafe {
-                            *((self.buf + self.count *2) as *mut u16) = t;
+                            *((self.buf + self.count *2) as *mut u16) = 0x0b00 | (' ' as u16);
                         }
                     }
                 },
