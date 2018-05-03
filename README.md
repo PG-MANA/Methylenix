@@ -15,7 +15,8 @@ Methylenix とはRustで構成されたOSです。
 Methylenixという名前は(頭弱い)自分が唐突に思いついたアイデアです。  
 有機化合物みたいにいろいろな部品を組み合わせて作っていくようにモジュールを組み合わせて応用的に作っていきたいと考え、基の中で「nix」をくっつけてゴロが良さそうなメチレン基にしました。
 なんか重大な間違いを起こしてそう。
-
+## 現状
+キーボード割り込みから入力された文字の表示
 ## 対応命令セット
 * x86_64
 
@@ -45,6 +46,8 @@ See LICENSE.md
 ### ビルド
 
 ```shell
+git clone https://github.com/PG-MANA/Methylenix.git
+cd Methylenix
 make iso
 #これでbin/img/boot.isoができる...はず
 make clean
