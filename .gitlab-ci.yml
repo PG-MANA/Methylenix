@@ -5,7 +5,7 @@ stages:
 build:
   stage:  build
   script:
-    - zypper in curl grub2 make nasm
+    - zypper in -y curl grub2 make nasm
     - curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly
     - source ~/.cargo/env
     - rustc --version
