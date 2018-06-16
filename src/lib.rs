@@ -15,6 +15,9 @@
 #![feature(const_size_of)]
 #![feature(naked_functions)]
 #![feature(use_extern_macros)]
+#![feature(panic_implementation)]
+#![feature(core_panic_info)]
+#![feature(panic_info_message)]
 //#![no_main]
 
 //crate
