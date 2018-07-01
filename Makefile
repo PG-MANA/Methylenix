@@ -1,8 +1,5 @@
-#
-# Copyright 2017 PG_MANA
-#
 # This software is Licensed under the Apache License Version 2.0 
-# See LICENSE.md
+# See LICENSE
 #
 
 #環境設定
@@ -23,8 +20,8 @@ MAKE_BASEDIR ?= $(shell pwd)/
 MAKE_BINDIR = $(MAKE_BASEDIR)bin/
 MAKE_IMGDIR = $(MAKE_BINDIR)img/
 MAKE_TMPDIR = $(MAKE_BASEDIR)tmp/
-MAKE_OBJDIR =  $(MAKE_TMPDIR)obj/
-LDFILE = linkerscript/$(TARGET_ARCH).ld
+MAKE_OBJDIR = $(MAKE_TMPDIR)obj/
+MAKE_CONGIGDIR =  $(MAKE_BASEDIR)config/$(TARGET_ARCH)/
 
 ##ソフトウェア
 STRIP= strip
@@ -33,7 +30,7 @@ CP = cp -r
 RM = rm -rf
 GRUBMKRES = grub2-mkrescue
 AR = ar rcs
-LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(LDFILE)
+LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
 XARGO = xargo
 include config/$(TARGET_ARCH)/assembler.mk
 export AR
@@ -70,7 +67,7 @@ iso:
 	$(MAKE) kernel
 	-$(MKDIR) $(MAKE_IMGDIR) $(MAKE_TMPDIR)grub-iso/boot/grub/ $(MAKE_TMPDIR)grub-iso/methylenix/
 	$(CP) $(MAKE_BINDIR)kernel.sys $(MAKE_TMPDIR)grub-iso/methylenix/
-	$(CP) config/grub  $(MAKE_TMPDIR)grub-iso/boot/
+	$(CP) $(MAKE_CONGIGDIR)/grub  $(MAKE_TMPDIR)grub-iso/boot/
 	$(GRUBMKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso/
 
 kernel: 
