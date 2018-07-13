@@ -11,10 +11,6 @@
 use arch::target_arch::device::cpu;
 use core::panic;
 
-//Rust用失敗処理
-#[lang = "eh_personality"]
-extern "C" fn eh_personality() {}
-
 #[panic_implementation]
 #[no_mangle]
 pub fn panic(info: &panic::PanicInfo) -> ! {
