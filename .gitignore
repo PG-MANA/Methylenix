@@ -1,5 +1,4 @@
-#生成物格納場所は除外
-/bin
+/bin/
 /tmp/
-/target
+/target/
 /Cargo.lock
