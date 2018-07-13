@@ -1,12 +1,7 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * アセンブリによる割り込みハンドラ、手短に済ませるべき
- * できるだけNasmなどを使いたくない
- */
+アセンブリによる割り込みハンドラ、手短に済ませるべき
+できるだけNasmなどを使いたくない
+*/
 
 #[macro_export]
 macro_rules! make_interrupt_hundler {

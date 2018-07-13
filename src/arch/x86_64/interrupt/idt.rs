@@ -1,11 +1,6 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * IDT(64bit)実装、割り込みを扱うために行う。
- */
+IDT(64bit)実装、割り込みを扱うために行う。
+*/
 
 //use
 use arch::x86_64::device::cpu;

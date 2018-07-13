@@ -1,13 +1,3 @@
-/*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * Arch 分岐のための何か
- * ここで差異を吸収する
- */
-
 #[cfg(target_arch = "x86_64")]
 #[macro_use]
 pub mod x86_64;

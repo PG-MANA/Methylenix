@@ -1,13 +1,3 @@
-/*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * Rust入門コード
- * C言語との連携はないと考えている...考えているつもり
- */
-
 #![no_std]
 #![feature(asm)]
 #![feature(lang_items)]
@@ -18,12 +8,8 @@
 #![feature(panic_implementation)]
 #![feature(core_panic_info)]
 #![feature(panic_info_message)]
-//#![no_main]
 
-//crate
-//pub extern crate rlibc;
-
-//Arch
+//arch
 #[macro_use]
 pub mod arch;
 
@@ -31,3 +17,4 @@ pub mod arch;
 pub mod usr;
 
 //そう...何もない!!
+//各モジュールを参照してください。

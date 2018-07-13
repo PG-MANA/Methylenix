@@ -1,11 +1,6 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * FIFOシステム(暫定)
- */
+FIFOシステム(暫定)
+*/
 
 use core::mem;
 

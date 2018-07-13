@@ -1,11 +1,6 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * ページング実装(Page Table)
- */
+ページング実装(Page Table)
+*/
 
 use core::ops::{Index, IndexMut};
 use paging::pte::PTE;

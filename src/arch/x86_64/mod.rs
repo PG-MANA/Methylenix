@@ -1,14 +1,3 @@
-/*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * grub.asmから呼ばれる何か。
- * Rust入門コード
- * C言語との連携はないと考えている...考えているつもり
- */
-
 #[macro_use]
 pub mod vga;
 pub mod mbi; //Multi Boot Information

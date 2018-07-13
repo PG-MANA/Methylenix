@@ -1,11 +1,6 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * TSS(64bit)実装、割り込みを扱うために行う。
- */
+TSS(64bit)実装、割り込みを扱うために行う。
+*/
 
 use core::mem;
 const IO_MAP_SIZE: usize = 0xFFFF;

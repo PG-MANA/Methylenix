@@ -1,12 +1,7 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * PIC初期化
- * https://pdos.csail.mit.edu/6.828/2005/readings/hardware/8259A.pdf
- */
+PIC初期化
+参考:https://pdos.csail.mit.edu/6.828/2005/readings/hardware/8259A.pdf
+*/
 
 use arch::x86_64::device::cpu;
 

@@ -1,9 +1,3 @@
-;
-;Copyright 2017 PG_MANA
-;
-;This software is Licensed under the Apache License Version 2.0 
-;See LICENSE.md
-;
 ;GRUB2で起動できたらなと作ったもの。(ELF式)
 ;
 bits    32
@@ -43,7 +37,7 @@ multiboot_start:
     dd  multiboot_header_arch
     dd  multiboot_header_len
     dd  multiboot_header_checksum
-    
+
 ;ここにタグを書く
 multiboot_tag_end:
     dw  multiboot_header_tag_end

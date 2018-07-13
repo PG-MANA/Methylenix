@@ -1,7 +1,3 @@
-# This software is Licensed under the Apache License Version 2.0 
-# See LICENSE
-#
-
 #環境設定
 ##名前
 NAME = methylenix
@@ -63,14 +59,14 @@ clean:
 	$(RM) $(MAKE_TMPDIR)
 	$(XARGO) clean
 
-iso: 
+iso:
 	$(MAKE) kernel
 	-$(MKDIR) $(MAKE_IMGDIR) $(MAKE_TMPDIR)grub-iso/boot/grub/ $(MAKE_TMPDIR)grub-iso/methylenix/
 	$(CP) $(MAKE_BINDIR)kernel.sys $(MAKE_TMPDIR)grub-iso/methylenix/
 	$(CP) $(MAKE_CONGIGDIR)/grub  $(MAKE_TMPDIR)grub-iso/boot/
 	$(GRUBMKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso/
 
-kernel: 
+kernel:
 	$(MAKE) init
 	$(MAKE) $(KERNELFILES)
 
@@ -83,6 +79,6 @@ $(MAKE_OBJDIR)boot_asm.a : src/arch/$(TARGET_ARCH)/boot/Makefile .FORCE
 	$(MAKE) -C src/arch/$(TARGET_ARCH)/boot/
 
 $(RUST_OBJ) :  .FORCE
-	$(XARGO) build --release --target $(RUST_TARGET_FILE_FOLDER) $(RUST_TARGET) 
+	$(XARGO) build --release --target $(RUST_TARGET_FILE_FOLDER) $(RUST_TARGET)
 
 .FORCE:

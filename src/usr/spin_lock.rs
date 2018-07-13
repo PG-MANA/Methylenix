@@ -1,12 +1,7 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * スピンロック実装
- *  std::sync::Mutexと互換を取る
- */
+スピンロック実装
+std::sync::Mutexと互換を取る
+*/
 
 //use
 use core::sync::atomic;

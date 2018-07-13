@@ -1,13 +1,3 @@
-/*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * VGA Textモードでprintするもの
- * 張り切ってコードをかいたもののコンパイラに怒られ続け生き残ったコードはこれだけ...
- */
-
 //use
 use core::fmt;
 use usr::spin_lock::Mutex;

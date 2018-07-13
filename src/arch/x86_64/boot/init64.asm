@@ -1,9 +1,3 @@
- ;
-;Copyright 2017 PG_MANA
-;
-;This software is Licensed under the Apache License Version 2.0
-;See LICENSE.md
-;
 ;雑な初期化(init.asmの続き)
 ;IDTの設定が終わるまでCLIしたままにする。そうでないと割り込みが入って死ぬ。
 bits 64

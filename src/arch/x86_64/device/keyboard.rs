@@ -1,11 +1,6 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * キーボード制御
- */
+キーボード制御
+*/
 
 use arch::x86_64::device::{cpu, pic};
 use arch::x86_64::interrupt::{idt, IDTMan};

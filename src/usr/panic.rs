@@ -1,12 +1,3 @@
-/*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- *パニック時の処理を担当
- */
-
 //use
 use arch::target_arch::device::cpu;
 use core::panic;

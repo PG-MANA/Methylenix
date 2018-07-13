@@ -1,9 +1,3 @@
-;
-;Copyright 2017 PG_MANA
-;
-;This software is Licensed under the Apache License Version 2.0 
-;See LICENSE.md
-;
 ;雑な初期化
 ;おそらく16bitリアルモードでINITを呼んでも行ける...はず
 ;IDTの設定が終わるまでCLIしたままにする。そうでないと割り込みが入って死ぬ。
@@ -38,7 +32,7 @@ init:
 
         push    0;64bit POPのための準備
         push    gdt.main_code;あとで使う
-        pushfd 
+        pushfd
         pop     eax
         mov     ecx,eax;比較用にとっておく
         xor     eax,1<<21;IDフラグを反転
@@ -220,4 +214,3 @@ pdpt:
 pml4:
 ;ページマップレベル4(8byte * 512)
     resb    4096
-

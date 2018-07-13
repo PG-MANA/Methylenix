@@ -1,12 +1,3 @@
-/*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * MultiBoot2実装
- */
-
 //参考:https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
 
 mod elf;

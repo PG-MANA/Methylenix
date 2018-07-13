@@ -1,11 +1,6 @@
 /*
- * Copyright 2017 PG_MANA
- *
- * This software is Licensed under the Apache License Version 2.0
- * See LICENSE.md
- *
- * MultiBoot2実装(メモリ関係)
- */
+MultiBoot2実装(メモリ関係)
+*/
 
 use core::mem;
 
