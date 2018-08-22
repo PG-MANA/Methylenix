@@ -2,7 +2,6 @@
 #![feature(asm)]
 #![feature(lang_items)]
 #![feature(const_fn)]
-#![feature(const_size_of)]
 #![feature(naked_functions)]
 #![feature(use_extern_macros)]
 #![feature(panic_implementation)]
