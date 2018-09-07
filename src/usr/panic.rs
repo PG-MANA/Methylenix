@@ -2,7 +2,7 @@
 use arch::target_arch::device::cpu;
 use core::panic;
 
-#[panic_implementation]
+#[panic_handler]
 #[no_mangle]
 pub fn panic(info: &panic::PanicInfo) -> ! {
     let location = info.location();
