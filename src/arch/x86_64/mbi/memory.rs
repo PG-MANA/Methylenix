@@ -14,6 +14,7 @@ pub struct MemoryMapEntry {
 }
 
 #[repr(packed)]
+#[allow(dead_code)]
 pub struct MultibootTagMemoryMap {
     s_type: u32,
     size: u32,
