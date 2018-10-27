@@ -21,7 +21,7 @@ pub struct MultiBootInformation {
 }
 
 impl MultiBootInformation {
-    #![allow(dead_code)]//使っていない定数でエラーが出る
+    #![allow(dead_code)] //使っていない定数でエラーが出る
     const TAG_ALIGN: u32 = 8;
     const TAG_TYPE_END: u32 = 0;
     const TAG_TYPE_CMDLINE: u32 = 1;
@@ -44,7 +44,7 @@ impl MultiBootInformation {
     const TAG_TYPE_EFI_BS: u32 = 18;
     const TAG_TYPE_EFI32_IH: u32 = 19;
     const TAG_TYPE_EFI64_IH: u32 = 20;
-    const TAG_TYPE_LOAD_BASE_ADDR: u32 = 21;
+    const TAG_TYPE_BASE_ADDR: u32 = 21;
 
     pub fn new(addr: usize) -> MultiBootInformation {
         //core::mem::uninitializedは慎重に使うべき(zeroedも避けるべきだがデフォルトの数値がすべて0だから...)
@@ -53,7 +53,7 @@ impl MultiBootInformation {
 
         let total_size = total_size(addr);
         let mut tag = addr + 8;
-
+        puts!("MultiBootInfo:");
         loop {
             let tag_type: u32 = unsafe { (&*(tag as *const MultibootTag)).s_type };
             match tag_type {
@@ -62,52 +62,56 @@ impl MultiBootInformation {
                     break;
                 }
                 MultiBootInformation::TAG_TYPE_MMAP => {
-                    puts!("Memory Map=>");
+                    puts!("Memory Map");
                     mbi.memmapinfo = MemoryMapInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_ACPI_NEW => {
-                    puts!("ACPI(NEW)=>");
+                    puts!("ACPI(NEW)");
                 }
                 MultiBootInformation::TAG_TYPE_BASIC_MEMINFO => {
-                    puts!("Basic MemoryInfo=>");
+                    puts!("Basic MemoryInfo");
                     mbi.meminfo = MemoryInfo::new(unsafe { &*(tag as *const _) }); //完全に信用すべきではない(CPUIDなどで問い合わせる)
                 }
                 MultiBootInformation::TAG_TYPE_VBE => {
-                    puts!("VBE Struct=>");
+                    puts!("VBE Struct");
                 }
                 MultiBootInformation::TAG_TYPE_CMDLINE => {
-                    puts!("Cmdline=>");
+                    puts!("Cmdline");
                 }
                 MultiBootInformation::TAG_TYPE_BOOT_LOADER_NAME => {
-                    puts!("Boot Loader Name=>");
+                    puts!("Boot Loader Name");
                 }
                 MultiBootInformation::TAG_TYPE_SMBIOS => {
-                    puts!("SMBIOS=>");
+                    puts!("SMBIOS");
                 }
                 MultiBootInformation::TAG_TYPE_FRAMEBUFFER => {
-                    puts!("FRAMEBUFFER=>");
+                    puts!("FrameBuffer");
                 }
                 MultiBootInformation::TAG_TYPE_EFI32 => {
-                    puts!("EFI32=>");
+                    puts!("EFI32");
                 }
                 MultiBootInformation::TAG_TYPE_ELF_SECTIONS => {
                     mbi.elfinfo = ElfInfo::new(unsafe { &*(tag as *const _) });
-                    puts!("ELF SECTIONS=>");
+                    puts!("ELF Sections");
                 }
                 MultiBootInformation::TAG_TYPE_APM => {
-                    puts!("APM=>");
+                    puts!("APM");
                 }
                 MultiBootInformation::TAG_TYPE_BOOTDEV => {
-                    puts!("BOOTDEV=>");
+                    puts!("Boot Device");
+                }
+                MultiBootInformation::TAG_TYPE_BASE_ADDR => {
+                    puts!("Image Base Address")
                 }
                 _ => {
                     if tag - addr - 8 >= (total_size as usize) {
                         puts!("List is too long.");
                         break;
                     }
-                    puts!("Unknown...=>")
+                    print!("Unknown(TAG_TYPE:{})", tag_type);
                 }
             }
+            puts!(" => ");
             tag += ((unsafe { (&*(tag as *const MultibootTag)).size } as usize) + 7) & !7;
         }
 

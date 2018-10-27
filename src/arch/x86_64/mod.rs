@@ -20,7 +20,7 @@ pub extern "C" fn boot_main(
     gdt: u64,    /*現在のセグメント:8*/
 ) {
     //おそらくこの関数はCLIされた状態で呼ばれる。
-    print!("Methylenix ver.0.0.1\n");
+    println!("Methylenix version 0.0.1");
     //PIC初期化
     unsafe {
         device::pic::pic_init();
@@ -32,7 +32,7 @@ pub extern "C" fn boot_main(
     }
     let info = load_mbi(addr);
     //メモリ管理初期化
-    let mut memory_manager = memman_init(&info, addr);
+    let mut memory_manager = init_memman(&info, addr);
     //IDT初期化&割り込み初期化
     let idt_manager =
         unsafe { interrupt::IDTMan::new(memory_manager.alloc_page().unwrap().get_page(), gdt) };
@@ -46,14 +46,16 @@ pub extern "C" fn boot_main(
     hlt();
 }
 
-fn memman_init(info: &MultiBootInformation, mbiaddr: usize) -> MemoryManager {
+fn init_memman(info: &MultiBootInformation, mbiaddr: usize) -> MemoryManager {
     //カーネルサイズの計算
-    let kernel_loader_start = info.elfinfo
+    let kernel_loader_start = info
+        .elfinfo
         .clone()
         .map(|section| section.addr())
         .min()
         .unwrap();
-    let kernel_loader_end = info.elfinfo
+    let kernel_loader_end = info
+        .elfinfo
         .clone()
         .map(|section| section.addr())
         .max()
@@ -61,7 +63,7 @@ fn memman_init(info: &MultiBootInformation, mbiaddr: usize) -> MemoryManager {
     let mbi_start = mbiaddr;
     let mbi_end = mbiaddr + mbi::total_size(mbiaddr) as usize;
     println!(
-        "KernelLoader Size:{}KB,MultiBootInformation Size:{}B",
+        "KernelLoader Size:{}KB, MultiBootInformation Size:{}B",
         (kernel_loader_end - kernel_loader_start) / 1024 as usize,
         mbi::total_size(mbiaddr)
     );
