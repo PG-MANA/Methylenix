@@ -58,14 +58,19 @@ init:
   test  edx,  1 << 26
   jz    no1gb
 
+  mov   ecx,  0             ; カウンタ
 pdpte_setup:
   ; https://software.intel.com/sites/default/files/managed/a4/60/325384-sdm-vol-3abcd.pdf (第四章 LEVEL4-PAGING)
   ; 1GB単位メモリページング
   ; PML4->PDPだけで完結
 
-  mov   eax,  0             ; 先頭アドレスが管理する区域(1GB)(予約域は0で埋めている。)
+  mov   eax,  0x100000      ; ページ一つが管理する区域(1GB)
+  mul   ecx                 ; eax = eax * ecx
   or    eax,  0b10000011    ; P(物理メモリ上) + r/w(read and write) + huge(PDPTでHugeを立てると1GB単位) 0b:二進数
-  mov   [pdpt], eax
+  mov   [pdpt + ecx * 8], eax
+  inc   ecx
+  cmp   ecx,  4
+  jne   pdpte_setup
   jmp   pml4_setup
 
 no1gb:
@@ -75,18 +80,25 @@ no1gb:
   ; 2MB単位メモリページング
   ; PML4->PDP->PDで完結
 
-  mov   eax,  0x200000      ; ページ一つが管理する区域(2MB)(掛け算で 0MB~ => 2MB~=>4MB~と増える)
+  mov   eax,  0x200000      ; ページ一つが管理する区域(2MB)(掛け算で 0MB~ => 4MB~=>8MB~と増える)
   mul   ecx                 ; eax = eax * ecx
   or    eax,  0b10000011    ; P(物理メモリ上) + r/w(read and write) + huge(PDEでHugeを立てると２MB単位) 0b:二進数
   mov   [pd + ecx * 8], eax ; 64bitごとの配置
   inc   ecx                 ; ecx++
-  cmp   ecx,  512
-  jne   .pde_setup          ; ecx != 512
+  cmp   ecx,  2048
+  jne   .pde_setup          ; ecx != 512 * 4
 
-;.pdpte_setup:
-  mov   eax,  pd
+  mov   ecx,  0             ; カウンタ
+
+.pdpte_setup_2mb:
+  mov   eax,  4096
+  mul   ecx
+  add   eax,  pd            ; この３つで eax = 4096 * ecx + pdしてる
   or    eax,  0b11          ; P(物理メモリ上) + r/w(read and write)
-  mov   [pdpt], eax         ; ページマップレベル4の最初に追加
+  mov   [pdpt + ecx * 8], eax
+  inc   ecx
+  cmp   ecx,  4
+  jne   .pdpte_setup_2mb
 
 pml4_setup:
   mov   eax,  pdpt
@@ -105,7 +117,7 @@ pml4_setup:
   wrmsr
   mov   eax,  cr0
   or    eax,  1 << 31 | 1   ; PGフラグを立てる("|1"は既に32bitになってる場合は不要)
-  mov   cr0,  eax           ; これらの初期化で1GBは仮想メモリアドレスと実メモリアドレスが一致しているはず。(ストレートマッピング)
+  mov   cr0,  eax           ; これらの初期化で4GBは仮想メモリアドレスと実メモリアドレスが一致しているはず。(ストレートマッピング)
   lgdt  [gdtr0]
   mov   ax,   gdt.tss_definition
   ltr   ax                  ; ホントは16bitから32bitになったときはすぐジャンプすべき
@@ -217,8 +229,8 @@ stack:
   resb    4096
 
 pd:
-; ページングディレクトリ(8byte * 512)
-  resb    4096
+; ページングディレクトリ(8byte * 512) * 4
+  resb    4096 * 4
 
 pdpt:
 ; ページディレクトリポインタテーブル(8byte * 512)
