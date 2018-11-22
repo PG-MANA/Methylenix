@@ -1,9 +1,11 @@
 //参考:https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
 
 mod elf;
+mod frame_buffer;
 mod memory;
 
 pub use self::elf::{ElfInfo, ElfSection};
+pub use self::frame_buffer::FrameBufferInfo;
 pub use self::memory::{MemoryInfo, MemoryMapEntry, MemoryMapInfo};
 use core::mem;
 
@@ -18,6 +20,7 @@ pub struct MultiBootInformation {
     pub meminfo: MemoryInfo,
     pub elfinfo: ElfInfo,
     pub memmapinfo: MemoryMapInfo,
+    pub framebufferinfo: FrameBufferInfo,
 }
 
 impl MultiBootInformation {
@@ -86,6 +89,7 @@ impl MultiBootInformation {
                 }
                 MultiBootInformation::TAG_TYPE_FRAMEBUFFER => {
                     puts!("FrameBuffer");
+                    mbi.framebufferinfo = FrameBufferInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_EFI32 => {
                     puts!("EFI32");
@@ -100,9 +104,7 @@ impl MultiBootInformation {
                 MultiBootInformation::TAG_TYPE_BOOTDEV => {
                     puts!("Boot Device");
                 }
-                MultiBootInformation::TAG_TYPE_BASE_ADDR => {
-                    puts!("Image Base Address")
-                }
+                MultiBootInformation::TAG_TYPE_BASE_ADDR => puts!("Image Base Address"),
                 _ => {
                     if tag - addr - 8 >= (total_size as usize) {
                         puts!("List is too long.");

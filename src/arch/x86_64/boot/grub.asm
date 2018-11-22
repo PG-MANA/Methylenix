@@ -10,8 +10,10 @@ extern  init  ; init.asm
 MULTIBOOT_HEADER_MAGIC          equ 0xe85250d6  ; 合言葉
 MULTIBOOT_HEADER_ARCH           equ 0           ; 4ならmips
 MULTIBOOT_HEADER_LEN            equ multiboot_end - multiboot_start
-MULTIBOOT_HEADER_CHECKSUM       equ 0x100000000-(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_ARCH + MULTIBOOT_HEADER_LEN)
+MULTIBOOT_HEADER_CHECKSUM       equ -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_ARCH + MULTIBOOT_HEADER_LEN)
 MULTIBOOT_CHECK_MAGIC           equ 0x36d76289  ; 正常に処理されたのであれば、EAXに代入されている値
+MULTIBOOT_HEADER_FLAG           equ 1           ; タグで使うフラグ(1はオプショナルを表す...?)
+MULTIBOOT_HEADER_TAG_TYPE_FB    equ 5           ; フレームバッファ要求タグ
 MULTIBOOT_HEADER_TAG_END        equ 0           ; マルチブート用ヘッダー 定数定義終了(実体は下)
 
 ; その他定数
@@ -25,19 +27,30 @@ section .grub_header  ; 特殊な扱いのセクションにする(配置固定 
 
 jmp     boot_entry    ; 下を実行されたらまずいのでjmp
 
-align   4
+align   8
 
 multiboot_start:
-  dd  MULTIBOOT_HEADER_MAGIC
-  dd  MULTIBOOT_HEADER_ARCH
-  dd  MULTIBOOT_HEADER_LEN
-  dd  MULTIBOOT_HEADER_CHECKSUM
+  dd      MULTIBOOT_HEADER_MAGIC
+  dd      MULTIBOOT_HEADER_ARCH
+  dd      MULTIBOOT_HEADER_LEN
+  dd      MULTIBOOT_HEADER_CHECKSUM
 
 ; ここに追加のタグを書く
-multiboot_tag_end:
-  dw  MULTIBOOT_HEADER_TAG_END
-  dw  0 ; flags
-  dd  8 ; size
+multiboot_tags:
+multiboot_tag_framebuffer:
+  ;自力でフォント描写ができないため現在は無効
+  ;dw      MULTIBOOT_HEADER_TAG_TYPE_FB
+  ;dw      MULTIBOOT_HEADER_FLAG   ; flags
+  ;dd      20                      ; size(このタグのサイズ)(multiboot_tag_framebuffer_end - multiboot_tag_framebuffer)
+  ;dd      1024                    ; width(1行の文字数)
+  ;dd      768                     ; height(行数)
+  ;dd      32                      ; depth(色深度)
+multiboot_tag_framebuffer_end:
+  align   8                       ; タグは8バイト間隔で並ぶ必要がある
+  dw      MULTIBOOT_HEADER_TAG_END
+  dw      MULTIBOOT_HEADER_FLAG   ; flags
+  dd      8                       ; size
+multiboot_tags_end:
 multiboot_end:
 ; マルチブート用ヘッダー実体記述終了
 ;========================================

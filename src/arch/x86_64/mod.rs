@@ -43,6 +43,14 @@ pub extern "C" fn boot_main(
     unsafe {
         cpu::sti();
     }
+    if info.framebufferinfo.depth == 32 {
+        // 文字見えてないだろうから#FF7F27で塗りつぶす
+        for count in 0..(info.framebufferinfo.width * info.framebufferinfo.height) {
+            unsafe {
+                *((info.framebufferinfo.address + (count * 4) as u64) as *mut u32) = 0xff7f27;
+            }
+        }
+    }
     hlt();
 }
 
