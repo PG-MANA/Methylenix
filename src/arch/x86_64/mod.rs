@@ -1,5 +1,3 @@
-#[macro_use]
-pub mod vga;
 pub mod mbi; //Multi Boot Information
 pub mod memman;
 //mod paging;
@@ -11,6 +9,8 @@ use arch::target_arch::device::{cpu, keyboard};
 use arch::target_arch::mbi::*;
 use arch::target_arch::memman::MemoryManager;
 
+use usr::graphic;
+
 #[allow(unused_imports)]
 use core::fmt;
 
@@ -20,17 +20,18 @@ pub extern "C" fn boot_main(
     gdt: u64,    /*現在のセグメント:8*/
 ) {
     //おそらくこの関数はCLIされた状態で呼ばれる。
-    println!("Methylenix version 0.0.1");
     //PIC初期化
     unsafe {
         device::pic::pic_init();
     }
-
+    //GraphicManager初期化
     //MultiBootInformation読み込み
     if !mbi::test(addr) {
         panic!("Unaligned Multi Boot Information.");
     }
     let info = load_mbi(addr);
+    graphic::GraphicManager::init_default_manager(&info.framebufferinfo);
+    println!("Methylenix version 0.0.1");
     //メモリ管理初期化
     let mut memory_manager = init_memman(&info, addr);
     //IDT初期化&割り込み初期化
@@ -42,14 +43,6 @@ pub extern "C" fn boot_main(
     //IDT&PICの初期化が終わったのでSTIする
     unsafe {
         cpu::sti();
-    }
-    if info.framebufferinfo.depth == 32 {
-        // 文字見えてないだろうから#FF7F27で塗りつぶす
-        for count in 0..(info.framebufferinfo.width * info.framebufferinfo.height) {
-            unsafe {
-                *((info.framebufferinfo.address + (count * 4) as u64) as *mut u32) = 0xff7f27;
-            }
-        }
     }
     hlt();
 }

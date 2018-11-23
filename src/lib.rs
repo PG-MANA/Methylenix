@@ -6,12 +6,14 @@
 #![feature(core_panic_info)]
 #![feature(panic_info_message)]
 
-//arch
+//usr
 #[macro_use]
+pub mod usr;
+
+//arch
 pub mod arch;
 
-//usr
-pub mod usr;
+
 
 //そう...何もない!!
 //各モジュールを参照してください。
