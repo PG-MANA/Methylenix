@@ -127,8 +127,8 @@ impl GraphicManager {
                                     unsafe {
                                         *((self.frame_buffer_address
                                             + (self.cursor.line * self.frame_buffer_width - x) * 2)
-                                            as *const u16)
-                                            == 0; //目印の削除
+                                            as *mut u16)
+                                            = 0; //目印の削除
                                     }
                                     break;
                                 }
