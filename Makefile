@@ -28,8 +28,16 @@ GRUBMKRES = grub2-mkrescue
 AR = ar rcs
 LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
 XARGO = xargo
+
+##アセンブラ読み込み
 include config/$(TARGET_ARCH)/assembler.mk
 export AR
+
+##コマンド確認&修正
+ifeq (, $(shell which $(GRUBMKRES)))
+	GRUBMKRES = grub-mkrescue
+endif
+
 ##ビルドファイル
 KERNELFILES = kernel.elf
 RUST_OBJ = target/$(RUST_TARGET)/release/lib$(NAME).a
@@ -41,7 +49,6 @@ export TARGET_ARCH
 export MAKE_BINDIR
 export MAKE_TMPDIR
 export MAKE_OBJDIR
-
 
 #各コマンド
 ##デフォルト動作
