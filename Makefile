@@ -24,7 +24,8 @@ STRIP= strip
 MKDIR = mkdir -p
 CP = cp -r
 RM = rm -rf
-GRUBMKRES = grub2-mkrescue
+GRUBMKRES = grub-mkrescue
+GRUB2MKRES = grub2-mkrescue #Temporary
 AR = ar rcs
 LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
 XARGO = xargo
@@ -33,16 +34,10 @@ XARGO = xargo
 include config/$(TARGET_ARCH)/assembler.mk
 export AR
 
-##コマンド確認&修正
-ifeq (, $(shell which $(GRUBMKRES)))
-	GRUBMKRES = grub-mkrescue
-endif
-
 ##ビルドファイル
 KERNELFILES = kernel.elf
 RUST_OBJ = target/$(RUST_TARGET)/release/lib$(NAME).a
 BOOT_SYS_LIST = $(MAKE_OBJDIR)boot_asm.a $(RUST_OBJ)
-
 
 #初期設定
 export TARGET_ARCH
@@ -71,7 +66,7 @@ iso:
 	-$(MKDIR) $(MAKE_IMGDIR) $(MAKE_TMPDIR)grub-iso/boot/grub/ $(MAKE_TMPDIR)grub-iso/boot/methylenix/
 	$(CP) $(MAKE_BINDIR)kernel.elf $(MAKE_TMPDIR)grub-iso/boot/methylenix/
 	$(CP) $(MAKE_CONGIGDIR)/grub  $(MAKE_TMPDIR)grub-iso/boot/
-	$(GRUBMKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso/
+	$(GRUBMKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso/ || $(GRUB2MKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso/
 
 kernel:
 	$(MAKE) init
