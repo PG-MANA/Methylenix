@@ -49,7 +49,7 @@ export MAKE_OBJDIR
 ##デフォルト動作
 default:
 	$(MAKE) kernel
-	-$(STRIP) $(MAKE_BINDIR) *.elf #できなくてもいい
+	-$(STRIP) $(MAKE_BINDIR)*.elf #できなくてもいい
 
 ##初期化動作
 init:
