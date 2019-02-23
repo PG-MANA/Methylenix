@@ -50,7 +50,8 @@ init:
   jb    x86
   mov   eax,  0x80000001
   cpuid
-  test  edx,  1 << 29       ; LMビットをテスト(Intel64が有効かどうか) TODO: AMD64対応
+  test  edx,  1 << 29       ; Long Mode Enable Bitをテスト(64bitモードが有効かどうか)
+  ;(AMD64 Architecture Programmer’s Manual, Volume 2: System Programming - 14.8 Long-Mode Initialization Example)
   jz    x86
 
   ; ページング設定
@@ -113,7 +114,7 @@ pml4_setup:
   mov   cr4,  eax           ; PAEフラグを立てる
   mov   ecx,  0xc0000080    ; rdmsrのための準備(レジスタ指定)
   rdmsr                     ; モデル固有レジスタに記載(intelの場合pentium以降に搭載、cpuidで検査済)
-  or    eax,  1 << 8        ; lmフラグを立てる
+  or    eax,  1 << 8        ; LMEフラグを立てる
   wrmsr
   mov   eax,  cr0
   or    eax,  1 << 31 | 1   ; PGフラグを立てる("|1"は既に32bitになってる場合は不要)
