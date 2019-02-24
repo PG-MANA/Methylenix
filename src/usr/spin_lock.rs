@@ -24,7 +24,7 @@ pub struct MutexGuard<'a, T: ?Sized + 'a> {
 impl<T> Mutex<T> {
     pub const fn new(d: T) -> Mutex<T> {
         Mutex {
-            lock_flag: atomic::ATOMIC_BOOL_INIT,
+            lock_flag: atomic::AtomicBool::new(false),
             data: UnsafeCell::new(d),
         }
     }
