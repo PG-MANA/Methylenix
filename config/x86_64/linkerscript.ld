@@ -1,11 +1,11 @@
 OUTPUT_FORMAT(elf64-x86-64)
 
 SECTIONS {
-  
+
   ENTRY(boot_entry) /*起動処理のコード*/
   . = 1M;
   LD_KERNEL_START = .;
-  
+
   .boot_entry BLOCK(0x1000): ALIGN(0x1000) { /*BLOCKとALIGNは同意義*/
     KEEP(*(.grub_header))/*使われてないとリンクされなくなるので*/
   }
@@ -32,4 +32,3 @@ SECTIONS {
     *(.data.rel.ro*)
   }
 }
- 
