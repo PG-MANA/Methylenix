@@ -3,13 +3,13 @@
 bits 64
 
 ; GLOBAL,EXTERN
-global init64
+global init_x86_64
 extern boot_main
 
 
 section .text
 
-init64:
+init_x86_64:
   ; セグメントレジスタ初期化、間違ってもCSはいじるな(FS,GSはマルチスレッドで使用する可能性がある...らしい)
   xor   rax,  rax
   mov   es,   rax
@@ -18,7 +18,7 @@ init64:
   mov   fs,   ax
   mov   gs,   ax
   pop   rsi             ; RDI=>RSI=> RDX=>RCX=>R8=>...=>R9が引数リスト
-  pop   rdi             ; 32bitでpushして64bitでpopはまずい気がする。
+  pop   rdi             ; こうPOPすることでRDIにMultiBootInformationのアドレスが入る
   mov   rsp,  stack_top ; スタック設定
   jmp   boot_main       ; 各アーキのbootに入ってる
 

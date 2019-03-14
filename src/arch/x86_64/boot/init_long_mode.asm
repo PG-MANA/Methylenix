@@ -1,19 +1,18 @@
 ; 雑な初期化
-; おそらく16bitリアルモードでINITを呼んでも行ける...はず
+; おそらく16bitリアルモードでINITを呼んでも行ける...はず(EFIからのブートは別)
 ; IDTの設定が終わるまでCLIしたままにする。そうでないと割り込みが入って死ぬ。
 bits 32
 
-; 定数定義
-IO_MAP_SIZE equ 0xffff
 
 ; GLOBAL, EXTERN
-global init
-extern init64 ; at init64.asm
-
+global init_long_mode
+extern init_x86_64                                  ; at init_x86_64.asm
+extern gdt_main_code, tss_address_definition, gdtr0 ; at common.asm
+extern tss_definition, tss
 
 section .text
 
-init:
+init_long_mode:
   ; 条件を満たしたcpuか確認(64it化できるか)
   ; http://wiki.osdev.org/setting_up_long_mode#detection_of_cpuid
   ; http://softwaretechnique.jp/os_development/tips/ia32_instructions/cpuid.html
@@ -25,13 +24,13 @@ init:
 
   ; TSSセグメント情報書き込み
   mov   eax,  tss
-  mov   word [gdt.tss_address_definition + 2],  ax
+  mov   word [tss_address_definition + 2],  ax
   shr   eax,  16
-  mov   byte [gdt.tss_address_definition + 4],  al
-  mov   byte [gdt.tss_address_definition + 7],  ah
+  mov   byte [tss_address_definition + 4],  al
+  mov   byte [tss_address_definition + 7],  ah
 
   push  0                   ; 64bit POPのための準備
-  push  gdt.main_code       ; あとで使う
+  push  gdt_main_code       ; あとで使う
   pushfd
   pop   eax
   mov   ecx,  eax           ; 比較用にとっておく
@@ -120,9 +119,9 @@ pml4_setup:
   or    eax,  1 << 31 | 1   ; PGフラグを立てる("|1"は既に32bitになってる場合は不要)
   mov   cr0,  eax           ; これらの初期化で4GBは仮想メモリアドレスと実メモリアドレスが一致しているはず。(ストレートマッピング)
   lgdt  [gdtr0]
-  mov   ax,   gdt.tss_definition
+  mov   ax,   tss_definition
   ltr   ax                  ; ホントは16bitから32bitになったときはすぐジャンプすべき
-  jmp   gdt.main_code:init64
+  jmp   gdt_main_code:init_x86_64
 
 x86:                        ; 今の所下と同じ
 nocpuid:
@@ -183,56 +182,14 @@ error_str:
   db   '.',   0x4f
 .end:
 
-align   8
-
-gdt:
-  .all:
-    dq    0                       ;GDT云々するとき下位3にセグメント番号がかぶらないため、わざと0エントリを立てる。
-
-  .main_code: equ $ - gdt
-    ;すべてコードセグメント
-    dq    (1 << 43) | (1 << 44) | (1 << 47) | (1 << 53)
-
-  .tss_definition: equ $ - gdt
-  .tss_address_definition:
-    dw    tss.end - tss           ; Limit(Low)
-    dw    0                       ; Base(Low)
-    db    0                       ; Base(middle)
-    db    10001001b               ; 64ビットTSS + DPL:0 + P:1
-    db    0                       ; Limit(High)+Granularity
-    db    0                       ; Base(Middle high)
-    dd    0                       ; Base(High)
-    dw    0                       ; 予約
-    dw    0                       ; 予約
-
-gdtr0:
-  dw    $ - gdt - 1
-  dq    gdt
-
-align   4096
-
-tss:
-tss_address: equ $                   ; tss_addressをうまく使えないか
-  dd    0
-  dd    stack
-  dd    0
-  times 22                dd    0
-  dd    104 << 16
-
-.end:
-  times IO_MAP_SIZE / 8   db    0
 
 section .bss
 
 align   4096
 
-stack:
-  resb    4096
-
 pd:
 ; ページングディレクトリ(8byte * 512) * 4
   resb    4096 * 4
-
 pdpt:
 ; ページディレクトリポインタテーブル(8byte * 512)
   resb    4096

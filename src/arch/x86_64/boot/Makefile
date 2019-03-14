@@ -5,7 +5,7 @@ MAKE_OBJDIR ?=  $(MAKE_TMPDIR)obj/
 AR ?= ar rcs
 
 #ビルドするもの
-ASM_OBJS_LIST = grub.o  init.o init64.o
+ASM_OBJS_LIST = grub_header.o common.o init_bios.o init_efi64.o init_long_mode.o init_x86_64.o
 ASM_OBJS = $(addprefix $(MAKE_OBJDIR), $(ASM_OBJS_LIST))
 
 default:
