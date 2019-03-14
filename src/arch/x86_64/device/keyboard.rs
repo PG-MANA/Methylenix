@@ -3,15 +3,15 @@
 */
 
 use arch::x86_64::device::{cpu, pic};
-use arch::x86_64::interrupt::{idt, IDTMan};
-use usr::fifo::FIFO;
+use arch::x86_64::interrupt::{idt, InterruptManager};
+use kernel::fifo::FIFO;
 
 pub struct Keyboard {
     fifo: FIFO<u8>,
 }
 
 pub static mut default_keyboard: Keyboard = Keyboard {
-    fifo: FIFO::const_new(128, &0u8),
+    fifo: FIFO::new_static(128, &0u8),
 };
 
 impl Keyboard {
@@ -22,7 +22,7 @@ impl Keyboard {
     const PORT_KEYDAT: u16 = 0x0060;
     const PORT_KEYCMD: u16 = 0x0064;
 
-    pub unsafe fn init(idt_manager: &IDTMan, selector: u64) {
+    pub unsafe fn init(idt_manager: &InterruptManager, selector: u64) {
         make_interrupt_hundler!(inthandler21, Keyboard::inthandler21_main);
         idt_manager.set_gatedec(
             0x21,

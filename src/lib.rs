@@ -1,19 +1,17 @@
 #![no_std]
 #![feature(asm)]
-#![feature(lang_items)]
 #![feature(const_fn)]
-#![feature(naked_functions)]
 #![feature(core_panic_info)]
+#![feature(lang_items)]
+#![feature(naked_functions)]
 #![feature(panic_info_message)]
 
 //usr
 #[macro_use]
-pub mod usr;
+pub mod kernel;
 
 //arch
 pub mod arch;
-
-
 
 //そう...何もない!!
 //各モジュールを参照してください。

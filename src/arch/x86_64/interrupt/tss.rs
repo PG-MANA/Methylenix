@@ -41,7 +41,7 @@ pub struct TSS {
 
 impl TSS {
     pub fn new(rsp0: u64) -> TSS {
-        let mut res: TSS = unsafe { mem::zeroed() };
+        let mut res: TSS = mem::MaybeUninit::zeroed();
         res.rsp0_l = (rsp0 & 0xffffffff) as u32;
         res.rsp0_u = (rsp0 & 0xffffffff00000000 >> 32) as u32;
         res.res_and_iomap = (mem::size_of::<TSS>() << 16) as u32;

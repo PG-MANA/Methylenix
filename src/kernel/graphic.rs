@@ -2,9 +2,9 @@
     フォントの描画などをフレームバッファに行う
 */
 
-use arch::target_arch::mbi::FrameBufferInfo;
 use core::fmt;
-use usr::spin_lock::Mutex;
+use kernel::drivers::multiboot::FrameBufferInfo;
+use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
 
 pub struct GraphicManager {
     frame_buffer_address: usize,
@@ -21,8 +21,6 @@ struct TextCursor {
     pub front_color: u32,
     pub back_color: u32,
 }
-
-static mut STATIC_GRAPHIC_MANAGER: Mutex<GraphicManager> = Mutex::new(GraphicManager::new_static());
 
 impl GraphicManager {
     pub fn new(frame_buffer_info: &FrameBufferInfo) -> GraphicManager {
@@ -47,20 +45,12 @@ impl GraphicManager {
         }
     }
 
-    pub fn init_default_manager(frame_buffer_info: &FrameBufferInfo) {
-        let default_graphic_manager_lock = unsafe { STATIC_GRAPHIC_MANAGER.try_lock() };
-        if default_graphic_manager_lock.is_ok() {
-            default_graphic_manager_lock
-                .unwrap()
-                .init_manager(frame_buffer_info);
-        }
-    }
-
     fn init_manager(&mut self, frame_buffer_info: &FrameBufferInfo) {
         self.frame_buffer_address = frame_buffer_info.address as usize;
         self.frame_buffer_width = frame_buffer_info.width as usize;
         self.frame_buffer_height = frame_buffer_info.height as usize;
         self.frame_buffer_color_depth = frame_buffer_info.depth;
+        self.init_color_mode();
         match frame_buffer_info.mode {
             1 => self.init_color_mode(),
             2 => self.init_ega_text_mode(),
@@ -85,6 +75,7 @@ impl GraphicManager {
         self.is_textmode = true;
         self.cursor.front_color = 0xb; // bright cyan
     }
+
     pub fn put_char(&self, c: char) {
         //カーソル操作はしない
         let t: u16 = ((self.cursor.back_color & 0x07) << 0x0C) as u16
@@ -96,6 +87,7 @@ impl GraphicManager {
                 as *mut u16) = t;
         }
     }
+
     pub fn write_string(&mut self, string: &str) -> bool {
         if !self.is_textmode || self.frame_buffer_width == 0 {
             return false; //現在未対応
@@ -127,8 +119,7 @@ impl GraphicManager {
                                     unsafe {
                                         *((self.frame_buffer_address
                                             + (self.cursor.line * self.frame_buffer_width - x) * 2)
-                                            as *mut u16)
-                                            = 0; //目印の削除
+                                            as *mut u16) = 0; //目印の削除
                                     }
                                     break;
                                 }
@@ -166,7 +157,8 @@ impl fmt::Write for GraphicManager {
 }
 
 pub fn print_string_to_default_screen(args: fmt::Arguments) -> bool {
-    let graphic_manager_lock = unsafe { STATIC_GRAPHIC_MANAGER.try_lock() };
+    let graphic_manager_lock =
+        unsafe { STATIC_BOOT_INFORMATION_MANAGER.graphic_manager.try_lock() };
     if graphic_manager_lock.is_ok() {
         use core::fmt::Write;
         if graphic_manager_lock.unwrap().write_fmt(args).is_ok() {
@@ -187,7 +179,7 @@ macro_rules! puts {
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
-        $crate::usr::graphic::print_string_to_default_screen(format_args!($($arg)*));
+        $crate::kernel::graphic::print_string_to_default_screen(format_args!($($arg)*));
     };
 }
 

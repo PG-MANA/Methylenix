@@ -8,7 +8,7 @@ pub mod handler;
 use arch::x86_64::device::cpu;
 use core::mem;
 
-pub struct IDTMan {
+pub struct InterruptManager {
     idt: usize,
 }
 
@@ -42,26 +42,33 @@ fn isr_to_irq(isr : u8) -> u8 {
     }
 }
 */
-impl IDTMan {
+impl InterruptManager {
     pub const LIMIT_IDT: u16 = 0x100 * (mem::size_of::<idt::GateDescriptor>() as u16) - 1; //0xfffという情報あり
     pub const IDT_MAX: u16 = 0xff;
 
-    pub unsafe fn new(idt_memory: usize /*IDT用メモリ域(4KiB)*/, _gdt: u64) -> IDTMan {
-        let idt_man = IDTMan { idt: idt_memory };
+    pub unsafe fn new(
+        idt_memory: usize, /*IDT用メモリ域(4KiB)*/
+        _gdt: u64,
+    ) -> InterruptManager {
+        let idt_man = InterruptManager { idt: idt_memory };
 
-        for i in 0..IDTMan::IDT_MAX {
+        for i in 0..InterruptManager::IDT_MAX {
             idt_man.set_gatedec(
                 i as usize,
-                idt::GateDescriptor::new(IDTMan::dummy_handler, 0, 0, 0),
+                idt::GateDescriptor::new(InterruptManager::dummy_handler, 0, 0, 0),
             );
         }
         idt_man.flush();
         idt_man
     }
 
+    pub const fn new_static() -> InterruptManager {
+        InterruptManager { idt: 0 }
+    }
+
     unsafe fn flush(&self) {
         let idtr = idt::IDTR {
-            limit: IDTMan::LIMIT_IDT,
+            limit: InterruptManager::LIMIT_IDT,
             offset: self.idt as u64,
         };
         cpu::lidt(&idtr as *const _ as usize);

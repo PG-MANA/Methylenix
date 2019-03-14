@@ -10,7 +10,7 @@ pub struct MemoryMapEntry {
     pub addr: u64,
     pub length: u64,
     pub m_type: u32,
-    reserved: u32,
+    pub reserved: u32,
 }
 
 #[repr(packed)]
@@ -38,6 +38,15 @@ impl MemoryMapInfo {
                 / map.entry_size as usize) as u32, /*+1,//0からカウントするため-1するが打ち消し*/
             addr: unsafe { &map.entries as *const MemoryMapEntry as usize },
             entry_size: map.entry_size,
+            cnt: 0,
+        }
+    }
+
+    pub const fn new_static() -> MemoryMapInfo {
+        MemoryMapInfo {
+            addr: 0,
+            num: 0,
+            entry_size: 0,
             cnt: 0,
         }
     }

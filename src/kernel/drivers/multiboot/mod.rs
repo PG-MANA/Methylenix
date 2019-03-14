@@ -16,11 +16,21 @@ struct MultibootTag {
     size: u32,
 }
 
+#[repr(C)]
+struct EfiSystemTableInformation {
+    s_type: u32,
+    size: u32,
+    address: usize,
+}
+
 pub struct MultiBootInformation {
-    pub meminfo: MemoryInfo,
-    pub elfinfo: ElfInfo,
-    pub memmapinfo: MemoryMapInfo,
-    pub framebufferinfo: FrameBufferInfo,
+    pub multiboot_information_address: usize,
+    pub multiboot_information_size: usize,
+    pub memory_info: MemoryInfo,
+    pub elf_info: ElfInfo,
+    pub memory_map_info: MemoryMapInfo,
+    pub framebuffer_info: FrameBufferInfo,
+    pub efi_table_pointer: usize,
 }
 
 impl MultiBootInformation {
@@ -49,13 +59,17 @@ impl MultiBootInformation {
     const TAG_TYPE_EFI64_IH: u32 = 20;
     const TAG_TYPE_BASE_ADDR: u32 = 21;
 
-    pub fn new(addr: usize) -> MultiBootInformation {
-        //core::mem::uninitializedは慎重に使うべき(zeroedも避けるべきだがデフォルトの数値がすべて0だから...)
-        //let mut mbi = MultiBootInformation{..Default::default()};
+    pub fn new(address: usize) -> MultiBootInformation {
         let mut mbi: MultiBootInformation = unsafe { mem::zeroed() };
+        if !MultiBootInformation::test(address) {
+            panic!("Unaligned Multi Boot Information")
+        }
+        let total_size = MultiBootInformation::total_size(address);
+        if total_size == 0 {
+            panic!("Invalid Multi Boot Information")
+        }
+        let mut tag = address + 8;
 
-        let total_size = total_size(addr);
-        let mut tag = addr + 8;
         loop {
             let tag_type: u32 = unsafe { (&*(tag as *const MultibootTag)).s_type };
             match tag_type {
@@ -63,24 +77,27 @@ impl MultiBootInformation {
                     break;
                 }
                 MultiBootInformation::TAG_TYPE_MMAP => {
-                    mbi.memmapinfo = MemoryMapInfo::new(unsafe { &*(tag as *const _) });
+                    mbi.memory_map_info = MemoryMapInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_ACPI_NEW => {}
                 MultiBootInformation::TAG_TYPE_BASIC_MEMINFO => {
-                    mbi.meminfo = MemoryInfo::new(unsafe { &*(tag as *const _) }); //完全に信用すべきではない(CPUIDなどで問い合わせる)
+                    mbi.memory_info = MemoryInfo::new(unsafe { &*(tag as *const _) }); //完全に信用すべきではない(CPUIDなどで問い合わせる)
                 }
                 MultiBootInformation::TAG_TYPE_CMDLINE => {}
                 MultiBootInformation::TAG_TYPE_BOOT_LOADER_NAME => {}
                 MultiBootInformation::TAG_TYPE_FRAMEBUFFER => {
-                    mbi.framebufferinfo = FrameBufferInfo::new(unsafe { &*(tag as *const _) });
+                    mbi.framebuffer_info = FrameBufferInfo::new(unsafe { &*(tag as *const _) });
                 }
-                MultiBootInformation::TAG_TYPE_EFI32 => {}
+                MultiBootInformation::TAG_TYPE_EFI64 => {
+                    mbi.efi_table_pointer =
+                        unsafe { (*(tag as *const EfiSystemTableInformation)).address };
+                }
                 MultiBootInformation::TAG_TYPE_ELF_SECTIONS => {
-                    mbi.elfinfo = ElfInfo::new(unsafe { &*(tag as *const _) });
+                    mbi.elf_info = ElfInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_BOOTDEV => {}
                 _ => {
-                    if tag - addr - 8 >= (total_size as usize) {
+                    if tag - address - 8 >= (total_size as usize) {
                         break;
                     }
                 }
@@ -91,16 +108,16 @@ impl MultiBootInformation {
         //返却
         mbi
     }
-}
 
-pub fn test(addr: usize) -> bool {
-    if addr & 7 != 0 {
-        false
-    } else {
-        true
+    fn test(address: usize) -> bool {
+        if address & 7 != 0 {
+            false
+        } else {
+            true
+        }
     }
-}
 
-pub fn total_size(addr: usize) -> u32 {
-    return unsafe { *(addr as *mut u32) };
+    fn total_size(address: usize) -> u32 {
+        unsafe { *(address as *mut u32) }
+    }
 }

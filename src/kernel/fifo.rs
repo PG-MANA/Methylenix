@@ -23,7 +23,7 @@ impl<T: Copy> FIFO<T> {
         }
     }
 
-    pub const fn const_new(_f_size: usize, default_value: &T) -> FIFO<T> {
+    pub const fn new_static(_f_size: usize, default_value: &T) -> FIFO<T> {
         FIFO {
             size: 128,
             buf: [*default_value; 128],

@@ -7,8 +7,8 @@
     というより土壇場実装なのでかなり危ない。
 */
 
-use arch::x86_64::mbi::{MemoryMapEntry, MemoryMapInfo};
 use core::mem;
+use kernel::drivers::multiboot::{MemoryMapEntry, MemoryMapInfo, MultiBootInformation};
 
 pub struct Page {
     //本の1ページみたいな
@@ -18,7 +18,7 @@ pub struct Page {
 impl Page {
     pub const PAGE_SIZE: usize = 4 * 1024; //ページングにおける一ページのサイズに合わせる
 
-    pub fn make_from_address(addr: usize) -> Page {
+    pub const fn make_from_address(addr: usize) -> Page {
         Page {
             no_page: addr / Page::PAGE_SIZE,
         }
@@ -40,24 +40,49 @@ pub struct MemoryManager {
 }
 
 impl MemoryManager {
-    pub fn new(
-        memory_map: MemoryMapInfo,
-        top_of_kernel_address: usize,
-        bottom_of_kernel_address: usize,
-        top_of_mbi_address: usize,
-        bottom_of_mbi_address: usize,
-    ) -> MemoryManager {
-        let mut memman = MemoryManager {
+    pub fn new(multiboot_info: &MultiBootInformation) -> MemoryManager {
+        let kernel_loader_start = multiboot_info
+            .elf_info
+            .clone()
+            .map(|section| section.addr())
+            .min()
+            .unwrap();
+        let kernel_loader_end = multiboot_info
+            .elf_info
+            .clone()
+            .map(|section| section.addr())
+            .max()
+            .unwrap();
+        let mbi_start = multiboot_info.multiboot_information_address;
+        let mbi_end = mbi_start + multiboot_info.multiboot_information_size as usize;
+        let mut memory_manager = MemoryManager {
             current_area: unsafe { mem::uninitialized() },
             current_next_page: Page::make_from_address(0),
-            memory_map: memory_map,
-            top_of_kernel_page: Page::make_from_address(top_of_kernel_address),
-            bottom_of_kernel_page: Page::make_from_address(bottom_of_kernel_address),
-            top_of_mbi_page: Page::make_from_address(top_of_mbi_address),
-            bottom_of_mbi_page: Page::make_from_address(bottom_of_mbi_address),
+            memory_map: multiboot_info.memory_map_info.clone(),
+            top_of_kernel_page: Page::make_from_address(kernel_loader_start),
+            bottom_of_kernel_page: Page::make_from_address(kernel_loader_end),
+            top_of_mbi_page: Page::make_from_address(mbi_start),
+            bottom_of_mbi_page: Page::make_from_address(mbi_end),
         };
-        memman.select_next_area();
-        memman
+        memory_manager.select_next_area();
+        memory_manager
+    }
+
+    pub const fn new_static() -> MemoryManager {
+        MemoryManager {
+            current_area: &MemoryMapEntry {
+                addr: 0,
+                length: 0,
+                m_type: 0,
+                reserved: 0,
+            },
+            current_next_page: Page::make_from_address(0),
+            memory_map: MemoryMapInfo::new_static(),
+            top_of_kernel_page: Page::make_from_address(0),
+            bottom_of_kernel_page: Page::make_from_address(0),
+            top_of_mbi_page: Page::make_from_address(0),
+            bottom_of_mbi_page: Page::make_from_address(0),
+        }
     }
 
     fn select_next_area(&mut self) {
@@ -67,7 +92,9 @@ impl MemoryManager {
             if memory_map_entry.m_type == 1
                 && Page::make_from_address(
                     (memory_map_entry.addr + memory_map_entry.length - 1) as usize,
-                ).no_page >= self.current_next_page.no_page
+                )
+                .no_page
+                    >= self.current_next_page.no_page
             {
                 self.current_area = memory_map_entry;
             }
