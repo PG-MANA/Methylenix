@@ -43,9 +43,9 @@ multiboot_tags_start:
   ;dd      768                     ; height(行数)
   ;dd      32                      ; depth(色深度)
   align   8                       ; タグは8バイト間隔で並ぶ必要がある
-  dw      MULTIBOOT_HEADER_TAG_TYPE_EFI
-  dw      MULTIBOOT_HEADER_FLAG   ; flags
-  dd      8                       ; size
+  ;dw      MULTIBOOT_HEADER_TAG_TYPE_EFI
+  ;dw      MULTIBOOT_HEADER_FLAG   ; flags
+  ;dd      8                       ; size
   align   8
   dw      MULTIBOOT_HEADER_TAG_ENTRY_ADDRESS_EFI64
   dw      MULTIBOOT_HEADER_FLAG
