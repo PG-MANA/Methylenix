@@ -1,4 +1,4 @@
-// Grub2-Efiでは使えない
+// Grub2(Efi)では使えない...ハンドラをオープンする必要あり..?(ブート時に警告出てるし)
 
 //use
 use super::super::table::EfiStatus;
@@ -15,6 +15,7 @@ pub struct EfiOutputProtocol {
     clear_screen: usize,
     set_cursor_position: usize,
     enable_cursor: usize,
+    mode: usize,
 }
 
 pub struct EfiTextOutputManager {
@@ -36,9 +37,9 @@ impl EfiTextOutputManager {
 
     pub fn reset(&self, extended_verification: bool) -> EfiStatus {
         unsafe {
-            (*((*self.protocol).reset as *const fn(*const EfiOutputProtocol, bool) -> EfiStatus))(
-                self.protocol,
-                extended_verification,
+            (*((*self.protocol).reset as *const fn(usize, u8) -> EfiStatus))(
+                self.protocol as usize,
+                extended_verification as u8,
             )
         }
     }

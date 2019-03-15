@@ -16,7 +16,6 @@ impl EfiManager {
         let table_manager = EfiTableManager::new(address);
         let output_manager =
             EfiTextOutputManager::new(table_manager.get_efi_systemtable().console_output_protocol);
-
         EfiManager {
             is_valid: true,
             table_manager: table_manager,

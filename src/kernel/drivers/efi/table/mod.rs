@@ -1,5 +1,5 @@
 //EFI Tableの実装
-//https://uefi.org/sites/default/files/resources/UEFI_Spec_2_1.pdf
+//https://uefi.org/sites/default/files/resources/UEFI_Spec_2_7.pdf
 
 //use
 use super::text::output::EfiOutputProtocol;
@@ -51,7 +51,7 @@ pub struct EfiBootServices {
     reate_event_ex: usize,
 }
 
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Clone)]
 pub struct EfiSystemTable {
     pub efi_table_header: EfiTableHeader,
@@ -94,7 +94,8 @@ impl EfiTableManager {
         }
     }
 
-    pub fn get_efi_systemtable(&self) -> EfiSystemTable {
-        unsafe { (*self.address).clone() } //Getter作るのめんどくさかった
+    pub fn get_efi_systemtable(&self) -> &'static EfiSystemTable {
+        //unsafe { (*self.address).clone() } //Getter作るのめんどくさかった
+        unsafe { &*self.address }
     }
 }
