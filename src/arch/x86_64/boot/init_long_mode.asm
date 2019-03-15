@@ -8,7 +8,7 @@ bits 32
 global init_long_mode
 extern init_x86_64                                  ; at init_x86_64.asm
 extern gdt_main_code, tss_address_definition, gdtr0 ; at common.asm
-extern tss_definition, tss
+extern tss_definition, tss, pd, pdpt, pml4
 
 section .text
 
@@ -42,23 +42,24 @@ init_long_mode:
   push  ecx
   popfd                     ; 元に戻す
   xor   eax,  ecx           ; 比較
-  jz    nocpuid             ; cpuid非対応
+  jz    cpuid_not_supported ; cpuid非対応
   mov   eax,  0x80000000    ; cpuid拡張モードは有効か(使用可能なeaxの最大値が返る)
   cpuid
   cmp   eax,  0x80000001
-  jb    x86
+  jb    only_x86
   mov   eax,  0x80000001
   cpuid
   test  edx,  1 << 29       ; Long Mode Enable Bitをテスト(64bitモードが有効かどうか)
   ;(AMD64 Architecture Programmer’s Manual, Volume 2: System Programming - 14.8 Long-Mode Initialization Example)
-  jz    x86
+  jz    only_x86
 
   ; ページング設定
   ; 1GBページング対応かどうか
   test  edx,  1 << 26
-  jz    no1gb
+  jz    init_normal_paging
 
-  mov   ecx,  0             ; カウンタ
+init_4level_paging:
+  xor   ecx,  ecx             ; カウンタ
 pdpte_setup:
   ; https://software.intel.com/sites/default/files/managed/a4/60/325384-sdm-vol-3abcd.pdf (第四章 LEVEL4-PAGING)
   ; 1GB単位メモリページング
@@ -73,8 +74,8 @@ pdpte_setup:
   jne   pdpte_setup
   jmp   pml4_setup
 
-no1gb:
-  mov   ecx,  0             ; カウンタ
+init_normal_paging:
+  xor   ecx,  ecx             ; カウンタ
 
 .pde_setup:
   ; 2MB単位メモリページング
@@ -123,8 +124,8 @@ pml4_setup:
   ltr   ax                  ; ホントは16bitから32bitになったときはすぐジャンプすべき
   jmp   gdt_main_code:init_x86_64
 
-x86:                        ; 今の所下と同じ
-nocpuid:
+only_x86:                   ; 今の所下と同じ
+cpuid_not_supported:
 ; とりあえずデバッグ
   mov   ecx,  error_str.end-error_str
   mov   edi,  0xb8000
@@ -132,7 +133,7 @@ nocpuid:
   rep   movsb               ; 転送
   cli
   hlt
-  jmp nocpuid
+  jmp cpuid_not_supported
 
 
 section .data
@@ -181,18 +182,3 @@ error_str:
   db   'd',   0x4f
   db   '.',   0x4f
 .end:
-
-
-section .bss
-
-align   4096
-
-pd:
-; ページングディレクトリ(8byte * 512) * 4
-  resb    4096 * 4
-pdpt:
-; ページディレクトリポインタテーブル(8byte * 512)
-  resb    4096
-pml4:
-; ページマップレベル4(8byte * 512)
-  resb    4096

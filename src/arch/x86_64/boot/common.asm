@@ -6,7 +6,7 @@ STACK_SIZE  equ 256
 
 global initial_stack, gdt_main_code, gdtr0
 global tss_definition, tss_address_definition, tss
-
+global pd, pdpt, pml4
 
 section .bss
 
@@ -15,6 +15,17 @@ align   4096
 tss_stack:
   resb    4096
 
+pd:
+  ; ページングディレクトリ(8byte * 512) * 4
+  resb    4096 * 4
+pdpt:
+  ; ページディレクトリポインタテーブル(8byte * 512)
+  resb    4096
+pml4:
+  ; ページマップレベル4(8byte * 512)
+  resb    4096
+
+; 初期スタック
 resb  STACK_SIZE
 initial_stack:
 
