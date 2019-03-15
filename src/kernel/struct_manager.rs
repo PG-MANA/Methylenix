@@ -3,6 +3,7 @@ structをグローバルでやり取りするためのマネージャ(プロセ�
 */
 
 //use(Arch実装依存)
+use arch::target_arch::device::serial_port::SerialPortManager;
 use arch::target_arch::interrupt::InterruptManager;
 
 //use(Arch非依存)
@@ -20,7 +21,7 @@ pub struct BootInformationManager {
     pub memory_manager: Mutex<MemoryManager>,
     pub interrupt_manager: Mutex<InterruptManager>,
     pub efi_manager: Mutex<EfiManager>,
-    //input_manager:
+    pub serial_port_manager: Mutex<SerialPortManager>, //input_manager:
 }
 
 const fn init_bootinformation_manager() -> BootInformationManager {
@@ -29,5 +30,6 @@ const fn init_bootinformation_manager() -> BootInformationManager {
         memory_manager: Mutex::new(MemoryManager::new_static()),
         interrupt_manager: Mutex::new(InterruptManager::new_static()),
         efi_manager: Mutex::new(EfiManager::new_static()),
+        serial_port_manager: Mutex::new(SerialPortManager::new_static()),
     }
 }

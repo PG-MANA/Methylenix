@@ -2,6 +2,7 @@
     フォントの描画などをフレームバッファに行う
 */
 
+// use(Arch非依存)
 use core::fmt;
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
@@ -88,9 +89,26 @@ impl GraphicManager {
         }
     }
 
+    fn write_string_to_serial_port(&self, string: &str) -> bool {
+        //代替処置
+        let serial_port_manager_lock = unsafe {
+            STATIC_BOOT_INFORMATION_MANAGER
+                .serial_port_manager
+                .try_lock()
+        };
+        if serial_port_manager_lock.is_ok() {
+            let manager = serial_port_manager_lock.unwrap();
+            for code in string.bytes() {
+                manager.send(code);
+            }
+            return true;
+        }
+        return false;
+    }
+
     pub fn write_string(&mut self, string: &str) -> bool {
         if !self.is_textmode || self.frame_buffer_width == 0 {
-            return false; //現在未対応
+            return self.write_string_to_serial_port(string);
         }
         for code in string.bytes() {
             match code as char {

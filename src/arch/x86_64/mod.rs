@@ -1,89 +1,69 @@
-pub mod mbi; //Multi Boot Information
-pub mod memman;
-//mod paging;
 #[macro_use]
 pub mod interrupt;
 pub mod device;
 
-use arch::target_arch::device::{cpu, keyboard};
-use arch::target_arch::mbi::*;
-use arch::target_arch::memman::MemoryManager;
+use self::device::serial_port::SerialPortManager;
+use self::device::{cpu, keyboard};
 
-use usr::graphic;
-
-#[allow(unused_imports)]
-use core::fmt;
+use kernel::drivers::efi::EfiManager;
+use kernel::drivers::multiboot::MultiBootInformation;
+use kernel::graphic::GraphicManager;
+use kernel::memory_manager::MemoryManager;
+use kernel::spin_lock::Mutex;
+use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
 
 #[no_mangle]
 pub extern "C" fn boot_main(
-    addr: usize, /*マルチブートヘッダのアドレス*/
-    gdt: u64,    /*現在のセグメント:8*/
+    mbi_addr: usize, /*マルチブートヘッダのアドレス*/
+    gdt: u64,        /*現在のセグメント:8*/
 ) {
-    //おそらくこの関数はCLIされた状態で呼ばれる。
+    //この関数はCLIされた状態で呼ばれる。
     //PIC初期化
     unsafe {
         device::pic::pic_init();
     }
-    //GraphicManager初期化
     //MultiBootInformation読み込み
-    if !mbi::test(addr) {
-        panic!("Unaligned Multi Boot Information.");
-    }
-    let info = load_mbi(addr);
-    graphic::GraphicManager::init_default_manager(&info.framebufferinfo);
-    println!("Methylenix version 0.0.1");
+    let multiboot_information = MultiBootInformation::new(mbi_addr);
     //メモリ管理初期化
-    let mut memory_manager = init_memman(&info, addr);
+    let mut memory_manager = MemoryManager::new(&multiboot_information);
     //IDT初期化&割り込み初期化
-    let idt_manager =
-        unsafe { interrupt::IDTMan::new(memory_manager.alloc_page().unwrap().get_page(), gdt) };
-    unsafe {
-        device::keyboard::Keyboard::init(&idt_manager, gdt);
+    let interrupt_manager = unsafe {
+        interrupt::InterruptManager::new(memory_manager.alloc_page().unwrap().get_page(), gdt)
+    };
+    //シリアルポート初期化
+    let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
+    serial_port_manager.init_serial_port();
+
+    if multiboot_information.efi_table_pointer != 0 {
+        //EFI Bootが有効
+        unsafe {
+            STATIC_BOOT_INFORMATION_MANAGER.efi_manager =
+                Mutex::new(EfiManager::new(multiboot_information.efi_table_pointer));
+        }
     }
-    //IDT&PICの初期化が終わったのでSTIする
+    //Boot Information Manager に格納
     unsafe {
+        STATIC_BOOT_INFORMATION_MANAGER.graphic_manager =
+            Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
+        STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager);
+        STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager = Mutex::new(interrupt_manager);
+        STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
+    }
+    println!("Methylenix version 0.0.1");
+
+    unsafe {
+        //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
+
+        device::keyboard::Keyboard::init(
+            &STATIC_BOOT_INFORMATION_MANAGER
+                .interrupt_manager
+                .lock()
+                .unwrap(),
+            gdt,
+        );
     }
     hlt();
-}
-
-fn init_memman(info: &MultiBootInformation, mbiaddr: usize) -> MemoryManager {
-    //カーネルサイズの計算
-    let kernel_loader_start = info
-        .elfinfo
-        .clone()
-        .map(|section| section.addr())
-        .min()
-        .unwrap();
-    let kernel_loader_end = info
-        .elfinfo
-        .clone()
-        .map(|section| section.addr())
-        .max()
-        .unwrap();
-    let mbi_start = mbiaddr;
-    let mbi_end = mbiaddr + mbi::total_size(mbiaddr) as usize;
-    println!(
-        "KernelLoader Size:{}KB, MultiBootInformation Size:{}B",
-        (kernel_loader_end - kernel_loader_start) / 1024 as usize,
-        mbi::total_size(mbiaddr)
-    );
-    memman::MemoryManager::new(
-        info.memmapinfo.clone(),
-        kernel_loader_start as usize,
-        kernel_loader_end as usize,
-        mbi_start,
-        mbi_end,
-    )
-}
-
-fn load_mbi(addr: usize) -> mbi::MultiBootInformation {
-    let mbi_total_size = mbi::total_size(addr);
-    if mbi_total_size == 0 {
-        panic!("Invalid Multi Boot Information.");
-    }
-    let info = mbi::MultiBootInformation::new(addr); //Result型などがあり利用してみるのもいいかも
-    info
 }
 
 fn hlt() {
