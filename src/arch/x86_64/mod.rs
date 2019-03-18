@@ -32,7 +32,7 @@ pub extern "C" fn boot_main(
     };
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
-    serial_port_manager.init_serial_port();
+    serial_port_manager.init_serial_port(&interrupt_manager, gdt);
 
     if multiboot_information.efi_table_pointer != 0 {
         //EFI Bootが有効
@@ -78,9 +78,21 @@ fn hlt() {
         unsafe {
             cpu::hlt();
         }
-        let keycode = keyboard::Keyboard::dequeue_key().unwrap() as usize;
-        if keycode < KEYCODE_MAP.len() {
-            print!("{}", KEYCODE_MAP[keycode] as char);
+        let key_code = keyboard::Keyboard::dequeue_key().unwrap_or(0xff) as usize;
+        if key_code < KEYCODE_MAP.len() {
+            print!("{}", KEYCODE_MAP[key_code] as char);
+        } else {
+            let ascii_code = unsafe {
+                STATIC_BOOT_INFORMATION_MANAGER
+                    .serial_port_manager
+                    .lock()
+                    .unwrap()
+                    .dequeue_key()
+                    .unwrap_or(0)
+            };
+            if ascii_code != 0 {
+                print!("{}", ascii_code as char);
+            }
         }
     }
 }
