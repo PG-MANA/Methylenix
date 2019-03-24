@@ -60,6 +60,9 @@ impl SerialPortManager {
     }
 
     pub fn send(&self, data: u8) {
+        if self.port == 0 {
+            return;
+        }
         loop {
             if self.is_completed_transmitter() {
                 break;
@@ -70,7 +73,16 @@ impl SerialPortManager {
         }
     }
 
+    pub fn sendstr(&self, s: &str) {
+        for c in s.bytes() {
+            self.send(c);
+        }
+    }
+
     pub fn read(&self) -> u8 {
+        if self.port == 0 {
+            return 0;
+        }
         unsafe { in_byte(self.port) }
     }
 
