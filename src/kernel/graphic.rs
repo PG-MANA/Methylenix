@@ -7,6 +7,9 @@ use core::fmt;
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
 
+// use(Arch依存)
+use arch::target_arch::device::crt;
+
 pub struct GraphicManager {
     frame_buffer_address: usize,
     frame_buffer_width: usize,
@@ -152,6 +155,10 @@ impl GraphicManager {
                     }
                 }
             };
+            // カーソル移動
+            crt::set_cursor_position(
+                (self.cursor.line * self.frame_buffer_width + self.cursor.character) as u16,
+            );
         }
         true
     }

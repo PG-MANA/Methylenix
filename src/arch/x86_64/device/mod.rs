@@ -3,6 +3,7 @@
 */
 
 pub mod cpu;
+pub mod crt;
 pub mod keyboard;
 pub mod pic;
 pub mod serial_port;
