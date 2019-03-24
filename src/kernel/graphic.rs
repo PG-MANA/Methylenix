@@ -54,7 +54,7 @@ impl GraphicManager {
         self.init_color_mode();
         match frame_buffer_info.mode {
             1 => self.init_color_mode(),
-            2 => self.init_ega_text_mode(),
+            2 => self.init_vga_text_mode(),
             _ => (/*何しよう...*/),
         }
     }
@@ -72,12 +72,12 @@ impl GraphicManager {
         }
     }
 
-    pub fn init_ega_text_mode(&mut self) {
+    pub fn init_vga_text_mode(&mut self) {
         self.is_textmode = true;
         self.cursor.front_color = 0xb; // bright cyan
     }
 
-    pub fn put_char(&self, c: char) {
+    pub fn putchar(&self, c: char) {
         //カーソル操作はしない
         let t: u16 = ((self.cursor.back_color & 0x07) << 0x0C) as u16
             | ((self.cursor.front_color & 0x0F) << 0x08) as u16
@@ -89,27 +89,20 @@ impl GraphicManager {
         }
     }
 
-    fn write_string_to_serial_port(&self, string: &str) -> bool {
-        //代替処置
-        let serial_port_manager_lock = unsafe {
-            STATIC_BOOT_INFORMATION_MANAGER
-                .serial_port_manager
-                .try_lock()
-        };
-        if serial_port_manager_lock.is_ok() {
-            let manager = serial_port_manager_lock.unwrap();
-            for code in string.bytes() {
-                manager.send(code);
+    pub fn puts(&mut self, string: &str) -> bool {
+        if self.is_textmode == false {
+            let serial_port_manager_lock = unsafe {
+                STATIC_BOOT_INFORMATION_MANAGER
+                    .serial_port_manager
+                    .try_lock()
+            };
+            if serial_port_manager_lock.is_ok() {
+                serial_port_manager_lock.unwrap().sendstr(string);
+                return true;
             }
-            return true;
+            return false;
         }
-        return false;
-    }
 
-    pub fn write_string(&mut self, string: &str) -> bool {
-        if !self.is_textmode || self.frame_buffer_width == 0 {
-            return self.write_string_to_serial_port(string);
-        }
         for code in string.bytes() {
             match code as char {
                 '\r' => self.cursor.character = 0,
@@ -147,10 +140,10 @@ impl GraphicManager {
                     } else {
                         self.cursor.character -= 1;
                     }
-                    self.put_char(' ');
+                    self.putchar(' ');
                 }
                 c => {
-                    self.put_char(c);
+                    self.putchar(c);
                     self.cursor.character += 1;
                     if self.cursor.character >= self.frame_buffer_width {
                         self.cursor.line += 1;
@@ -166,7 +159,7 @@ impl GraphicManager {
 
 impl fmt::Write for GraphicManager {
     fn write_str(&mut self, string: &str) -> fmt::Result {
-        if self.write_string(string) {
+        if self.puts(string) {
             return Ok(());
         } else {
             return Err(fmt::Error {});
