@@ -21,7 +21,7 @@ MULTIBOOT_HEADER_TAG_END                  equ 0           ; マルチブート�
 ;========================================
 
 ; マルチブート用ヘッダー
-section .grub_header  ; 特殊な扱いのセクションにする(配置固定 & 最適化無効)
+section .multiboot_header  ; 特殊な扱いのセクションにする(配置固定 & 最適化無効)
 
 jmp     boot_entry     ; 下を実行されたらまずいのでjmp
 

@@ -7,7 +7,7 @@ SECTIONS {
   LD_KERNEL_START = .;
 
   .boot_entry BLOCK(0x1000): ALIGN(0x1000) { /*BLOCKとALIGNは同意義*/
-    KEEP(*(.grub_header))/*使われてないとリンクされなくなるので*/
+    KEEP(*(.multiboot_header))/*使われてないとリンクされなくなるので*/
   }
 
   .text BLOCK(4K): ALIGN(4K) {
