@@ -1,34 +1,36 @@
 OUTPUT_FORMAT(elf64-x86-64)
 
+__ALIGN_SIZE = 0x1000;
+
 SECTIONS {
 
   ENTRY(boot_entry) /*起動処理のコード*/
-  . = 1M;
+  . = 1M; /*Memory Mapで空いていて使いやすそうな場所*/
   LD_KERNEL_START = .;
 
-  .boot_entry BLOCK(0x1000): ALIGN(0x1000) { /*BLOCKとALIGNは同意義*/
+  .boot_entry : {
     KEEP(*(.multiboot_header))/*使われてないとリンクされなくなるので*/
   }
 
-  .text BLOCK(4K): ALIGN(4K) {
-    *(.text*)
+  .text : {
+    *(.text .text.*)
   }
 
-  .data BLOCK(4K): ALIGN(4K) {
-    *(.data*)
-    *(.rodata*)
+  . = ALIGN(__ALIGN_SIZE);
+
+  .data : {
+    *(.data .data.*)
   }
 
-  .rodata BLOCK(4K): ALIGN(4K) {
-    *(.rodata*)
+  . = ALIGN(__ALIGN_SIZE);
+
+  .rodata : {
+    *(.rodata .rodata.*)
   }
 
-  .bss BLOCK(4K): ALIGN(4K) {
-    *(.bss*)
-  }
+  . = ALIGN(__ALIGN_SIZE);
 
-  .data.rel.ro BLOCK(4K): ALIGN(4K) { /*動的再配置?*/
-    *(.data.rel.ro.local*)
-    *(.data.rel.ro*)
+  .bss : {
+    *(.bss .bss.*)
   }
 }
