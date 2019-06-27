@@ -28,7 +28,7 @@ GRUBMKRES = grub-mkrescue
 GRUB2MKRES = grub2-mkrescue #Temporary
 AR = ar rcs
 LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
-XARGO = xargo
+CARGO = cargo
 
 ##アセンブラ読み込み
 include config/$(TARGET_ARCH)/assembler.mk
@@ -59,7 +59,7 @@ init:
 
 clean:
 	$(RM) $(MAKE_TMPDIR)
-	$(XARGO) clean
+	$(CARGO) clean
 
 iso:
 	$(MAKE) kernel
@@ -81,6 +81,6 @@ $(MAKE_OBJDIR)boot_asm.a : src/arch/$(TARGET_ARCH)/boot/Makefile .FORCE
 	$(MAKE) -C src/arch/$(TARGET_ARCH)/boot/
 
 $(RUST_OBJ) :  .FORCE
-	$(XARGO) build --release --target $(RUST_TARGET_FILE_FOLDER) $(RUST_TARGET)
+	$(CARGO) xbuild --release --target $(RUST_TARGET_FILE_FOLDER) $(RUST_TARGET)
 
 .FORCE:
