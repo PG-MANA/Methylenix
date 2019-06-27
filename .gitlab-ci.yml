@@ -12,7 +12,7 @@ build:
     - cargo --version
     - nasm -v
     - rustup component add rust-src
-    - cargo install xargo
+    - cargo install cargo-xbuild
     - make iso
   artifacts:
     paths:
