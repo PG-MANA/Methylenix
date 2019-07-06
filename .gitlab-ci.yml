@@ -1,4 +1,4 @@
-image:    "opensuse:latest"
+image:    "opensuse/leap:latest"
 stages:
   - build
 
