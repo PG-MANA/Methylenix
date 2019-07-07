@@ -119,8 +119,8 @@ pml4_setup:
   mov   eax,  cr0
   or    eax,  1 << 31 | 1   ; PGフラグを立てる("|1"は既に32bitになってる場合は不要)
   mov   cr0,  eax           ; これらの初期化で4GBは仮想メモリアドレスと実メモリアドレスが一致しているはず。(ストレートマッピング)
-  lgdt  [gdtr0]
   mov   ax,   tss_descriptor
+  lgdt  [gdtr0]
   ltr   ax                  ; ホントは16bitから32bitになったときはすぐジャンプすべき
   jmp   main_code_segment_descriptor:init_x86_64
 
