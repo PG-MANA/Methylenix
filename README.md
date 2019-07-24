@@ -8,7 +8,7 @@ Methylenix とはRustで構成されたOSです。
 ドキュメントは追々整備します。
 
 ## Methylenixとは
-このプログラムの原点は、セキュリティキャンプ全国大会2018 集中コース「X　言語やOSを自作しよう」において、書きはじめたものです。  
+このプログラムの原点は、セキュリティキャンプ全国大会2017 集中コース「X　言語やOSを自作しよう」において、書きはじめたものです。  
 セキュリティキャンプについては、[セキュリティ・キャンプ：IPA 独立行政法人 情報処理推進機構](https://www.ipa.go.jp/jinzai/camp/index.html)をご覧ください。
 セキュリティキャンプでは割り込みまでを実装しました。(参考：[セキュリティキャンプ2017参加記](https://pg-mana.net/blog/seccamp_after/))
 
@@ -52,7 +52,7 @@ limitations under the License.
 * nasm
 * rustc(nightly)
 * cargo
-* xargo
+* cargo-xbuild
 
 詳しくは https://soft.taprix.org/wiki/oswiki/Rust:setup を参照してください。
 
