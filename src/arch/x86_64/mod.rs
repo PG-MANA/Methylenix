@@ -16,7 +16,7 @@ use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
 #[no_mangle]
 pub extern "C" fn boot_main(
     mbi_addr: usize, /*マルチブートヘッダのアドレス*/
-    gdt: u64,        /*現在のセグメント:8*/
+    gdt: u64, /*現在のセグメント:8*/
 ) {
     //この関数はCLIされた状態で呼ばれる。
     //PIC初期化
@@ -25,14 +25,17 @@ pub extern "C" fn boot_main(
     }
     //MultiBootInformation読み込み
     let multiboot_information = MultiBootInformation::new(mbi_addr);
+    // Graphic初期化（Panicが起きたときの表示のため)
+    unsafe {
+        STATIC_BOOT_INFORMATION_MANAGER.graphic_manager =
+            Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
+    }
     //メモリ管理初期化
     let mut memory_manager = MemoryManager::new(&multiboot_information);
     //IDT初期化&割り込み初期化
     let interrupt_manager = unsafe {
         interrupt::InterruptManager::new(memory_manager.alloc_page().expect("Cannot alloc memory for IDT."), gdt)
     };
-
-
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
     serial_port_manager.init_serial_port(&interrupt_manager, gdt);
@@ -46,8 +49,6 @@ pub extern "C" fn boot_main(
     }
     //Boot Information Manager に格納
     unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.graphic_manager =
-            Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
         STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager);
         STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager = Mutex::new(interrupt_manager);
         STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
