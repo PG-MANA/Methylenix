@@ -13,7 +13,6 @@ use arch::target_arch::paging::PAGE_SIZE;
 
 use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use arch::x86_64::paging::PAGE_MASK;
 
 pub struct MemoryManager {
     physical_memory_manager: PhysicalMemoryManager,
@@ -31,8 +30,8 @@ impl MemoryManager {
         let mut memory_for_manager: (usize, bool) = (0, false);
         for entry in multiboot_info.memory_map_info.clone() {
             if memory_for_manager.1 == false && entry.m_type == 1 && entry.length as usize >= PAGE_SIZE &&
-                !(entry.addr as usize + PAGE_SIZE >= kernel_loader_range.0 &&
-                    entry.addr as usize + PAGE_SIZE < kernel_loader_range.1) {
+                !(entry.addr as usize + PAGE_SIZE - 1 >= kernel_loader_range.0 &&
+                    entry.addr as usize + PAGE_SIZE - 1 <= kernel_loader_range.1) {
                 /*Kernel Loaderはメモリマップに記載されてないので用意するメモリ領域の端がそれらに食い込まないかチェック*/
                 memory_for_manager = (entry.addr as usize, true);
             }
@@ -45,13 +44,14 @@ impl MemoryManager {
                 phy_memory_manager.define_free_memory(entry.addr as usize, entry.length as usize);
             }
         }
-        /*カーネル領域・MultiBootInfoの予約*/
-        phy_memory_manager.define_used_memory(kernel_loader_range.0, ((kernel_loader_range.1 - kernel_loader_range.0) & PAGE_MASK) + PAGE_SIZE);
-        /*(((kernel_loader_range.1 - kernel_loader_range.0 + 1) - 1) & PAGE_MASK) + PAGE_SIZE の短縮版、長さをPAGE_SIZE長に繰り上げる*/
+        phy_memory_manager.define_used_memory(memory_for_manager.0, PAGE_SIZE);
+        /*カーネル領域の予約*/
+        for section in multiboot_info.elf_info.clone() {
+            phy_memory_manager.define_used_memory(section.addr(), section.size());
+        }
         /*phy_memory_manager.define_used_memory(multiboot_info.multiboot_information_address, multiboot_info.multiboot_information_size);
         マルチブートインフォメーションはすでにコピーされてるのでいらない。
         */
-        phy_memory_manager.define_used_memory(memory_for_manager.0, PAGE_SIZE);
         MemoryManager {
             physical_memory_manager: phy_memory_manager
         }
@@ -63,12 +63,12 @@ impl MemoryManager {
         }
     }
 
-    pub fn alloc_page(&mut self) -> Option<usize> {
+    pub fn alloc_page(&mut self, align: bool) -> Option<usize> {
         /*Test*/
-        self.physical_memory_manager.alloc(PAGE_SIZE)
+        self.physical_memory_manager.alloc(PAGE_SIZE, align)
     }
 
     pub fn dump_memory_manager(&self) {
-        self.physical_memory_manager.debug_memory_entry();
+        self.physical_memory_manager.dump_memory_entry();
     }
 }

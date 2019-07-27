@@ -34,12 +34,11 @@ pub extern "C" fn boot_main(
     let mut memory_manager = MemoryManager::new(&multiboot_information);
     //IDT初期化&割り込み初期化
     let interrupt_manager = unsafe {
-        interrupt::InterruptManager::new(memory_manager.alloc_page().expect("Cannot alloc memory for IDT."), gdt)
+        interrupt::InterruptManager::new(memory_manager.alloc_page(false).expect("Cannot alloc memory for IDT."), gdt)
     };
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
     serial_port_manager.init_serial_port(&interrupt_manager, gdt);
-
     if multiboot_information.efi_table_pointer != 0 {
         //EFI Bootが有効
         unsafe {
