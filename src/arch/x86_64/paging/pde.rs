@@ -3,8 +3,8 @@
 */
 
 //use
-use paging::pt::PageTable;
-use paging::pte::PTE;
+use super::pt::PageTable;
+use super::pte::PTE;
 
 pub struct PDE {
     flags: u64,
@@ -39,7 +39,7 @@ impl PDE {
         self.get_bit(1 << 0)
     }
 
-    pub fn setPresent(&mut self, b: bool) {
+    pub fn set_present(&mut self, b: bool) {
         self.set_bit(1 << 0, b);
     }
 

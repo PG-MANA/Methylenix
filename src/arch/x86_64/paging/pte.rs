@@ -2,8 +2,6 @@
 ページング実装(Page Table Entry)
 */
 
-use memman::{Frame, Memman};
-
 pub struct PTE {
     flags: u64,
 }

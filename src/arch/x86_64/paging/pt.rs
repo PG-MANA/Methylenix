@@ -3,7 +3,7 @@
 */
 
 use core::ops::{Index, IndexMut};
-use paging::pte::PTE;
+use super::pte::PTE;
 
 const PAGE_TABLE_MAX: usize = 512;
 
