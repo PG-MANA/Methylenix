@@ -7,124 +7,68 @@
     というより土壇場実装なのでかなり危ない。
 */
 
-use core::mem;
-use kernel::drivers::multiboot::{MemoryMapEntry, MemoryMapInfo, MultiBootInformation};
+mod physical_memory_manager;
 
-pub struct Page {
-    //本の1ページみたいな
-    no_page: usize, //ページ番号
-}
+use arch::target_arch::paging::PAGE_SIZE;
 
-impl Page {
-    pub const PAGE_SIZE: usize = 4 * 1024; //ページングにおける一ページのサイズに合わせる
-
-    pub const fn make_from_address(addr: usize) -> Page {
-        Page {
-            no_page: addr / Page::PAGE_SIZE,
-        }
-    }
-
-    pub fn get_page(&self) -> usize {
-        self.no_page
-    }
-}
+use kernel::drivers::multiboot::MultiBootInformation;
+use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use arch::x86_64::paging::PAGE_MASK;
 
 pub struct MemoryManager {
-    current_area: &'static MemoryMapEntry, //現在いるMemoryMapでのメモリ領域
-    current_next_page: Page, //現在使用されているページの次のページを指してる(head...?)
-    memory_map: MemoryMapInfo,
-    top_of_kernel_page: Page,
-    bottom_of_kernel_page: Page,
-    top_of_mbi_page: Page,
-    bottom_of_mbi_page: Page,
+    physical_memory_manager: PhysicalMemoryManager,
 }
 
 impl MemoryManager {
     pub fn new(multiboot_info: &MultiBootInformation) -> MemoryManager {
-        let kernel_loader_start = multiboot_info
-            .elf_info
-            .clone()
-            .map(|section| section.addr())
-            .min()
-            .unwrap();
-        let kernel_loader_end = multiboot_info
-            .elf_info
-            .clone()
-            .map(|section| section.addr())
-            .max()
-            .unwrap();
-        let mbi_start = multiboot_info.multiboot_information_address;
-        let mbi_end = mbi_start + multiboot_info.multiboot_information_size as usize;
-        let mut memory_manager = MemoryManager {
-            current_area: unsafe { mem::uninitialized() },
-            current_next_page: Page::make_from_address(0),
-            memory_map: multiboot_info.memory_map_info.clone(),
-            top_of_kernel_page: Page::make_from_address(kernel_loader_start),
-            bottom_of_kernel_page: Page::make_from_address(kernel_loader_end),
-            top_of_mbi_page: Page::make_from_address(mbi_start),
-            bottom_of_mbi_page: Page::make_from_address(mbi_end),
-        };
-        memory_manager.select_next_area();
-        memory_manager
+        let kernel_loader_range = (|multiboot_info: &MultiBootInformation| {
+            let map = multiboot_info
+                .elf_info
+                .clone()
+                .map(|section| section.addr());
+            (map.clone().min().unwrap(), map.max().unwrap())
+        })(multiboot_info);
+        let mut memory_for_manager: (usize, bool) = (0, false);
+        for entry in multiboot_info.memory_map_info.clone() {
+            if memory_for_manager.1 == false && entry.m_type == 1 && entry.length as usize >= PAGE_SIZE &&
+                !(entry.addr as usize + PAGE_SIZE >= kernel_loader_range.0 &&
+                    entry.addr as usize + PAGE_SIZE < kernel_loader_range.1) {
+                /*Kernel Loaderはメモリマップに記載されてないので用意するメモリ領域の端がそれらに食い込まないかチェック*/
+                memory_for_manager = (entry.addr as usize, true);
+            }
+        }
+        let mut phy_memory_manager = PhysicalMemoryManager::new();
+        phy_memory_manager.set_memory_entry_pool(memory_for_manager.0, PAGE_SIZE);
+        for entry in multiboot_info.memory_map_info.clone() {
+            /*2回回すのは少し気が引けるけど...*/
+            if entry.m_type == 1 {
+                phy_memory_manager.define_free_memory(entry.addr as usize, entry.length as usize);
+            }
+        }
+        /*カーネル領域・MultiBootInfoの予約*/
+        phy_memory_manager.define_used_memory(kernel_loader_range.0, ((kernel_loader_range.1 - kernel_loader_range.0) & PAGE_MASK) + PAGE_SIZE);
+        /*(((kernel_loader_range.1 - kernel_loader_range.0 + 1) - 1) & PAGE_MASK) + PAGE_SIZE の短縮版、長さをPAGE_SIZE長に繰り上げる*/
+        /*phy_memory_manager.define_used_memory(multiboot_info.multiboot_information_address, multiboot_info.multiboot_information_size);
+        マルチブートインフォメーションはすでにコピーされてるのでいらない。
+        */
+        phy_memory_manager.define_used_memory(memory_for_manager.0, PAGE_SIZE);
+        MemoryManager {
+            physical_memory_manager: phy_memory_manager
+        }
     }
 
     pub const fn new_static() -> MemoryManager {
         MemoryManager {
-            current_area: &MemoryMapEntry {
-                addr: 0,
-                length: 0,
-                m_type: 0,
-                reserved: 0,
-            },
-            current_next_page: Page::make_from_address(0),
-            memory_map: MemoryMapInfo::new_static(),
-            top_of_kernel_page: Page::make_from_address(0),
-            bottom_of_kernel_page: Page::make_from_address(0),
-            top_of_mbi_page: Page::make_from_address(0),
-            bottom_of_mbi_page: Page::make_from_address(0),
+            physical_memory_manager: PhysicalMemoryManager::new(),
         }
     }
 
-    fn select_next_area(&mut self) {
-        //あまりイケてない書き方であるが、色々filter使うより、ループ回すほうが早そう。
-        //なおこのやり方は、memory_mapがアドレスから小さい方から並んでると勝手に信じて実装しているので、そうでなければアウト、filterとなんか使おうね。
-        for memory_map_entry in self.memory_map.clone() {
-            if memory_map_entry.m_type == 1
-                && Page::make_from_address(
-                    (memory_map_entry.addr + memory_map_entry.length - 1) as usize,
-                )
-                .no_page
-                    >= self.current_next_page.no_page
-            {
-                self.current_area = memory_map_entry;
-            }
-        }
+    pub fn alloc_page(&mut self) -> Option<usize> {
+        /*Test*/
+        self.physical_memory_manager.alloc(PAGE_SIZE)
     }
 
-    pub fn alloc_page(&mut self) -> Option<Page> {
-        let current_area_last_frame = Page::make_from_address(
-            (self.current_area.addr + self.current_area.length - 1) as usize,
-        );
-
-        if self.current_next_page.no_page > current_area_last_frame.no_page {
-            //次の領域
-            self.select_next_area();
-        } else if self.current_next_page.no_page >= self.top_of_kernel_page.no_page
-            && self.current_next_page.no_page <= self.bottom_of_kernel_page.no_page
-        {
-            //カーネル領域に入ったのでつまみ出す
-            self.current_next_page.no_page = self.bottom_of_kernel_page.no_page + 1;
-        } else if self.current_next_page.no_page >= self.top_of_mbi_page.no_page
-            && self.current_next_page.no_page <= self.bottom_of_mbi_page.no_page
-        {
-            self.current_next_page.no_page = self.bottom_of_mbi_page.no_page + 1;
-        } else {
-            let cloned_page_next = Page {
-                no_page: self.current_next_page.no_page,
-            };
-            self.current_next_page.no_page += 1;
-            return Some(cloned_page_next);
-        }
-        self.alloc_page()
+    pub fn dump_memory_manager(&self) {
+        self.physical_memory_manager.debug_memory_entry();
     }
 }

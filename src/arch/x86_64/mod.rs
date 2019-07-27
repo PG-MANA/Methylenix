@@ -1,6 +1,7 @@
 #[macro_use]
 pub mod interrupt;
 pub mod device;
+pub mod paging;
 
 use self::device::serial_port::SerialPortManager;
 use self::device::{cpu, keyboard};
@@ -28,8 +29,10 @@ pub extern "C" fn boot_main(
     let mut memory_manager = MemoryManager::new(&multiboot_information);
     //IDT初期化&割り込み初期化
     let interrupt_manager = unsafe {
-        interrupt::InterruptManager::new(memory_manager.alloc_page().unwrap().get_page(), gdt)
+        interrupt::InterruptManager::new(memory_manager.alloc_page().expect("Cannot alloc memory for IDT."), gdt)
     };
+
+
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
     serial_port_manager.init_serial_port(&interrupt_manager, gdt);

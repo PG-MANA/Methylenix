@@ -82,34 +82,3 @@ impl Default for MemoryMapInfo {
         }
     }
 }
-
-#[repr(C)]
-pub struct MultibootTagBasicMeminfo {
-    s_type: u32,
-    size: u32,
-    mem_lower: u32, //0MiB~からの空きメモリ
-    mem_upper: u32, //1MiB~からの空きメモリ
-}
-
-pub struct MemoryInfo {
-    pub mem_lower: u32, //0MiB~からの空きメモリ
-    pub mem_upper: u32, //1MiB~からの空きメモリ
-}
-
-impl MemoryInfo {
-    pub fn new(mem: &MultibootTagBasicMeminfo) -> MemoryInfo {
-        MemoryInfo {
-            mem_upper: mem.mem_upper,
-            mem_lower: mem.mem_lower,
-        }
-    }
-}
-
-impl Default for MemoryInfo {
-    fn default() -> MemoryInfo {
-        MemoryInfo {
-            mem_upper: 0,
-            mem_lower: 0,
-        }
-    }
-}

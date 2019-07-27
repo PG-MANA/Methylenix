@@ -6,7 +6,7 @@ mod memory;
 
 pub use self::elf::{ElfInfo, ElfSection};
 pub use self::frame_buffer::FrameBufferInfo;
-pub use self::memory::{MemoryInfo, MemoryMapEntry, MemoryMapInfo};
+pub use self::memory::{MemoryMapEntry, MemoryMapInfo};
 use core::mem;
 
 //構造体
@@ -24,9 +24,6 @@ struct EfiSystemTableInformation {
 }
 
 pub struct MultiBootInformation {
-    pub multiboot_information_address: usize,
-    pub multiboot_information_size: usize,
-    pub memory_info: MemoryInfo,
     pub elf_info: ElfInfo,
     pub memory_map_info: MemoryMapInfo,
     pub framebuffer_info: FrameBufferInfo,
@@ -40,7 +37,7 @@ impl MultiBootInformation {
     const TAG_TYPE_CMDLINE: u32 = 1;
     const TAG_TYPE_BOOT_LOADER_NAME: u32 = 2;
     const TAG_TYPE_MODULE: u32 = 3;
-    const TAG_TYPE_BASIC_MEMINFO: u32 = 4;
+    /*const TAG_TYPE_BASIC_MEMINFO: u32 = 4;*/
     const TAG_TYPE_BOOTDEV: u32 = 5;
     const TAG_TYPE_MMAP: u32 = 6;
     const TAG_TYPE_VBE: u32 = 7;
@@ -80,9 +77,6 @@ impl MultiBootInformation {
                     mbi.memory_map_info = MemoryMapInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_ACPI_NEW => {}
-                MultiBootInformation::TAG_TYPE_BASIC_MEMINFO => {
-                    mbi.memory_info = MemoryInfo::new(unsafe { &*(tag as *const _) }); //完全に信用すべきではない(CPUIDなどで問い合わせる)
-                }
                 MultiBootInformation::TAG_TYPE_CMDLINE => {}
                 MultiBootInformation::TAG_TYPE_BOOT_LOADER_NAME => {}
                 MultiBootInformation::TAG_TYPE_FRAMEBUFFER => {
