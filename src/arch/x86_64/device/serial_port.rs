@@ -16,16 +16,16 @@ pub struct SerialPortManager {
 }
 
 impl SerialPortManager {
-    pub fn new(port: u16) -> SerialPortManager {
+    pub fn new(io_port: u16) -> SerialPortManager {
         SerialPortManager {
-            port: port,
+            port: io_port,
             fifo: FIFO::new(128),
         }
     }
 
     pub const fn new_static() -> SerialPortManager {
         SerialPortManager {
-            port: 0,
+            port: 0x3F8,
             fifo: FIFO::new_static(128, &0),
         }
     }
@@ -75,6 +75,9 @@ impl SerialPortManager {
 
     pub fn sendstr(&self, s: &str) {
         for c in s.bytes() {
+            if c as char == '\n'{
+                self.send('\r' as u8);
+            }
             self.send(c);
         }
     }

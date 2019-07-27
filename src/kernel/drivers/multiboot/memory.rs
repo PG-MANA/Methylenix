@@ -13,7 +13,7 @@ pub struct MemoryMapEntry {
     pub reserved: u32,
 }
 
-#[repr(packed)]
+#[repr(C)]
 #[allow(dead_code)]
 pub struct MultibootTagMemoryMap {
     s_type: u32,
@@ -36,7 +36,7 @@ impl MemoryMapInfo {
         MemoryMapInfo {
             num: ((map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
                 / map.entry_size as usize) as u32, /*+1,//0からカウントするため-1するが打ち消し*/
-            addr: unsafe { &map.entries as *const MemoryMapEntry as usize },
+            addr: &map.entries as *const MemoryMapEntry as usize,
             entry_size: map.entry_size,
             cnt: 0,
         }
