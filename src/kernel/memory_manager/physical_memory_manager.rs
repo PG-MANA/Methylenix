@@ -134,6 +134,8 @@ impl PhysicalMemoryManager {
                 return false;
             }
             entry.set_range(entry.get_start_address(), start - 1);
+        } else if entry.get_end_address() == start + length - 1 {
+            entry.set_range(entry.get_start_address(), start - 1);
         } else {
             let new_entry = if let Some(t) = self.create_memory_entry() { t } else { return false; };
             new_entry.set_range(start + length, entry.get_end_address());
@@ -249,10 +251,10 @@ impl PhysicalMemoryManager {
             println!("Root Entry is not enabled.");
             return;
         }
-        println!("Root:start:{},end:{}", entry.get_start_address(), entry.get_end_address());
+        println!("Root:start:{:X},end:{:X}", entry.get_start_address(), entry.get_end_address());
         while let Some(t) = entry.get_next_entry() {
             entry = t;
-            println!(" Entry:start:{},end:{}", entry.get_start_address(), entry.get_end_address());
+            println!(" Entry:start:{:X},end:{:X}", entry.get_start_address(), entry.get_end_address());
         }
     }
 }
