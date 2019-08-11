@@ -89,7 +89,7 @@ init_normal_paging:
   cmp   ecx,  2048
   jne   .pde_setup          ; ecx != 512 * 4
 
-  mov   ecx,  0             ; カウンタ
+  xor   ecx, ecx            ; カウンタ
 
 .pdpte_setup_2mb:
   mov   eax,  4096
@@ -114,8 +114,8 @@ pml4_setup:
   mov   cr4,  eax           ; PAEフラグを立てる
   mov   ecx,  0xc0000080    ; rdmsrのための準備(レジスタ指定)
   rdmsr                     ; モデル固有レジスタに記載(intelの場合pentium以降に搭載、cpuidで検査済)
-  or    eax,  1 << 8        ; LMEフラグを立てる
-  wrmsr
+  or    eax,  1 << 8 | 1 << 11
+  wrmsr                     ; LMEとNXEフラグを立てる
   mov   eax,  cr0
   or    eax,  1 << 31 | 1   ; PGフラグを立てる("|1"は既に32bitになってる場合は不要)
   mov   cr0,  eax           ; これらの初期化で4GBは仮想メモリアドレスと実メモリアドレスが一致しているはず。(ストレートマッピング)

@@ -5,6 +5,7 @@ pub mod paging;
 
 use self::device::serial_port::SerialPortManager;
 use self::device::{cpu, keyboard};
+use self::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
 
 use kernel::drivers::efi::EfiManager;
 use kernel::drivers::multiboot::MultiBootInformation;
@@ -12,6 +13,7 @@ use kernel::graphic::GraphicManager;
 use kernel::memory_manager::MemoryManager;
 use kernel::spin_lock::Mutex;
 use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
+use kernel::task::{TaskEntry, TaskStatus};
 
 #[no_mangle]
 pub extern "C" fn boot_main(
@@ -31,10 +33,12 @@ pub extern "C" fn boot_main(
             Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
     }
     //メモリ管理初期化
-    let mut memory_manager = MemoryManager::new(&multiboot_information);
+    init_memory(&multiboot_information);
     //IDT初期化&割り込み初期化
     let interrupt_manager = unsafe {
-        interrupt::InterruptManager::new(memory_manager.alloc_page(false).expect("Cannot alloc memory for IDT."), gdt)
+        let mut memory_manager = STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap();
+        let page_manager = STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager();
+        interrupt::InterruptManager::new(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Cannot alloc memory for IDT."), gdt)
     };
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
@@ -48,12 +52,10 @@ pub extern "C" fn boot_main(
     }
     //Boot Information Manager に格納
     unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager);
         STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager = Mutex::new(interrupt_manager);
         STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
     }
     println!("Methylenix version 0.0.1");
-
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
@@ -65,6 +67,10 @@ pub extern "C" fn boot_main(
                 .unwrap(),
             gdt,
         );
+    }
+    //ページング反映
+    unsafe {
+        STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager().reset_paging();
     }
     hlt();
 }
@@ -98,4 +104,56 @@ fn hlt() {
             }
         }
     }
+}
+
+
+fn init_memory(multiboot_information: &MultiBootInformation) {
+    //基本はストレートマッピングで行く
+    //TODO: メモリマネージャーの4KAlign
+    let mut memory_manager = MemoryManager::new(multiboot_information);
+    let mut page_manager = PageManager::new(&mut memory_manager, None).expect("Can not reset paging.");
+    let mut max_address = 0usize;
+    //ページングを設定すべきメモリ範囲を出す
+    for entry in multiboot_information.memory_map_info.clone() {
+        if (entry.addr + entry.length) as usize > max_address {
+            max_address = (entry.addr + entry.length) as usize;
+        }
+    }
+    let mut counter = 0usize;
+    loop {
+        if max_address <= counter {
+            break;
+        }
+        page_manager.associate_address(&mut memory_manager, None, counter, counter, false, false, false);
+        counter += PAGE_SIZE;
+    }
+    for entry in multiboot_information.elf_info.clone() {
+        counter = 0usize;
+        let start_address = entry.addr() as usize & PAGE_MASK;
+        loop {
+            if entry.size() <= counter {
+                break;
+            }
+            page_manager.associate_address(&mut memory_manager, None, start_address + counter,
+                                           start_address + counter, entry.should_excusable(),
+                                           entry.should_writable(), false);
+            counter += PAGE_SIZE;
+        }
+    }
+    //メモリマネージャーのPOOL用
+    let memory_manager_pool = memory_manager.get_memory_pool();
+    for i in 0..(memory_manager.get_memory_pool().1) / PAGE_SIZE {
+        page_manager.associate_address(&mut memory_manager, None, memory_manager_pool.0 + i * PAGE_SIZE, memory_manager_pool.0 + i * PAGE_SIZE, false, true, false);
+    }
+    let mut task_manager = unsafe { STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap() };
+    task_manager.set_entry_pool(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc task manager pool."), PAGE_SIZE);
+    let mut task_entry = TaskEntry::new_static();
+    task_entry.set_status(TaskStatus::Running);
+    task_entry.set_privilege_level(0);
+    task_entry.set_kernel_stack(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc kernel stack."));
+    task_entry.set_enabled();
+    task_entry.set_page_manager(page_manager);
+    task_manager.add_task(task_entry);
+    task_manager.switch_next_task(false);
+    unsafe { STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager); }
 }

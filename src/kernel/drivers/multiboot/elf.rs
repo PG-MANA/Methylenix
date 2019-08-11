@@ -93,4 +93,10 @@ impl ElfSection {
         //列挙型使えるとな...
         self.section_flags
     }
+    pub fn should_writable(&self) -> bool {
+        self.section_flags & 1 != 0
+    }
+    pub fn should_excusable(&self) -> bool {
+        self.section_flags & 4 != 0
+    }
 }

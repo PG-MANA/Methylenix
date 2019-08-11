@@ -11,6 +11,7 @@ use kernel::drivers::efi::EfiManager;
 use kernel::graphic::GraphicManager;
 use kernel::memory_manager::MemoryManager;
 use kernel::spin_lock::Mutex;
+use kernel::task::TaskManager;
 
 //Boot時に格納するデータ群
 pub static mut STATIC_BOOT_INFORMATION_MANAGER: BootInformationManager =
@@ -22,6 +23,7 @@ pub struct BootInformationManager {
     pub interrupt_manager: Mutex<InterruptManager>,
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: Mutex<SerialPortManager>, //input_manager:
+    pub task_manager: Mutex<TaskManager>
 }
 
 const fn init_bootinformation_manager() -> BootInformationManager {
@@ -31,5 +33,6 @@ const fn init_bootinformation_manager() -> BootInformationManager {
         interrupt_manager: Mutex::new(InterruptManager::new_static()),
         efi_manager: Mutex::new(EfiManager::new_static()),
         serial_port_manager: Mutex::new(SerialPortManager::new_static()),
+        task_manager: Mutex::new(TaskManager::new()),
     }
 }

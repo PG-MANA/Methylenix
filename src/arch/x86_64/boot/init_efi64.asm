@@ -95,6 +95,10 @@ pml4_setup:
   push  0                   ; mainがreturnしたときの戻り先(returnすることないので0にする)
   push main_code_segment_descriptor
   push init_x86_64
+  mov   ecx,  0xc0000080    ; rdmsrのための準備(レジスタ指定)
+  rdmsr                     ; モデル固有レジスタに記載(intelの場合pentium以降に搭載、cpuidで検査済)
+  or    eax,  1 << 11
+  wrmsr                     ; NXEフラグを立てる
   mov   rax,  pml4
   mov   cr3,  rax           ; PML4Eをcr3に設定する
   mov   ax,   tss_descriptor

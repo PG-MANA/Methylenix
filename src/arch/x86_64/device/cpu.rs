@@ -29,14 +29,26 @@ pub unsafe fn in_byte(data: u16) -> u8 {
     result
 }
 
+#[inline(always)]
 pub unsafe fn lidt(idtr: usize) {
     asm!("lidt (%rax)"::"{rax}"(idtr));
 }
 
+#[inline(always)]
+pub unsafe fn set_cr3(addr: usize) {
+    asm!("movq %rax,%cr3"::"{rax}"(addr));
+}
+
+#[inline(always)]
+pub unsafe fn invlpg(addr: usize) {
+    asm!("invlpg (%rax)"::"{rax}"(addr));
+}
+
+
 pub unsafe fn get_func_addr(func: unsafe fn()) -> usize {
     // 関数のアドレス取得に使用、代用案捜索中
     #[allow(unused_assignments)]
-    let mut result: usize = 0;
+        let mut result: usize = 0;
     asm!("mov eax, ebx ":"={eax}"(result):"{ebx}"(func)::"intel");
     result
 }

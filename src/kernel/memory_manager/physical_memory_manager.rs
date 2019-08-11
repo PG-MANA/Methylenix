@@ -43,6 +43,11 @@ impl PhysicalMemoryManager {
             root: 0,
         }
     }
+
+    pub fn get_memory_entry_pool(&self) -> (usize, usize) {
+        (self.memory_entry_pool, self.memory_entry_pool_size)
+    }
+
     pub fn set_memory_entry_pool(&mut self, free_address: usize, free_address_size: usize) {
         self.memory_entry_pool = free_address;
         self.memory_entry_pool_size = free_address_size;
@@ -169,7 +174,7 @@ impl PhysicalMemoryManager {
         let mut entry = unsafe { &mut *(self.root as *mut MemoryEntry) };
         loop {
             if entry.get_size() >= size {
-                if align {
+                if align && entry.get_start_address() != 0 {
                     let aligned_addr = ((entry.get_start_address() - 1) & PAGE_MASK) + PAGE_SIZE;
                     if size <= entry.get_size() - (aligned_addr - entry.get_start_address()) {
                         break;

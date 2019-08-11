@@ -28,6 +28,8 @@ pub struct MultiBootInformation {
     pub memory_map_info: MemoryMapInfo,
     pub framebuffer_info: FrameBufferInfo,
     pub efi_table_pointer: usize,
+    pub address: usize,
+    pub size: usize,
 }
 
 impl MultiBootInformation {
@@ -61,8 +63,9 @@ impl MultiBootInformation {
         if !MultiBootInformation::test(address) {
             panic!("Unaligned Multi Boot Information")
         }
-        let total_size = MultiBootInformation::total_size(address);
-        if total_size == 0 {
+        mbi.address = address;
+        mbi.size = MultiBootInformation::total_size(address) as usize;
+        if mbi.size == 0 {
             panic!("Invalid Multi Boot Information")
         }
         let mut tag = address + 8;
@@ -91,7 +94,7 @@ impl MultiBootInformation {
                 }
                 MultiBootInformation::TAG_TYPE_BOOTDEV => {}
                 _ => {
-                    if tag - address - 8 >= (total_size as usize) {
+                    if tag - address - 8 >= mbi.size {
                         break;
                     }
                 }
