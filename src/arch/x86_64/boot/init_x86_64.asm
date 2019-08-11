@@ -12,7 +12,7 @@ section .text
 init_x86_64:
   ; セグメントレジスタ初期化、間違ってもCSはいじるな(FS,GSはマルチスレッドで使用する可能性がある...らしい)
   xor   rax,  rax
-  mov   es,   rax
+  mov   es,   ax
   mov   ss,   ax
   mov   ds,   ax
   mov   fs,   ax

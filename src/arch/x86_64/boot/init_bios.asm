@@ -18,7 +18,7 @@ init_bios:                 ; 起動処理のキモ
 
   ; eflags初期化
   push  0
-  popf
+  popfd
   push  0             ; 64bit popのための準備
   push  ebx           ; アドレス保存
 
