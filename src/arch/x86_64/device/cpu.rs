@@ -49,6 +49,6 @@ pub unsafe fn get_func_addr(func: unsafe fn()) -> usize {
     // 関数のアドレス取得に使用、代用案捜索中
     #[allow(unused_assignments)]
         let mut result: usize = 0;
-    asm!("mov eax, ebx ":"={eax}"(result):"{ebx}"(func)::"intel");
+    asm!("mov rax, rbx ":"={rax}"(result):"{rbx}"(func)::"intel");
     result
 }
