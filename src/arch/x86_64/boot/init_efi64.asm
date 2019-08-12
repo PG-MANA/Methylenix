@@ -102,6 +102,6 @@ pml4_setup:
   mov   rax,  pml4
   mov   cr3,  rax           ; PML4Eをcr3に設定する
   mov   ax,   tss_descriptor
-  lgdt  [gdtr0]
   ltr   ax
-  retf 
+  lgdt  [gdtr0]
+  retf
