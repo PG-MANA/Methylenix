@@ -10,6 +10,7 @@ use core::mem;
 
 pub struct InterruptManager {
     idt: usize,
+    main_gdt: u16,
 }
 
 /*
@@ -43,14 +44,15 @@ fn isr_to_irq(isr : u8) -> u8 {
 }
 */
 impl InterruptManager {
-    pub const LIMIT_IDT: u16 = 0x100 * (mem::size_of::<idt::GateDescriptor>() as u16) - 1; //0xfffという情報あり
+    pub const LIMIT_IDT: u16 = 0x100 * (mem::size_of::<idt::GateDescriptor>() as u16) - 1;
+    //0xfffという情報あり
     pub const IDT_MAX: u16 = 0xff;
 
     pub unsafe fn new(
         idt_memory: usize, /*IDT用メモリ域(4KiB)*/
-        _gdt: u64,
+        gdt: u64,
     ) -> InterruptManager {
-        let idt_man = InterruptManager { idt: idt_memory };
+        let idt_man = InterruptManager { idt: idt_memory, main_gdt: gdt as u16 };
 
         for i in 0..InterruptManager::IDT_MAX {
             idt_man.set_gatedec(
@@ -63,7 +65,7 @@ impl InterruptManager {
     }
 
     pub const fn new_static() -> InterruptManager {
-        InterruptManager { idt: 0 }
+        InterruptManager { idt: 0, main_gdt: 0 }
     }
 
     unsafe fn flush(&self) {
@@ -83,5 +85,9 @@ impl InterruptManager {
             descr;
     }
 
-    pub fn dummy_handler() {}
+    pub fn get_gdt(&self) -> u16 {
+        self.main_gdt
+    }
+
+    extern "x86-interrupt" fn dummy_handler() {}
 }

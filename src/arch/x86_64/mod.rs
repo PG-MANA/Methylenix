@@ -4,7 +4,7 @@ pub mod device;
 pub mod paging;
 
 use self::device::serial_port::SerialPortManager;
-use self::device::{cpu, keyboard};
+use self::device::{cpu, keyboard, timer};
 use self::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
 
 use kernel::drivers::efi::EfiManager;
@@ -40,6 +40,19 @@ pub extern "C" fn boot_main(
         let page_manager = STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager();
         interrupt::InterruptManager::new(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Cannot alloc memory for IDT."), gdt)
     };
+
+    /*unsafe {
+                make_error_interrupt_hundler!(inthandler0d, general_protection_exception_handler);
+                interrupt_manager.set_gatedec(
+                    0x0d,
+                    interrupt::idt::GateDescriptor::new(
+                        inthandler0d, /*上のマクロで指定した名前*/
+                        gdt as u16,
+                        0,
+                        interrupt::idt::GateDescriptor::AR_INTGATE32,
+                    ),
+                );
+    }*/
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
     serial_port_manager.init_serial_port(&interrupt_manager, gdt);
@@ -59,20 +72,54 @@ pub extern "C" fn boot_main(
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
-
-        device::keyboard::Keyboard::init(
-            &STATIC_BOOT_INFORMATION_MANAGER
-                .interrupt_manager
-                .lock()
-                .unwrap(),
-            gdt,
-        );
+        /*
+                device::keyboard::Keyboard::init(
+                    &STATIC_BOOT_INFORMATION_MANAGER
+                        .interrupt_manager
+                        .lock()
+                        .unwrap(),
+                    gdt,
+                );*/
     }
     //ページング反映
     unsafe {
         STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager().reset_paging();
     }
+    task_switch_test();
+    timer::PitManager::init();
     hlt();
+}
+
+fn general_protection_exception_handler(e_code: usize) {
+    panic!("General Protection Exception \nError Code:0x{:X}", e_code);
+}
+
+fn task_switch_test() {
+    let mut task_manager = unsafe { STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap() };
+    let mut memory_manager = unsafe { STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap() };
+    let mut task_entry = TaskEntry::new_static();
+    let mut page_manager = task_manager.get_running_task_page_manager().clone();
+
+    let task_switch_stack = page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc kernel stack.");
+    let normal_stack = page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc normal stack.");
+    unsafe {
+        cpu::clear_task_stack(task_switch_stack, PAGE_SIZE, 0, normal_stack + PAGE_SIZE, cpu::get_func_addr(test_task));
+    }
+    task_entry.set_kernel_stack(task_switch_stack);
+    task_entry.set_status(TaskStatus::Running);
+    task_entry.set_privilege_level(0);
+    task_entry.set_enabled();
+    task_entry.set_page_manager(page_manager);
+    task_manager.add_task(task_entry);
+}
+
+pub fn test_task() {
+    loop {
+        print!("Hello!");
+        unsafe {
+            cpu::hlt();
+        }
+    }
 }
 
 fn hlt() {
@@ -82,6 +129,7 @@ fn hlt() {
         b'\n', b'0', b'a', b's', b'd', b'f', b'g', b'h', b'j', b'k', b'l', b';', b'\'', b'`', b'0',
         b'\\', b'z', b'x', b'c', b'v', b'b', b'n', b'm', b',', b'.', b'/', b'0', b'*', b'0', b' ',
     ];
+    unsafe { STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager().dump_table(0x115E08) };
     print!("keyboard test:/ $");
     loop {
         unsafe {

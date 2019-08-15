@@ -104,4 +104,4 @@ pml4_setup:
   mov   ax,   tss_descriptor
   ltr   ax
   lgdt  [gdtr0]
-  retf
+  retfq

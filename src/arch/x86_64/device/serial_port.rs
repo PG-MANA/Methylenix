@@ -36,11 +36,10 @@ impl SerialPortManager {
 
     pub fn init_serial_port(&self, interrupt_manager: &InterruptManager, selector: u64) {
         unsafe {
-            make_interrupt_hundler!(inthandler24, SerialPortManager::inthandler24_main);
             interrupt_manager.set_gatedec(
                 0x24,
                 idt::GateDescriptor::new(
-                    inthandler24, /*上のマクロで指定した名前*/
+                    SerialPortManager::inthandler24_main, /*上のマクロで指定した名前*/
                     selector as u16,
                     0,
                     idt::GateDescriptor::AR_INTGATE32,
@@ -49,8 +48,8 @@ impl SerialPortManager {
 
             out_byte(self.port + 1, 0x00); // FIFOをオフ
             out_byte(self.port + 3, 0x80); // DLABを有効化して設定できるようにする?
-            out_byte(self.port + 0, 0x03); // rateを設定
-            out_byte(self.port + 1, 0x00); // rate上位
+            //out_byte(self.port + 0, 0x03); // rateを設定
+            //out_byte(self.port + 1, 0x00); // rate上位
             out_byte(self.port + 3, 0x03); // 8bit単位のパリティビットなし
             out_byte(self.port + 1, 0x05); // データ到着とエラーで割り込み
             out_byte(self.port + 2, 0xC7); // FIFOをオン、割り込みを許可
@@ -93,7 +92,7 @@ impl SerialPortManager {
         self.fifo.dequeue()
     }
 
-    pub fn inthandler24_main() {
+    extern "x86-interrupt" fn inthandler24_main() {
         //handlerをimplで実装することを考え直すべき
         unsafe {
             let serial_port_manager_lock = STATIC_BOOT_INFORMATION_MANAGER

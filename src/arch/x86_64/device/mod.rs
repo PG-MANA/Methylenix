@@ -7,3 +7,4 @@ pub mod crt;
 pub mod keyboard;
 pub mod pic;
 pub mod serial_port;
+pub mod timer;

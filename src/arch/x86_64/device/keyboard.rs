@@ -23,11 +23,10 @@ impl Keyboard {
     const PORT_KEYCMD: u16 = 0x0064;
 
     pub unsafe fn init(idt_manager: &InterruptManager, selector: u64) {
-        make_interrupt_hundler!(inthandler21, Keyboard::inthandler21_main);
         idt_manager.set_gatedec(
             0x21,
             idt::GateDescriptor::new(
-                inthandler21, /*上のマクロで指定した名前*/
+                Keyboard::inthandler21_main, /*上のマクロで指定した名前*/
                 selector as u16,
                 0,
                 idt::GateDescriptor::AR_INTGATE32,
@@ -63,7 +62,7 @@ impl Keyboard {
         }
     }
 
-    pub fn inthandler21_main() {
+    extern "x86-interrupt" fn inthandler21_main() {
         unsafe {
             default_keyboard.fifo.queue(Keyboard::read_keycode());
             pic::pic0_eoi(0x01); //IRQ-01
