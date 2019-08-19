@@ -5,7 +5,6 @@
 #![feature(lang_items)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
-#![feature(abi_x86_interrupt)]
 //usr
 #[macro_use]
 pub mod kernel;

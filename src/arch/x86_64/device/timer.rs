@@ -12,12 +12,13 @@ pub struct PitManager {}
 impl PitManager {
     pub fn init() {
         unsafe {
+            make_interrupt_hundler!(inthandler20, PitManager::inthandler20_main);
             let interrupt_manager = STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager.lock().unwrap();
             interrupt_manager.set_gatedec(
                 0x20,
                 idt::GateDescriptor::new(
-                    Self::inthandler20_main, /*上のマクロで指定した名前*/
-                    interrupt_manager.get_gdt(),
+                    inthandler20, /*上のマクロで指定した名前*/
+                    interrupt_manager.get_main_selector(),
                     0,
                     idt::GateDescriptor::AR_INTGATE32,
                 ),
@@ -32,7 +33,7 @@ impl PitManager {
     }
 
 
-    extern "x86-interrupt" fn inthandler20_main() {
+    pub fn inthandler20_main() {
         unsafe {
             pic::pic0_eoi(0x00);
             if let Ok(task_manager) = STATIC_BOOT_INFORMATION_MANAGER.task_manager.try_lock() {

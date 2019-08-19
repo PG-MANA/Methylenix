@@ -22,12 +22,12 @@ impl Keyboard {
     const PORT_KEYDAT: u16 = 0x0060;
     const PORT_KEYCMD: u16 = 0x0064;
 
-    pub unsafe fn init(idt_manager: &InterruptManager, selector: u64) {
+    pub unsafe fn init(idt_manager: &InterruptManager) {
         idt_manager.set_gatedec(
             0x21,
             idt::GateDescriptor::new(
                 Keyboard::inthandler21_main, /*上のマクロで指定した名前*/
-                selector as u16,
+                idt_manager.get_main_selector(),
                 0,
                 idt::GateDescriptor::AR_INTGATE32,
             ),
@@ -39,11 +39,11 @@ impl Keyboard {
         pic::pic0_accept(0x02); //1はタイマー(1 <<1 = 0x02)
     }
 
-    /*pub fn new() -> Keyboard {
+    pub fn new() -> Keyboard {
         Keyboard {
             fifo : FIFO::new(128),
         }
-    }*/
+    }
 
     pub fn dequeue_key() -> Option<u8> {
         unsafe { default_keyboard.fifo.dequeue() }
@@ -62,7 +62,7 @@ impl Keyboard {
         }
     }
 
-    extern "x86-interrupt" fn inthandler21_main() {
+    pub fn inthandler21_main() {
         unsafe {
             default_keyboard.fifo.queue(Keyboard::read_keycode());
             pic::pic0_eoi(0x01); //IRQ-01

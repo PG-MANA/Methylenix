@@ -34,13 +34,14 @@ impl SerialPortManager {
         self.port //あとから変更できないようにする
     }
 
-    pub fn init_serial_port(&self, interrupt_manager: &InterruptManager, selector: u64) {
+    pub fn init_serial_port(&self, interrupt_manager: &InterruptManager, selector: u16) {
         unsafe {
+            make_interrupt_hundler!(inthandler24, SerialPortManager::inthandler24_main);
             interrupt_manager.set_gatedec(
                 0x24,
                 idt::GateDescriptor::new(
-                    SerialPortManager::inthandler24_main, /*上のマクロで指定した名前*/
-                    selector as u16,
+                    inthandler24, /*上のマクロで指定した名前*/
+                    selector,
                     0,
                     idt::GateDescriptor::AR_INTGATE32,
                 ),
@@ -92,7 +93,7 @@ impl SerialPortManager {
         self.fifo.dequeue()
     }
 
-    extern "x86-interrupt" fn inthandler24_main() {
+    pub fn inthandler24_main() {
         //handlerをimplで実装することを考え直すべき
         unsafe {
             let serial_port_manager_lock = STATIC_BOOT_INFORMATION_MANAGER

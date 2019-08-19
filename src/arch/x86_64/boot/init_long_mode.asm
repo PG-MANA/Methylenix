@@ -29,8 +29,6 @@ init_long_mode:
   mov   byte [tss_descriptor_adress + 4],  al
   mov   byte [tss_descriptor_adress + 7],  ah
 
-  push  0                   ; 64bit POPのための準備
-  push  main_code_segment_descriptor
   pushfd
   pop   eax
   mov   ecx,  eax           ; 比較用にとっておく

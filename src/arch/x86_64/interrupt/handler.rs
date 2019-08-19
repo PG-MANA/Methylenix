@@ -14,6 +14,7 @@ macro_rules! make_interrupt_hundler {
                 push    rcx
                 push    rdx
                 push    rsi
+                push    rdi
                 push    rbp
                 push    r8
                 push    r9
@@ -22,9 +23,10 @@ macro_rules! make_interrupt_hundler {
                 push    r12
                 push    r13
                 push    r14
-                push    r15" :::: "intel");
-            $handler_func();
-            asm!("
+                push    r15
+                mov     rbp, rsp
+                call    $0
+                mov     rsp, rbp
                 pop     r15
                 pop     r14
                 pop     r13
@@ -34,24 +36,25 @@ macro_rules! make_interrupt_hundler {
                 pop     r9
                 pop     r8
                 pop     rbp
+                pop     rdi
                 pop     rsi
                 pop     rdx
                 pop     rcx
                 pop     rbx
                 pop     rax
-                iretq" :::: "intel");
+                iretq" ::"X"($handler_func as unsafe fn()):: "intel","volatile");
         }
     };
 }
 
 #[macro_export]
 macro_rules! make_error_interrupt_hundler {
-    ($handler_name:ident, $handler_func:path) => {
+    ($handler_name: ident, $handler_func: path) => {
         #[naked]
-        pub unsafe fn $handler_name() {
-            let error_code: usize;
+        pub unsafe fn $ handler_name() {
             asm!("
-                pop     rdi
+                push    rdi
+                mov     rdi, [rsp + 8]
                 push    rax
                 push    rbx
                 push    rcx
@@ -65,9 +68,10 @@ macro_rules! make_error_interrupt_hundler {
                 push    r12
                 push    r13
                 push    r14
-                push    r15" :"={rdi}"(error_code)::: "intel");
-            $handler_func(error_code);
-            asm!("
+                push    r15
+                mov     rbp, rsp
+                call    $0
+                mov     rsp, rbp
                 pop     r15
                 pop     r14
                 pop     r13
@@ -82,8 +86,9 @@ macro_rules! make_error_interrupt_hundler {
                 pop     rcx
                 pop     rbx
                 pop     rax
-                push    rax
-                iretq" :::: "intel");
+                pop     rdi
+                add     rsp, 8
+                iretq"::"X"( $handler_func as  fn (usize))::"intel", "volatile");
         }
     };
 }

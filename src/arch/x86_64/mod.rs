@@ -13,12 +13,18 @@ use kernel::graphic::GraphicManager;
 use kernel::memory_manager::MemoryManager;
 use kernel::spin_lock::Mutex;
 use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
-use kernel::task::{TaskEntry, TaskStatus};
+use kernel::task::{TaskEntry, TaskStatus, TaskManager};
+use self::device::cpu::get_func_addr;
+
+
+//use x86_64::structures::idt::ExceptionStackFrame;
 
 #[no_mangle]
 pub extern "C" fn boot_main(
     mbi_addr: usize, /*マルチブートヘッダのアドレス*/
-    gdt: u64, /*現在のセグメント:8*/
+    kernel_code_segment: u16, /*現在のセグメント:8*/
+    user_code_segment: u16,
+    user_data_segment: u16,
 ) {
     //この関数はCLIされた状態で呼ばれる。
     //PIC初期化
@@ -38,11 +44,11 @@ pub extern "C" fn boot_main(
     let interrupt_manager = unsafe {
         let mut memory_manager = STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap();
         let page_manager = STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager();
-        interrupt::InterruptManager::new(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Cannot alloc memory for IDT."), gdt)
+        interrupt::InterruptManager::new(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Cannot alloc memory for IDT."), kernel_code_segment)
     };
 
     /*unsafe {
-                make_error_interrupt_hundler!(inthandler0d, general_protection_exception_handler);
+                make_error_interrupt_hundler!(inthandler0d,general_protection_exception_handler);
                 interrupt_manager.set_gatedec(
                     0x0d,
                     interrupt::idt::GateDescriptor::new(
@@ -55,7 +61,7 @@ pub extern "C" fn boot_main(
     }*/
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
-    serial_port_manager.init_serial_port(&interrupt_manager, gdt);
+    serial_port_manager.init_serial_port(&interrupt_manager, kernel_code_segment);
     if multiboot_information.efi_table_pointer != 0 {
         //EFI Bootが有効
         unsafe {
@@ -85,29 +91,31 @@ pub extern "C" fn boot_main(
     unsafe {
         STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager().reset_paging();
     }
-    task_switch_test();
+    task_switch_test(user_code_segment, user_data_segment);
     timer::PitManager::init();
     hlt();
 }
 
-fn general_protection_exception_handler(e_code: usize) {
+pub fn general_protection_exception_handler(e_code: usize) {
     panic!("General Protection Exception \nError Code:0x{:X}", e_code);
 }
 
-fn task_switch_test() {
+fn task_switch_test(user_code_segment: u16, user_data_segment: u16) {
     let mut task_manager = unsafe { STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap() };
     let mut memory_manager = unsafe { STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap() };
     let mut task_entry = TaskEntry::new_static();
     let mut page_manager = task_manager.get_running_task_page_manager().clone();
 
     let task_switch_stack = page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc kernel stack.");
-    let normal_stack = page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc normal stack.");
+    let normal_stack = page_manager.alloc_page(&mut memory_manager, None, None, false, true, true).expect("Can not alloc normal stack.");
     unsafe {
-        cpu::clear_task_stack(task_switch_stack, PAGE_SIZE, 0, normal_stack + PAGE_SIZE, cpu::get_func_addr(test_task));
+        cpu::clear_task_stack(task_switch_stack, PAGE_SIZE, user_data_segment | 3, user_code_segment
+            | 3, normal_stack + PAGE_SIZE - 16, cpu::get_func_addr(test_task));
+        page_manager.associate_address(&mut memory_manager, None, get_func_addr(test_task) & PAGE_MASK, get_func_addr(test_task) & PAGE_MASK, true, false, true);
     }
     task_entry.set_kernel_stack(task_switch_stack);
     task_entry.set_status(TaskStatus::Running);
-    task_entry.set_privilege_level(0);
+    task_entry.set_privilege_level(3);
     task_entry.set_enabled();
     task_entry.set_page_manager(page_manager);
     task_manager.add_task(task_entry);
@@ -115,10 +123,7 @@ fn task_switch_test() {
 
 pub fn test_task() {
     loop {
-        print!("Hello!");
-        unsafe {
-            cpu::hlt();
-        }
+        //Loopするだけのタスク
     }
 }
 
@@ -129,7 +134,6 @@ fn hlt() {
         b'\n', b'0', b'a', b's', b'd', b'f', b'g', b'h', b'j', b'k', b'l', b';', b'\'', b'`', b'0',
         b'\\', b'z', b'x', b'c', b'v', b'b', b'n', b'm', b',', b'.', b'/', b'0', b'*', b'0', b' ',
     ];
-    unsafe { STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager().dump_table(0x115E08) };
     print!("keyboard test:/ $");
     loop {
         unsafe {

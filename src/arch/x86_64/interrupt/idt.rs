@@ -25,9 +25,9 @@ pub struct IDTR {
 //http://wiki.osdev.org/Interrupt_Descriptor_Table
 impl GateDescriptor {
     pub const AR_INTGATE32: u8 = 0x008e & 0xff; //はりぼてOSより
-    pub fn new(offset: unsafe extern "x86-interrupt" fn(), selector: u16, ist: u8, type_attr: u8) -> GateDescriptor {
+    pub fn new(offset: unsafe fn(), selector: u16, ist: u8, type_attr: u8) -> GateDescriptor {
         //これを作るのは無害
-        let c: usize = unsafe { cpu::get_init_handler_func_addr(offset) }; //ここだけ不安定
+        let c: usize = unsafe { cpu::get_func_addr(offset) }; //ここだけ不安定
         GateDescriptor {
             offset_l: (c & 0xffff) as u16,             //(offset & 0xffff) as u16,
             offset_m: ((c & 0xffff0000) >> 16) as u16, //(offset & 0xffff0000 >> 16) as u16,
