@@ -17,6 +17,7 @@ mod pte;
 pub const PAGE_SIZE: usize = 4 * 1024;
 pub const PAGE_MASK: usize = 0xFFFFFFFF_FFFFF000;
 
+#[derive(Clone)]//Test
 pub struct PageManager {
     pml4: usize,
     /*&'static mut [PML4; PML4_MAX_ENTRY]*/
@@ -172,7 +173,7 @@ impl PageManager {
         }
     }
 
-    pub fn dump_table(&self) {
+    pub fn dump_table(&self,end: usize) {
         let pml4_table = unsafe { &*(self.pml4 as *const [PML4; PML4_MAX_ENTRY]) };
         for pml4 in pml4_table.iter() {
             if !pml4.is_pdpe_set() {
@@ -194,6 +195,9 @@ impl PageManager {
                             continue;
                         }
                         println!("Address:0x{:X},WRITABLE:{},EXECUTABLE:{},ACCESSED:{}", pte.get_addr().unwrap(), pte.is_writable(), !pte.is_no_execute(), pte.is_accessed());
+                        if pte.get_addr().unwrap() >= end{
+                            return;
+                        }
                     }
                 }
             }

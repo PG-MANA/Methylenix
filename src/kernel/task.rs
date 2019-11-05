@@ -1,11 +1,15 @@
 //use(Arch依存)
 use arch::target_arch::paging::PageManager;
+use arch::target_arch::device::cpu;
 
 //use(Arch非依存)
 use kernel::memory_manager::MemoryManager;
+use kernel::spin_lock::MutexGuard;
 
 //use(Core)
 use core::mem;
+use arch::x86_64::paging::PAGE_SIZE;
+
 
 const ENTRY_SIZE: usize = mem::size_of::<TaskEntry>();
 
@@ -124,13 +128,13 @@ impl TaskManager {
         &mut self.get_target_task_entry(self.running_task_pid).memory_info.page_manager
     }
 
-    pub fn switch_next_task(&mut self, should_set_paging: bool) {
+    pub fn switch_next_task(&mut self, should_set_paging: bool) -> bool {
         let mut next_task_pid = self.running_task_pid;
         loop {
             let entry = unsafe { &mut *(self.get_target_task_entry(next_task_pid).next as *mut TaskEntry) };
             next_task_pid = entry.get_pid();
             if next_task_pid == self.running_task_pid {
-                return;
+                return false;
             }
             if entry.is_enabled() && entry.get_status() == TaskStatus::Running {
                 break;
@@ -139,6 +143,20 @@ impl TaskManager {
         self.running_task_pid = next_task_pid;
         if should_set_paging {
             self.get_running_task_page_manager().reset_paging();
+        }
+        true
+    }
+
+    pub fn context_switch(mut tm: MutexGuard<Self>){
+        let mut pid = tm.running_task_pid;
+        let now_task_stack = tm.get_target_task_entry(pid).memory_info.kernel_stack;
+        if tm.switch_next_task(true) {
+            pid = tm.running_task_pid;
+            let next_task_stack = tm.get_target_task_entry(pid).memory_info.kernel_stack;
+            drop(tm);
+            unsafe {
+                cpu::task_switch(now_task_stack, next_task_stack, PAGE_SIZE);
+            }
         }
     }
 }

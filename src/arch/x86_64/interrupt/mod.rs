@@ -10,6 +10,7 @@ use core::mem;
 
 pub struct InterruptManager {
     idt: usize,
+    main_selector: u16,
 }
 
 /*
@@ -42,15 +43,17 @@ fn isr_to_irq(isr : u8) -> u8 {
     }
 }
 */
+
 impl InterruptManager {
-    pub const LIMIT_IDT: u16 = 0x100 * (mem::size_of::<idt::GateDescriptor>() as u16) - 1; //0xfffという情報あり
+    pub const LIMIT_IDT: u16 = 0x100 * (mem::size_of::<idt::GateDescriptor>() as u16) - 1;
+    //0xfffという情報あり
     pub const IDT_MAX: u16 = 0xff;
 
     pub unsafe fn new(
         idt_memory: usize, /*IDT用メモリ域(4KiB)*/
-        _gdt: u64,
+        kernel_selector: u16,
     ) -> InterruptManager {
-        let idt_man = InterruptManager { idt: idt_memory };
+        let idt_man = InterruptManager { idt: idt_memory, main_selector: kernel_selector };
 
         for i in 0..InterruptManager::IDT_MAX {
             idt_man.set_gatedec(
@@ -63,7 +66,7 @@ impl InterruptManager {
     }
 
     pub const fn new_static() -> InterruptManager {
-        InterruptManager { idt: 0 }
+        InterruptManager { idt: 0, main_selector: 0 }
     }
 
     unsafe fn flush(&self) {
@@ -81,6 +84,10 @@ impl InterruptManager {
     ) {
         *((self.idt + (num * mem::size_of::<idt::GateDescriptor>())) as *mut idt::GateDescriptor) =
             descr;
+    }
+
+    pub fn get_main_selector(&self) -> u16 {
+        self.main_selector
     }
 
     pub fn dummy_handler() {}

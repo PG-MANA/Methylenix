@@ -62,7 +62,7 @@ impl GraphicManager {
         }
     }
 
-    fn init_color_mode(&mut self) {
+    pub fn init_color_mode(&mut self) {
         //こっからテスト
         if self.frame_buffer_color_depth == 32 {
             self.is_textmode = false;

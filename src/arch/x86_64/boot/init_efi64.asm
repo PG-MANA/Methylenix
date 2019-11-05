@@ -23,7 +23,6 @@ init_efi64:
   push  0
   popf
   push  rbx
-  push  main_code_segment_descriptor
   cmp   eax, MULTIBOOT_CHECK_MAGIC
   jne   bad_magic
   ; TSSセグメント情報書き込み
@@ -104,4 +103,4 @@ pml4_setup:
   mov   ax,   tss_descriptor
   ltr   ax
   lgdt  [gdtr0]
-  retf
+  retfq

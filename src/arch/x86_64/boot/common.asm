@@ -4,7 +4,8 @@
 IO_MAP_SIZE equ 0xffff
 STACK_SIZE  equ 256
 
-global initial_stack, main_code_segment_descriptor, gdtr0
+global initial_stack, gdtr0
+global main_code_segment_descriptor, user_code_segment_descriptor, user_data_segment_descriptor
 global tss_descriptor,tss_descriptor_adress, tss
 global pd, pdpt, pml4
 
@@ -38,8 +39,13 @@ gdt:
     dq    0                         ; GDT云々するとき下位3にセグメント番号がかぶらないため、わざと0エントリを立てる。
 
 main_code_segment_descriptor: equ $ - gdt
-    ; すべてコードセグメント
-    dq    (1 << 43) | (1 << 44) | (1 << 47) | (1 << 53)
+    dq    (1 << 41) | (1 << 43) | (1 << 44) | (1 << 47) | (1 << 53)
+
+user_code_segment_descriptor: equ $ - gdt
+    dq    (1 << 41) | (1 << 43) | (1 << 44) | (3 << 45) | (1 << 47) | (1 << 53)
+
+user_data_segment_descriptor: equ $ - gdt
+    dq    (1 << 41) | (1 << 44) | (3 << 45) | (1 << 47)| (1 << 53)
 
 tss_descriptor: equ $ - gdt
 tss_descriptor_adress:

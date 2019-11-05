@@ -20,6 +20,8 @@ impl PDPE {
 
     pub fn init(&mut self) {
         self.flags = 0;
+        self.set_user_accessible(true);
+        self.set_writable(true);
     }
 
     fn set_bit(&mut self, bit: u64, b: bool) {
