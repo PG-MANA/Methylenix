@@ -28,14 +28,15 @@ impl PitManager {
             cpu::out_byte(0x43, 0x34);
             cpu::out_byte(0x40, 0);
             cpu::out_byte(0x40, 0);
-            pic::pic0_accept(0x01);
+            //pic::pic0_accept(0x01);
         }
     }
 
 
     pub fn inthandler20_main() {
         unsafe {
-            pic::pic0_eoi(0x00);
+            //pic::pic0_eoi(0x00);
+            print!("Hello");
             if let Ok(task_manager) = STATIC_BOOT_INFORMATION_MANAGER.task_manager.try_lock() {
                 TaskManager::context_switch(task_manager);
             }

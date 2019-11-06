@@ -3,7 +3,7 @@
 
 //use
 use super::cpu::{in_byte, out_byte};
-use super::pic;
+use super::local_apic;
 
 use arch::target_arch::interrupt::{idt, InterruptManager};
 
@@ -55,7 +55,6 @@ impl SerialPortManager {
             out_byte(self.port + 1, 0x05); // データ到着とエラーで割り込み
             out_byte(self.port + 2, 0xC7); // FIFOをオン、割り込みを許可
             out_byte(self.port + 4, 0x0B); // IRQ割り込みを開始
-            pic::pic0_accept(1 << 4);
         }
     }
 
@@ -75,7 +74,7 @@ impl SerialPortManager {
 
     pub fn sendstr(&self, s: &str) {
         for c in s.bytes() {
-            if c as char == '\n'{
+            if c as char == '\n' {
                 self.send('\r' as u8);
             }
             self.send(c);
@@ -104,7 +103,8 @@ impl SerialPortManager {
                 let code = serial_port_manager.read();
                 serial_port_manager.fifo.queue(code);
             }
-            pic::pic0_eoi(0x04); //IRQ-04
+            local_apic::send_eoi();
+            //pic::pic0_eoi(0x04); //IRQ-04
         }
     }
 
