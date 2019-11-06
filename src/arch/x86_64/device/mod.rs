@@ -2,6 +2,7 @@
 デバイスを扱い(ここはサブモジュールを読み込むだけ、共通関数実装)
 */
 
+pub mod apic;
 pub mod cpu;
 pub mod crt;
 pub mod keyboard;

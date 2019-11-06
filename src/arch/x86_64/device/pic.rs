@@ -3,7 +3,7 @@ PIC初期化
 参考:https://pdos.csail.mit.edu/6.828/2005/readings/hardware/8259A.pdf
 */
 
-use arch::x86_64::device::cpu;
+use arch::target_arch::device::cpu;
 
 //const PIC0_ISR: u16 = 0x0020;
 const PIC0_ICW1: u16 = 0x0020;

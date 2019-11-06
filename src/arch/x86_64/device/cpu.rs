@@ -35,6 +35,27 @@ pub unsafe fn lidt(idtr: usize) {
 }
 
 #[inline(always)]
+pub unsafe fn rdmsr(ecx: u32) -> u64 {
+    let edx: u32;
+    let eax: u32;
+    asm!("rdmsr":"={edx}"(edx), "={eax}"(eax):"{ecx}"(ecx));
+    ((edx as u64) << 32 | eax as u64)
+}
+
+#[inline(always)]
+pub unsafe fn wrmsr(ecx: u32, data: u64) {
+    let edx: u32 = (data >> 32) as u32;
+    let eax: u32 = data as u32;
+    asm!("wrmsr"::"{edx}"(edx), "{eax}"(eax),"{ecx}"(ecx));
+}
+
+#[inline(always)]
+pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) {
+    asm!("cpuid":"={eax}"(*eax), "={ebx}"(*ebx), "={ecx}"(*ecx), "={edx}"(*edx):
+        "{eax}"(eax.clone()), "{ecx}"(ecx.clone()));
+}
+
+#[inline(always)]
 pub unsafe fn set_cr3(addr: usize) {
     asm!("movq %rax,%cr3"::"{rax}"(addr));
 }

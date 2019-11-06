@@ -4,7 +4,7 @@ pub mod device;
 pub mod paging;
 
 use self::device::serial_port::SerialPortManager;
-use self::device::{cpu, keyboard, timer};
+use self::device::{cpu, keyboard, timer, apic};
 use self::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
 
 use kernel::drivers::efi::EfiManager;
@@ -16,8 +16,6 @@ use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
 use kernel::task::{TaskEntry, TaskStatus, TaskManager};
 use self::device::cpu::get_func_addr;
 
-
-//use x86_64::structures::idt::ExceptionStackFrame;
 
 #[no_mangle]
 pub extern "C" fn boot_main(
@@ -62,30 +60,16 @@ pub extern "C" fn boot_main(
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
     serial_port_manager.init_serial_port(&interrupt_manager, kernel_code_segment);
-    if multiboot_information.efi_table_pointer != 0 {
-        //EFI Bootが有効
-        unsafe {
-            STATIC_BOOT_INFORMATION_MANAGER.efi_manager =
-                Mutex::new(EfiManager::new(multiboot_information.efi_table_pointer));
-        }
-    }
     //Boot Information Manager に格納
     unsafe {
         STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager = Mutex::new(interrupt_manager);
         STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
     }
     println!("Methylenix version 0.0.1");
+    apic::init_local_apic();
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
-        /*
-                device::keyboard::Keyboard::init(
-                    &STATIC_BOOT_INFORMATION_MANAGER
-                        .interrupt_manager
-                        .lock()
-                        .unwrap(),
-                    gdt,
-                );*/
     }
     //ページング反映
     unsafe {
