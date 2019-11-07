@@ -103,8 +103,7 @@ impl SerialPortManager {
                 let code = serial_port_manager.read();
                 serial_port_manager.fifo.queue(code);
             }
-            local_apic::send_eoi();
-            //pic::pic0_eoi(0x04); //IRQ-04
+            local_apic::LocalApicManager::send_eoi();
         }
     }
 

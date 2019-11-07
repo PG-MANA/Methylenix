@@ -15,6 +15,7 @@ use kernel::spin_lock::Mutex;
 use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
 use kernel::task::{TaskEntry, TaskStatus, TaskManager};
 use self::device::cpu::get_func_addr;
+use arch::x86_64::device::local_apic::LocalApicManager;
 
 
 #[no_mangle]
@@ -63,7 +64,8 @@ pub extern "C" fn boot_main(
         STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
     }
     println!("Methylenix version 0.0.1");
-    io_apic::init_io_apic(local_apic::init_local_apic());//Test
+    let local_apic_manager = LocalApicManager::init();
+    io_apic::init_io_apic(local_apic_manager.get_apic_id());//Test
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
