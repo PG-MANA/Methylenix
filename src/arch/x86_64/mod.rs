@@ -4,7 +4,10 @@ pub mod device;
 pub mod paging;
 
 use self::device::serial_port::SerialPortManager;
-use self::device::{cpu, timer, local_apic, io_apic};
+use self::device::{cpu, timer};
+use self::device::cpu::get_func_addr;
+use self::device::io_apic::IoApicManager;
+use self::device::local_apic::LocalApicManager;
 use self::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
 
 use kernel::drivers::efi::EfiManager;
@@ -14,8 +17,6 @@ use kernel::memory_manager::MemoryManager;
 use kernel::spin_lock::Mutex;
 use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
 use kernel::task::{TaskEntry, TaskStatus, TaskManager};
-use self::device::cpu::get_func_addr;
-use arch::x86_64::device::local_apic::LocalApicManager;
 
 
 #[no_mangle]
@@ -64,8 +65,11 @@ pub extern "C" fn boot_main(
         STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
     }
     println!("Methylenix version 0.0.1");
+
     let local_apic_manager = LocalApicManager::init();
-    io_apic::init_io_apic(local_apic_manager.get_apic_id());//Test
+    let io_apic_manager = IoApicManager::new();
+    io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x024);//Serial Port
+
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();

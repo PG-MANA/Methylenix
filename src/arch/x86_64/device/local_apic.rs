@@ -2,7 +2,6 @@
 Local APIC
 */
 
-
 use arch::target_arch::device::cpu;
 
 pub struct LocalApicManager {
@@ -26,7 +25,7 @@ impl LocalApicManager {
     const X2APIC_MSR_INDEX: u32 = 0x800;
 
     pub fn init() -> LocalApicManager {
-        let mut local_apic_msr = unsafe {
+        let local_apic_msr = unsafe {
             cpu::rdmsr(LocalApicManager::MSR_INDEX)
         };
         let base_addr = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
@@ -42,7 +41,6 @@ impl LocalApicManager {
             unsafe {
                 cpu::wrmsr(LocalApicManager::MSR_INDEX,
                            local_apic_msr | LocalApicManager::X2APIC_ENABLED_MASK);
-                local_apic_msr = cpu::rdmsr(LocalApicManager::MSR_INDEX);
             }
         }
         let mut local_apic_manager = LocalApicManager {
@@ -58,7 +56,7 @@ impl LocalApicManager {
     }
 
     fn get_running_cpu_local_apic_manager() -> LocalApicManager {
-        let mut local_apic_msr = unsafe {
+        let local_apic_msr = unsafe {
             cpu::rdmsr(LocalApicManager::MSR_INDEX)
         };
         let base_address = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
