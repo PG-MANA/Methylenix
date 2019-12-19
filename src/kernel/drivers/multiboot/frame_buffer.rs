@@ -18,7 +18,8 @@ pub struct MultibootTagFrameBuffer {
     framebuffer_width: u32,
     framebuffer_height: u32,
     framebuffer_bpp: u8,
-    framebuffer_type: u8, //https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html 3.6.12 Framebuffer info 参照
+    framebuffer_type: u8,
+    //https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html 3.6.12 Framebuffer info 参照
     reserved: u8,
     /*color_infoは無視してる*/
 }
