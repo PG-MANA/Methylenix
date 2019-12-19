@@ -113,7 +113,7 @@ impl GraphicManager {
                     unsafe {
                         *((self.frame_buffer_address
                             + (self.cursor.line * self.frame_buffer_width + self.cursor.character)
-                                * 2) as *mut u16) = ' ' as u16;
+                            * 2) as *mut u16) = ' ' as u16;
                     } //暫定的な目印(カラーコードは0にすることで区別)
                     self.cursor.character = 0;
                     self.cursor.line += 1;

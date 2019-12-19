@@ -8,7 +8,8 @@ pub struct FIFO<T: Copy> {
     buf: [T; 128],
     r: usize,
     w: usize,
-    size: usize, //暫定
+    size: usize,
+    //暫定
     free: usize, //暫定
 }
 

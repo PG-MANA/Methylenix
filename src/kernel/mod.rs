@@ -11,4 +11,3 @@ pub mod panic;
 pub mod spin_lock;
 pub mod struct_manager;
 pub mod rwlock;
-pub mod task;

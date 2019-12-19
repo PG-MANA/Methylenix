@@ -9,7 +9,8 @@ use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 
 pub struct Mutex<T: ?Sized> {
-    lock_flag: atomic::AtomicBool, /*atomicはcoreで使える*/
+    lock_flag: atomic::AtomicBool,
+    /*atomicはcoreで使える*/
     /*read_only: atomic::AtomicBool,*/
     /*fail_lock: atomic::AtomicBool,*/
     data: UnsafeCell<T>,
