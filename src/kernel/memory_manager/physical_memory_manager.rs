@@ -7,8 +7,10 @@
 /*TODO: 排他管理*/
 /*WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている*/
 
-/*use kernel::spin_lock::Mutex;*/
+/*use(depending on arch)*/
 use arch::target_arch::paging::{PAGE_SIZE, PAGE_MASK};
+
+/*use(not depending on arch)*/
 use core::mem;
 
 const MEMORY_ENTRY_SIZE: usize = mem::size_of::<MemoryEntry>();
@@ -22,8 +24,8 @@ pub struct PhysicalMemoryManager {
     memory_entry_pool_size: usize,
 }
 
-pub struct MemoryEntry {
-    /*秋メモリ領域を所持している*/
+struct MemoryEntry {
+    /*空きメモリ領域を所持している*/
     previous: Option<usize>,
     next: Option<usize>,
     start: usize,
@@ -170,7 +172,7 @@ impl PhysicalMemoryManager {
     }
 
     pub fn alloc(&mut self, size: usize, align: bool/*PAGE_SIZEでアラインするか*/) -> Option<usize> {
-        if size == 0 || size & (!PAGE_MASK) != 0 || self.free_memory_size <= size {
+        if size == 0 /*|| size & (!PAGE_MASK) != 0 */ || self.free_memory_size <= size {
             return None;
         }
         let mut entry = unsafe { &mut *(self.root as *mut MemoryEntry) };

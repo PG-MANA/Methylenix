@@ -2,13 +2,13 @@
 // TODO: UEFIでシリアルポート
 
 //use
-use super::cpu::{in_byte, out_byte};
-use super::local_apic;
-
-use arch::target_arch::interrupt::{idt, InterruptManager};
+use arch::target_arch::device::cpu::{in_byte, out_byte};
+use arch::target_arch::device::local_apic;
+use arch::target_arch::interrupt::idt::GateDescriptor;
 
 use kernel::fifo::FIFO;
 use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
+
 
 pub struct SerialPortManager {
     port: u16,
@@ -34,16 +34,16 @@ impl SerialPortManager {
         self.port //あとから変更できないようにする
     }
 
-    pub fn init_serial_port(&self, interrupt_manager: &InterruptManager, selector: u16) {
+    pub fn init(&self, selector: u16) {
         unsafe {
             make_interrupt_hundler!(inthandler24, SerialPortManager::inthandler24_main);
-            interrupt_manager.set_gatedec(
+            STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager.lock().unwrap().set_gatedec(
                 0x24,
-                idt::GateDescriptor::new(
+                GateDescriptor::new(
                     inthandler24, /*上のマクロで指定した名前*/
                     selector,
                     0,
-                    idt::GateDescriptor::AR_INTGATE32,
+                    GateDescriptor::AR_INTGATE32,
                 ),
             );
 
@@ -95,11 +95,7 @@ impl SerialPortManager {
     pub fn inthandler24_main() {
         //handlerをimplで実装することを考え直すべき
         unsafe {
-            let serial_port_manager_lock = STATIC_BOOT_INFORMATION_MANAGER
-                .serial_port_manager
-                .try_lock();
-            if serial_port_manager_lock.is_ok() {
-                let mut serial_port_manager = serial_port_manager_lock.unwrap();
+            if let Ok(mut serial_port_manager) = STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager.try_lock() {
                 let code = serial_port_manager.read();
                 serial_port_manager.fifo.queue(code);
             }

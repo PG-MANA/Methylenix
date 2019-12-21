@@ -4,20 +4,19 @@ pub mod device;
 pub mod paging;
 
 use self::device::serial_port::SerialPortManager;
-use self::device::{cpu, timer};
-use self::device::cpu::get_func_addr;
+use self::device::cpu;
+use self::interrupt::InterruptManager;
 use self::device::io_apic::IoApicManager;
 use self::device::local_apic::LocalApicManager;
 use self::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
 
-use kernel::drivers::efi::EfiManager;
 use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic::GraphicManager;
 use kernel::memory_manager::MemoryManager;
-use kernel::memory_manager::physical_memory_manager;
+use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::spin_lock::Mutex;
 use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
-use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use kernel::kernel_malloc::KernelMemoryAllocManager;
 
 use core::mem;
 
@@ -79,10 +78,6 @@ pub extern "C" fn boot_main(
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
     }
-    //ページング反映
-    unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager().reset_paging();
-    }
     hlt();
 }
 
@@ -113,12 +108,12 @@ fn hlt() {
 fn init_memory(multiboot_information: &MultiBootInformation) {
     let mut max_address = 0usize;
     let mut processed_address = 0usize;
-    //let mut memory_manager = MemoryManager::new(multiboot_information);
+
     //set up for Physical Memory Manager
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
-        physical_memory_manager.set_memory_entry_pool(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as usize,
-                                                      mem::size_of_val(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER));
+        physical_memory_manager.set_memory_entry_pool((&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize) as usize,
+                                                      mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER));
     }
     for entry in multiboot_information.memory_map_info.clone() {
         if entry.m_type == 1 { //Free Area
@@ -148,8 +143,17 @@ fn init_memory(multiboot_information: &MultiBootInformation) {
             processed_address += PAGE_SIZE;
         }
     }
+    page_manager.reset_paging();
+
+    //set up for Memory Manager
+    let mut memory_manager = MemoryManager::new(Mutex::new(physical_memory_manager), page_manager);
+
+    // set up for Kernel Memory Alloc Manager
+    let mut kernel_memory_alloc_manager = KernelMemoryAllocManager::new();
+    kernel_memory_alloc_manager.init(&mut memory_manager);
 
     unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(MemoryManager::new(Mutex::new(physical_memory_manager), page_manager));
+        STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager);
+        STATIC_BOOT_INFORMATION_MANAGER.kernel_memory_alloc_manager = Mutex::new(kernel_memory_alloc_manager);
     }
 }
