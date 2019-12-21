@@ -1,7 +1,7 @@
-//use
+
 use super::PAGE_MASK;
 
-//const
+
 pub const PML4_MAX_ENTRY: usize = 512;
 
 //PML4の53bit目はPDPEがセットされているかどうかの確認に利用している。

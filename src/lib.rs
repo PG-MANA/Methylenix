@@ -1,14 +1,13 @@
 #![no_std]
 #![feature(asm)]
 #![feature(const_fn)]
-#![feature(core_panic_info)]
+#![feature(const_mut_refs)]
+#![feature(const_raw_ptr_deref)]
 #![feature(lang_items)]
 #![feature(naked_functions)]
-#![feature(panic_info_message)]
-#![feature(const_raw_ptr_deref)]
-#![feature(const_mut_refs)]
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_ref)]
+#![feature(panic_info_message)]
 
 //usr
 #[macro_use]

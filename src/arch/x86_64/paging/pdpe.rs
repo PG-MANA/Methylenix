@@ -1,7 +1,7 @@
-//use
+
 use super::PAGE_MASK;
 
-//const
+
 pub const PDPE_MAX_ENTRY: usize = 512;
 
 //PDPEの53bit目はPDEの配列がセットされているかどうかの確認に利用している。
