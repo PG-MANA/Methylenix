@@ -44,31 +44,15 @@ pub extern "C" fn boot_main(
     //メモリ管理初期化
     init_memory(&multiboot_information);
     //IDT初期化&割り込み初期化
-    let interrupt_manager = unsafe {
-        let mut memory_manager = STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap();
-        interrupt::InterruptManager::new(memory_manager.alloc_page(None, false, true, false).expect("Cannot alloc memory for IDT."), kernel_code_segment)
-    };
-    /*unsafe {
-                make_error_interrupt_hundler!(inthandler0d,general_protection_exception_handler);
-                interrupt_manager.set_gatedec(
-                    0x0d,
-                    interrupt::idt::GateDescriptor::new(
-                        inthandler0d, /*上のマクロで指定した名前*/
-                        gdt as u16,
-                        0,
-                        interrupt::idt::GateDescriptor::AR_INTGATE32,
-                    ),
-                );
-    }*/
+    init_interrupt(kernel_code_segment);
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
-    serial_port_manager.init_serial_port(&interrupt_manager, kernel_code_segment);
+    serial_port_manager.init(kernel_code_segment);
     //Boot Information Manager に格納
     unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager = Mutex::new(interrupt_manager);
         STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
     }
-    println!("Methylenix version 0.0.1");
+    println!("Methylenix");
 
     let local_apic_manager = LocalApicManager::init();
     let io_apic_manager = IoApicManager::new();
@@ -86,6 +70,7 @@ pub fn general_protection_exception_handler(e_code: usize) {
 }
 
 fn hlt() {
+    println!("All init are done!");
     loop {
         unsafe {
             cpu::hlt();
@@ -155,5 +140,14 @@ fn init_memory(multiboot_information: &MultiBootInformation) {
     unsafe {
         STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager);
         STATIC_BOOT_INFORMATION_MANAGER.kernel_memory_alloc_manager = Mutex::new(kernel_memory_alloc_manager);
+    }
+}
+
+
+fn init_interrupt(kernel_selector: u16) {
+    let mut interrupt_manager = InterruptManager::new();
+    interrupt_manager.init(kernel_selector);
+    unsafe {
+        STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager = Mutex::new(interrupt_manager);
     }
 }

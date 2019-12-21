@@ -1,15 +1,23 @@
-//module
+/*
+    Interrupt Manager
+*/
+
 pub mod idt;
 #[macro_use]
 pub mod handler;
 //mod tss;
 
-//use
-use arch::x86_64::device::cpu;
-use core::mem;
+
+use arch::target_arch::device::cpu;
+use self::idt::GateDescriptor;
+
+use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
+
+use core::mem::{MaybeUninit, size_of};
+
 
 pub struct InterruptManager {
-    idt: usize,
+    idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
     main_selector: u16,
 }
 
@@ -45,45 +53,47 @@ fn isr_to_irq(isr : u8) -> u8 {
 */
 
 impl InterruptManager {
-    pub const LIMIT_IDT: u16 = 0x100 * (mem::size_of::<idt::GateDescriptor>() as u16) - 1;
+    pub const LIMIT_IDT: u16 = 0x100 * (size_of::<idt::GateDescriptor>() as u16) - 1;
     //0xfffという情報あり
     pub const IDT_MAX: u16 = 0xff;
 
-    pub unsafe fn new(
-        idt_memory: usize, /*IDT用メモリ域(4KiB)*/
-        kernel_selector: u16,
-    ) -> InterruptManager {
-        let idt_man = InterruptManager { idt: idt_memory, main_selector: kernel_selector };
-
-        for i in 0..InterruptManager::IDT_MAX {
-            idt_man.set_gatedec(
-                i as usize,
-                idt::GateDescriptor::new(InterruptManager::dummy_handler, 0, 0, 0),
-            );
+    pub const fn new() -> InterruptManager {
+        InterruptManager {
+            idt: MaybeUninit::uninit(),
+            main_selector: 0,
         }
-        idt_man.flush();
-        idt_man
     }
 
-    pub const fn new_static() -> InterruptManager {
-        InterruptManager { idt: 0, main_selector: 0 }
+    pub fn init(&mut self, selector: u16) -> bool {
+        self.main_selector = selector;
+        self.idt.write(unsafe {
+            &mut *(
+                STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap()
+                    .alloc_physical_page(false, true, false)
+                    .expect("Cannot alloc memory for interrupt manager.") as *mut [_; Self::IDT_MAX as usize])
+        });
+
+        unsafe {
+            for i in 0..Self::IDT_MAX {
+                self.set_gatedec(i, GateDescriptor::new(Self::dummy_handler, 0, 0, 0));
+            }
+            self.flush();
+        }
+        true
     }
 
     unsafe fn flush(&self) {
         let idtr = idt::IDTR {
             limit: InterruptManager::LIMIT_IDT,
-            offset: self.idt as u64,
+            offset: self.idt.read() as *const _ as u64,
         };
         cpu::lidt(&idtr as *const _ as usize);
     }
 
-    pub unsafe fn set_gatedec(
-        &self,
-        num: usize, /*割り込み番号*/
-        descr: idt::GateDescriptor,
-    ) {
-        *((self.idt + (num * mem::size_of::<idt::GateDescriptor>())) as *mut idt::GateDescriptor) =
-            descr;
+    pub unsafe fn set_gatedec(&mut self, interrupt_num: u16, descr: GateDescriptor) {
+        if interrupt_num < Self::IDT_MAX {
+            self.idt.read()[interrupt_num as usize] = descr;
+        }
     }
 
     pub fn get_main_selector(&self) -> u16 {

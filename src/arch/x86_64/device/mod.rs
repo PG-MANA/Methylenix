@@ -8,4 +8,3 @@ pub mod crt;
 pub mod io_apic;
 pub mod pic;
 pub mod serial_port;
-pub mod timer;
