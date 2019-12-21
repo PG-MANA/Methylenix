@@ -66,6 +66,15 @@ impl MemoryManager {
         self.physical_memory_manager.lock().unwrap().free(linear_address, size);
     }
 
+    pub fn free_physical_memory(&mut self, physical_address: usize, size: usize) {
+        self.physical_memory_manager.lock().unwrap().free(physical_address, size);
+        //TODO: check consistency between physical meory and linear memory.
+    }
+
+    pub fn reset_paging(&mut self) {
+        self.page_manager.reset_paging();
+    }
+
     pub fn dump_memory_manager(&self) {
         if let Ok(physical_memory_manager) = self.physical_memory_manager.try_lock() {
             physical_memory_manager.dump_memory_entry();

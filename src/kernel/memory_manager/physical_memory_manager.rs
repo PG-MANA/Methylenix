@@ -165,9 +165,6 @@ impl PhysicalMemoryManager {
         } else {
             self.free(start, length);
         }
-        if self.free_memory_size > self.memory_size {
-            self.memory_size = self.free_memory_size;
-        }
         true
     }
 
@@ -244,6 +241,9 @@ impl PhysicalMemoryManager {
         }
         entry.chain_after_me(new_entry);
         self.free_memory_size += size;
+        if self.free_memory_size > self.memory_size {
+            self.memory_size = self.free_memory_size;
+        }
         true
     }
 

@@ -58,9 +58,9 @@ impl MultiBootInformation {
     const TAG_TYPE_EFI64_IH: u32 = 20;
     const TAG_TYPE_BASE_ADDR: u32 = 21;
 
-    pub fn new(address: usize) -> MultiBootInformation {
+    pub fn new(address: usize,should_test: bool) -> MultiBootInformation {
         let mut mbi: MultiBootInformation = unsafe { mem::zeroed() };
-        if !MultiBootInformation::test(address) {
+        if should_test && !MultiBootInformation::test(address) {
             panic!("Unaligned Multi Boot Information")
         }
         mbi.address = address;
@@ -87,7 +87,7 @@ impl MultiBootInformation {
                 }
                 MultiBootInformation::TAG_TYPE_EFI64 => {
                     mbi.efi_table_pointer =
-                        unsafe { (*(tag as *const EfiSystemTableInformation)).address };
+                        unsafe { (&*(tag as *const EfiSystemTableInformation)).address };
                 }
                 MultiBootInformation::TAG_TYPE_ELF_SECTIONS => {
                     mbi.elf_info = ElfInfo::new(unsafe { &*(tag as *const _) });

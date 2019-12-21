@@ -1,4 +1,3 @@
-
 #[macro_use]
 pub mod interrupt;
 pub mod device;
@@ -36,14 +35,14 @@ pub extern "C" fn boot_main(
     //PIC初期化
     device::pic::pic_init();
     //MultiBootInformation読み込み
-    let multiboot_information = MultiBootInformation::new(mbi_addr);
+    let multiboot_information = MultiBootInformation::new(mbi_addr, true);
     // Graphic初期化（Panicが起きたときの表示のため)
     unsafe {
         STATIC_BOOT_INFORMATION_MANAGER.graphic_manager =
             Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
     }
     //メモリ管理初期化
-    init_memory(&multiboot_information);
+    let _multiboot_information = init_memory(multiboot_information);
     //IDT初期化&割り込み初期化
     init_interrupt(kernel_code_segment);
     //シリアルポート初期化
@@ -91,7 +90,7 @@ fn hlt() {
 }
 
 
-fn init_memory(multiboot_information: &MultiBootInformation) {
+fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformation {
     let mut max_address = 0usize;
     let mut processed_address = 0usize;
 
@@ -129,7 +128,7 @@ fn init_memory(multiboot_information: &MultiBootInformation) {
             processed_address += PAGE_SIZE;
         }
     }
-    page_manager.reset_paging();
+
 
     //set up for Memory Manager
     let mut memory_manager = MemoryManager::new(Mutex::new(physical_memory_manager), page_manager);
@@ -138,10 +137,24 @@ fn init_memory(multiboot_information: &MultiBootInformation) {
     let mut kernel_memory_alloc_manager = KernelMemoryAllocManager::new();
     kernel_memory_alloc_manager.init(&mut memory_manager);
 
+    // Move multiboot information to allocated memory area.
+    let new_mbi_address = kernel_memory_alloc_manager.malloc(&mut memory_manager, multiboot_information.size)
+        .expect("Cannot alloc memory for Multiboot Information.");
+    for i in 0..multiboot_information.size {
+        unsafe {
+            *((new_mbi_address + i) as *mut u8) = *((multiboot_information.address + i) as *mut u8);
+        }
+    }
+    memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size);
+
+    //Apply paging
+    memory_manager.reset_paging();
+
     unsafe {
         STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager);
         STATIC_BOOT_INFORMATION_MANAGER.kernel_memory_alloc_manager = Mutex::new(kernel_memory_alloc_manager);
     }
+    MultiBootInformation::new(new_mbi_address, false)
 }
 
 
