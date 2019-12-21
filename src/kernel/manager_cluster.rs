@@ -1,8 +1,10 @@
 /*
-    Struct Manager for kernel
+    Cluster of Managers for kernel
+    This cluster stores necessary structs for kernel.
+    All members of manager must be Mutex.
 */
 
-//use
+
 use arch::target_arch::device::serial_port::SerialPortManager;
 use arch::target_arch::interrupt::InterruptManager;
 
@@ -13,11 +15,10 @@ use kernel::spin_lock::Mutex;
 use kernel::kernel_malloc::KernelMemoryAllocManager;
 
 
-//Boot時に格納するデータ群
-pub static mut STATIC_BOOT_INFORMATION_MANAGER: BootInformationManager =
-    init_bootinformation_manager();
+pub static mut STATIC_KERNEL_MANAGER_CLUSTER: KernelManagerCluster =
+    init_manager_cluster();
 
-pub struct BootInformationManager {
+pub struct KernelManagerCluster {
     pub graphic_manager: Mutex<GraphicManager>,
     pub memory_manager: Mutex<MemoryManager>,
     pub kernel_memory_alloc_manager: Mutex<KernelMemoryAllocManager>,
@@ -27,13 +28,20 @@ pub struct BootInformationManager {
     //input_manager:
 }
 
-const fn init_bootinformation_manager() -> BootInformationManager {
-    BootInformationManager {
+const fn init_manager_cluster() -> KernelManagerCluster {
+    KernelManagerCluster {
         graphic_manager: Mutex::new(GraphicManager::new_static()),
         memory_manager: Mutex::new(MemoryManager::new_static()),
         kernel_memory_alloc_manager: Mutex::new(KernelMemoryAllocManager::new()),
         interrupt_manager: Mutex::new(InterruptManager::new()),
         efi_manager: Mutex::new(EfiManager::new_static()),
         serial_port_manager: Mutex::new(SerialPortManager::new_static()),
+    }
+}
+
+#[inline(always)]
+pub fn get_kernel_manager_cluster() -> &'static mut KernelManagerCluster {
+    unsafe {
+        &mut STATIC_KERNEL_MANAGER_CLUSTER
     }
 }

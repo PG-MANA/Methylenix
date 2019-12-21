@@ -7,7 +7,7 @@ use arch::target_arch::device::local_apic;
 use arch::target_arch::interrupt::idt::GateDescriptor;
 
 use kernel::fifo::FIFO;
-use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
+use kernel::manager_cluster::get_kernel_manager_cluster;
 
 
 pub struct SerialPortManager {
@@ -37,7 +37,7 @@ impl SerialPortManager {
     pub fn init(&self, selector: u16) {
         unsafe {
             make_interrupt_hundler!(inthandler24, SerialPortManager::inthandler24_main);
-            STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager.lock().unwrap().set_gatedec(
+            get_kernel_manager_cluster().interrupt_manager.lock().unwrap().set_gatedec(
                 0x24,
                 GateDescriptor::new(
                     inthandler24, /*上のマクロで指定した名前*/
@@ -94,11 +94,9 @@ impl SerialPortManager {
 
     pub fn inthandler24_main() {
         //handlerをimplで実装することを考え直すべき
-        unsafe {
-            if let Ok(mut serial_port_manager) = STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager.try_lock() {
-                let code = serial_port_manager.read();
-                serial_port_manager.fifo.queue(code);
-            }
+        if let Ok(mut serial_port_manager) = get_kernel_manager_cluster().serial_port_manager.try_lock() {
+            let code = serial_port_manager.read();
+            serial_port_manager.fifo.queue(code);
             local_apic::LocalApicManager::send_eoi();
         }
     }

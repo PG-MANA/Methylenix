@@ -58,7 +58,7 @@ impl MultiBootInformation {
     const TAG_TYPE_EFI64_IH: u32 = 20;
     const TAG_TYPE_BASE_ADDR: u32 = 21;
 
-    pub fn new(address: usize,should_test: bool) -> MultiBootInformation {
+    pub fn new(address: usize, should_test: bool) -> MultiBootInformation {
         let mut mbi: MultiBootInformation = unsafe { mem::zeroed() };
         if should_test && !MultiBootInformation::test(address) {
             panic!("Unaligned Multi Boot Information")

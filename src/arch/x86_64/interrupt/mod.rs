@@ -11,7 +11,7 @@ pub mod handler;
 use arch::target_arch::device::cpu;
 use self::idt::GateDescriptor;
 
-use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
+use kernel::manager_cluster::get_kernel_manager_cluster;
 
 use core::mem::{MaybeUninit, size_of};
 
@@ -68,7 +68,7 @@ impl InterruptManager {
         self.main_selector = selector;
         self.idt.write(unsafe {
             &mut *(
-                STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap()
+                get_kernel_manager_cluster().memory_manager.lock().unwrap()
                     .alloc_physical_page(false, true, false)
                     .expect("Cannot alloc memory for interrupt manager.") as *mut [_; Self::IDT_MAX as usize])
         });

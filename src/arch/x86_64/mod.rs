@@ -15,7 +15,7 @@ use kernel::graphic::GraphicManager;
 use kernel::memory_manager::MemoryManager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::spin_lock::Mutex;
-use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
+use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::kernel_malloc::KernelMemoryAllocManager;
 
 use core::mem;
@@ -37,10 +37,8 @@ pub extern "C" fn boot_main(
     //MultiBootInformation読み込み
     let multiboot_information = MultiBootInformation::new(mbi_addr, true);
     // Graphic初期化（Panicが起きたときの表示のため)
-    unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.graphic_manager =
-            Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
-    }
+    get_kernel_manager_cluster().graphic_manager =
+        Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
     //メモリ管理初期化
     let _multiboot_information = init_memory(multiboot_information);
     //IDT初期化&割り込み初期化
@@ -49,9 +47,7 @@ pub extern "C" fn boot_main(
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
     serial_port_manager.init(kernel_code_segment);
     //Boot Information Manager に格納
-    unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
-    }
+    get_kernel_manager_cluster().serial_port_manager = Mutex::new(serial_port_manager);
     println!("Methylenix");
 
     let local_apic_manager = LocalApicManager::init();
@@ -75,14 +71,12 @@ fn hlt() {
         unsafe {
             cpu::hlt();
         }
-        let ascii_code = unsafe {
-            STATIC_BOOT_INFORMATION_MANAGER
-                .serial_port_manager
-                .lock()
-                .unwrap()
-                .dequeue_key()
-                .unwrap_or(0)
-        };
+        let ascii_code = get_kernel_manager_cluster()
+            .serial_port_manager
+            .lock()
+            .unwrap()
+            .dequeue_key()
+            .unwrap_or(0);
         if ascii_code != 0 {
             print!("{}", ascii_code as char);
         }
@@ -150,10 +144,10 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     //Apply paging
     memory_manager.reset_paging();
 
-    unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager);
-        STATIC_BOOT_INFORMATION_MANAGER.kernel_memory_alloc_manager = Mutex::new(kernel_memory_alloc_manager);
-    }
+    //Store to cluster
+    get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);
+    get_kernel_manager_cluster().kernel_memory_alloc_manager = Mutex::new(kernel_memory_alloc_manager);
+
     MultiBootInformation::new(new_mbi_address, false)
 }
 
@@ -161,7 +155,5 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
 fn init_interrupt(kernel_selector: u16) {
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
-    unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager = Mutex::new(interrupt_manager);
-    }
+    get_kernel_manager_cluster().interrupt_manager = Mutex::new(interrupt_manager);
 }

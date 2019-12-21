@@ -1,14 +1,15 @@
 /*
-    フォントの描画などをフレームバッファに行う
+    Graphic Manager
 */
 
-// use(Arch非依存)
-use core::fmt;
-use kernel::drivers::multiboot::FrameBufferInfo;
-use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
 
-// use(Arch依存)
 use arch::target_arch::device::crt;
+
+use kernel::drivers::multiboot::FrameBufferInfo;
+use kernel::manager_cluster::get_kernel_manager_cluster;
+
+use core::fmt;
+
 
 pub struct GraphicManager {
     frame_buffer_address: usize,
@@ -94,13 +95,8 @@ impl GraphicManager {
 
     pub fn puts(&mut self, string: &str) -> bool {
         if self.is_textmode == false {
-            let serial_port_manager_lock = unsafe {
-                STATIC_BOOT_INFORMATION_MANAGER
-                    .serial_port_manager
-                    .try_lock()
-            };
-            if serial_port_manager_lock.is_ok() {
-                serial_port_manager_lock.unwrap().sendstr(string);
+            if let Ok(serial_port_manager) = get_kernel_manager_cluster().serial_port_manager.try_lock() {
+                serial_port_manager.sendstr(string);
                 return true;
             }
             return false;
@@ -175,11 +171,9 @@ impl fmt::Write for GraphicManager {
 }
 
 pub fn print_string_to_default_screen(args: fmt::Arguments) -> bool {
-    let graphic_manager_lock =
-        unsafe { STATIC_BOOT_INFORMATION_MANAGER.graphic_manager.try_lock() };
-    if graphic_manager_lock.is_ok() {
+    if let Ok(mut graphic_manager) = get_kernel_manager_cluster().graphic_manager.try_lock() {
         use core::fmt::Write;
-        if graphic_manager_lock.unwrap().write_fmt(args).is_ok() {
+        if graphic_manager.write_fmt(args).is_ok() {
             return true;
         }
     }

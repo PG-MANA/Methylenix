@@ -10,5 +10,5 @@ pub mod kernel_malloc;
 pub mod memory_manager;
 pub mod panic;
 pub mod spin_lock;
-pub mod struct_manager;
+pub mod manager_cluster;
 pub mod rwlock;
