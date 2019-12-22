@@ -132,7 +132,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     kernel_memory_alloc_manager.init(&mut memory_manager);
 
     // Move multiboot information to allocated memory area.
-    let new_mbi_address = kernel_memory_alloc_manager.malloc(&mut memory_manager, multiboot_information.size)
+    let new_mbi_address = kernel_memory_alloc_manager.kmalloc(&mut memory_manager, multiboot_information.size)
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
         unsafe {

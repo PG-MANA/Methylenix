@@ -3,7 +3,7 @@
     ここでは仮想メモリ上でのメモリ確保しか関与しない
 */
 
-use arch::target_arch::paging::PAGE_SIZE;
+use arch::target_arch::paging::{PAGE_SIZE, PAGE_MASK};
 
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::MemoryManager;
@@ -45,11 +45,11 @@ impl KernelMemoryAllocManager {
         true
     }
 
-    pub fn malloc(&mut self, memory_manager: &mut MemoryManager, size: usize) -> Option<usize> {
+    pub fn kmalloc(&mut self, memory_manager: &mut MemoryManager, size: usize) -> Option<usize> {
         if size == 0 {
             return None;
         }
-        /*TODO: if size > PAGE_SIZE {alloc from vmalloc()}*/
+        /*TODO: if size > PAGE_SIZE {alloc from page table}*/
         if let Some(address) = self.alloc_manager.alloc(size, false) {
             return Some(address);
         }
@@ -75,7 +75,7 @@ impl KernelMemoryAllocManager {
         None
     }
 
-    pub fn free(&mut self, memory_manager: &mut MemoryManager, address: usize) {
+    pub fn kfree(&mut self, memory_manager: &mut MemoryManager, address: usize) {
         for e in unsafe { self.used_memory_list.get_mut().iter_mut() } {
             if e.0 == address {
                 if e.1 == 0 {
@@ -87,5 +87,13 @@ impl KernelMemoryAllocManager {
                 return;
             }
         }
+    }
+
+    pub fn vmalloc(&mut self, memory_manager: &mut MemoryManager, size: usize) -> Option<usize> {
+        if size == 0{
+            return None;
+        }
+        let size = ((size - 1) & PAGE_MASK) + PAGE_SIZE;
+        unimplemented!();//TODO
     }
 }
