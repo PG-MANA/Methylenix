@@ -1,5 +1,6 @@
 /*
     Memory Manager
+    This manager is the frontend of physical memory manager and page manager.
 */
 
 
@@ -8,10 +9,8 @@ pub mod physical_memory_manager;
 
 use arch::target_arch::paging::{PageManager, PAGE_SIZE};
 
-use kernel::spin_lock::Mutex;
+use kernel::sync::spin_lock::Mutex;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-
-use core::borrow::BorrowMut;
 
 
 pub struct MemoryManager {
@@ -57,7 +56,7 @@ impl MemoryManager {
     }
 
     pub fn associate_address(&mut self, physical_address: usize, linear_address: usize, is_code: bool, is_writable: bool, is_user_accessible: bool) -> bool {
-        self.page_manager.associate_address(self.physical_memory_manager.lock().unwrap().borrow_mut(), physical_address, linear_address, is_code, is_writable, is_user_accessible)
+        self.page_manager.associate_address(&mut self.physical_memory_manager.lock().unwrap(), physical_address, linear_address, is_code, is_writable, is_user_accessible)
     }
 
     pub fn free(&mut self, linear_address: usize, size: usize) {

@@ -5,6 +5,7 @@
 #![feature(const_raw_ptr_deref)]
 #![feature(lang_items)]
 #![feature(naked_functions)]
+#![feature(no_more_cas)]
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_ref)]
 #![feature(panic_info_message)]

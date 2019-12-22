@@ -14,7 +14,7 @@ use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic::GraphicManager;
 use kernel::memory_manager::MemoryManager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use kernel::spin_lock::Mutex;
+use kernel::sync::spin_lock::Mutex;
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::kernel_malloc::KernelMemoryAllocManager;
 
