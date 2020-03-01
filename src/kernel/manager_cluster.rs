@@ -11,8 +11,8 @@ use arch::target_arch::interrupt::InterruptManager;
 use kernel::drivers::efi::EfiManager;
 use kernel::graphic::GraphicManager;
 use kernel::memory_manager::MemoryManager;
+use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::sync::spin_lock::Mutex;
-use kernel::kernel_malloc::KernelMemoryAllocManager;
 
 
 pub static mut STATIC_KERNEL_MANAGER_CLUSTER: KernelManagerCluster =
