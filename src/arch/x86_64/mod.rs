@@ -26,7 +26,7 @@ static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SI
 
 #[no_mangle]
 pub extern "C" fn boot_main(
-    mbi_addr: usize, /*マルチブートヘッダのアドレス*/
+    mbi_address: usize, /*マルチブートヘッダのアドレス*/
     kernel_code_segment: u16, /*現在のセグメント:8*/
     user_code_segment: u16,
     user_data_segment: u16,
@@ -35,7 +35,7 @@ pub extern "C" fn boot_main(
     //PIC初期化
     device::pic::pic_init();
     //MultiBootInformation読み込み
-    let multiboot_information = MultiBootInformation::new(mbi_addr, true);
+    let multiboot_information = MultiBootInformation::new(mbi_address, true);
     // Graphic初期化（Panicが起きたときの表示のため)
     get_kernel_manager_cluster().graphic_manager =
         Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
