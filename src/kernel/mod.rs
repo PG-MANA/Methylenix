@@ -7,7 +7,6 @@ pub mod drivers;
 pub mod fifo;
 #[macro_use]
 pub mod graphic;
-pub mod kernel_malloc;
 pub mod memory_manager;
 pub mod panic;
 pub mod manager_cluster;

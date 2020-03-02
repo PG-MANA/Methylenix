@@ -12,11 +12,12 @@ use self::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
 
 use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic::GraphicManager;
-use kernel::memory_manager::MemoryManager;
+use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
+use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::sync::spin_lock::Mutex;
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::kernel_malloc::KernelMemoryAllocManager;
 
 use core::mem;
 
@@ -102,47 +103,52 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             max_address = (entry.addr + entry.length) as usize;
         }
     }
-    for section in multiboot_information.elf_info.clone() {
-        physical_memory_manager.define_used_memory(section.addr(), section.size());
-    }
-    physical_memory_manager.define_used_memory(multiboot_information.address, multiboot_information.size);
 
-    //set up for Page Manager (Virtual Memory Manager)
+    //set up for Virtual Memory Manager
     let mut page_manager = PageManager::new(&mut physical_memory_manager).expect("Can not reset paging.");
-    while processed_address < max_address {
-        page_manager.associate_address(&mut physical_memory_manager, processed_address, processed_address, false, false, false);
-        processed_address += PAGE_SIZE;
-    }
-    for entry in multiboot_information.elf_info.clone() {
-        processed_address = entry.addr() as usize & PAGE_MASK;
-        while processed_address < (entry.size() + entry.addr()) {
-            page_manager.associate_address(&mut physical_memory_manager, processed_address,
-                                           processed_address, entry.should_excusable(),
-                                           entry.should_writable(), false);
-            processed_address += PAGE_SIZE;
-        }
-    }
-
+    let mut virtual_memory_manager = VirtualMemoryManager::new();
+    virtual_memory_manager.init(true, page_manager, &mut physical_memory_manager);
 
     //set up for Memory Manager
-    let mut memory_manager = MemoryManager::new(Mutex::new(physical_memory_manager), page_manager);
+    let mut memory_manager = MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
+
+    for section in multiboot_information.elf_info.clone() {
+        let permission = MemoryPermissionFlags {
+            read: true,
+            write: section.should_writable(),
+            execute: section.should_excusable(),
+            user_access: false,
+        };
+        memory_manager.reserve_pages(section.addr(), section.addr(), VirtualMemoryManager::size_to_order(section.size()), permission);
+    }
+
+    for entry in multiboot_information.memory_map_info.clone() {
+        if entry.m_type == 1 {
+            continue;
+        }
+        let permission = match entry.m_type {
+            3 => MemoryPermissionFlags::data(),
+            4 => MemoryPermissionFlags::data(),
+            5 => MemoryPermissionFlags::data(), //rodata?
+            _ => MemoryPermissionFlags::rodata()
+        };
+        memory_manager.reserve_pages(entry.addr as usize, entry.addr as usize, VirtualMemoryManager::size_to_order(entry.length as usize), permission);
+    }
 
     // set up for Kernel Memory Alloc Manager
     let mut kernel_memory_alloc_manager = KernelMemoryAllocManager::new();
     kernel_memory_alloc_manager.init(&mut memory_manager);
 
     // Move multiboot information to allocated memory area.
-    let new_mbi_address = kernel_memory_alloc_manager.kmalloc(&mut memory_manager, multiboot_information.size)
+    let new_mbi_address = kernel_memory_alloc_manager.kmalloc(multiboot_information.size, &mut memory_manager)
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
         unsafe {
             *((new_mbi_address + i) as *mut u8) = *((multiboot_information.address + i) as *mut u8);
         }
     }
-    memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size);
-
     //Apply paging
-    memory_manager.reset_paging();
+    //memory_manager.reset_paging();
 
     //Store to cluster
     get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);

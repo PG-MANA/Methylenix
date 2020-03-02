@@ -104,7 +104,7 @@ impl VirtualMemoryManager {
             let size = entry.end_address - entry.start_address + 1;
             self.page_manager.unassociate_address(vm_start_address, pm_manager);
             pm_manager.free(physical_address, size);
-            self.delete_entry(entry);
+            self.delete_entry(entry, pm_manager);
             true
         } else {
             false

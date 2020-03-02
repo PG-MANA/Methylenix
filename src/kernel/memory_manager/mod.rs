@@ -121,6 +121,29 @@ impl MemoryManager {
         true
     }
 
+    pub fn reserve_pages(&mut self, virtual_address: usize, physical_address: usize, order: usize, permission: MemoryPermissionFlags) -> bool {
+        /*initial settings only*/
+        if order == 0 {
+            return false;
+        }
+        let size = (1 << (order - 1)) * PAGE_SIZE;
+        if !self.virtual_memory_manager.check_usable_address_range(virtual_address, virtual_address + size - 1) {
+            return false;
+        }
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        if !pm_manager.define_used_memory(physical_address, size) {
+            return false;
+        }
+        if let Some(result) = self.virtual_memory_manager.alloc_address(size, physical_address, Some(virtual_address), permission, pm_manager) {
+            if result == virtual_address {
+                return true;
+            }
+            self.virtual_memory_manager.free_address(result, pm_manager);
+        }
+        pm_manager.free(physical_address, size);
+        false
+    }
+
     pub fn dump_memory_manager(&self) {
         if let Ok(physical_memory_manager) = self.physical_memory_manager.try_lock() {
             physical_memory_manager.dump_memory_entry();
