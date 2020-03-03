@@ -8,7 +8,7 @@ pub mod physical_memory_manager;
 pub mod virtual_memory_manager;
 pub mod kernel_malloc_manager;
 
-use arch::target_arch::paging::{PageManager, PAGE_SIZE};
+use arch::target_arch::paging::PAGE_SIZE;
 
 use kernel::sync::spin_lock::Mutex;
 use self::virtual_memory_manager::VirtualMemoryManager;
@@ -53,18 +53,16 @@ impl MemoryManager {
         }
         let size = PAGE_SIZE * (1 << (order - 1));
         if let Some(vm_address) = vm_start_address {
-            if !self.virtual_memory_manager.check_usable_address_range(vm_address, vm_addresss + size - 1) {
+            if !self.virtual_memory_manager.check_usable_address_range(vm_address, vm_address + size - 1) {
                 return None;
             }
         }
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, true) {
-            let address = vm_start_address.unwrap_or(physical_address);
-            if self.virtual_memory_manager.associate_address(&mut physical_memory_manager, physical_address, address, permission) {
-                PageManager::reset_paging_local(address);
+            if let Some(address) = self.virtual_memory_manager.alloc_address(size, physical_address, vm_start_address, permission, &mut physical_memory_manager) {
                 Some(address)
             } else {
-                physical_memory_manager.free(physical_address, PAGE_SIZE);
+                physical_memory_manager.free(physical_address, size);
                 None
             }
         } else {
@@ -79,7 +77,7 @@ impl MemoryManager {
         if order <= 1 {
             return self.alloc_pages(order, vm_start_address, permission);
         }
-        let count = (1 << (order - 1));
+        let count = 1 << (order - 1);
         let size = PAGE_SIZE * count;
         let address = if let Some(addr) = vm_start_address {
             if !self.virtual_memory_manager.check_usable_address_range(addr, addr + size - 1) {
@@ -96,10 +94,10 @@ impl MemoryManager {
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
         for i in 0..count {
             if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, true) {
-                self.virtual_memory_manager.alloc_address(PAGE_SIZE, physical_address, Some(address + i * PAGE_SIZE), permission, pm_manager);
+                self.virtual_memory_manager.alloc_address(PAGE_SIZE, physical_address, Some(address + i * PAGE_SIZE), permission, &mut pm_manager);
             } else {
                 for j in 0..i {
-                    self.virtual_memory_manager.free_address(address + i * PAGE_SIZE, pm_manager);
+                    self.virtual_memory_manager.free_address(address + i * PAGE_SIZE, &mut pm_manager);
                 }
                 return None;
             }
@@ -111,10 +109,10 @@ impl MemoryManager {
         if order == 0 {
             return false;
         }
-        let count = (1 << (order - 1));
-        let pm_manager = self.physical_memory_manager.lock().unwrap();
+        let count = 1 << (order - 1);
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
         for i in 0..count {
-            if !self.virtual_memory_manager.free_address(vm_address + i * PAGE_SIZE, pm_manager) {
+            if !self.virtual_memory_manager.free_address(vm_address + i * PAGE_SIZE, &mut pm_manager) {
                 return false;
             }
         }
@@ -134,11 +132,11 @@ impl MemoryManager {
         if !pm_manager.define_used_memory(physical_address, size) {
             return false;
         }
-        if let Some(result) = self.virtual_memory_manager.alloc_address(size, physical_address, Some(virtual_address), permission, pm_manager) {
+        if let Some(result) = self.virtual_memory_manager.alloc_address(size, physical_address, Some(virtual_address), permission, &mut pm_manager) {
             if result == virtual_address {
                 return true;
             }
-            self.virtual_memory_manager.free_address(result, pm_manager);
+            self.virtual_memory_manager.free_address(result, &mut pm_manager);
         }
         pm_manager.free(physical_address, size);
         false

@@ -8,7 +8,7 @@ use self::device::cpu;
 use self::interrupt::InterruptManager;
 use self::device::io_apic::IoApicManager;
 use self::device::local_apic::LocalApicManager;
-use self::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
+use self::paging::{PageManager, PAGE_SIZE};
 
 use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic::GraphicManager;

@@ -8,7 +8,6 @@
 use arch::target_arch::paging::PageManager;
 use arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 
-use kernel::memory_manager::physical_memory_manager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::MemoryPermissionFlags;
 
@@ -50,7 +49,7 @@ impl VirtualMemoryManager {
         }
     }
 
-    pub fn init(&mut self, is_system_vm: bool, mut page_manager: PageManager, pm_manager: &mut PhysicalMemoryManager) -> bool {
+    pub fn init(&mut self, is_system_vm: bool, page_manager: PageManager, pm_manager: &mut PhysicalMemoryManager) -> bool {
         self.page_manager = page_manager;
         self.is_system_vm = is_system_vm;
         let pool = pm_manager.alloc(PAGE_SIZE, true);
@@ -59,7 +58,7 @@ impl VirtualMemoryManager {
         }
         self.entry_pool = pool.unwrap();
         self.entry_pool_size = PAGE_SIZE;
-        page_manager.associate_address(pm_manager, self.entry_pool, self.entry_pool, MemoryPermissionFlags::data());
+        self.page_manager.associate_address(pm_manager, self.entry_pool, self.entry_pool, MemoryPermissionFlags::data());
         for i in 0..(self.entry_pool_size / VirtualMemoryEntry::ENTRY_SIZE) {
             unsafe { (*((self.entry_pool + i * VirtualMemoryEntry::ENTRY_SIZE) as *mut VirtualMemoryEntry)).set_disabled() }
         }
@@ -83,7 +82,7 @@ impl VirtualMemoryManager {
         if size & !PAGE_MASK != 0 {
             return None;
         }
-        let mut entry = if let Some(address) = vm_start_address {
+        let entry = if let Some(address) = vm_start_address {
             if !self.check_usable_address_range(address, address + size - 1) {
                 return None;
             }
@@ -99,12 +98,15 @@ impl VirtualMemoryManager {
     }
 
     pub fn free_address(&mut self, vm_start_address: usize, pm_manager: &mut PhysicalMemoryManager) -> bool {
+        //TODO: 結合されていたエントリの分離処理
         if let Some(entry) = self.find_entry_mut(vm_start_address) {
             let physical_address = entry.physical_start_address;
             let size = entry.end_address - entry.start_address + 1;
-            self.page_manager.unassociate_address(vm_start_address, pm_manager);
-            pm_manager.free(physical_address, size);
             self.delete_entry(entry, pm_manager);
+            for i in 0..(size / PAGE_SIZE) {
+                self.page_manager.unassociate_address(vm_start_address + i * PAGE_SIZE, pm_manager);
+            }
+            pm_manager.free(physical_address, size);
             true
         } else {
             false
@@ -128,12 +130,12 @@ impl VirtualMemoryManager {
     }
 
     fn insert_entry(&mut self, vm_entry: VirtualMemoryEntry, pm_manager: &mut PhysicalMemoryManager) -> bool {
-        if (vm_entry.start_address & !PAGE_MASK) || ((vm_entry.end_address + 1) & !PAGE_MASK) {
+        if (vm_entry.start_address & !PAGE_MASK != 0) || ((vm_entry.end_address + 1) & !PAGE_MASK != 0) {
             return false;
         }
         for i in 0..(self.entry_pool_size / VirtualMemoryEntry::ENTRY_SIZE) {
-            let e = unsafe { ((self.entry_pool + i * VirtualMemoryEntry::ENTRY_SIZE) as *mut VirtualMemoryEntry) };
-            if *e.is_disabled() {
+            let e = (self.entry_pool + i * VirtualMemoryEntry::ENTRY_SIZE) as *mut VirtualMemoryEntry;
+            if unsafe { &*e }.is_disabled() {
                 unsafe { *e = vm_entry; }
                 self.adjust_entries(pm_manager);
                 self.page_manager.associate_address(pm_manager, vm_entry.physical_start_address, vm_entry.start_address, vm_entry.permission_flags);
@@ -147,7 +149,7 @@ impl VirtualMemoryManager {
     fn delete_entry(&mut self, target_entry: &mut VirtualMemoryEntry, pm_manager: &mut PhysicalMemoryManager) {
         target_entry.unchain();
         target_entry.set_disabled();
-        self.adjust_entries(physical_memory_manager);
+        self.adjust_entries(pm_manager);
     }
 
     pub fn check_usable_address_range(&self, vm_start_address: usize, vm_end_address: usize) -> bool {
@@ -156,21 +158,26 @@ impl VirtualMemoryManager {
         while entry.end_address >= vm_end_address {
             if (entry.start_address <= vm_start_address && entry.end_address >= vm_start_address) ||
                 (entry.start_address <= vm_start_address && entry.end_address >= vm_start_address) {
-                true
+                return false;
+            }
+            if let Some(e) = entry.next_entry {
+                entry = unsafe { &*(e as *const _) };
+            } else {
+                break;
             }
         }
-        false
+        true
     }
 
     fn find_entry(&self, vm_start_address: usize) -> Option<&VirtualMemoryEntry> {
         //TODO: Tree
         let mut entry = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };
-        while entry.end_address >= vm_start_address {
-            if entry.start_address <= vm_start_address && entry.end_address >= vm_start_address {
+        while entry.start_address <= vm_start_address {
+            if entry.end_address >= vm_start_address {
                 return Some(entry);
             }
             if let Some(e) = entry.next_entry {
-                entry = unsafe { &*(e as *mut _) };
+                entry = unsafe { &*(e as *const _) };
             } else {
                 break;
             }
@@ -178,15 +185,15 @@ impl VirtualMemoryManager {
         None
     }
 
-    fn find_entry_mut(&mut self, vm_start_address: usize) -> Option<&mut VirtualMemoryEntry> {
+    fn find_entry_mut(&mut self, vm_start_address: usize) -> Option<&'static mut VirtualMemoryEntry> {
         //TODO: Tree
         let mut entry = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) };
-        while entry.next_entry != 0 && entry.end_address >= vm_start_address {
-            if entry.start_address <= vm_start_address && entry.end_address >= vm_start_address {
+        while entry.start_address <= vm_start_address {
+            if entry.end_address >= vm_start_address {
                 return Some(entry);
             }
             if let Some(e) = entry.next_entry {
-                entry = unsafe { &*(e as *mut _) };
+                entry = unsafe { &mut *(e as *mut _) };
             } else {
                 break;
             }
@@ -195,22 +202,8 @@ impl VirtualMemoryManager {
     }
 
     fn adjust_entries(&mut self, pm_manager: &mut PhysicalMemoryManager) {
-        let mut entry = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) };
-        while let Some(next) = entry.next_entry {
-            let prev_entry = entry;
-            entry = unsafe { &mut *(prev_entry.next_entry as *mut VirtualMemoryEntry) };
-            if prev_entry.end_address + 1 == entry.start_address &&
-                prev_entry.physical_start_address +
-                    (prev_entry.end_address - prev_entry.start_address) + 1 == entry.physical_start_address &&
-                prev_entry.inheritance == entry.inheritance &&
-                !prev_entry.is_shared && !entry.is_shared &&
-                prev_entry.inheritance == entry.inheritance //TODO: make a judge function
-            {
-                prev_entry.end_address = entry.end_address;
-                entry.unchain();
-                entry = prev_entry;
-            }
-        }
+        //TODO: 同一属性の連続したエントリの結合
+        return;
     }
 
     pub const fn size_to_order(size: usize) -> usize {
@@ -218,7 +211,7 @@ impl VirtualMemoryManager {
             return 0;
         }
         let mut page_count = (((size - 1) & PAGE_MASK) / PAGE_SIZE) + 1;
-        let mut order = if page_count & (page_count - 1) {
+        let mut order = if page_count & (page_count - 1) == 0 {
             0usize
         } else {
             1usize
@@ -245,7 +238,7 @@ impl VirtualMemoryEntry {
             next_entry: None,
             start_address: vm_start_address,
             end_address: vm_end_address,
-            physical_start_address: linear_start_address,
+            physical_start_address,
             is_shared: false,
             should_cow: false,
             permission_flags: permission,
@@ -262,33 +255,9 @@ impl VirtualMemoryEntry {
         self.physical_start_address = 0;
     }
 
-    pub fn set_readable(&mut self, b: bool) {
-        if b {
-            self.inheritance |= b as _;
-        } else {
-            self.inheritance &= !(1);
-        }
-    }
-
-    pub fn set_writable(&mut self, b: bool) {
-        if b {
-            self.inheritance |= (b as _) << 1;
-        } else {
-            self.inheritance &= !(1 < < 1);
-        }
-    }
-
-    pub fn set_executable(&mut self, b: bool) {
-        if b {
-            self.inheritance |= (b as _) << 2;
-        } else {
-            self.inheritance &= !(1 < < 2);
-        }
-    }
-
     pub fn chain_after_me(&mut self, entry: &mut Self) {
         self.next_entry = Some(entry as *mut Self as usize);
-        unsafe { (&mut *(entry as *mut Self)).previous = Some(self as *mut Self as usize); }
+        unsafe { (&mut *(entry as *mut Self)).prev_entry = Some(self as *mut Self as usize); }
     }
 
     pub fn unchain(&mut self) {

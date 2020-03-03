@@ -12,6 +12,7 @@ use arch::target_arch::device::cpu;
 use self::idt::GateDescriptor;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::MemoryPermissionFlags;
 
 use core::mem::{MaybeUninit, size_of};
 
@@ -69,7 +70,7 @@ impl InterruptManager {
         self.idt.write(unsafe {
             &mut *(
                 get_kernel_manager_cluster().memory_manager.lock().unwrap()
-                    .alloc_physical_page(false, true, false)
+                    .alloc_pages(1, None,MemoryPermissionFlags::data())
                     .expect("Cannot alloc memory for interrupt manager.") as *mut [_; Self::IDT_MAX as usize])
         });
 
