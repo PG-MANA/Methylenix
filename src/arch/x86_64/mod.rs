@@ -29,8 +29,8 @@ static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SI
 pub extern "C" fn boot_main(
     mbi_address: usize, /*マルチブートヘッダのアドレス*/
     kernel_code_segment: u16, /*現在のセグメント:8*/
-    user_code_segment: u16,
-    user_data_segment: u16,
+    _user_code_segment: u16,
+    _user_data_segment: u16,
 ) {
     //この関数はCLIされた状態で呼ばれる。
     //PIC初期化
@@ -86,9 +86,6 @@ fn hlt() {
 
 
 fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformation {
-    let mut max_address = 0usize;
-    let mut processed_address = 0usize;
-
     //set up for Physical Memory Manager
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
@@ -99,13 +96,10 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         if entry.m_type == 1 { //Free Area
             physical_memory_manager.define_free_memory(entry.addr as usize, entry.length as usize);
         }
-        if (entry.addr + entry.length) as usize > max_address {
-            max_address = (entry.addr + entry.length) as usize;
-        }
     }
 
     //set up for Virtual Memory Manager
-    let mut page_manager = PageManager::new(&mut physical_memory_manager).expect("Can not reset paging.");
+    let page_manager = PageManager::new(&mut physical_memory_manager).expect("Can not reset paging.");
     let mut virtual_memory_manager = VirtualMemoryManager::new();
     virtual_memory_manager.init(true, page_manager, &mut physical_memory_manager);
 

@@ -98,7 +98,7 @@ impl KernelMemoryAllocManager {
         }
     }
 
-    pub fn kfree(&mut self, address: usize, m_manager: &mut MemoryManager) {
+    pub fn kfree(&mut self, address: usize, _m_manager: &mut MemoryManager) {
         for e in unsafe { self.used_memory_list.get_mut().iter_mut() } {
             if e.0 == address {
                 if e.1 == 0 {

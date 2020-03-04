@@ -19,7 +19,7 @@ impl SerialPortManager {
     pub fn new(io_port: u16) -> SerialPortManager {
         SerialPortManager {
             port: io_port,
-            fifo: FIFO::new(128),
+            fifo: FIFO::new(128, &0),
         }
     }
 

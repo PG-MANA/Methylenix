@@ -49,14 +49,18 @@ impl VirtualMemoryManager {
         }
     }
 
-    pub fn init(&mut self, is_system_vm: bool, page_manager: PageManager, pm_manager: &mut PhysicalMemoryManager) -> bool {
-        self.page_manager = page_manager;
-        self.is_system_vm = is_system_vm;
-        let pool = pm_manager.alloc(PAGE_SIZE, true);
-        if pool.is_none() {
+    pub fn init(&mut self, is_system_vm: bool, pm_manager: &mut PhysicalMemoryManager) -> bool {
+        self.page_manager = if let Some(manager) = PageManager::new(pm_manager) {
+            manager
+        } else {
             return false;
-        }
-        self.entry_pool = pool.unwrap();
+        };
+        self.is_system_vm = is_system_vm;
+        self.entry_pool = if let Some(address) = pm_manager.alloc(PAGE_SIZE, true) {
+            address
+        } else {
+            return false;
+        };
         self.entry_pool_size = PAGE_SIZE;
         self.page_manager.associate_address(pm_manager, self.entry_pool, self.entry_pool, MemoryPermissionFlags::data());
         for i in 0..(self.entry_pool_size / VirtualMemoryEntry::ENTRY_SIZE) {
@@ -65,8 +69,8 @@ impl VirtualMemoryManager {
 
         unsafe {
             *(self.entry_pool as *mut VirtualMemoryEntry) = VirtualMemoryEntry {
-                next_entry: Some(0),
-                prev_entry: Some(0),
+                next_entry: None,
+                prev_entry: None,
                 start_address: self.entry_pool,
                 end_address: self.entry_pool + self.entry_pool_size - 1,
                 physical_start_address: self.entry_pool,
@@ -75,6 +79,14 @@ impl VirtualMemoryManager {
                 permission_flags: MemoryPermissionFlags::data(),
             };
         }
+        self.vm_map_entry = self.entry_pool;
+        //insert an entry for PageManager's pool.
+        let page_manager_entry = VirtualMemoryEntry{
+            next_entry: None,
+            prev_entry: None,
+            start_address: self.page_manager.
+        }
+        self.insert_entry()
         true
     }
 
@@ -201,7 +213,7 @@ impl VirtualMemoryManager {
         None
     }
 
-    fn adjust_entries(&mut self, pm_manager: &mut PhysicalMemoryManager) {
+    fn adjust_entries(&mut self, _pm_manager: &mut PhysicalMemoryManager) {
         //TODO: 同一属性の連続したエントリの結合
         return;
     }

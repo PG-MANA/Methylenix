@@ -39,7 +39,7 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
     let edx: u32;
     let eax: u32;
     asm!("rdmsr":"={edx}"(edx), "={eax}"(eax):"{ecx}"(ecx));
-    ((edx as u64) << 32 | eax as u64)
+    (edx as u64) << 32 | eax as u64
 }
 
 #[inline(always)]

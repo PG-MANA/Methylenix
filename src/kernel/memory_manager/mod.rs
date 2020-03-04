@@ -97,7 +97,7 @@ impl MemoryManager {
                 self.virtual_memory_manager.alloc_address(PAGE_SIZE, physical_address, Some(address + i * PAGE_SIZE), permission, &mut pm_manager);
             } else {
                 for j in 0..i {
-                    self.virtual_memory_manager.free_address(address + i * PAGE_SIZE, &mut pm_manager);
+                    self.virtual_memory_manager.free_address(address + j * PAGE_SIZE, &mut pm_manager);
                 }
                 return None;
             }
