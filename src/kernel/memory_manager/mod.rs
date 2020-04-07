@@ -4,11 +4,12 @@
 */
 
 
+pub mod kernel_malloc_manager;
 pub mod physical_memory_manager;
 pub mod virtual_memory_manager;
-pub mod kernel_malloc_manager;
+pub mod virtual_memory_entry;
 
-use arch::target_arch::paging::PAGE_SIZE;
+use arch::target_arch::paging::{PAGE_SIZE, PAGING_CACHE_LENGTH};
 
 use kernel::sync::spin_lock::Mutex;
 use self::virtual_memory_manager::VirtualMemoryManager;
@@ -27,6 +28,12 @@ pub struct MemoryPermissionFlags {
     pub execute: bool,
     pub user_access: bool,
 }
+
+pub struct FreePageList {
+    pub list: [usize; PAGING_CACHE_LENGTH],
+    pub pointer: usize,
+}
+
 
 impl MemoryManager {
     pub fn new(physical_memory_manager: Mutex<PhysicalMemoryManager>, virtual_memory_manager: VirtualMemoryManager) -> Self {
@@ -60,6 +67,7 @@ impl MemoryManager {
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, true) {
             if let Some(address) = self.virtual_memory_manager.alloc_address(size, physical_address, vm_start_address, permission, &mut physical_memory_manager) {
+                self.virtual_memory_manager.update_paging(address);
                 Some(address)
             } else {
                 physical_memory_manager.free(physical_address, size);

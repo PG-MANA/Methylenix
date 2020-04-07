@@ -1,6 +1,5 @@
 #![no_std]
 #![feature(asm)]
-#![feature(assoc_int_consts)]
 #![feature(const_fn)]
 #![feature(const_if_match)]
 #![feature(const_loop)]

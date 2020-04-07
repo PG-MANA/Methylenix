@@ -8,7 +8,7 @@ use self::device::cpu;
 use self::interrupt::InterruptManager;
 use self::device::io_apic::IoApicManager;
 use self::device::local_apic::LocalApicManager;
-use self::paging::{PageManager, PAGE_SIZE};
+use self::paging::PAGE_SIZE;
 
 use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic::GraphicManager;
@@ -99,9 +99,8 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
 
     //set up for Virtual Memory Manager
-    let page_manager = PageManager::new(&mut physical_memory_manager).expect("Can not reset paging.");
     let mut virtual_memory_manager = VirtualMemoryManager::new();
-    virtual_memory_manager.init(true, page_manager, &mut physical_memory_manager);
+    virtual_memory_manager.init(true, &mut physical_memory_manager);
 
     //set up for Memory Manager
     let mut memory_manager = MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
