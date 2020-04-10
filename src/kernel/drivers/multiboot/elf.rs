@@ -43,7 +43,7 @@ impl ElfInfo {
         ElfInfo {
             addr: unsafe { &elf.sections as *const _ as usize },
             entsize: elf.entsize,
-            num: elf.num - 1, //cntが0からカウントするため
+            num: elf.num,
             cnt: 0,
         }
     }
@@ -99,4 +99,5 @@ impl ElfSection {
     pub fn should_excusable(&self) -> bool {
         self.section_flags & 4 != 0
     }
+    pub fn should_allocate(&self) -> bool { self.section_flags & 2 != 0 }
 }

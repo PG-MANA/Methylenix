@@ -101,7 +101,9 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
     /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
     for section in multiboot_information.elf_info.clone() {
-        physical_memory_manager.define_used_memory(section.addr(), section.size(), true);
+        if section.should_allocate() {
+            physical_memory_manager.define_used_memory(section.addr(), section.size(), true);
+        }
     }
     //MultiBootInformation領域を除外
     physical_memory_manager.define_used_memory(multiboot_information.address, multiboot_information.size, false);
@@ -113,6 +115,9 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
 
     for section in multiboot_information.elf_info.clone() {
+        if !section.should_allocate() {
+            continue;
+        }
         let permission = MemoryPermissionFlags {
             read: true,
             write: section.should_writable(),
@@ -120,7 +125,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             user_access: false,
         };
         let aligned_start_address = section.addr() & PAGE_MASK;
-        let aligned_size = ((section.addr() - aligned_start_address + section.size() - 1) & PAGE_MASK) + PAGE_SIZE;
+        let aligned_size = ((section.size() + (section.addr() - aligned_start_address) - 1) & PAGE_MASK) + PAGE_SIZE;
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
         if let Some(address) = virtual_memory_manager.alloc_address(aligned_size,
                                                                     aligned_start_address,
