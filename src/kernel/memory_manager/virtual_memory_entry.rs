@@ -24,7 +24,6 @@ pub struct VirtualMemoryEntry {
 }
 // ADD: thread chain
 
-
 impl VirtualMemoryEntry {
     pub const ENTRY_SIZE: usize = mem::size_of::<Self>();
 
@@ -58,7 +57,9 @@ impl VirtualMemoryEntry {
         self.physical_start_address
     }
 
-    pub fn get_permission_flags(&self) -> MemoryPermissionFlags { self.permission_flags }
+    pub fn get_permission_flags(&self) -> MemoryPermissionFlags {
+        self.permission_flags
+    }
 
     pub fn set_permission_flags(&mut self, flags: MemoryPermissionFlags) {
         self.permission_flags = flags;
@@ -81,23 +82,25 @@ impl VirtualMemoryEntry {
         self.end_address = 0;
         self.physical_start_address = 0;
     }
-    pub fn chain_before_me(&mut self/*must be chained*/, entry: &mut Self) {
+    pub fn chain_before_me(&mut self /*must be chained*/, entry: &mut Self) {
         let prev_prev_entry = self.prev_entry;
         self.prev_entry = Some(entry as *mut Self as usize);
         entry.next_entry = Some(self as *mut Self as usize);
         entry.prev_entry = prev_prev_entry;
         if let Some(e) = prev_prev_entry {
-            unsafe { &mut *(e as *mut VirtualMemoryEntry) }.next_entry = Some(entry as *const _ as usize);
+            unsafe { &mut *(e as *mut VirtualMemoryEntry) }.next_entry =
+                Some(entry as *const _ as usize);
         }
     }
 
-    pub fn chain_after_me(&mut self/*must be chained*/, entry: &mut Self) {
+    pub fn chain_after_me(&mut self /*must be chained*/, entry: &mut Self) {
         let next_next_entry = self.next_entry;
         self.next_entry = Some(entry as *mut Self as usize);
         entry.prev_entry = Some(self as *mut Self as usize);
         entry.next_entry = next_next_entry;
         if let Some(e) = next_next_entry {
-            unsafe { &mut *(e as *mut VirtualMemoryEntry) }.prev_entry = Some(entry as *const _ as usize);
+            unsafe { &mut *(e as *mut VirtualMemoryEntry) }.prev_entry =
+                Some(entry as *const _ as usize);
         }
     }
 
@@ -164,7 +167,7 @@ impl VirtualMemoryEntry {
         true
     }
 
-    pub fn adjust_entries(&mut self) -> usize/*new root*/ {
+    pub fn adjust_entries(&mut self) -> usize /*new root*/ {
         // self should be root.
         let mut new_root = self;
         while let Some(entry) = new_root.prev_entry {
@@ -191,7 +194,7 @@ impl VirtualMemoryEntry {
         }
     }
 
-    pub fn find_entry(&self, vm_start_address: usize) -> Option<&Self/*should be fixed*/> {
+    pub fn find_entry(&self, vm_start_address: usize) -> Option<&Self /*should be fixed*/> {
         // self should be root.
         if self.start_address == vm_start_address {
             Some(self)
@@ -210,7 +213,11 @@ impl VirtualMemoryEntry {
         }
     }
 
-    fn _find_entry(&self, vm_start_address: usize, search_right: bool) -> Option<&Self/*should be fixed*/> {
+    fn _find_entry(
+        &self,
+        vm_start_address: usize,
+        search_right: bool,
+    ) -> Option<&Self /*should be fixed*/> {
         if self.start_address == vm_start_address {
             Some(self)
         } else if self.start_address < vm_start_address && search_right {
@@ -230,7 +237,10 @@ impl VirtualMemoryEntry {
         }
     }
 
-    pub fn find_entry_mut(&mut self, vm_start_address: usize) -> Option<&mut Self/*should be fixed*/> {
+    pub fn find_entry_mut(
+        &mut self,
+        vm_start_address: usize,
+    ) -> Option<&mut Self /*should be fixed*/> {
         // self should be root.
         if self.start_address == vm_start_address {
             unsafe { Some(&mut *(self as *mut Self)) }
@@ -249,18 +259,24 @@ impl VirtualMemoryEntry {
         }
     }
 
-    fn _find_entry_mut(&mut self, vm_start_address: usize, search_right: bool) -> Option<&mut Self/*should be fixed*/> {
+    fn _find_entry_mut(
+        &mut self,
+        vm_start_address: usize,
+        search_right: bool,
+    ) -> Option<&mut Self /*should be fixed*/> {
         if self.start_address == vm_start_address {
             unsafe { Some(&mut *(self as *mut Self)) }
         } else if self.start_address < vm_start_address && search_right {
             if let Some(address) = self.next_entry {
-                unsafe { &mut *(address as *mut Self) }._find_entry_mut(vm_start_address, search_right)
+                unsafe { &mut *(address as *mut Self) }
+                    ._find_entry_mut(vm_start_address, search_right)
             } else {
                 None
             }
         } else if self.start_address > vm_start_address && !search_right {
             if let Some(address) = self.prev_entry {
-                unsafe { &mut *(address as *mut Self) }._find_entry_mut(vm_start_address, search_right)
+                unsafe { &mut *(address as *mut Self) }
+                    ._find_entry_mut(vm_start_address, search_right)
             } else {
                 None
             }
@@ -269,23 +285,45 @@ impl VirtualMemoryEntry {
         }
     }
 
-    pub fn check_usable_address_range(&self, vm_start_address: usize, vm_end_address: usize) -> bool {
-        self._check_usable_address_range(vm_start_address, vm_end_address, self.start_address <= vm_start_address)
+    pub fn check_usable_address_range(
+        &self,
+        vm_start_address: usize,
+        vm_end_address: usize,
+    ) -> bool {
+        self._check_usable_address_range(
+            vm_start_address,
+            vm_end_address,
+            self.start_address <= vm_start_address,
+        )
     }
 
-    fn _check_usable_address_range(&self, vm_start_address: usize, vm_end_address: usize, search_right: bool) -> bool {
-        if (self.start_address <= vm_start_address && self.end_address >= vm_start_address) ||
-            (self.start_address <= vm_end_address && self.end_address >= vm_end_address) {
+    fn _check_usable_address_range(
+        &self,
+        vm_start_address: usize,
+        vm_end_address: usize,
+        search_right: bool,
+    ) -> bool {
+        if (self.start_address <= vm_start_address && self.end_address >= vm_start_address)
+            || (self.start_address <= vm_end_address && self.end_address >= vm_end_address)
+        {
             false
         } else if search_right && self.end_address < vm_start_address {
             if let Some(address) = self.next_entry {
-                unsafe { &*(address as *const Self) }._check_usable_address_range(vm_start_address, vm_end_address, search_right)
+                unsafe { &*(address as *const Self) }._check_usable_address_range(
+                    vm_start_address,
+                    vm_end_address,
+                    search_right,
+                )
             } else {
                 true
             }
         } else if !search_right && self.start_address > vm_end_address {
             if let Some(address) = self.prev_entry {
-                unsafe { &*(address as *const Self) }._check_usable_address_range(vm_start_address, vm_end_address, search_right)
+                unsafe { &*(address as *const Self) }._check_usable_address_range(
+                    vm_start_address,
+                    vm_end_address,
+                    search_right,
+                )
             } else {
                 true
             }

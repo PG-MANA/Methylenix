@@ -3,17 +3,16 @@
     This manager is the frontend of physical memory manager and page manager.
 */
 
-
 pub mod kernel_malloc_manager;
 pub mod physical_memory_manager;
-pub mod virtual_memory_manager;
 pub mod virtual_memory_entry;
+pub mod virtual_memory_manager;
 
 use arch::target_arch::paging::{PAGE_SIZE, PAGING_CACHE_LENGTH};
 
-use kernel::sync::spin_lock::Mutex;
-use self::virtual_memory_manager::VirtualMemoryManager;
 use self::physical_memory_manager::PhysicalMemoryManager;
+use self::virtual_memory_manager::VirtualMemoryManager;
+use kernel::sync::spin_lock::Mutex;
 
 pub struct MemoryManager {
     physical_memory_manager: Mutex<PhysicalMemoryManager>,
@@ -33,9 +32,11 @@ pub struct FreePageList {
     pub pointer: usize,
 }
 
-
 impl MemoryManager {
-    pub fn new(physical_memory_manager: Mutex<PhysicalMemoryManager>, virtual_memory_manager: VirtualMemoryManager) -> Self {
+    pub fn new(
+        physical_memory_manager: Mutex<PhysicalMemoryManager>,
+        virtual_memory_manager: VirtualMemoryManager,
+    ) -> Self {
         /*カーネル領域の予約*/
         MemoryManager {
             physical_memory_manager,
@@ -50,19 +51,33 @@ impl MemoryManager {
         }
     }
 
-    pub fn alloc_pages(&mut self, order: usize, vm_start_address: Option<usize>, permission: MemoryPermissionFlags) -> Option<usize> {
+    pub fn alloc_pages(
+        &mut self,
+        order: usize,
+        vm_start_address: Option<usize>,
+        permission: MemoryPermissionFlags,
+    ) -> Option<usize> {
         /*TODO: lazy allocation*/
         // return physically continuous 2 ^ order pages memory.
         // this function is called by kmalloc.
         let size = PAGE_SIZE * (1 << order);
         if let Some(vm_address) = vm_start_address {
-            if !self.virtual_memory_manager.check_if_usable_address_range(vm_address, vm_address + size - 1) {
+            if !self
+                .virtual_memory_manager
+                .check_if_usable_address_range(vm_address, vm_address + size - 1)
+            {
                 return None;
             }
         }
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, true) {
-            if let Some(address) = self.virtual_memory_manager.alloc_address(size, physical_address, vm_start_address, permission, &mut physical_memory_manager) {
+            if let Some(address) = self.virtual_memory_manager.alloc_address(
+                size,
+                physical_address,
+                vm_start_address,
+                permission,
+                &mut physical_memory_manager,
+            ) {
                 self.virtual_memory_manager.update_paging(address);
                 Some(address)
             } else {
@@ -74,7 +89,12 @@ impl MemoryManager {
         }
     }
 
-    pub fn alloc_nonlinear_pages(&mut self, order: usize, vm_start_address: Option<usize>, permission: MemoryPermissionFlags) -> Option<usize> {
+    pub fn alloc_nonlinear_pages(
+        &mut self,
+        order: usize,
+        vm_start_address: Option<usize>,
+        permission: MemoryPermissionFlags,
+    ) -> Option<usize> {
         /*THINK: rename*/
         // return virtually 2 ^ order pages memory.
         // this function is called by vmalloc.
@@ -85,7 +105,10 @@ impl MemoryManager {
         let count = 1 << order;
         let size = PAGE_SIZE * count;
         let address = if let Some(addr) = vm_start_address {
-            if !self.virtual_memory_manager.check_if_usable_address_range(addr, addr + size - 1) {
+            if !self
+                .virtual_memory_manager
+                .check_if_usable_address_range(addr, addr + size - 1)
+            {
                 return None;
             }
             addr
@@ -99,10 +122,17 @@ impl MemoryManager {
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
         for i in 0..count {
             if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, true) {
-                self.virtual_memory_manager.alloc_address(PAGE_SIZE, physical_address, Some(address + i * PAGE_SIZE), permission, &mut pm_manager);
+                self.virtual_memory_manager.alloc_address(
+                    PAGE_SIZE,
+                    physical_address,
+                    Some(address + i * PAGE_SIZE),
+                    permission,
+                    &mut pm_manager,
+                );
             } else {
                 for j in 0..i {
-                    self.virtual_memory_manager.free_address(address + j * PAGE_SIZE, &mut pm_manager);
+                    self.virtual_memory_manager
+                        .free_address(address + j * PAGE_SIZE, &mut pm_manager);
                 }
                 return None;
             }
@@ -113,7 +143,10 @@ impl MemoryManager {
     pub fn free_pages(&mut self, vm_address: usize, _order: usize) -> bool {
         //let count = 1 << order;
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
-        if !self.virtual_memory_manager.free_address(vm_address, &mut pm_manager) {
+        if !self
+            .virtual_memory_manager
+            .free_address(vm_address, &mut pm_manager)
+        {
             return false;
         }
         //物理メモリの開放はfree_addressでやっているが本来はここでやるべきか?
@@ -146,7 +179,6 @@ impl MemoryManager {
         println!("----Virtual Memory Entries Dump End----");
     }
 }
-
 
 impl MemoryPermissionFlags {
     pub const fn rodata() -> Self {

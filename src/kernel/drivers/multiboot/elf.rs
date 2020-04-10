@@ -99,5 +99,7 @@ impl ElfSection {
     pub fn should_excusable(&self) -> bool {
         self.section_flags & 4 != 0
     }
-    pub fn should_allocate(&self) -> bool { self.section_flags & 2 != 0 }
+    pub fn should_allocate(&self) -> bool {
+        self.section_flags & 2 != 0
+    }
 }
