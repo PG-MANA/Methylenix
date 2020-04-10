@@ -20,6 +20,7 @@ use kernel::sync::spin_lock::Mutex;
 use kernel::manager_cluster::get_kernel_manager_cluster;
 
 use core::mem;
+use arch::x86_64::paging::PAGE_MASK;
 
 /* Memory Areas for initial processes*/
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
@@ -86,24 +87,30 @@ fn hlt() {
 
 
 fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformation {
-    //set up for Physical Memory Manager
+    /* Set up Physical Memory Manager */
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
-        physical_memory_manager.set_memory_entry_pool((&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize) as usize,
-                                                      mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER));
+        physical_memory_manager.set_memory_entry_pool(
+            &MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize,
+            mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER));
     }
     for entry in multiboot_information.memory_map_info.clone() {
         if entry.m_type == 1 { //Free Area
             physical_memory_manager.define_free_memory(entry.addr as usize, entry.length as usize);
         }
     }
+    /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
+    for section in multiboot_information.elf_info.clone() {
+        physical_memory_manager.define_used_memory(section.addr(), section.size(), true);
+    }
+    //MultiBootInformation領域を除外
+    physical_memory_manager.define_used_memory(multiboot_information.address, multiboot_information.size, false);
 
-    //set up for Virtual Memory Manager
+    /* set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
-    virtual_memory_manager.init(true, &mut physical_memory_manager);
-
-    //set up for Memory Manager
-    let mut memory_manager = MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
+    if !virtual_memory_manager.init(true, &mut physical_memory_manager) {
+        panic!("Cannot init Virtual Memory Manager.");
+    }
 
     for section in multiboot_information.elf_info.clone() {
         let permission = MemoryPermissionFlags {
@@ -112,7 +119,19 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             execute: section.should_excusable(),
             user_access: false,
         };
-        memory_manager.reserve_pages(section.addr(), section.addr(), VirtualMemoryManager::size_to_order(section.size()), permission);
+        let aligned_start_address = section.addr() & PAGE_MASK;
+        let aligned_size = ((section.addr() - aligned_start_address + section.size() - 1) & PAGE_MASK) + PAGE_SIZE;
+        /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
+        if let Some(address) = virtual_memory_manager.alloc_address(aligned_size,
+                                                                    aligned_start_address,
+                                                                    Some(aligned_start_address),
+                                                                    permission,
+                                                                    &mut physical_memory_manager) {
+            if address == aligned_start_address {
+                continue;
+            }
+        }
+        panic!("Cannot map virtual memory correctly.");
     }
 
     for entry in multiboot_information.memory_map_info.clone() {
@@ -125,14 +144,28 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             5 => MemoryPermissionFlags::data(), //rodata?
             _ => MemoryPermissionFlags::rodata()
         };
-        memory_manager.reserve_pages(entry.addr as usize, entry.addr as usize, VirtualMemoryManager::size_to_order(entry.length as usize), permission);
+        let aligned_start_address = entry.addr as usize & PAGE_MASK;
+        let aligned_size = ((entry.addr as usize - aligned_start_address + entry.length as usize - 1) & PAGE_MASK) + PAGE_SIZE;
+        if let Some(address) = virtual_memory_manager.alloc_address(aligned_size,
+                                                                    aligned_start_address,
+                                                                    Some(aligned_start_address),
+                                                                    permission,
+                                                                    &mut physical_memory_manager) {
+            if address == aligned_start_address {
+                continue;
+            }
+        }
+        panic!("Cannot map virtual memory correctly.");
     }
 
-    // set up for Kernel Memory Alloc Manager
+    /* set up Memory Manager */
+    let mut memory_manager = MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
+
+    /* set up Kernel Memory Alloc Manager */
     let mut kernel_memory_alloc_manager = KernelMemoryAllocManager::new();
     kernel_memory_alloc_manager.init(&mut memory_manager);
 
-    // Move multiboot information to allocated memory area.
+    /* move Multiboot Information to allocated memory area */
     let new_mbi_address = kernel_memory_alloc_manager.kmalloc(multiboot_information.size, &mut memory_manager)
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
@@ -140,8 +173,12 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             *((new_mbi_address + i) as *mut u8) = *((multiboot_information.address + i) as *mut u8);
         }
     }
+
+    /* free old multibootinfo area */
+    memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size); // may be already freed
+
     //Apply paging
-    //memory_manager.reset_paging();
+    memory_manager.set_paging_table();
 
     //Store to cluster
     get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);

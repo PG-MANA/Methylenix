@@ -3,8 +3,6 @@
  * 動作を簡略化させるためにページサイズのメモリ管理しかしない(つもり)
  * 現時点では連結リスト管理だが、AVL-Treeなども実装してみたい
 */
-#![allow(dead_code)]
-/*TODO: 排他管理*/
 /*WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている*/
 
 /*use(depending on arch)*/
@@ -105,9 +103,14 @@ impl PhysicalMemoryManager {
         }
     }
 
-    pub fn define_used_memory(&mut self, start: usize, length/*length= start - end + 1*/: usize) -> bool {
+    pub fn define_used_memory(&mut self, start: usize, length/*length= end - start + 1*/: usize, align: bool) -> bool {
         if length == 0 || self.free_memory_size < length {
             return false;
+        }
+        if align {
+            let aligned_start_address = start & PAGE_MASK;
+            let aligned_size = ((start - aligned_start_address + length - 1) & PAGE_MASK) + PAGE_SIZE;
+            return self.define_used_memory(aligned_start_address, aligned_size, false);
         }
         let entry = if let Some(t) = self.search_contained_entry(start) { t } else { return false; };
         if entry.get_start_address() == start {
@@ -162,6 +165,7 @@ impl PhysicalMemoryManager {
             root.init();
             root.set_range(start, start + length - 1);
             self.free_memory_size += length;
+            self.memory_size += length;
         } else {
             self.free(start, length);
         }
@@ -175,10 +179,16 @@ impl PhysicalMemoryManager {
         let mut entry = unsafe { &mut *(self.root as *mut MemoryEntry) };
         loop {
             if entry.get_size() >= size {
-                if align && entry.get_start_address() != 0 {
-                    let aligned_addr = ((entry.get_start_address() - 1) & PAGE_MASK) + PAGE_SIZE;
-                    if size <= entry.get_size() - (aligned_addr - entry.get_start_address()) {
-                        break;
+                if align && entry.get_start_address() != 0 /*Why != 0*/ {
+                    let aligned_address = ((entry.get_start_address() - 1) & PAGE_MASK) + PAGE_SIZE;
+                    let aligned_available_size = entry.get_size() - (aligned_address - entry.get_start_address());
+
+                    if size <= aligned_available_size {
+                        return if !self.define_used_memory(aligned_address, size, false) {
+                            None
+                        } else {
+                            Some(aligned_address)
+                        }
                     }
                 } else {
                     break;
@@ -191,7 +201,7 @@ impl PhysicalMemoryManager {
             }
         }
         let address = if align { ((entry.get_start_address() - 1) & PAGE_MASK) + PAGE_SIZE } else { entry.get_start_address() };
-        if !self.define_used_memory(address, size) {
+        if !self.define_used_memory(address, size, false) {
             None
         } else {
             Some(address)
@@ -203,6 +213,9 @@ impl PhysicalMemoryManager {
             return false;
         }
         let entry = self.search_previous_entry(address).unwrap_or(unsafe { &mut *(self.root as *mut MemoryEntry) });
+        if entry.start <= address && entry.end >= address + size - 1 {
+            return false;//Already freed
+        }
         if entry.get_end_address() > address {
             if address + size == entry.get_start_address() {
                 entry.set_range(address, entry.get_end_address());
@@ -212,6 +225,9 @@ impl PhysicalMemoryManager {
                 new_root.chain_after_me(unsafe { &mut *(self.root as *mut MemoryEntry) });
                 self.root = new_root as *const _ as usize;
                 self.free_memory_size += size;
+                if self.free_memory_size > self.memory_size {
+                    self.memory_size = self.free_memory_size;
+                }
                 return true;
             }
         }
@@ -219,18 +235,37 @@ impl PhysicalMemoryManager {
             if let Some(next) = entry.get_next_entry() {
                 if next.get_start_address() == address + size {
                     next.set_range(entry.get_start_address(), next.get_end_address());
+                    if entry as *const _ as usize == self.root {
+                        self.root = next as *mut _ as usize;
+                    }
                     entry.delete();
+                } else {
+                    //should do something?
                 }
             } else {
                 entry.set_range(entry.get_start_address(), address + size - 1);
             }
             self.free_memory_size += size;
+            if self.free_memory_size > self.memory_size {
+                self.memory_size = self.free_memory_size;
+            }
             return true;
+        }
+        if entry.get_start_address() == address {
+            //重複領域の解放
+            return self.free(address + entry.get_size(), size - entry.get_size());
+        }
+        if entry.get_end_address() == address + size - 1 {
+            //重複領域の解放
+            return self.free(address, size - entry.get_size());
         }
         if let Some(next) = entry.get_next_entry() {
             if next.get_start_address() == address + size {
                 next.set_range(address, next.get_end_address());
                 self.free_memory_size += size;
+                if self.free_memory_size > self.memory_size {
+                    self.memory_size = self.free_memory_size;
+                }
                 return true;
             }
         }
@@ -253,19 +288,18 @@ impl PhysicalMemoryManager {
             println!("Root Entry is not enabled.");
             return;
         }
-        println!("Root:start:{:X},end:{:X}", entry.get_start_address(), entry.get_end_address());
+        println!("Root :start:0x{:X},end:0x{:X}", entry.get_start_address(), entry.get_end_address());
         while let Some(t) = entry.get_next_entry() {
             entry = t;
-            println!(" Entry:start:{:X},end:{:X}", entry.get_start_address(), entry.get_end_address());
+            println!("Entry:start:0x{:X},end:0x{:X}", entry.get_start_address(), entry.get_end_address());
         }
     }
 }
 
 impl MemoryEntry {
-    pub unsafe fn new_from_address(address: usize) -> &'static mut MemoryEntry {
-        let entry = &mut *(address as *mut MemoryEntry);
-        entry.init();
-        entry
+    pub fn init(&mut self) {
+        self.previous = None;
+        self.next = None;
     }
 
     pub fn delete(&mut self) {
@@ -277,14 +311,14 @@ impl MemoryEntry {
                 previous.next = None;
             }
         } else {
-            panic!("Physical Memory Manager is broken: MemoryMap's chain is wrong.");
-            /*つまりrootは削除不可*/
+            if let Some(next) = self.get_next_entry() {
+                /*root*/
+                println!("Physical Memory Manager: root entry was changed.");
+                next.previous = None;
+            } else {
+                println!("Physical Memory Manager: not chained entry was deleted.");
+            }
         }
-    }
-
-    pub fn init(&mut self) {
-        self.previous = None;
-        self.next = None;
     }
 
     pub fn set_enabled(&mut self) {

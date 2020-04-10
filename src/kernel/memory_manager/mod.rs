@@ -15,7 +15,6 @@ use kernel::sync::spin_lock::Mutex;
 use self::virtual_memory_manager::VirtualMemoryManager;
 use self::physical_memory_manager::PhysicalMemoryManager;
 
-
 pub struct MemoryManager {
     physical_memory_manager: Mutex<PhysicalMemoryManager>,
     virtual_memory_manager: VirtualMemoryManager,
@@ -55,12 +54,9 @@ impl MemoryManager {
         /*TODO: lazy allocation*/
         // return physically continuous 2 ^ order pages memory.
         // this function is called by kmalloc.
-        if order == 0 {
-            return None;
-        }
-        let size = PAGE_SIZE * (1 << (order - 1));
+        let size = PAGE_SIZE * (1 << order);
         if let Some(vm_address) = vm_start_address {
-            if !self.virtual_memory_manager.check_usable_address_range(vm_address, vm_address + size - 1) {
+            if !self.virtual_memory_manager.check_if_usable_address_range(vm_address, vm_address + size - 1) {
                 return None;
             }
         }
@@ -82,13 +78,14 @@ impl MemoryManager {
         /*THINK: rename*/
         // return virtually 2 ^ order pages memory.
         // this function is called by vmalloc.
-        if order <= 1 {
+        // vfreeの際に全てのメモリが開放されないバグを含んでいる
+        if order == 0 {
             return self.alloc_pages(order, vm_start_address, permission);
         }
-        let count = 1 << (order - 1);
+        let count = 1 << order;
         let size = PAGE_SIZE * count;
         let address = if let Some(addr) = vm_start_address {
-            if !self.virtual_memory_manager.check_usable_address_range(addr, addr + size - 1) {
+            if !self.virtual_memory_manager.check_if_usable_address_range(addr, addr + size - 1) {
                 return None;
             }
             addr
@@ -113,49 +110,40 @@ impl MemoryManager {
         Some(address)
     }
 
-    pub fn free_pages(&mut self, vm_address: usize, order: usize) -> bool {
-        if order == 0 {
+    pub fn free_pages(&mut self, vm_address: usize, _order: usize) -> bool {
+        //let count = 1 << order;
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        if !self.virtual_memory_manager.free_address(vm_address, &mut pm_manager) {
             return false;
         }
-        let count = 1 << (order - 1);
-        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
-        for i in 0..count {
-            if !self.virtual_memory_manager.free_address(vm_address + i * PAGE_SIZE, &mut pm_manager) {
-                return false;
-            }
-        }
+        //物理メモリの開放はfree_addressでやっているが本来はここでやるべきか?
         true
     }
 
-    pub fn reserve_pages(&mut self, virtual_address: usize, physical_address: usize, order: usize, permission: MemoryPermissionFlags) -> bool {
-        /*initial settings only*/
-        if order == 0 {
-            return false;
+    pub fn free_physical_memory(&mut self, physical_address: usize, size: usize) -> bool {
+        /* initial use only */
+        if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
+            pm_manager.free(physical_address, size)
+        } else {
+            false
         }
-        let size = (1 << (order - 1)) * PAGE_SIZE;
-        if !self.virtual_memory_manager.check_usable_address_range(virtual_address, virtual_address + size - 1) {
-            return false;
-        }
-        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
-        if !pm_manager.define_used_memory(physical_address, size) {
-            return false;
-        }
-        if let Some(result) = self.virtual_memory_manager.alloc_address(size, physical_address, Some(virtual_address), permission, &mut pm_manager) {
-            if result == virtual_address {
-                return true;
-            }
-            self.virtual_memory_manager.free_address(result, &mut pm_manager);
-        }
-        pm_manager.free(physical_address, size);
-        false
+    }
+
+    pub fn set_paging_table(&mut self) {
+        self.virtual_memory_manager.flush_paging();
     }
 
     pub fn dump_memory_manager(&self) {
         if let Ok(physical_memory_manager) = self.physical_memory_manager.try_lock() {
+            println!("----Physical Memory Entries Dump----");
             physical_memory_manager.dump_memory_entry();
+            println!("----Physical Memory Entries Dump End----");
         } else {
             println!("Can not lock Physical Memory Manager.");
         }
+        println!("----Virtual Memory Entries Dump----");
+        self.virtual_memory_manager.dump_memory_manager();
+        println!("----Virtual Memory Entries Dump End----");
     }
 }
 

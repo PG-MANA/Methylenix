@@ -134,8 +134,27 @@ impl PageManager {
             /*PageManager::reset_paging_local(linear_address)*/
             true
         } else {
+            if cache_memory_list.pointer == 0{
+                println!("Cached Memory runs out!!");
+            }
             false
         }
+    }
+
+    pub fn change_memory_permission(&mut self, cache_memory_list: &mut FreePageList, linear_address: usize, permission: MemoryPermissionFlags) -> bool {
+        if (linear_address & !PAGE_MASK) != 0 {
+            return false;
+        }
+        if let Some(pte) = self.get_target_pte(cache_memory_list, linear_address, false) {
+            pte.set_writable(permission.write);
+            pte.set_no_execute(!permission.execute);
+            pte.set_user_accessible(permission.user_access);
+            return true;
+        }
+        if cache_memory_list.pointer == 0{
+            println!("Cached Memory runs out!!");
+        }
+        false
     }
 
     pub fn unassociate_address(&mut self, linear_address: usize, cache_memory_list: &mut FreePageList) -> bool {
@@ -182,7 +201,7 @@ impl PageManager {
                         if !pte.is_present() {
                             continue;
                         }
-                        println!("Address:0x{:X},WRITABLE:{},EXECUTABLE:{},ACCESSED:{}", pte.get_addr().unwrap(), pte.is_writable(), !pte.is_no_execute(), pte.is_accessed());
+                        println!("Address: 0x{:X} PM W:{}, EXE:{}, A:{}", pte.get_addr().unwrap(), pte.is_writable(), !pte.is_no_execute(), pte.is_accessed());
                         if pte.get_addr().unwrap() >= end {
                             return;
                         }

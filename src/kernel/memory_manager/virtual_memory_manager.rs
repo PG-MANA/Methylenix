@@ -44,7 +44,8 @@ impl VirtualMemoryManager {
 
         self.is_system_vm = is_system_vm;
 
-        // set cache list
+        /* set up cache list */
+        //後で解放する気があるならPAGE_SIZEごとに分けるのが良さそう?
         let addr = pm_manager.alloc(PAGE_SIZE * PAGING_CACHE_LENGTH, true).expect("Cannot alloc memory for Virtual Memory Cache");
         let vme_for_cache = VirtualMemoryEntry::new(
             addr,
@@ -55,22 +56,29 @@ impl VirtualMemoryManager {
             self.reserved_memory_list.list[i] = addr + PAGE_SIZE * i;
         }
         self.reserved_memory_list.pointer = PAGING_CACHE_LENGTH;
+        /* ページング反映とエントリー追加は後でやる*/
 
         //init page_manager
         if !self.page_manager.init(&mut self.reserved_memory_list) {
             return false;
         }
 
-        //set memory pool
-        self.entry_pool = if let Some(address) = pm_manager.alloc(PAGE_SIZE, true) {
+        /* set up memory pool */
+        self.entry_pool = if let Some(address) = pm_manager.alloc(PAGE_SIZE * 4, true) {
             address
         } else {
             return false;
         };
-        self.entry_pool_size = PAGE_SIZE;
-        self.page_manager.associate_address(&mut self.reserved_memory_list, self.entry_pool, self.entry_pool, MemoryPermissionFlags::data());
         for i in 0..(self.entry_pool_size / VirtualMemoryEntry::ENTRY_SIZE) {
             unsafe { (*((self.entry_pool + i * VirtualMemoryEntry::ENTRY_SIZE) as *mut VirtualMemoryEntry)).set_disabled() }
+        }
+        self.vm_map_entry = self.entry_pool;
+        self.entry_pool_size = PAGE_SIZE * 4;
+        for i in 0..(self.entry_pool_size / PAGE_SIZE) {
+            self.page_manager.associate_address(&mut self.reserved_memory_list,
+                                                self.entry_pool + i * PAGE_SIZE,
+                                                self.entry_pool + i * PAGE_SIZE,
+                                                MemoryPermissionFlags::data());
         }
         unsafe {
             *(self.entry_pool as *mut VirtualMemoryEntry) = VirtualMemoryEntry::new(
@@ -80,8 +88,16 @@ impl VirtualMemoryManager {
                 MemoryPermissionFlags::data());
         }
 
-        self.vm_map_entry = self.entry_pool;
+        /* insert cached_memory_list entry */
         self.insert_entry(vme_for_cache, pm_manager);
+        self.vm_map_entry = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) }.adjust_entries();
+        for i in 0..self.reserved_memory_list.pointer {
+            let physical_address = self.reserved_memory_list.list[i];
+            self.page_manager.associate_address(&mut self.reserved_memory_list,
+                                                physical_address,
+                                                physical_address,
+                                                MemoryPermissionFlags::data());
+        }
         true
     }
 
@@ -89,7 +105,7 @@ impl VirtualMemoryManager {
         self.page_manager.reset_paging();
     }
 
-    pub fn update_paging(&mut self, address: usize) {
+    pub fn update_paging(&mut self/*Not necessary*/, address: usize) {
         PageManager::reset_paging_local(address);
     }
 
@@ -98,7 +114,11 @@ impl VirtualMemoryManager {
             let e = unsafe { &mut (*((self.entry_pool + i * VirtualMemoryEntry::ENTRY_SIZE) as *mut VirtualMemoryEntry)) };
             if e.is_disabled() {
                 *e = entry;
-                unsafe { &mut (*(self.vm_map_entry as *mut VirtualMemoryEntry)) }.insert_entry(e);
+                if !(unsafe { &mut (*(self.vm_map_entry as *mut VirtualMemoryEntry)) }.insert_entry(e)) {
+                    println!("Error: cannot insert Virtual Memory Entry.");
+                    return false;
+                }
+                self.vm_map_entry = unsafe { &mut (*(self.vm_map_entry as *mut VirtualMemoryEntry)) }.adjust_entries();
                 return true;
             }
         }
@@ -108,28 +128,55 @@ impl VirtualMemoryManager {
 
     pub fn alloc_address(&mut self, size: usize, physical_start_address: usize, vm_start_address: Option<usize>, permission: MemoryPermissionFlags, pm_manager: &mut PhysicalMemoryManager) -> Option<usize> {
         //NOTE: ページキャッシュの更新は行わない
-        if size & !PAGE_MASK != 0 {
+        if physical_start_address & !PAGE_MASK != 0 {
+            println!("Error: Physical Address is not aligned.");
+            return None;
+        } else if size & !PAGE_MASK != 0 {
+            println!("Error: Size is not aligned.");
             return None;
         }
         let entry = if let Some(address) = vm_start_address {
-            if !self.check_usable_address_range(address, address + size - 1) {
+            if address & !PAGE_MASK != 0 {
+                println!("Error: Virtual Address is not aligned.");
+                return None;
+            }
+            if !self.check_if_usable_address_range(address, address + size - 1) {
+                println!("Error: Virtual Address is not usable.");
                 return None;
             }
             VirtualMemoryEntry::new(address, address + size - 1, physical_start_address, permission)
+        } else if self.check_if_usable_address_range(physical_start_address, physical_start_address + size - 1) {
+            /* 物理・論理アドレスの合致ができるならそれが良い */
+            VirtualMemoryEntry::new(physical_start_address, physical_start_address + size - 1, physical_start_address, permission)
         } else if let Some(address) = self.get_free_address(size) {
             VirtualMemoryEntry::new(address, address + size - 1, physical_start_address, permission)
         } else {
+            println!("Error: Virtual Address is not available.");
             return None;
         };
         let address = entry.get_vm_start_address();
-        self.insert_entry(entry, pm_manager);
+        if !self.insert_entry(entry, pm_manager) {
+            println!("Error: Cannot add Virtual Memory Entry.");
+            return None;
+        }
+        for i in 0..size / PAGE_SIZE {
+            if !self.page_manager.associate_address(&mut self.reserved_memory_list,
+                                                    physical_start_address + i * PAGE_SIZE,
+                                                    address + i * PAGE_SIZE, permission) {
+                panic!("Error: Cannot associate physical address.");// 後で巻き戻してdelete_entryしてNoneする処理を追加
+            }
+        }
         Some(address)
     }
 
     pub fn free_address(&mut self, vm_start_address: usize, pm_manager: &mut PhysicalMemoryManager) -> bool {
+        if vm_start_address & !PAGE_MASK != 0 {
+            println!("Error: Virtual Address is not aligned.");
+            return false;
+        }
         let root_entry = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) };
         let root_physical_address = root_entry.get_physical_address();
-        if let Some(entry) = root_entry.find_entry_mut(vm_start_address){
+        if let Some(entry) = root_entry.find_entry_mut(vm_start_address) {
             if entry.get_physical_address() == root_physical_address {
                 panic!("VirtualMemoryManager: Cannot delete root entry.");
             }
@@ -148,17 +195,59 @@ impl VirtualMemoryManager {
         }
     }
 
+    pub fn update_memory_permission(&mut self, vm_start_address: usize, new_permission: MemoryPermissionFlags) -> bool {
+        if let Some(entry) = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) }.find_entry_mut(vm_start_address) {
+            entry.set_permission_flags(new_permission);
+            for i in 0..((entry.get_vm_end_address() + 1) / PAGE_SIZE) {
+                if !self.page_manager.change_memory_permission(&mut self.reserved_memory_list, vm_start_address + i * PAGE_SIZE, new_permission) {
+                    //do something...
+                    return false;
+                }
+            }
+            return true;
+        }
+        false
+    }
+
     pub fn get_free_address(&mut self, size: usize) -> Option<usize> {
         //think: change this function to private and make "reserve_address" function.
         let entry = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };
         entry.find_usable_memory_area(size)
     }
 
-
-    pub fn check_usable_address_range(&self, vm_start_address: usize, vm_end_address: usize) -> bool {
+    pub fn check_if_usable_address_range(&self, vm_start_address: usize, vm_end_address: usize) -> bool {
         // THINKING: rename
         let entry = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };
         entry.check_usable_address_range(vm_start_address, vm_end_address)
+    }
+
+    pub fn check_if_used_memory_range(&self, vm_start_address: usize, vm_end_address: usize) -> bool {
+        let entry = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };
+        if let Some(entry) = entry.find_entry(vm_start_address) {
+            if entry.get_vm_end_address() == vm_end_address {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn dump_memory_manager(&self) {
+        let mut entry = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };
+        loop {
+            println!("V start:0x{:X}, end:0x{:X} P start:0x{:X} PM W:{}, U:{}, EXE:{}",
+                     entry.get_vm_start_address(),
+                     entry.get_vm_end_address(),
+                     entry.get_physical_address(),
+                     entry.get_permission_flags().write,
+                     entry.get_permission_flags().user_access,
+                     entry.get_permission_flags().execute);
+            if let Some(address) = entry.get_next_entry() {
+                unsafe { entry = &*(address as *const _) };
+            } else {
+                break;
+            }
+        }
+        self.page_manager.dump_table(16 * 1024 * 1024);// 適当
     }
 
     pub const fn size_to_order(size: usize) -> usize {

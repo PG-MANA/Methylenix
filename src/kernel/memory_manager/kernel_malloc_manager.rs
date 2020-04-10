@@ -69,8 +69,9 @@ impl KernelMemoryAllocManager {
             }
             return Some(address);
         }
-        /*Allocate from Memory Manager*/
-        if let Some(allocated_address) = m_manager.alloc_pages(1, None, MemoryPermissionFlags::data()) {
+
+        /* alloc from Memory Manager */
+        if let Some(allocated_address) = m_manager.alloc_pages(0, None, MemoryPermissionFlags::data()) {
             self.alloc_manager.define_free_memory(allocated_address, PAGE_SIZE);
             return self.kmalloc(size, m_manager);
         }
