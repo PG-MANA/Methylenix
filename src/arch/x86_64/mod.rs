@@ -95,17 +95,17 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     for entry in multiboot_information.memory_map_info.clone() {
         if entry.m_type == 1 {
             //Free Area
-            physical_memory_manager.define_free_memory(entry.addr as usize, entry.length as usize);
+            physical_memory_manager.free(entry.addr as usize, entry.length as usize, true);
         }
     }
     /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
     for section in multiboot_information.elf_info.clone() {
         if section.should_allocate() {
-            physical_memory_manager.define_used_memory(section.addr(), section.size(), true);
+            physical_memory_manager.reserve_memory(section.addr(), section.size(), true);
         }
     }
     //MultiBootInformation領域を除外
-    physical_memory_manager.define_used_memory(
+    physical_memory_manager.reserve_memory(
         multiboot_information.address,
         multiboot_information.size,
         false,

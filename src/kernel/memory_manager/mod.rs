@@ -81,7 +81,7 @@ impl MemoryManager {
                 self.virtual_memory_manager.update_paging(address);
                 Some(address)
             } else {
-                physical_memory_manager.free(physical_address, size);
+                physical_memory_manager.free(physical_address, size, false);
                 None
             }
         } else {
@@ -154,9 +154,9 @@ impl MemoryManager {
     }
 
     pub fn free_physical_memory(&mut self, physical_address: usize, size: usize) -> bool {
-        /* initial use only */
+        /* initializing use only */
         if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
-            pm_manager.free(physical_address, size)
+            pm_manager.free(physical_address, size, false)
         } else {
             false
         }

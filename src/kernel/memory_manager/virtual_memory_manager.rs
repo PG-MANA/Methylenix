@@ -245,7 +245,7 @@ impl VirtualMemoryManager {
                     &mut self.reserved_memory_list,
                 );
             }
-            pm_manager.free(physical_address, size); //should do this at MemoryManager...?
+            pm_manager.free(physical_address, size, false); //should do this at MemoryManager...?
             true
         } else {
             false

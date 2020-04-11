@@ -72,7 +72,7 @@ impl KernelMemoryAllocManager {
         }
         if let Some(address) = self.alloc_manager.alloc(size, false) {
             if !self.add_entry_to_used_list(address, size) {
-                self.alloc_manager.free(address, size);
+                self.alloc_manager.free(address, size, false);
                 return None;
             }
             return Some(address);
@@ -82,8 +82,7 @@ impl KernelMemoryAllocManager {
         if let Some(allocated_address) =
             m_manager.alloc_pages(0, None, MemoryPermissionFlags::data())
         {
-            self.alloc_manager
-                .define_free_memory(allocated_address, PAGE_SIZE);
+            self.alloc_manager.free(allocated_address, PAGE_SIZE, true);
             return self.kmalloc(size, m_manager);
         }
         /*TODO: Free unused memory.*/
@@ -120,7 +119,7 @@ impl KernelMemoryAllocManager {
                 if e.1 == 0 {
                     return;
                 }
-                self.alloc_manager.free(address, e.1);
+                self.alloc_manager.free(address, e.1, false);
                 *e = (0, 0);
                 /*TODO: return unused memory to virtual memory.*/
                 return;
@@ -138,7 +137,7 @@ impl KernelMemoryAllocManager {
                     return self.kfree(address, m_manager);
                 }
                 m_manager.free_pages(e.0, VirtualMemoryManager::size_to_order(e.1));
-                self.alloc_manager.free(e.0, e.1);
+                self.alloc_manager.free(e.0, e.1, false);
                 *e = (0, 0);
                 return;
             }
