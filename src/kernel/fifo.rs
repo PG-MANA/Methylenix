@@ -2,7 +2,6 @@
 FIFOシステム(暫定)
 */
 
-
 pub struct FIFO<T: Copy> {
     buf: [T; 128],
     r: usize,
@@ -13,7 +12,10 @@ pub struct FIFO<T: Copy> {
 }
 
 impl<T: Copy> FIFO<T> {
-    pub fn new(_f_size: usize /*可変にできないので今の所無視*/, default_value: &T) -> FIFO<T> {
+    pub fn new(
+        _f_size: usize, /*可変にできないので今の所無視*/
+        default_value: &T,
+    ) -> FIFO<T> {
         FIFO {
             size: 128,
             buf: [*default_value; 128],

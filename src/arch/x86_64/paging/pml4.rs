@@ -1,6 +1,5 @@
 use super::PAGE_MASK;
 
-
 pub const PML4_MAX_ENTRY: usize = 512;
 
 //PML4の53bit目はPDPEがセットされているかどうかの確認に利用している。
@@ -12,9 +11,7 @@ pub struct PML4 {
 impl PML4 {
     #![allow(dead_code)]
     pub const fn new() -> PML4 {
-        PML4 {
-            flags: 0
-        }
+        PML4 { flags: 0 }
     }
 
     pub fn init(&mut self) {

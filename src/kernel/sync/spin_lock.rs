@@ -3,9 +3,9 @@
 */
 
 //use
-use core::sync::atomic;
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
+use core::sync::atomic;
 
 pub struct Mutex<T: ?Sized> {
     lock_flag: atomic::AtomicBool,
@@ -44,7 +44,10 @@ impl<T: ?Sized> Mutex<T> {
     }
 
     fn lock_loop(&self) {
-        while !self.lock_flag.compare_and_swap(false, true, atomic::Ordering::Relaxed) {}
+        while !self
+            .lock_flag
+            .compare_and_swap(false, true, atomic::Ordering::Relaxed)
+        {}
     }
 }
 

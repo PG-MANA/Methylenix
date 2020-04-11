@@ -2,11 +2,9 @@
     RwLock(Spin Lock version)
 */
 
-
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
 
 pub struct RwLock<T: ?Sized> {
     write_locked: AtomicBool,
@@ -24,7 +22,6 @@ pub struct RwLockWriteGuard<'a, T: ?Sized + 'a> {
     write_locked: &'a AtomicBool,
     data: &'a mut T,
 }
-
 
 impl<T> RwLock<T> {
     pub const fn new(d: T) -> RwLock<T> {
@@ -48,13 +45,21 @@ impl<T: ?Sized> RwLock<T> {
 
     pub fn try_read(&self) -> Result<RwLockReadGuard<'_, T>, ()> {
         if !self.write_locked.load(Ordering::Relaxed) {
-            if self.readers.fetch_update(|x| {
-                if x == usize::max_value() {
-                    None
-                } else {
-                    Some(x + 1)
-                }
-            }, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            if self
+                .readers
+                .fetch_update(
+                    |x| {
+                        if x == usize::max_value() {
+                            None
+                        } else {
+                            Some(x + 1)
+                        }
+                    },
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+            {
                 return Ok(RwLockReadGuard {
                     readers: &self.readers,
                     data: unsafe { &*self.data.get() },
@@ -74,7 +79,10 @@ impl<T: ?Sized> RwLock<T> {
     }
 
     pub fn try_write(&self) -> Result<RwLockWriteGuard<'_, T>, ()> {
-        if self.write_locked.compare_and_swap(false, true, Ordering::Relaxed) {
+        if self
+            .write_locked
+            .compare_and_swap(false, true, Ordering::Relaxed)
+        {
             if self.readers.load(Ordering::Relaxed) != 0 {
                 self.write_locked.store(false, Ordering::Relaxed);
                 return Err(());

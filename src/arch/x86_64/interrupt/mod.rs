@@ -7,15 +7,13 @@ pub mod idt;
 pub mod handler;
 //mod tss;
 
-
-use arch::target_arch::device::cpu;
 use self::idt::GateDescriptor;
+use arch::target_arch::device::cpu;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::MemoryPermissionFlags;
 
-use core::mem::{MaybeUninit, size_of};
-
+use core::mem::{size_of, MaybeUninit};
 
 pub struct InterruptManager {
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
@@ -68,10 +66,13 @@ impl InterruptManager {
     pub fn init(&mut self, selector: u16) -> bool {
         self.main_selector = selector;
         self.idt.write(unsafe {
-            &mut *(
-                get_kernel_manager_cluster().memory_manager.lock().unwrap()
-                    .alloc_pages(1, None,MemoryPermissionFlags::data())
-                    .expect("Cannot alloc memory for interrupt manager.") as *mut [_; Self::IDT_MAX as usize])
+            &mut *(get_kernel_manager_cluster()
+                .memory_manager
+                .lock()
+                .unwrap()
+                .alloc_pages(1, None, MemoryPermissionFlags::data())
+                .expect("Cannot alloc memory for interrupt manager.")
+                as *mut [_; Self::IDT_MAX as usize])
         });
 
         unsafe {

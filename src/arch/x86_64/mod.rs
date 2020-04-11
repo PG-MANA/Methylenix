@@ -3,32 +3,30 @@ pub mod interrupt;
 pub mod device;
 pub mod paging;
 
-use self::device::serial_port::SerialPortManager;
 use self::device::cpu;
-use self::interrupt::InterruptManager;
 use self::device::io_apic::IoApicManager;
 use self::device::local_apic::LocalApicManager;
-use self::paging::PAGE_SIZE;
+use self::device::serial_port::SerialPortManager;
+use self::interrupt::InterruptManager;
+use self::paging::{PAGE_MASK, PAGE_SIZE};
 
 use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic::GraphicManager;
-use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
+use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
-use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
+use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
 use kernel::sync::spin_lock::Mutex;
-use kernel::manager_cluster::get_kernel_manager_cluster;
 
 use core::mem;
-use arch::x86_64::paging::PAGE_MASK;
 
 /* Memory Areas for initial processes*/
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
 
-
 #[no_mangle]
 pub extern "C" fn boot_main(
-    mbi_address: usize, /*マルチブートヘッダのアドレス*/
+    mbi_address: usize,       /*マルチブートヘッダのアドレス*/
     kernel_code_segment: u16, /*現在のセグメント:8*/
     _user_code_segment: u16,
     _user_data_segment: u16,
@@ -54,7 +52,7 @@ pub extern "C" fn boot_main(
 
     let local_apic_manager = LocalApicManager::init();
     let io_apic_manager = IoApicManager::new();
-    io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x24);//Serial Port
+    io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x24); //Serial Port
 
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
@@ -85,17 +83,18 @@ fn hlt() {
     }
 }
 
-
 fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformation {
     /* Set up Physical Memory Manager */
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
         physical_memory_manager.set_memory_entry_pool(
             &MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize,
-            mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER));
+            mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER),
+        );
     }
     for entry in multiboot_information.memory_map_info.clone() {
-        if entry.m_type == 1 { //Free Area
+        if entry.m_type == 1 {
+            //Free Area
             physical_memory_manager.define_free_memory(entry.addr as usize, entry.length as usize);
         }
     }
@@ -106,7 +105,11 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         }
     }
     //MultiBootInformation領域を除外
-    physical_memory_manager.define_used_memory(multiboot_information.address, multiboot_information.size, false);
+    physical_memory_manager.define_used_memory(
+        multiboot_information.address,
+        multiboot_information.size,
+        false,
+    );
 
     /* set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
@@ -125,13 +128,17 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             user_access: false,
         };
         let aligned_start_address = section.addr() & PAGE_MASK;
-        let aligned_size = ((section.size() + (section.addr() - aligned_start_address) - 1) & PAGE_MASK) + PAGE_SIZE;
+        let aligned_size = ((section.size() + (section.addr() - aligned_start_address) - 1)
+            & PAGE_MASK)
+            + PAGE_SIZE;
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
-        if let Some(address) = virtual_memory_manager.alloc_address(aligned_size,
-                                                                    aligned_start_address,
-                                                                    Some(aligned_start_address),
-                                                                    permission,
-                                                                    &mut physical_memory_manager) {
+        if let Some(address) = virtual_memory_manager.alloc_address(
+            aligned_size,
+            aligned_start_address,
+            Some(aligned_start_address),
+            permission,
+            &mut physical_memory_manager,
+        ) {
             if address == aligned_start_address {
                 continue;
             }
@@ -147,15 +154,19 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             3 => MemoryPermissionFlags::data(),
             4 => MemoryPermissionFlags::data(),
             5 => MemoryPermissionFlags::data(), //rodata?
-            _ => MemoryPermissionFlags::rodata()
+            _ => MemoryPermissionFlags::rodata(),
         };
         let aligned_start_address = entry.addr as usize & PAGE_MASK;
-        let aligned_size = ((entry.addr as usize - aligned_start_address + entry.length as usize - 1) & PAGE_MASK) + PAGE_SIZE;
-        if let Some(address) = virtual_memory_manager.alloc_address(aligned_size,
-                                                                    aligned_start_address,
-                                                                    Some(aligned_start_address),
-                                                                    permission,
-                                                                    &mut physical_memory_manager) {
+        let aligned_size =
+            ((entry.addr as usize - aligned_start_address + entry.length as usize - 1) & PAGE_MASK)
+                + PAGE_SIZE;
+        if let Some(address) = virtual_memory_manager.alloc_address(
+            aligned_size,
+            aligned_start_address,
+            Some(aligned_start_address),
+            permission,
+            &mut physical_memory_manager,
+        ) {
             if address == aligned_start_address {
                 continue;
             }
@@ -164,14 +175,16 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
 
     /* set up Memory Manager */
-    let mut memory_manager = MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
+    let mut memory_manager =
+        MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
 
     /* set up Kernel Memory Alloc Manager */
     let mut kernel_memory_alloc_manager = KernelMemoryAllocManager::new();
     kernel_memory_alloc_manager.init(&mut memory_manager);
 
     /* move Multiboot Information to allocated memory area */
-    let new_mbi_address = kernel_memory_alloc_manager.kmalloc(multiboot_information.size, &mut memory_manager)
+    let new_mbi_address = kernel_memory_alloc_manager
+        .kmalloc(multiboot_information.size, &mut memory_manager)
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
         unsafe {
@@ -187,11 +200,11 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
 
     //Store to cluster
     get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);
-    get_kernel_manager_cluster().kernel_memory_alloc_manager = Mutex::new(kernel_memory_alloc_manager);
+    get_kernel_manager_cluster().kernel_memory_alloc_manager =
+        Mutex::new(kernel_memory_alloc_manager);
 
     MultiBootInformation::new(new_mbi_address, false)
 }
-
 
 fn init_interrupt(kernel_selector: u16) {
     let mut interrupt_manager = InterruptManager::new();

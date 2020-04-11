@@ -1,6 +1,5 @@
 use super::PAGE_MASK;
 
-
 pub const PDPE_MAX_ENTRY: usize = 512;
 
 //PDPEの53bit目はPDEの配列がセットされているかどうかの確認に利用している。
@@ -12,9 +11,7 @@ pub struct PDPE {
 impl PDPE {
     #![allow(dead_code)]
     pub const fn new() -> PDPE {
-        PDPE {
-            flags: 0
-        }
+        PDPE { flags: 0 }
     }
 
     pub fn init(&mut self) {

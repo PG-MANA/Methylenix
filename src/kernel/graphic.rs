@@ -2,14 +2,12 @@
     Graphic Manager
 */
 
-
 use arch::target_arch::device::crt;
 
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::manager_cluster::get_kernel_manager_cluster;
 
 use core::fmt;
-
 
 pub struct GraphicManager {
     frame_buffer_address: usize,
@@ -95,7 +93,9 @@ impl GraphicManager {
 
     pub fn puts(&mut self, string: &str) -> bool {
         if self.is_textmode == false {
-            if let Ok(serial_port_manager) = get_kernel_manager_cluster().serial_port_manager.try_lock() {
+            if let Ok(serial_port_manager) =
+                get_kernel_manager_cluster().serial_port_manager.try_lock()
+            {
                 serial_port_manager.sendstr(string);
                 return true;
             }
@@ -109,7 +109,7 @@ impl GraphicManager {
                     unsafe {
                         *((self.frame_buffer_address
                             + (self.cursor.line * self.frame_buffer_width + self.cursor.character)
-                            * 2) as *mut u16) = ' ' as u16;
+                                * 2) as *mut u16) = ' ' as u16;
                     } //暫定的な目印(カラーコードは0にすることで区別)
                     self.cursor.character = 0;
                     self.cursor.line += 1;

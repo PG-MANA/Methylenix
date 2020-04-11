@@ -9,7 +9,6 @@ use arch::target_arch::interrupt::idt::GateDescriptor;
 use kernel::fifo::FIFO;
 use kernel::manager_cluster::get_kernel_manager_cluster;
 
-
 pub struct SerialPortManager {
     port: u16,
     fifo: FIFO<u8>,
@@ -37,20 +36,24 @@ impl SerialPortManager {
     pub fn init(&self, selector: u16) {
         unsafe {
             make_interrupt_hundler!(inthandler24, SerialPortManager::inthandler24_main);
-            get_kernel_manager_cluster().interrupt_manager.lock().unwrap().set_gatedec(
-                0x24,
-                GateDescriptor::new(
-                    inthandler24, /*上のマクロで指定した名前*/
-                    selector,
-                    0,
-                    GateDescriptor::AR_INTGATE32,
-                ),
-            );
+            get_kernel_manager_cluster()
+                .interrupt_manager
+                .lock()
+                .unwrap()
+                .set_gatedec(
+                    0x24,
+                    GateDescriptor::new(
+                        inthandler24, /*上のマクロで指定した名前*/
+                        selector,
+                        0,
+                        GateDescriptor::AR_INTGATE32,
+                    ),
+                );
 
             out_byte(self.port + 1, 0x00); // FIFOをオフ
             out_byte(self.port + 3, 0x80); // DLABを有効化して設定できるようにする?
-            //out_byte(self.port + 0, 0x03); // rateを設定
-            //out_byte(self.port + 1, 0x00); // rate上位
+                                           //out_byte(self.port + 0, 0x03); // rateを設定
+                                           //out_byte(self.port + 1, 0x00); // rate上位
             out_byte(self.port + 3, 0x03); // 8bit単位のパリティビットなし
             out_byte(self.port + 1, 0x05); // データ到着とエラーで割り込み
             out_byte(self.port + 2, 0xC7); // FIFOをオン、割り込みを許可
@@ -94,7 +97,9 @@ impl SerialPortManager {
 
     pub fn inthandler24_main() {
         //handlerをimplで実装することを考え直すべき
-        if let Ok(mut serial_port_manager) = get_kernel_manager_cluster().serial_port_manager.try_lock() {
+        if let Ok(mut serial_port_manager) =
+            get_kernel_manager_cluster().serial_port_manager.try_lock()
+        {
             let code = serial_port_manager.read();
             serial_port_manager.fifo.queue(code);
             local_apic::LocalApicManager::send_eoi();
