@@ -59,7 +59,7 @@ impl VirtualMemoryManager {
         self.reserved_memory_list.pointer = PAGING_CACHE_LENGTH;
         /* ページング反映とエントリー追加は後でやる*/
 
-        //init page_manager
+        /* set up page_manager */
         if !self.page_manager.init(&mut self.reserved_memory_list) {
             return false;
         }

@@ -82,6 +82,7 @@ impl VirtualMemoryEntry {
         self.end_address = 0;
         self.physical_start_address = 0;
     }
+
     pub fn chain_before_me(&mut self /*must be chained*/, entry: &mut Self) {
         let prev_prev_entry = self.prev_entry;
         self.prev_entry = Some(entry as *mut Self as usize);
@@ -196,21 +197,7 @@ impl VirtualMemoryEntry {
 
     pub fn find_entry(&self, vm_start_address: usize) -> Option<&Self /*should be fixed*/> {
         // self should be root.
-        if self.start_address == vm_start_address {
-            Some(self)
-        } else if self.start_address > vm_start_address {
-            if let Some(address) = self.prev_entry {
-                unsafe { &*(address as *const Self) }._find_entry(vm_start_address, false)
-            } else {
-                None
-            }
-        } else {
-            if let Some(address) = self.next_entry {
-                unsafe { &*(address as *const Self) }._find_entry(vm_start_address, true)
-            } else {
-                None
-            }
-        }
+        self._find_entry(vm_start_address, self.start_address < vm_start_address)
     }
 
     fn _find_entry(
@@ -242,21 +229,7 @@ impl VirtualMemoryEntry {
         vm_start_address: usize,
     ) -> Option<&mut Self /*should be fixed*/> {
         // self should be root.
-        if self.start_address == vm_start_address {
-            unsafe { Some(&mut *(self as *mut Self)) }
-        } else if self.start_address > vm_start_address {
-            if let Some(address) = self.prev_entry {
-                unsafe { &mut *(address as *mut Self) }._find_entry_mut(vm_start_address, false)
-            } else {
-                None
-            }
-        } else {
-            if let Some(address) = self.next_entry {
-                unsafe { &mut *(address as *mut Self) }._find_entry_mut(vm_start_address, true)
-            } else {
-                None
-            }
-        }
+        self._find_entry_mut(vm_start_address, self.start_address < vm_start_address)
     }
 
     fn _find_entry_mut(
