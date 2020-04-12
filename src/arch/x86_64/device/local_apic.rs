@@ -25,9 +25,7 @@ impl LocalApicManager {
     const X2APIC_MSR_INDEX: u32 = 0x800;
 
     pub fn init() -> LocalApicManager {
-        let local_apic_msr = unsafe {
-            cpu::rdmsr(LocalApicManager::MSR_INDEX)
-        };
+        let local_apic_msr = unsafe { cpu::rdmsr(LocalApicManager::MSR_INDEX) };
         let base_addr = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
         let is_x2apic_supported = unsafe {
             let mut eax = 1u32;
@@ -39,8 +37,10 @@ impl LocalApicManager {
         };
         if local_apic_msr & LocalApicManager::X2APIC_ENABLED_MASK == 0 && is_x2apic_supported {
             unsafe {
-                cpu::wrmsr(LocalApicManager::MSR_INDEX,
-                           local_apic_msr | LocalApicManager::X2APIC_ENABLED_MASK);
+                cpu::wrmsr(
+                    LocalApicManager::MSR_INDEX,
+                    local_apic_msr | LocalApicManager::X2APIC_ENABLED_MASK,
+                );
             }
         }
         let mut local_apic_manager = LocalApicManager {
@@ -48,17 +48,21 @@ impl LocalApicManager {
             is_x2apic_enabled: is_x2apic_supported,
             base_address: base_addr,
         };
-        local_apic_manager.apic_id = local_apic_manager.read_apic_register(LocalApicRegisters::ApicId);
-        local_apic_manager.write_apic_register(LocalApicRegisters::SIR,
-                                               local_apic_manager.read_apic_register(LocalApicRegisters::SIR) | 0x100);
-        println!("APIC ID:{}(x2APIC:{})", local_apic_manager.apic_id, is_x2apic_supported);
+        local_apic_manager.apic_id =
+            local_apic_manager.read_apic_register(LocalApicRegisters::ApicId);
+        local_apic_manager.write_apic_register(
+            LocalApicRegisters::SIR,
+            local_apic_manager.read_apic_register(LocalApicRegisters::SIR) | 0x100,
+        );
+        println!(
+            "APIC ID:{}(x2APIC:{})",
+            local_apic_manager.apic_id, is_x2apic_supported
+        );
         local_apic_manager
     }
 
     fn get_running_cpu_local_apic_manager() -> LocalApicManager {
-        let local_apic_msr = unsafe {
-            cpu::rdmsr(LocalApicManager::MSR_INDEX)
-        };
+        let local_apic_msr = unsafe { cpu::rdmsr(LocalApicManager::MSR_INDEX) };
         let base_address = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
         let is_x2apic_enabled = local_apic_msr & LocalApicManager::X2APIC_ENABLED_MASK != 0;
         let mut local_apic_manager = LocalApicManager {
@@ -67,7 +71,8 @@ impl LocalApicManager {
             base_address,
         };
 
-        local_apic_manager.apic_id = local_apic_manager.read_apic_register(LocalApicRegisters::ApicId);
+        local_apic_manager.apic_id =
+            local_apic_manager.read_apic_register(LocalApicRegisters::ApicId);
         local_apic_manager
     }
 
@@ -82,12 +87,12 @@ impl LocalApicManager {
 
     fn read_apic_register(&self, index: LocalApicRegisters) -> u32 {
         if self.is_x2apic_enabled {
-            unsafe {
-                cpu::rdmsr(LocalApicManager::X2APIC_MSR_INDEX + (index as u32)) as u32
-            }
+            unsafe { cpu::rdmsr(LocalApicManager::X2APIC_MSR_INDEX + (index as u32)) as u32 }
         } else {
             unsafe {
-                core::ptr::read_volatile((self.base_address + (index as usize) * 0x10) as *const u32)
+                core::ptr::read_volatile(
+                    (self.base_address + (index as usize) * 0x10) as *const u32,
+                )
             }
         }
     }
@@ -95,11 +100,17 @@ impl LocalApicManager {
     fn write_apic_register(&self, index: LocalApicRegisters, data: u32) {
         if self.is_x2apic_enabled {
             unsafe {
-                cpu::wrmsr(LocalApicManager::X2APIC_MSR_INDEX + (index as u32), data as u64);
+                cpu::wrmsr(
+                    LocalApicManager::X2APIC_MSR_INDEX + (index as u32),
+                    data as u64,
+                );
             }
         } else {
             unsafe {
-                core::ptr::write_volatile((self.base_address + (index as usize) * 0x10) as *mut u32, data);
+                core::ptr::write_volatile(
+                    (self.base_address + (index as usize) * 0x10) as *mut u32,
+                    data,
+                );
             }
         }
     }

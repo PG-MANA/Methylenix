@@ -1,22 +1,19 @@
 /*
-スピンロック実装
-std::sync::Mutexと互換を取る
+    Mutex(Spin Lock version)
 */
 
 //use
-use core::sync::atomic;
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
+use core::sync::atomic;
 
 pub struct Mutex<T: ?Sized> {
-    lock_flag: atomic::AtomicBool, /*atomicはcoreで使える*/
-    /*read_only: atomic::AtomicBool,*/
-    /*fail_lock: atomic::AtomicBool,*/
+    lock_flag: atomic::AtomicBool,
     data: UnsafeCell<T>,
 }
 
 pub struct MutexGuard<'a, T: ?Sized + 'a> {
-    ///ドロップしても消さないように
+    // ドロップしても消さないように
     lock_flag: &'a atomic::AtomicBool,
     data: &'a mut T,
 }
@@ -47,15 +44,10 @@ impl<T: ?Sized> Mutex<T> {
     }
 
     fn lock_loop(&self) {
-        //self.lock_flag.load
-        loop {
-            if !self.lock_flag.load(atomic::Ordering::Relaxed)
-                && !self.lock_flag.swap(true, atomic::Ordering::Acquire)
-            /*flagがtrueでないならfalseであるはず*/
-            {
-                break;
-            }
-        }
+        while !self
+            .lock_flag
+            .compare_and_swap(false, true, atomic::Ordering::Relaxed)
+        {}
     }
 }
 

@@ -35,7 +35,8 @@ impl MemoryMapInfo {
     pub fn new(map: &MultibootTagMemoryMap) -> MemoryMapInfo {
         MemoryMapInfo {
             num: ((map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
-                / map.entry_size as usize) as u32, /*+1,//0からカウントするため-1するが打ち消し*/
+                / map.entry_size as usize) as u32,
+            /*+1,//0からカウントするため-1するが打ち消し*/
             addr: &map.entries as *const MemoryMapEntry as usize,
             entry_size: map.entry_size,
             cnt: 0,

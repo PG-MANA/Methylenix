@@ -1,11 +1,8 @@
-//use
 use super::PAGE_MASK;
 
-//const
 pub const PDE_MAX_ENTRY: usize = 512;
 
 //PDEの53bit目はPTEの配列がセットされているかどうかの確認に利用している。
-
 
 pub struct PDE {
     flags: u64,
@@ -14,9 +11,7 @@ pub struct PDE {
 impl PDE {
     #![allow(dead_code)]
     pub const fn new() -> PDE {
-        PDE {
-            flags: 0
-        }
+        PDE { flags: 0 }
     }
 
     pub fn init(&mut self) {

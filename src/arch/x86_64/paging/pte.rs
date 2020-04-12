@@ -1,7 +1,5 @@
-//use
 use super::PAGE_MASK;
 
-//const
 pub const PTE_MAX_ENTRY: usize = 512;
 
 pub struct PTE {
@@ -11,9 +9,7 @@ pub struct PTE {
 impl PTE {
     #![allow(dead_code)]
     pub const fn new() -> PTE {
-        PTE {
-            flags: 0
-        }
+        PTE { flags: 0 }
     }
 
     pub fn init(&mut self) {
@@ -93,7 +89,9 @@ impl PTE {
         self.set_bit(1 << 8, b);
     }
 
-    pub fn is_no_execute(&self) -> bool { self.get_bit(1 << 63) }
+    pub fn is_no_execute(&self) -> bool {
+        self.get_bit(1 << 63)
+    }
 
     pub fn set_no_execute(&mut self, b: bool) {
         self.set_bit(1 << 63, b);

@@ -11,27 +11,19 @@ SECTIONS {
     KEEP(*(.multiboot_header))/*使われてないとリンクされなくなるので*/
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-
-  .text : {
+  .text : ALIGN(__ALIGN_SIZE) {
     *(.text .text.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-
-  .data : {
+  .data : ALIGN(__ALIGN_SIZE) {
     *(.data .data.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-
-  .rodata : {
+  .rodata : ALIGN(__ALIGN_SIZE) {
     *(.rodata .rodata.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-
-  .bss : {
+  .bss : ALIGN(__ALIGN_SIZE) {
     *(.bss .bss.*)
   }
 }

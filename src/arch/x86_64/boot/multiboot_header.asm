@@ -14,10 +14,12 @@ MULTIBOOT_HEADER_ARCH                     equ 0           ; 4ならmips
 MULTIBOOT_HEADER_LEN                      equ multiboot_end - multiboot_start
 MULTIBOOT_HEADER_CHECKSUM                 equ -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_ARCH + MULTIBOOT_HEADER_LEN)
 MULTIBOOT_HEADER_FLAG                     equ 1           ; タグで使うフラグ(1はオプショナルを表す...?)
+MULTIBOOT_HEADER_TAG_TYPE_END             equ 0           ; マルチブート用ヘッダー タグ終了
+MULTIBOOT_HEADER_TAG_TYPE_CONSOLE         equ 4           ; EGAテキストモードサポート
 MULTIBOOT_HEADER_TAG_TYPE_FB              equ 5           ; フレームバッファ要求タグ
+MULTIBOOT_HEADER_TAG_TYPE_ALIGN           equ 6           ; アライメント要求
 MULTIBOOT_HEADER_TAG_TYPE_EFI             equ 7           ; EFI サービスを終了させないようにする
-MULTIBOOT_HEADER_TAG_ENTRY_ADDRESS_EFI64  equ 9           ; EFI64で最初に実行するアドレス
-MULTIBOOT_HEADER_TAG_END                  equ 0           ; マルチブート用ヘッダー 定数定義終了(実体は下)
+MULTIBOOT_HEADER_TAG_TYPE_ENTRY_EFI64     equ 9           ; EFI64で最初に実行するアドレス
 ;========================================
 
 ; マルチブート用ヘッダー
@@ -35,6 +37,11 @@ multiboot_start:
 
 ; ここに追加のタグを書く
 multiboot_tags_start:
+  dw      MULTIBOOT_HEADER_TAG_TYPE_CONSOLE
+  dw      MULTIBOOT_HEADER_FLAG   ; flags
+  dd      12                      ; size
+  dd      (1 << 1)                ; (1 << 1) EGA TEXT Supported
+  align   8                       ; タグは8バイト間隔で並ぶ必要がある
   ;自力でフォント描写ができないため現在は無効
   ;dw      MULTIBOOT_HEADER_TAG_TYPE_FB
   ;dw      MULTIBOOT_HEADER_FLAG   ; flags
@@ -42,17 +49,21 @@ multiboot_tags_start:
   ;dd      1024                    ; width(1行の文字数)
   ;dd      768                     ; height(行数)
   ;dd      32                      ; depth(色深度)
+  ;align   8                       ; タグは8バイト間隔で並ぶ必要がある
+  dw      MULTIBOOT_HEADER_TAG_TYPE_ALIGN
+  dw      MULTIBOOT_HEADER_FLAG
+  dd      8
   align   8                       ; タグは8バイト間隔で並ぶ必要がある
   ;dw      MULTIBOOT_HEADER_TAG_TYPE_EFI
   ;dw      MULTIBOOT_HEADER_FLAG   ; flags
   ;dd      8                       ; size
-  align   8
-  dw      MULTIBOOT_HEADER_TAG_ENTRY_ADDRESS_EFI64
-  dw      MULTIBOOT_HEADER_FLAG
-  dd      12
-  dd      init_efi64
+  ;align   8                       ; タグは8バイト間隔で並ぶ必要がある
+  ;dw      MULTIBOOT_HEADER_TAG_TYPE_ENTRY_EFI64
+  ;dw      MULTIBOOT_HEADER_FLAG   ; flags
+  ;dd      12                      ; size
+  ;dd      init_efi64              ; entry point for EFI(x86_64)
   align   8                       ; タグは8バイト間隔で並ぶ必要がある
-  dw      MULTIBOOT_HEADER_TAG_END
+  dw      MULTIBOOT_HEADER_TAG_TYPE_END
   dw      MULTIBOOT_HEADER_FLAG   ; flags
   dd      8                       ; size
 multiboot_tags_end:

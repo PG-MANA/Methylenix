@@ -3,83 +3,61 @@ pub mod interrupt;
 pub mod device;
 pub mod paging;
 
-use self::device::serial_port::SerialPortManager;
-use self::device::{cpu, timer};
-use self::device::cpu::get_func_addr;
+use self::device::cpu;
 use self::device::io_apic::IoApicManager;
 use self::device::local_apic::LocalApicManager;
-use self::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
+use self::device::serial_port::SerialPortManager;
+use self::interrupt::InterruptManager;
+use self::paging::{PAGE_MASK, PAGE_SIZE};
 
-use kernel::drivers::efi::EfiManager;
 use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic::GraphicManager;
-use kernel::memory_manager::MemoryManager;
-use kernel::spin_lock::Mutex;
-use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
-use kernel::task::{TaskEntry, TaskStatus, TaskManager};
+use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
+use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
+use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
+use kernel::sync::spin_lock::Mutex;
 
+use core::mem;
+
+/* Memory Areas for initial processes*/
+static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
 
 #[no_mangle]
 pub extern "C" fn boot_main(
-    mbi_addr: usize, /*マルチブートヘッダのアドレス*/
+    mbi_address: usize,       /*マルチブートヘッダのアドレス*/
     kernel_code_segment: u16, /*現在のセグメント:8*/
-    user_code_segment: u16,
-    user_data_segment: u16,
+    _user_code_segment: u16,
+    _user_data_segment: u16,
 ) {
     //この関数はCLIされた状態で呼ばれる。
     //PIC初期化
     device::pic::pic_init();
     //MultiBootInformation読み込み
-    let multiboot_information = MultiBootInformation::new(mbi_addr);
+    let multiboot_information = MultiBootInformation::new(mbi_address, true);
     // Graphic初期化（Panicが起きたときの表示のため)
-    unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.graphic_manager =
-            Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
-    }
+    get_kernel_manager_cluster().graphic_manager =
+        Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
     //メモリ管理初期化
-    init_memory(&multiboot_information);
+    let _multiboot_information = init_memory(multiboot_information);
     //IDT初期化&割り込み初期化
-    let interrupt_manager = unsafe {
-        let mut memory_manager = STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap();
-        let page_manager = STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager();
-        interrupt::InterruptManager::new(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Cannot alloc memory for IDT."), kernel_code_segment)
-    };
-    /*unsafe {
-                make_error_interrupt_hundler!(inthandler0d,general_protection_exception_handler);
-                interrupt_manager.set_gatedec(
-                    0x0d,
-                    interrupt::idt::GateDescriptor::new(
-                        inthandler0d, /*上のマクロで指定した名前*/
-                        gdt as u16,
-                        0,
-                        interrupt::idt::GateDescriptor::AR_INTGATE32,
-                    ),
-                );
-    }*/
+    init_interrupt(kernel_code_segment);
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
-    serial_port_manager.init_serial_port(&interrupt_manager, kernel_code_segment);
+    serial_port_manager.init(kernel_code_segment);
     //Boot Information Manager に格納
-    unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.interrupt_manager = Mutex::new(interrupt_manager);
-        STATIC_BOOT_INFORMATION_MANAGER.serial_port_manager = Mutex::new(serial_port_manager);
-    }
-    println!("Methylenix version 0.0.1");
+    get_kernel_manager_cluster().serial_port_manager = Mutex::new(serial_port_manager);
+    println!("Methylenix");
 
     let local_apic_manager = LocalApicManager::init();
     let io_apic_manager = IoApicManager::new();
-    io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x024);//Serial Port
+    io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x24); //Serial Port
 
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
     }
-    //ページング反映
-    unsafe {
-        STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap().get_running_task_page_manager().reset_paging();
-    }
-    task_switch_test(user_code_segment, user_data_segment);
-    timer::PitManager::init();
     hlt();
 }
 
@@ -87,100 +65,149 @@ pub fn general_protection_exception_handler(e_code: usize) {
     panic!("General Protection Exception \nError Code:0x{:X}", e_code);
 }
 
-fn task_switch_test(user_code_segment: u16, user_data_segment: u16) {
-    let mut task_manager = unsafe { STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap() };
-    let mut memory_manager = unsafe { STATIC_BOOT_INFORMATION_MANAGER.memory_manager.lock().unwrap() };
-    let mut task_entry = TaskEntry::new_static();
-    let mut page_manager = task_manager.get_running_task_page_manager().clone();
-
-    let task_switch_stack = page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc kernel stack.");
-    let normal_stack = page_manager.alloc_page(&mut memory_manager, None, None, false, true, true).expect("Can not alloc normal stack.");
-    unsafe {
-        cpu::clear_task_stack(task_switch_stack, PAGE_SIZE, user_data_segment | 3, user_code_segment
-            | 3, normal_stack + PAGE_SIZE - 16, cpu::get_func_addr(test_task));
-        page_manager.associate_address(&mut memory_manager, None, get_func_addr(test_task) & PAGE_MASK, get_func_addr(test_task) & PAGE_MASK, true, false, true);
-    }
-    task_entry.set_kernel_stack(task_switch_stack);
-    task_entry.set_status(TaskStatus::Running);
-    task_entry.set_privilege_level(3);
-    task_entry.set_enabled();
-    task_entry.set_page_manager(page_manager);
-    task_manager.add_task(task_entry);
-}
-
-pub fn test_task() {
-    loop {
-        //Loopするだけのタスク
-    }
-}
-
 fn hlt() {
+    println!("All init are done!");
     loop {
         unsafe {
             cpu::hlt();
         }
-        let ascii_code = unsafe {
-            STATIC_BOOT_INFORMATION_MANAGER
-                .serial_port_manager
-                .lock()
-                .unwrap()
-                .dequeue_key()
-                .unwrap_or(0)
-        };
+        let ascii_code = get_kernel_manager_cluster()
+            .serial_port_manager
+            .lock()
+            .unwrap()
+            .dequeue_key()
+            .unwrap_or(0);
         if ascii_code != 0 {
             print!("{}", ascii_code as char);
         }
     }
 }
 
-
-fn init_memory(multiboot_information: &MultiBootInformation) {
-    //基本はストレートマッピングで行く
-    //TODO: メモリマネージャーの4KAlign
-    let mut memory_manager = MemoryManager::new(multiboot_information);
-    let mut page_manager = PageManager::new(&mut memory_manager, None).expect("Can not reset paging.");
-    let mut max_address = 0usize;
-    //ページングを設定すべきメモリ範囲を出す
+fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformation {
+    /* Set up Physical Memory Manager */
+    let mut physical_memory_manager = PhysicalMemoryManager::new();
+    unsafe {
+        physical_memory_manager.set_memory_entry_pool(
+            &MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize,
+            mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER),
+        );
+    }
     for entry in multiboot_information.memory_map_info.clone() {
-        if (entry.addr + entry.length) as usize > max_address {
-            max_address = (entry.addr + entry.length) as usize;
+        if entry.m_type == 1 {
+            //Free Area
+            physical_memory_manager.free(entry.addr as usize, entry.length as usize, true);
         }
     }
-    let mut counter = 0usize;
-    loop {
-        if max_address <= counter {
-            break;
+    /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
+    for section in multiboot_information.elf_info.clone() {
+        if section.should_allocate() {
+            physical_memory_manager.reserve_memory(section.addr(), section.size(), true);
         }
-        page_manager.associate_address(&mut memory_manager, None, counter, counter, false, false, false);
-        counter += PAGE_SIZE;
     }
-    for entry in multiboot_information.elf_info.clone() {
-        counter = 0usize;
-        let start_address = entry.addr() as usize & PAGE_MASK;
-        loop {
-            if entry.size() <= counter {
-                break;
+    //MultiBootInformation領域を除外
+    physical_memory_manager.reserve_memory(
+        multiboot_information.address,
+        multiboot_information.size,
+        false,
+    );
+
+    /* set up Virtual Memory Manager */
+    let mut virtual_memory_manager = VirtualMemoryManager::new();
+    if !virtual_memory_manager.init(true, &mut physical_memory_manager) {
+        panic!("Cannot init Virtual Memory Manager.");
+    }
+
+    for section in multiboot_information.elf_info.clone() {
+        if !section.should_allocate() {
+            continue;
+        }
+        let permission = MemoryPermissionFlags {
+            read: true,
+            write: section.should_writable(),
+            execute: section.should_excusable(),
+            user_access: false,
+        };
+        let aligned_start_address = section.addr() & PAGE_MASK;
+        let aligned_size = ((section.size() + (section.addr() - aligned_start_address) - 1)
+            & PAGE_MASK)
+            + PAGE_SIZE;
+        /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
+        if let Some(address) = virtual_memory_manager.alloc_address(
+            aligned_size,
+            aligned_start_address,
+            Some(aligned_start_address),
+            permission,
+            &mut physical_memory_manager,
+        ) {
+            if address == aligned_start_address {
+                continue;
             }
-            page_manager.associate_address(&mut memory_manager, None, start_address + counter,
-                                           start_address + counter, entry.should_excusable(),
-                                           entry.should_writable(), false);
-            counter += PAGE_SIZE;
+        }
+        panic!("Cannot map virtual memory correctly.");
+    }
+
+    for entry in multiboot_information.memory_map_info.clone() {
+        if entry.m_type == 1 {
+            continue;
+        }
+        let permission = match entry.m_type {
+            3 => MemoryPermissionFlags::data(),
+            4 => MemoryPermissionFlags::data(),
+            5 => MemoryPermissionFlags::data(), //rodata?
+            _ => MemoryPermissionFlags::rodata(),
+        };
+        let aligned_start_address = entry.addr as usize & PAGE_MASK;
+        let aligned_size =
+            ((entry.addr as usize - aligned_start_address + entry.length as usize - 1) & PAGE_MASK)
+                + PAGE_SIZE;
+        if let Some(address) = virtual_memory_manager.alloc_address(
+            aligned_size,
+            aligned_start_address,
+            Some(aligned_start_address),
+            permission,
+            &mut physical_memory_manager,
+        ) {
+            if address == aligned_start_address {
+                continue;
+            }
+        }
+        panic!("Cannot map virtual memory correctly.");
+    }
+
+    /* set up Memory Manager */
+    let mut memory_manager =
+        MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
+
+    /* set up Kernel Memory Alloc Manager */
+    let mut kernel_memory_alloc_manager = KernelMemoryAllocManager::new();
+    kernel_memory_alloc_manager.init(&mut memory_manager);
+
+    /* move Multiboot Information to allocated memory area */
+    let new_mbi_address = kernel_memory_alloc_manager
+        .kmalloc(multiboot_information.size, &mut memory_manager)
+        .expect("Cannot alloc memory for Multiboot Information.");
+    for i in 0..multiboot_information.size {
+        unsafe {
+            *((new_mbi_address + i) as *mut u8) = *((multiboot_information.address + i) as *mut u8);
         }
     }
-    //メモリマネージャーのPOOL用
-    let memory_manager_pool = memory_manager.get_memory_pool();
-    for i in 0..(memory_manager.get_memory_pool().1) / PAGE_SIZE {
-        page_manager.associate_address(&mut memory_manager, None, memory_manager_pool.0 + i * PAGE_SIZE, memory_manager_pool.0 + i * PAGE_SIZE, false, true, false);
-    }
-    let mut task_manager = unsafe { STATIC_BOOT_INFORMATION_MANAGER.task_manager.lock().unwrap() };
-    task_manager.set_entry_pool(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc task manager pool."), PAGE_SIZE);
-    let mut task_entry = TaskEntry::new_static();
-    task_entry.set_status(TaskStatus::Running);
-    task_entry.set_privilege_level(0);
-    task_entry.set_kernel_stack(page_manager.alloc_page(&mut memory_manager, None, None, false, true, false).expect("Can not alloc kernel stack."));
-    task_entry.set_enabled();
-    task_entry.set_page_manager(page_manager);
-    task_manager.add_task(task_entry);
-    task_manager.switch_next_task(false);
-    unsafe { STATIC_BOOT_INFORMATION_MANAGER.memory_manager = Mutex::new(memory_manager); }
+
+    /* free old multibootinfo area */
+    memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size); // may be already freed
+
+    //Apply paging
+    memory_manager.set_paging_table();
+
+    //Store to cluster
+    get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);
+    get_kernel_manager_cluster().kernel_memory_alloc_manager =
+        Mutex::new(kernel_memory_alloc_manager);
+
+    MultiBootInformation::new(new_mbi_address, false)
+}
+
+fn init_interrupt(kernel_selector: u16) {
+    let mut interrupt_manager = InterruptManager::new();
+    interrupt_manager.init(kernel_selector);
+    get_kernel_manager_cluster().interrupt_manager = Mutex::new(interrupt_manager);
 }

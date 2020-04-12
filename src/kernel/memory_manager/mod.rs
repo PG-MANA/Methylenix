@@ -1,98 +1,200 @@
 /*
-メモリ管理システム
-    とりあえず、MemManは4KBごとに空き、使用中か管理して詳しいことはページングでと考えてる
-    メモリ領域がほしい(要求)=>まずあいているメモリをMemManで探しリアルアドレスをとってくる=>それを元にページを作成=>返す
-    だといいかな。
-    この実装は色んな本やサイトを参考にした書き方なのでいつか再実装する。
-    というより土壇場実装なのでかなり危ない。
+    Memory Manager
+    This manager is the frontend of physical memory manager and page manager.
 */
 
-mod physical_memory_manager;
+pub mod kernel_malloc_manager;
+pub mod physical_memory_manager;
+pub mod virtual_memory_entry;
+pub mod virtual_memory_manager;
 
-use arch::target_arch::paging::PAGE_SIZE;
+use arch::target_arch::paging::{PAGE_SIZE, PAGING_CACHE_LENGTH};
 
-use kernel::drivers::multiboot::MultiBootInformation;
-use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use arch::x86_64::paging::PAGE_MASK;
+use self::physical_memory_manager::PhysicalMemoryManager;
+use self::virtual_memory_manager::VirtualMemoryManager;
+use kernel::sync::spin_lock::Mutex;
 
 pub struct MemoryManager {
-    physical_memory_manager: PhysicalMemoryManager,
+    physical_memory_manager: Mutex<PhysicalMemoryManager>,
+    virtual_memory_manager: VirtualMemoryManager,
+}
+
+#[derive(Clone, Eq, PartialEq, Copy)]
+pub struct MemoryPermissionFlags {
+    pub read: bool,
+    pub write: bool,
+    pub execute: bool,
+    pub user_access: bool,
+}
+
+pub struct FreePageList {
+    pub list: [usize; PAGING_CACHE_LENGTH],
+    pub pointer: usize,
 }
 
 impl MemoryManager {
-    pub fn new(multiboot_info: &MultiBootInformation) -> MemoryManager {
-        let kernel_loader_range = (|m: &MultiBootInformation| {
-            let max_entry = m.elf_info.clone().max_by_key(|s| s.addr()).unwrap();
-            (m.elf_info.clone().min_by_key(|s| s.addr()).unwrap().addr(), max_entry.addr() + max_entry.size())
-        })(multiboot_info);
-        let memory_entry_pool_size = PAGE_SIZE * 2;
-        let mut memory_entry_pool_address = 0usize;
-        for entry in multiboot_info.memory_map_info.clone() {
-            if entry.m_type != 1 {
-                continue;
-            }
-            let mut aligned_address = if entry.addr != 0 { ((entry.addr - 1) as usize & PAGE_MASK) + PAGE_SIZE } else { 0 };
-            let mut free_address_size = entry.length as usize - (aligned_address - entry.addr as usize);
-            loop {
-                if free_address_size < memory_entry_pool_size {
-                    break;
-                }
-                if (aligned_address + memory_entry_pool_size <= kernel_loader_range.0 ||
-                    aligned_address >= kernel_loader_range.1) &&
-                    (aligned_address + memory_entry_pool_address <= multiboot_info.address ||
-                        aligned_address >= multiboot_info.size + multiboot_info.size) {
-                    /*Kernel Loaderはメモリマップに記載されてないので用意するメモリ領域の端がそれらに食い込まないかチェック*/
-                    /*このチェックではELF飛び飛びに対応できてないけどいいや*/
-                    memory_entry_pool_address = aligned_address;
-                    break;
-                }
-                aligned_address += PAGE_SIZE;
-                free_address_size -= PAGE_SIZE;
-            }
-            if free_address_size >= memory_entry_pool_size {
-                break;
-            }
-        }
-        let mut phy_memory_manager = PhysicalMemoryManager::new();
-        phy_memory_manager.set_memory_entry_pool(memory_entry_pool_address, memory_entry_pool_size);
-        for entry in multiboot_info.memory_map_info.clone() {
-            /*2回回すのは少し気が引けるけど...*/
-            if entry.m_type == 1 {
-                phy_memory_manager.define_free_memory(entry.addr as usize, entry.length as usize);
-                //PAGE_SIZE長に切りそろえる
-            }
-        }
-        phy_memory_manager.define_used_memory(memory_entry_pool_address, memory_entry_pool_size);
+    pub fn new(
+        physical_memory_manager: Mutex<PhysicalMemoryManager>,
+        virtual_memory_manager: VirtualMemoryManager,
+    ) -> Self {
         /*カーネル領域の予約*/
-        for section in multiboot_info.elf_info.clone() {
-            phy_memory_manager.define_used_memory(section.addr(), section.size());
-        }
-        phy_memory_manager.define_used_memory(multiboot_info.address, multiboot_info.size);
         MemoryManager {
-            physical_memory_manager: phy_memory_manager
+            physical_memory_manager,
+            virtual_memory_manager,
         }
-    }
-
-    pub fn get_memory_pool(&self) -> (usize, usize) {
-        self.physical_memory_manager.get_memory_entry_pool()
     }
 
     pub const fn new_static() -> MemoryManager {
         MemoryManager {
-            physical_memory_manager: PhysicalMemoryManager::new(),
+            physical_memory_manager: Mutex::new(PhysicalMemoryManager::new()),
+            virtual_memory_manager: VirtualMemoryManager::new(),
         }
     }
 
-    pub fn alloc_page(&mut self, align: bool) -> Option<usize> {
-        /*Test*/
-        self.physical_memory_manager.alloc(PAGE_SIZE, align)
+    pub fn alloc_pages(
+        &mut self,
+        order: usize,
+        vm_start_address: Option<usize>,
+        permission: MemoryPermissionFlags,
+    ) -> Option<usize> {
+        /*TODO: lazy allocation*/
+        // return physically continuous 2 ^ order pages memory.
+        // this function is called by kmalloc.
+        let size = PAGE_SIZE * (1 << order);
+        if let Some(vm_address) = vm_start_address {
+            if !self
+                .virtual_memory_manager
+                .check_if_usable_address_range(vm_address, vm_address + size - 1)
+            {
+                return None;
+            }
+        }
+        let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
+        if let Some(physical_address) = physical_memory_manager.alloc(size, true) {
+            if let Some(address) = self.virtual_memory_manager.alloc_address(
+                size,
+                physical_address,
+                vm_start_address,
+                permission,
+                &mut physical_memory_manager,
+            ) {
+                self.virtual_memory_manager.update_paging(address);
+                Some(address)
+            } else {
+                physical_memory_manager.free(physical_address, size, false);
+                None
+            }
+        } else {
+            None
+        }
     }
 
-    pub fn free_page(&mut self, address: usize) {
-        self.physical_memory_manager.free(address, PAGE_SIZE);
+    pub fn alloc_nonlinear_pages(
+        &mut self,
+        order: usize,
+        vm_start_address: Option<usize>,
+        permission: MemoryPermissionFlags,
+    ) -> Option<usize> {
+        /*THINK: rename*/
+        // return virtually 2 ^ order pages memory.
+        // this function is called by vmalloc.
+        // vfreeの際に全てのメモリが開放されないバグを含んでいる
+        if order == 0 {
+            return self.alloc_pages(order, vm_start_address, permission);
+        }
+        let count = 1 << order;
+        let size = PAGE_SIZE * count;
+        let address = if let Some(addr) = vm_start_address {
+            if !self
+                .virtual_memory_manager
+                .check_if_usable_address_range(addr, addr + size - 1)
+            {
+                return None;
+            }
+            addr
+        } else {
+            if let Some(addr) = self.virtual_memory_manager.get_free_address(size) {
+                addr
+            } else {
+                return None;
+            }
+        };
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        for i in 0..count {
+            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, true) {
+                self.virtual_memory_manager.alloc_address(
+                    PAGE_SIZE,
+                    physical_address,
+                    Some(address + i * PAGE_SIZE),
+                    permission,
+                    &mut pm_manager,
+                );
+            } else {
+                for j in 0..i {
+                    self.virtual_memory_manager
+                        .free_address(address + j * PAGE_SIZE, &mut pm_manager);
+                }
+                return None;
+            }
+        }
+        Some(address)
+    }
+
+    pub fn free_pages(&mut self, vm_address: usize, _order: usize) -> bool {
+        //let count = 1 << order;
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        if !self
+            .virtual_memory_manager
+            .free_address(vm_address, &mut pm_manager)
+        {
+            return false;
+        }
+        //物理メモリの開放はfree_addressでやっているが本来はここでやるべきか?
+        true
+    }
+
+    pub fn free_physical_memory(&mut self, physical_address: usize, size: usize) -> bool {
+        /* initializing use only */
+        if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
+            pm_manager.free(physical_address, size, false)
+        } else {
+            false
+        }
+    }
+
+    pub fn set_paging_table(&mut self) {
+        self.virtual_memory_manager.flush_paging();
     }
 
     pub fn dump_memory_manager(&self) {
-        self.physical_memory_manager.dump_memory_entry();
+        if let Ok(physical_memory_manager) = self.physical_memory_manager.try_lock() {
+            println!("----Physical Memory Entries Dump----");
+            physical_memory_manager.dump_memory_entry();
+            println!("----Physical Memory Entries Dump End----");
+        } else {
+            println!("Can not lock Physical Memory Manager.");
+        }
+        println!("----Virtual Memory Entries Dump----");
+        self.virtual_memory_manager.dump_memory_manager();
+        println!("----Virtual Memory Entries Dump End----");
+    }
+}
+
+impl MemoryPermissionFlags {
+    pub const fn rodata() -> Self {
+        Self {
+            read: true,
+            write: false,
+            execute: false,
+            user_access: false,
+        }
+    }
+    pub const fn data() -> Self {
+        Self {
+            read: true,
+            write: true,
+            execute: false,
+            user_access: false,
+        }
     }
 }

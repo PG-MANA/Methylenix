@@ -2,7 +2,6 @@
 IO APIC
 */
 
-
 pub struct IoApicManager {
     base_address: usize,
 }

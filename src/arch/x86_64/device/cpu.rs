@@ -39,7 +39,7 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
     let edx: u32;
     let eax: u32;
     asm!("rdmsr":"={edx}"(edx), "={eax}"(eax):"{ecx}"(ecx));
-    ((edx as u64) << 32 | eax as u64)
+    (edx as u64) << 32 | eax as u64
 }
 
 #[inline(always)]
@@ -69,12 +69,19 @@ pub unsafe fn invlpg(addr: usize) {
 pub unsafe fn get_func_addr(func: unsafe fn()) -> usize {
     // 関数のアドレス取得に使用、代用案捜索中
     #[allow(unused_assignments)]
-        let mut result: usize = 0;
+    let mut result: usize = 0;
     asm!("mov rax, rbx":"={rax}"(result):"{rbx}"(func)::"intel");
     result
 }
 
-pub unsafe fn clear_task_stack(task_switch_stack: usize, stack_size: usize, ss: u16, cs: u16, normal_stack_pointer: usize, start_addr: usize) {
+pub unsafe fn clear_task_stack(
+    task_switch_stack: usize,
+    stack_size: usize,
+    ss: u16,
+    cs: u16,
+    normal_stack_pointer: usize,
+    start_addr: usize,
+) {
     asm!("
                 push    rdi
                 mov     rdi, rsp
