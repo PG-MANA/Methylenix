@@ -84,7 +84,7 @@ fn hlt() {
 }
 
 fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformation {
-    /* Set up Physical Memory Manager */
+    /* set up Physical Memory Manager */
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
         physical_memory_manager.set_memory_entry_pool(
@@ -94,7 +94,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
     for entry in multiboot_information.memory_map_info.clone() {
         if entry.m_type == 1 {
-            //Free Area
+            /* available memory */
             physical_memory_manager.free(entry.addr as usize, entry.length as usize, true);
         }
     }
@@ -104,7 +104,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             physical_memory_manager.reserve_memory(section.addr(), section.size(), true);
         }
     }
-    //MultiBootInformation領域を除外
+    /* reserve Multiboot Information area */
     physical_memory_manager.reserve_memory(
         multiboot_information.address,
         multiboot_information.size,
@@ -195,10 +195,10 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     /* free old multibootinfo area */
     memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size); // may be already freed
 
-    //Apply paging
+    /* apply paging */
     memory_manager.set_paging_table();
 
-    //Store to cluster
+    /* store managers to cluster */
     get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);
     get_kernel_manager_cluster().kernel_memory_alloc_manager =
         Mutex::new(kernel_memory_alloc_manager);
