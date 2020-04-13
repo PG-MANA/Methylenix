@@ -276,6 +276,15 @@ impl VirtualMemoryManager {
         false
     }
 
+    pub fn virtual_address_to_physical_address(&self, virtual_address: usize) -> Option<usize> {
+        let root = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };
+        if let Some(entry) = root.find_entry(virtual_address) {
+            Some(entry.get_physical_address())
+        } else {
+            None
+        }
+    }
+
     pub fn get_free_address(&mut self, size: usize) -> Option<usize> {
         //think: change this function to private and make "reserve_address" function.
         let entry = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };

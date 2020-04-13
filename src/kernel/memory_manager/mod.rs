@@ -8,7 +8,7 @@ pub mod physical_memory_manager;
 pub mod virtual_memory_entry;
 pub mod virtual_memory_manager;
 
-use arch::target_arch::paging::{PAGE_SIZE, PAGING_CACHE_LENGTH};
+use arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE, PAGING_CACHE_LENGTH};
 
 use self::physical_memory_manager::PhysicalMemoryManager;
 use self::virtual_memory_manager::VirtualMemoryManager;
@@ -129,10 +129,14 @@ impl MemoryManager {
                     permission,
                     &mut pm_manager,
                 );
+                self.virtual_memory_manager
+                    .update_paging(address + i * PAGE_SIZE);
             } else {
                 for j in 0..i {
                     self.virtual_memory_manager
                         .free_address(address + j * PAGE_SIZE, &mut pm_manager);
+                    self.virtual_memory_manager
+                        .update_paging(address + j * PAGE_SIZE);
                 }
                 return None;
             }
@@ -162,6 +166,71 @@ impl MemoryManager {
         }
     }
 
+    pub fn reserve_memory(
+        &mut self,
+        physical_address: usize,
+        virtual_address: usize,
+        size: usize,
+        permission: MemoryPermissionFlags,
+        physical_address_may_be_reserved: bool,
+        virtual_memory_may_be_reserved: bool,
+    ) -> bool {
+        if physical_address & !PAGE_MASK != 0 {
+            println!("Error: Physical Address is not aligned.");
+            return false;
+        } else if virtual_address & !PAGE_MASK != 0 {
+            println!("Error: Virtual Address is not aligned.");
+            return false;
+        } else if size & !PAGE_MASK != 0 {
+            println!("Error: Size is not aligned.");
+            return false;
+        }
+        if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
+            let mut allocated_memory = false;
+            if pm_manager.reserve_memory(physical_address, size, false) {
+                allocated_memory = true;
+            } else {
+                if !physical_address_may_be_reserved {
+                    println!("Error: Cannot allocate physical address.");
+                    return false;
+                }
+            }
+            if self.virtual_memory_manager.alloc_address(
+                size,
+                physical_address,
+                Some(virtual_address),
+                permission,
+                &mut pm_manager,
+            ) != Some(virtual_address)
+            {
+                if virtual_memory_may_be_reserved {
+                    if self
+                        .virtual_memory_manager
+                        .virtual_address_to_physical_address(virtual_address)
+                        == Some(physical_address)
+                    {
+                        if self
+                            .virtual_memory_manager
+                            .update_memory_permission(virtual_address, permission)
+                        {
+                            self.virtual_memory_manager.update_paging(virtual_address);
+                            return true;
+                        }
+                    }
+                }
+                if allocated_memory {
+                    pm_manager.free(physical_address, size, false);
+                }
+                println!("Error: Cannot reserve memory.");
+                return false;
+            }
+            self.virtual_memory_manager.update_paging(virtual_address);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     pub fn set_paging_table(&mut self) {
         self.virtual_memory_manager.flush_paging();
     }
@@ -177,6 +246,17 @@ impl MemoryManager {
         println!("----Virtual Memory Entries Dump----");
         self.virtual_memory_manager.dump_memory_manager();
         println!("----Virtual Memory Entries Dump End----");
+    }
+
+    pub const fn page_round_up(address: usize, size: usize) -> (usize /*address*/, usize /*size*/) {
+        if size == 0 && (address & PAGE_MASK) == 0 {
+            (address, 0)
+        } else {
+            (
+                (address & PAGE_MASK),
+                (((size + (address - (address & PAGE_MASK)) - 1) & PAGE_MASK) + PAGE_SIZE),
+            )
+        }
     }
 }
 

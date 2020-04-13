@@ -1,17 +1,37 @@
 /*
-IO APIC
-*/
+ * I/O APIC
+ */
+
+use arch::target_arch::paging::PAGE_SIZE;
+
+use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct IoApicManager {
     base_address: usize,
 }
 
 impl IoApicManager {
-    pub fn new() -> IoApicManager {
-        //アドレスはTemp
-        IoApicManager {
+    pub fn init() -> IoApicManager {
+        let io_apic_manager = IoApicManager {
             base_address: 0xfec00000,
+        };
+        if !get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .reserve_memory(
+                io_apic_manager.base_address,
+                io_apic_manager.base_address,
+                PAGE_SIZE, /*too big...*/
+                MemoryPermissionFlags::data(),
+                true,
+                true,
+            )
+        {
+            panic!("Cannot reserve memory of IO APIC");
         }
+        io_apic_manager
     }
 
     pub fn set_redirect(&self, local_apic_id: u32, irq: u8, index: u8) {

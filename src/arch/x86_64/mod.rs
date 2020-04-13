@@ -55,7 +55,7 @@ pub extern "C" fn boot_main(
     );
 
     let local_apic_manager = LocalApicManager::init();
-    let io_apic_manager = IoApicManager::new();
+    let io_apic_manager = IoApicManager::init();
     io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x24); //Serial Port
 
     unsafe {
@@ -206,7 +206,6 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);
     get_kernel_manager_cluster().kernel_memory_alloc_manager =
         Mutex::new(kernel_memory_alloc_manager);
-
     MultiBootInformation::new(new_mbi_address, false)
 }
 

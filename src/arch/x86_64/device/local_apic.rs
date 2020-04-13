@@ -4,6 +4,9 @@ Local APIC
 
 use arch::target_arch::device::cpu;
 
+use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::MemoryPermissionFlags;
+
 pub struct LocalApicManager {
     apic_id: u32,
     is_x2apic_enabled: bool,
@@ -42,6 +45,21 @@ impl LocalApicManager {
                     local_apic_msr | LocalApicManager::X2APIC_ENABLED_MASK,
                 );
             }
+        }
+        if !get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .reserve_memory(
+                base_addr,
+                base_addr,
+                0x1000,
+                MemoryPermissionFlags::data(),
+                true,
+                true,
+            )
+        {
+            panic!("Cannot reserve memory of APIC.");
         }
         let mut local_apic_manager = LocalApicManager {
             apic_id: 0,
