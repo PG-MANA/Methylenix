@@ -40,7 +40,7 @@ pub extern "C" fn boot_main(
     get_kernel_manager_cluster().graphic_manager =
         Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
     //メモリ管理初期化
-    let _multiboot_information = init_memory(multiboot_information);
+    let multiboot_information = init_memory(multiboot_information);
     //IDT初期化&割り込み初期化
     init_interrupt(kernel_code_segment);
     //シリアルポート初期化
@@ -49,6 +49,10 @@ pub extern "C" fn boot_main(
     //Boot Information Manager に格納
     get_kernel_manager_cluster().serial_port_manager = Mutex::new(serial_port_manager);
     println!("Methylenix");
+    println!(
+        "Booted from {}, cmd line: {}",
+        multiboot_information.boot_loader_name, multiboot_information.boot_cmd_line
+    );
 
     let local_apic_manager = LocalApicManager::init();
     let io_apic_manager = IoApicManager::new();

@@ -30,6 +30,8 @@ pub struct MultiBootInformation {
     pub efi_table_pointer: usize,
     pub address: usize,
     pub size: usize,
+    pub boot_loader_name: &'static str,
+    pub boot_cmd_line: &'static str,
 }
 
 impl MultiBootInformation {
@@ -59,6 +61,7 @@ impl MultiBootInformation {
     const TAG_TYPE_BASE_ADDR: u32 = 21;
 
     pub fn new(address: usize, should_test: bool) -> MultiBootInformation {
+        #[allow(invalid_value)]
         let mut mbi: MultiBootInformation = unsafe { mem::zeroed() };
         if should_test && !MultiBootInformation::test(address) {
             panic!("Unaligned Multi Boot Information")
@@ -80,8 +83,26 @@ impl MultiBootInformation {
                     mbi.memory_map_info = MemoryMapInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_ACPI_NEW => {}
-                MultiBootInformation::TAG_TYPE_CMDLINE => {}
-                MultiBootInformation::TAG_TYPE_BOOT_LOADER_NAME => {}
+                MultiBootInformation::TAG_TYPE_CMDLINE => {
+                    use core::{slice, str};
+                    mbi.boot_cmd_line = str::from_utf8(unsafe {
+                        slice::from_raw_parts(
+                            &*((tag + 8) as *const u8),
+                            (&*(tag as *const MultibootTag)).size as usize - 8,
+                        )
+                    })
+                    .unwrap_or("");
+                }
+                MultiBootInformation::TAG_TYPE_BOOT_LOADER_NAME => {
+                    use core::{slice, str};
+                    mbi.boot_loader_name = str::from_utf8(unsafe {
+                        slice::from_raw_parts(
+                            &*((tag + 8) as *const u8),
+                            (&*(tag as *const MultibootTag)).size as usize - 8,
+                        )
+                    })
+                    .unwrap_or("");
+                }
                 MultiBootInformation::TAG_TYPE_FRAMEBUFFER => {
                     mbi.framebuffer_info = FrameBufferInfo::new(unsafe { &*(tag as *const _) });
                 }
