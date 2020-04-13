@@ -65,10 +65,12 @@ impl SerialPortManager {
         if self.port == 0 {
             return;
         }
-        loop {
+        let mut timeout: usize = 0xFFFFFF;
+        while timeout > 0 {
             if self.is_completed_transmitter() {
                 break;
             }
+            timeout -= 1;
         } // ちょっと危なっかしい
         unsafe {
             out_byte(self.port, data);
