@@ -41,6 +41,11 @@ pub extern "C" fn boot_main(
         Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
     //メモリ管理初期化
     let multiboot_information = init_memory(multiboot_information);
+    get_kernel_manager_cluster()
+        .graphic_manager
+        .lock()
+        .unwrap()
+        .set_framebuffer_memory_permission();
     //IDT初期化&割り込み初期化
     init_interrupt(kernel_code_segment);
     //シリアルポート初期化

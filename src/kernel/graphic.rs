@@ -6,6 +6,7 @@ use arch::target_arch::device::crt;
 
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
 
 use core::fmt;
 
@@ -46,6 +47,30 @@ impl GraphicManager {
                 back_color: 0,
             },
         }
+    }
+
+    pub fn set_framebuffer_memory_permission(&self) {
+        let pixel_size = if self.is_textmode {
+            2
+        } else {
+            self.frame_buffer_color_depth / 8
+        };
+        let result = MemoryManager::page_round_up(
+            self.frame_buffer_address,
+            self.frame_buffer_height * self.frame_buffer_width * pixel_size as usize,
+        );
+        get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .reserve_memory(
+                result.0,
+                result.0,
+                result.1,
+                MemoryPermissionFlags::data(),
+                true,
+                true,
+            );
     }
 
     fn init_manager(&mut self, frame_buffer_info: &FrameBufferInfo) {
@@ -92,69 +117,67 @@ impl GraphicManager {
     }
 
     pub fn puts(&mut self, string: &str) -> bool {
-        if self.is_textmode == false {
-            if let Ok(serial_port_manager) =
-                get_kernel_manager_cluster().serial_port_manager.try_lock()
-            {
-                serial_port_manager.sendstr(string);
-                return true;
-            }
-            return false;
+        if let Ok(serial_port_manager) = get_kernel_manager_cluster().serial_port_manager.try_lock()
+        {
+            serial_port_manager.sendstr(string);
         }
-
-        for code in string.bytes() {
-            match code as char {
-                '\r' => self.cursor.character = 0,
-                '\n' => {
-                    unsafe {
-                        *((self.frame_buffer_address
-                            + (self.cursor.line * self.frame_buffer_width + self.cursor.character)
-                                * 2) as *mut u16) = ' ' as u16;
-                    } //暫定的な目印(カラーコードは0にすることで区別)
-                    self.cursor.character = 0;
-                    self.cursor.line += 1;
-                }
-                '\x08' => {
-                    if self.cursor.character == 0 {
-                        if self.cursor.line > 0 {
-                            self.cursor.character = 0;
-                            for x in 0..self.frame_buffer_width {
-                                if unsafe {
-                                    *((self.frame_buffer_address
-                                        + (self.cursor.line * self.frame_buffer_width - x) * 2)
-                                        as *const u16)
-                                        == ' ' as u16
-                                } {
-                                    self.cursor.character = self.frame_buffer_width - x - 1;
-                                    unsafe {
+        if self.is_textmode {
+            for code in string.bytes() {
+                match code as char {
+                    '\r' => self.cursor.character = 0,
+                    '\n' => {
+                        unsafe {
+                            *((self.frame_buffer_address
+                                + (self.cursor.line * self.frame_buffer_width
+                                    + self.cursor.character)
+                                    * 2) as *mut u16) = ' ' as u16;
+                        } //暫定的な目印(カラーコードは0にすることで区別)
+                        self.cursor.character = 0;
+                        self.cursor.line += 1;
+                    }
+                    '\x08' => {
+                        if self.cursor.character == 0 {
+                            if self.cursor.line > 0 {
+                                self.cursor.character = 0;
+                                for x in 0..self.frame_buffer_width {
+                                    if unsafe {
                                         *((self.frame_buffer_address
                                             + (self.cursor.line * self.frame_buffer_width - x) * 2)
-                                            as *mut u16) = 0; //目印の削除
+                                            as *const u16)
+                                            == ' ' as u16
+                                    } {
+                                        self.cursor.character = self.frame_buffer_width - x - 1;
+                                        unsafe {
+                                            *((self.frame_buffer_address
+                                                + (self.cursor.line * self.frame_buffer_width - x)
+                                                    * 2)
+                                                as *mut u16) = 0; //目印の削除
+                                        }
+                                        break;
                                     }
-                                    break;
                                 }
+                                self.cursor.line -= 1;
                             }
-                            self.cursor.line -= 1;
+                        } else {
+                            self.cursor.character -= 1;
                         }
-                    } else {
-                        self.cursor.character -= 1;
+                        self.putchar(' ');
                     }
-                    self.putchar(' ');
-                }
-                c => {
-                    self.putchar(c);
-                    self.cursor.character += 1;
-                    if self.cursor.character >= self.frame_buffer_width {
-                        self.cursor.line += 1;
-                        self.cursor.character = 0;
-                        //溢れ対策してない
+                    c => {
+                        self.putchar(c);
+                        self.cursor.character += 1;
+                        if self.cursor.character >= self.frame_buffer_width {
+                            self.cursor.line += 1;
+                            self.cursor.character = 0;
+                            //溢れ対策してない
+                        }
                     }
-                }
-            };
-            // カーソル移動
-            crt::set_cursor_position(
-                (self.cursor.line * self.frame_buffer_width + self.cursor.character) as u16,
-            );
+                };
+                // カーソル移動
+                crt::set_cursor_position(
+                    (self.cursor.line * self.frame_buffer_width + self.cursor.character) as u16,
+                );
+            }
         }
         true
     }
