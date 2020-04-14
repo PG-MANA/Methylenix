@@ -29,7 +29,7 @@ impl LocalApicManager {
 
     pub fn init() -> LocalApicManager {
         let local_apic_msr = unsafe { cpu::rdmsr(LocalApicManager::MSR_INDEX) };
-        let base_addr = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
+        let base_address = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
         let is_x2apic_supported = unsafe {
             let mut eax = 1u32;
             let mut ebx = 0u32;
@@ -51,20 +51,20 @@ impl LocalApicManager {
             .lock()
             .unwrap()
             .reserve_memory(
-                base_addr,
-                base_addr,
+                base_address,
+                base_address,
                 0x1000,
                 MemoryPermissionFlags::data(),
                 true,
                 true,
             )
         {
-            panic!("Cannot reserve memory of APIC.");
+            panic!("Cannot reserve memory of Local APIC.");
         }
         let mut local_apic_manager = LocalApicManager {
             apic_id: 0,
             is_x2apic_enabled: is_x2apic_supported,
-            base_address: base_addr,
+            base_address,
         };
         local_apic_manager.apic_id =
             local_apic_manager.read_apic_register(LocalApicRegisters::ApicId);
@@ -79,7 +79,7 @@ impl LocalApicManager {
         local_apic_manager
     }
 
-    fn get_running_cpu_local_apic_manager() -> LocalApicManager {
+    pub fn get_running_cpu_local_apic_manager() -> LocalApicManager {
         let local_apic_msr = unsafe { cpu::rdmsr(LocalApicManager::MSR_INDEX) };
         let base_address = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
         let is_x2apic_enabled = local_apic_msr & LocalApicManager::X2APIC_ENABLED_MASK != 0;

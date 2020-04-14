@@ -12,17 +12,20 @@ pub struct IoApicManager {
 }
 
 impl IoApicManager {
-    pub fn init() -> IoApicManager {
-        let io_apic_manager = IoApicManager {
-            base_address: 0xfec00000,
-        };
+    pub const fn new() -> IoApicManager {
+        IoApicManager { base_address: 0 }
+    }
+
+    pub fn init(&mut self) {
+        self.base_address = 0xfec00000;
+
         if !get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
             .reserve_memory(
-                io_apic_manager.base_address,
-                io_apic_manager.base_address,
+                self.base_address,
+                self.base_address,
                 PAGE_SIZE, /*too big...*/
                 MemoryPermissionFlags::data(),
                 true,
@@ -31,7 +34,6 @@ impl IoApicManager {
         {
             panic!("Cannot reserve memory of IO APIC");
         }
-        io_apic_manager
     }
 
     pub fn set_redirect(&self, local_apic_id: u32, irq: u8, index: u8) {

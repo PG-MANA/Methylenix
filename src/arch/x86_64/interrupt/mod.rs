@@ -10,6 +10,8 @@ pub mod handler;
 
 use self::idt::GateDescriptor;
 use arch::target_arch::device::cpu;
+use arch::target_arch::device::io_apic::IoApicManager;
+use arch::target_arch::device::local_apic::LocalApicManager;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::MemoryPermissionFlags;
@@ -19,6 +21,7 @@ use core::mem::{size_of, MaybeUninit};
 pub struct InterruptManager {
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
     main_selector: u16,
+    io_apic: IoApicManager,
 }
 
 impl InterruptManager {
@@ -29,6 +32,7 @@ impl InterruptManager {
         InterruptManager {
             idt: MaybeUninit::uninit(),
             main_selector: 0,
+            io_apic: IoApicManager::new(),
         }
     }
 
@@ -52,7 +56,8 @@ impl InterruptManager {
             }
             self.flush();
         }
-        true
+        self.io_apic.init();
+        return true;
     }
 
     unsafe fn flush(&self) {
@@ -73,13 +78,15 @@ impl InterruptManager {
         self.main_selector
     }
 
-    pub fn set_interrupt_function(
+    pub fn set_device_interrupt_function(
         &mut self,
         function: unsafe fn(),
+        irq: u8,
         index: u16,
         privilege_level: u8,
     ) -> bool {
-        if index >= 22 && index <= 32 || index > 0xFF {
+        if index <= 32 || index > 0xFF {
+            /* CPU exception interrupt */
             /* intel reserved */
             return false;
         }
@@ -91,6 +98,12 @@ impl InterruptManager {
                 GateDescriptor::new(function, self.main_selector, 0, type_attr),
             );
         }
+
+        self.io_apic.set_redirect(
+            LocalApicManager::get_running_cpu_local_apic_manager().get_apic_id(),
+            irq,
+            index as u8,
+        );
         return true;
     }
 }

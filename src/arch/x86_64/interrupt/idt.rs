@@ -26,8 +26,6 @@ pub struct IDTR {
 
 /* Intel SDM 6.14 EXCEPTION AND INTERRUPT HANDLING IN 64-BIT MODE */
 impl GateDescriptor {
-    pub const AR_INTGATE32: u8 = 0x8e;
-    /* はりぼてOSより */
     pub fn new(offset: unsafe fn(), selector: u16, ist: u8, type_attr: u8) -> GateDescriptor {
         let c = offset as *const unsafe fn() as usize;
         GateDescriptor {

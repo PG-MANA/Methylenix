@@ -39,8 +39,9 @@ impl SerialPortManager {
                 .interrupt_manager
                 .lock()
                 .unwrap()
-                .set_interrupt_function(
+                .set_device_interrupt_function(
                     inthandler24, /*上のマクロで指定した名前*/
+                    4,
                     0x24,
                     0,
                 );

@@ -4,7 +4,6 @@ pub mod device;
 pub mod paging;
 
 use self::device::cpu;
-use self::device::io_apic::IoApicManager;
 use self::device::local_apic::LocalApicManager;
 use self::device::serial_port::SerialPortManager;
 use self::interrupt::InterruptManager;
@@ -26,32 +25,32 @@ static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SI
 
 #[no_mangle]
 pub extern "C" fn boot_main(
-    mbi_address: usize,       /*マルチブートヘッダのアドレス*/
-    kernel_code_segment: u16, /*現在のセグメント:8*/
+    mbi_address: usize,       /* MultiBoot Information */
+    kernel_code_segment: u16, /* Current segment is 8 */
     _user_code_segment: u16,
     _user_data_segment: u16,
 ) {
-    //この関数はCLIされた状態で呼ばれる。
-    //MultiBootInformation読み込み
+    /* MultiBootInformation読み込み */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
-    // Graphic初期化（Panicが起きたときの表示のため)
+    /* Graphic初期化（Panicが起きたときの表示のため) */
     get_kernel_manager_cluster().graphic_manager =
         Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
-    //メモリ管理初期化
+    println!("Methylenix");
+    /* メモリ管理初期化 */
     let multiboot_information = init_memory(multiboot_information);
     get_kernel_manager_cluster()
         .graphic_manager
         .lock()
         .unwrap()
         .set_framebuffer_memory_permission();
-    //IDT初期化&割り込み初期化
+    /* IDT初期化&割り込み初期化 */
     init_interrupt(kernel_code_segment);
-    //シリアルポート初期化
-    let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
+    /* シリアルポート初期化 */
+    let serial_port_manager = SerialPortManager::new(0x3F8 /* COM1 */);
     serial_port_manager.init();
-    //Boot Information Manager に格納
+    /* Boot Information Manager に格納 */
     get_kernel_manager_cluster().serial_port_manager = Mutex::new(serial_port_manager);
-    println!("Methylenix");
+
     println!(
         "Booted from {}, cmd line: {}",
         multiboot_information.boot_loader_name, multiboot_information.boot_cmd_line
@@ -209,12 +208,10 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
 }
 
 fn init_interrupt(kernel_selector: u16) {
-    //PIC初期化
     device::pic::disable_8259_pic();
-    let local_apic_manager = LocalApicManager::init();
-    let io_apic_manager = IoApicManager::init();
+
+    LocalApicManager::init();
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
     get_kernel_manager_cluster().interrupt_manager = Mutex::new(interrupt_manager);
-    io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x24); //Serial Port
 }
