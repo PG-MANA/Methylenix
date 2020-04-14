@@ -261,7 +261,12 @@ impl VirtualMemoryManager {
             .find_entry_mut(vm_start_address)
         {
             entry.set_permission_flags(new_permission);
-            for i in 0..((entry.get_vm_end_address() + 1) / PAGE_SIZE) {
+            for i in 0..(PhysicalMemoryManager::address_to_size(
+                entry.get_vm_start_address(),
+                entry.get_vm_end_address(),
+            ) / PAGE_SIZE)
+            /* should do page_round_up ? */
+            {
                 if !self.page_manager.change_memory_permission(
                     &mut self.reserved_memory_list,
                     vm_start_address + i * PAGE_SIZE,
