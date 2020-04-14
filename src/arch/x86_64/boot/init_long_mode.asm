@@ -7,8 +7,8 @@ bits 32
 ; GLOBAL, EXTERN
 global init_long_mode
 extern init_x86_64                                  ; at init_x86_64.asm
-extern gdt_main_code, tss_address_definition, gdtr0 ; at common.asm
-extern tss_definition, tss, pd, pdpt, pml4
+extern main_code_segment_descriptor, tss_descriptor, gdtr0 ; at common.asm
+extern tss_descriptor_adress, tss, pd, pdpt, pml4
 
 section .text
 
@@ -24,13 +24,11 @@ init_long_mode:
 
   ; TSSセグメント情報書き込み
   mov   eax,  tss
-  mov   word [tss_address_definition + 2],  ax
+  mov   word [tss_descriptor_adress + 2],  ax
   shr   eax,  16
-  mov   byte [tss_address_definition + 4],  al
-  mov   byte [tss_address_definition + 7],  ah
+  mov   byte [tss_descriptor_adress + 4],  al
+  mov   byte [tss_descriptor_adress + 7],  ah
 
-  push  0                   ; 64bit POPのための準備
-  push  gdt_main_code       ; あとで使う
   pushfd
   pop   eax
   mov   ecx,  eax           ; 比較用にとっておく
@@ -89,7 +87,7 @@ init_normal_paging:
   cmp   ecx,  2048
   jne   .pde_setup          ; ecx != 512 * 4
 
-  mov   ecx,  0             ; カウンタ
+  xor   ecx, ecx            ; カウンタ
 
 .pdpte_setup_2mb:
   mov   eax,  4096
@@ -114,15 +112,15 @@ pml4_setup:
   mov   cr4,  eax           ; PAEフラグを立てる
   mov   ecx,  0xc0000080    ; rdmsrのための準備(レジスタ指定)
   rdmsr                     ; モデル固有レジスタに記載(intelの場合pentium以降に搭載、cpuidで検査済)
-  or    eax,  1 << 8        ; LMEフラグを立てる
-  wrmsr
+  or    eax,  1 << 8 | 1 << 11
+  wrmsr                     ; LMEとNXEフラグを立てる
   mov   eax,  cr0
   or    eax,  1 << 31 | 1   ; PGフラグを立てる("|1"は既に32bitになってる場合は不要)
   mov   cr0,  eax           ; これらの初期化で4GBは仮想メモリアドレスと実メモリアドレスが一致しているはず。(ストレートマッピング)
+  mov   ax,   tss_descriptor
   lgdt  [gdtr0]
-  mov   ax,   tss_definition
   ltr   ax                  ; ホントは16bitから32bitになったときはすぐジャンプすべき
-  jmp   gdt_main_code:init_x86_64
+  jmp   main_code_segment_descriptor:init_x86_64
 
 only_x86:                   ; 今の所下と同じ
 cpuid_not_supported:

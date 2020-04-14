@@ -1,45 +1,54 @@
-/*
-ページング実装(Page Directory Entries)
-*/
+use super::PAGE_MASK;
 
-//use
-use paging::pt::PageTable;
-use paging::pte::PTE;
+pub const PDE_MAX_ENTRY: usize = 512;
+
+//PDEの53bit目はPTEの配列がセットされているかどうかの確認に利用している。
 
 pub struct PDE {
     flags: u64,
 }
 
 impl PDE {
-    /*pub fn new(/*規格未定*/) -> PTE{
-
-    }*/
-
-    pub fn new_empty() -> PTE {
-        PTE { flags: 0 }
+    #![allow(dead_code)]
+    pub const fn new() -> PDE {
+        PDE { flags: 0 }
     }
 
-    fn set_bit(&mut self, addr: u64, b: bool) {
+    pub fn init(&mut self) {
+        self.flags = 0;
+        self.set_user_accessible(true);
+        self.set_writable(true);
+    }
+
+    fn set_bit(&mut self, bit: u64, b: bool) {
         if b {
-            self.flags |= addr;
+            self.flags |= bit;
         } else {
-            self.flags &= !addr;
+            self.flags &= !bit;
         }
     }
 
-    fn get_bit(&self, addr: u64) -> bool {
-        if (self.flags & addr) == 0 {
+    fn get_bit(&self, bit: u64) -> bool {
+        if (self.flags & bit) == 0 {
             false
         } else {
             true
         }
     }
 
-    pub fn present(&self) -> bool {
+    pub fn is_pte_set(&self) -> bool {
+        self.get_bit(1 << 52)
+    }
+
+    pub fn set_pte_set(&mut self, b: bool) {
+        self.set_bit(1 << 52, b);
+    }
+
+    pub fn is_present(&self) -> bool {
         self.get_bit(1 << 0)
     }
 
-    pub fn setPresent(&mut self, b: bool) {
+    pub fn set_present(&mut self, b: bool) {
         self.set_bit(1 << 0, b);
     }
 
@@ -60,7 +69,7 @@ impl PDE {
         self.set_bit(1 << 4, b);
     }
 
-    pub fn accessed(&self) -> bool {
+    pub fn is_accessed(&self) -> bool {
         self.get_bit(1 << 5)
     }
 
@@ -68,7 +77,7 @@ impl PDE {
         self.set_bit(1 << 5, false);
     }
 
-    pub fn dirty(&self) -> bool {
+    pub fn is_dirty(&self) -> bool {
         self.get_bit(1 << 6)
     }
 
@@ -84,29 +93,25 @@ impl PDE {
         self.set_bit(1 << 8, b);
     }
 
-    pub fn addr(&self) -> Option<usize> {
-        if self.present() {
-            Some((self.flags & 0xFFFFFFFFFF000) as usize)
+    pub fn set_no_excuse(&mut self, b: bool) {
+        self.set_bit(1 << 63, b);
+    }
+
+    pub fn get_addr(&self) -> Option<usize> {
+        if self.is_pte_set() {
+            Some((self.flags & 0x000FFFFF_FFFFF000) as usize)
         } else {
             None
         }
     }
 
-    pub fn page(&self) -> Option<Frame> {
-        let ad = self.addr();
-        if ad.is_none() {
-            None
+    pub fn set_addr(&mut self, address: usize) -> bool {
+        if (address & !PAGE_MASK) == 0 {
+            self.set_bit((0x000FFFFF_FFFFF000 & address) as u64, true);
+            self.set_pte_set(true);
+            true
         } else {
-            Some(Frame::makefromaddr(self.addr().unwrap()))
-        } //もっと短くかけないかな
-    }
-
-    pub fn set_addr(&mut self, page: &Frame) {
-        assert!(page.startAddr() & !0xFFFFFFFFFF000 == 0);
-        self.flags &= (!(0xFFFFFFFFFF000) | page.startAddr()) as u64;
-    }
-
-    pub fn set_no_excuse(&mut self, b: bool) {
-        self.set_bit(1 << 63, b);
+            false
+        }
     }
 }

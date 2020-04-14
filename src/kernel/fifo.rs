@@ -2,21 +2,23 @@
 FIFOシステム(暫定)
 */
 
-use core::mem;
-
 pub struct FIFO<T: Copy> {
     buf: [T; 128],
     r: usize,
     w: usize,
-    size: usize, //暫定
+    size: usize,
+    //暫定
     free: usize, //暫定
 }
 
 impl<T: Copy> FIFO<T> {
-    pub fn new(_f_size: usize /*可変にできないので今の所無視*/) -> FIFO<T> {
+    pub fn new(
+        _f_size: usize, /*可変にできないので今の所無視*/
+        default_value: &T,
+    ) -> FIFO<T> {
         FIFO {
             size: 128,
-            buf: unsafe { mem::uninitialized::<[T; 128]>() },
+            buf: [*default_value; 128],
             r: 0,
             w: 0,
             free: 128,
@@ -48,6 +50,7 @@ impl<T: Copy> FIFO<T> {
     }
 
     pub fn dequeue(&mut self) -> Option<T> {
+        use core::mem;
         if self.w == self.r {
             return None;
         }

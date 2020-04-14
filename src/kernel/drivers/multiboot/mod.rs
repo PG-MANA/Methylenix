@@ -6,7 +6,7 @@ mod memory;
 
 pub use self::elf::{ElfInfo, ElfSection};
 pub use self::frame_buffer::FrameBufferInfo;
-pub use self::memory::{MemoryInfo, MemoryMapEntry, MemoryMapInfo};
+pub use self::memory::{MemoryMapEntry, MemoryMapInfo};
 use core::mem;
 
 //構造体
@@ -24,13 +24,14 @@ struct EfiSystemTableInformation {
 }
 
 pub struct MultiBootInformation {
-    pub multiboot_information_address: usize,
-    pub multiboot_information_size: usize,
-    pub memory_info: MemoryInfo,
     pub elf_info: ElfInfo,
     pub memory_map_info: MemoryMapInfo,
     pub framebuffer_info: FrameBufferInfo,
     pub efi_table_pointer: usize,
+    pub address: usize,
+    pub size: usize,
+    pub boot_loader_name: &'static str,
+    pub boot_cmd_line: &'static str,
 }
 
 impl MultiBootInformation {
@@ -40,7 +41,7 @@ impl MultiBootInformation {
     const TAG_TYPE_CMDLINE: u32 = 1;
     const TAG_TYPE_BOOT_LOADER_NAME: u32 = 2;
     const TAG_TYPE_MODULE: u32 = 3;
-    const TAG_TYPE_BASIC_MEMINFO: u32 = 4;
+    /*const TAG_TYPE_BASIC_MEMINFO: u32 = 4;*/
     const TAG_TYPE_BOOTDEV: u32 = 5;
     const TAG_TYPE_MMAP: u32 = 6;
     const TAG_TYPE_VBE: u32 = 7;
@@ -59,13 +60,15 @@ impl MultiBootInformation {
     const TAG_TYPE_EFI64_IH: u32 = 20;
     const TAG_TYPE_BASE_ADDR: u32 = 21;
 
-    pub fn new(address: usize) -> MultiBootInformation {
+    pub fn new(address: usize, should_test: bool) -> MultiBootInformation {
+        #[allow(invalid_value)]
         let mut mbi: MultiBootInformation = unsafe { mem::zeroed() };
-        if !MultiBootInformation::test(address) {
+        if should_test && !MultiBootInformation::test(address) {
             panic!("Unaligned Multi Boot Information")
         }
-        let total_size = MultiBootInformation::total_size(address);
-        if total_size == 0 {
+        mbi.address = address;
+        mbi.size = MultiBootInformation::total_size(address) as usize;
+        if mbi.size == 0 {
             panic!("Invalid Multi Boot Information")
         }
         let mut tag = address + 8;
@@ -80,24 +83,39 @@ impl MultiBootInformation {
                     mbi.memory_map_info = MemoryMapInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_ACPI_NEW => {}
-                MultiBootInformation::TAG_TYPE_BASIC_MEMINFO => {
-                    mbi.memory_info = MemoryInfo::new(unsafe { &*(tag as *const _) }); //完全に信用すべきではない(CPUIDなどで問い合わせる)
+                MultiBootInformation::TAG_TYPE_CMDLINE => {
+                    use core::{slice, str};
+                    mbi.boot_cmd_line = str::from_utf8(unsafe {
+                        slice::from_raw_parts(
+                            &*((tag + 8) as *const u8),
+                            (&*(tag as *const MultibootTag)).size as usize - 8,
+                        )
+                    })
+                    .unwrap_or("");
                 }
-                MultiBootInformation::TAG_TYPE_CMDLINE => {}
-                MultiBootInformation::TAG_TYPE_BOOT_LOADER_NAME => {}
+                MultiBootInformation::TAG_TYPE_BOOT_LOADER_NAME => {
+                    use core::{slice, str};
+                    mbi.boot_loader_name = str::from_utf8(unsafe {
+                        slice::from_raw_parts(
+                            &*((tag + 8) as *const u8),
+                            (&*(tag as *const MultibootTag)).size as usize - 8,
+                        )
+                    })
+                    .unwrap_or("");
+                }
                 MultiBootInformation::TAG_TYPE_FRAMEBUFFER => {
                     mbi.framebuffer_info = FrameBufferInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_EFI64 => {
                     mbi.efi_table_pointer =
-                        unsafe { (*(tag as *const EfiSystemTableInformation)).address };
+                        unsafe { (&*(tag as *const EfiSystemTableInformation)).address };
                 }
                 MultiBootInformation::TAG_TYPE_ELF_SECTIONS => {
                     mbi.elf_info = ElfInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_BOOTDEV => {}
                 _ => {
-                    if tag - address - 8 >= (total_size as usize) {
+                    if tag - address - 8 >= mbi.size {
                         break;
                     }
                 }

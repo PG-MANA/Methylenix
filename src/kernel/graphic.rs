@@ -1,11 +1,14 @@
 /*
-    フォントの描画などをフレームバッファに行う
+    Graphic Manager
 */
 
-// use(Arch非依存)
-use core::fmt;
+use arch::target_arch::device::crt;
+
 use kernel::drivers::multiboot::FrameBufferInfo;
-use kernel::struct_manager::STATIC_BOOT_INFORMATION_MANAGER;
+use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
+
+use core::fmt;
 
 pub struct GraphicManager {
     frame_buffer_address: usize,
@@ -46,6 +49,30 @@ impl GraphicManager {
         }
     }
 
+    pub fn set_framebuffer_memory_permission(&self) {
+        let pixel_size = if self.is_textmode {
+            2
+        } else {
+            self.frame_buffer_color_depth / 8
+        };
+        let result = MemoryManager::page_round_up(
+            self.frame_buffer_address,
+            self.frame_buffer_height * self.frame_buffer_width * pixel_size as usize,
+        );
+        get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .reserve_memory(
+                result.0,
+                result.0,
+                result.1,
+                MemoryPermissionFlags::data(),
+                true,
+                true,
+            );
+    }
+
     fn init_manager(&mut self, frame_buffer_info: &FrameBufferInfo) {
         self.frame_buffer_address = frame_buffer_info.address as usize;
         self.frame_buffer_width = frame_buffer_info.width as usize;
@@ -54,12 +81,12 @@ impl GraphicManager {
         self.init_color_mode();
         match frame_buffer_info.mode {
             1 => self.init_color_mode(),
-            2 => self.init_ega_text_mode(),
+            2 => self.init_vga_text_mode(),
             _ => (/*何しよう...*/),
         }
     }
 
-    fn init_color_mode(&mut self) {
+    pub fn init_color_mode(&mut self) {
         //こっからテスト
         if self.frame_buffer_color_depth == 32 {
             self.is_textmode = false;
@@ -72,12 +99,13 @@ impl GraphicManager {
         }
     }
 
-    pub fn init_ega_text_mode(&mut self) {
+    pub fn init_vga_text_mode(&mut self) {
         self.is_textmode = true;
         self.cursor.front_color = 0xb; // bright cyan
+        crt::set_cursor_position(0);
     }
 
-    pub fn put_char(&self, c: char) {
+    pub fn putchar(&self, c: char) {
         //カーソル操作はしない
         let t: u16 = ((self.cursor.back_color & 0x07) << 0x0C) as u16
             | ((self.cursor.front_color & 0x0F) << 0x08) as u16
@@ -89,76 +117,89 @@ impl GraphicManager {
         }
     }
 
-    fn write_string_to_serial_port(&self, string: &str) -> bool {
-        //代替処置
-        let serial_port_manager_lock = unsafe {
-            STATIC_BOOT_INFORMATION_MANAGER
-                .serial_port_manager
-                .try_lock()
-        };
-        if serial_port_manager_lock.is_ok() {
-            let manager = serial_port_manager_lock.unwrap();
+    pub fn puts(&mut self, string: &str) -> bool {
+        if let Ok(serial_port_manager) = get_kernel_manager_cluster().serial_port_manager.try_lock()
+        {
+            serial_port_manager.sendstr(string);
+        }
+        if self.is_textmode {
             for code in string.bytes() {
-                manager.send(code);
-            }
-            return true;
-        }
-        return false;
-    }
-
-    pub fn write_string(&mut self, string: &str) -> bool {
-        if !self.is_textmode || self.frame_buffer_width == 0 {
-            return self.write_string_to_serial_port(string);
-        }
-        for code in string.bytes() {
-            match code as char {
-                '\r' => self.cursor.character = 0,
-                '\n' => {
-                    unsafe {
-                        *((self.frame_buffer_address
-                            + (self.cursor.line * self.frame_buffer_width + self.cursor.character)
-                                * 2) as *mut u16) = ' ' as u16;
-                    } //暫定的な目印(カラーコードは0にすることで区別)
-                    self.cursor.character = 0;
-                    self.cursor.line += 1;
-                }
-                '\x08' => {
-                    if self.cursor.character == 0 {
-                        if self.cursor.line > 0 {
-                            self.cursor.character = 0;
-                            for x in 0..self.frame_buffer_width {
-                                if unsafe {
-                                    *((self.frame_buffer_address
-                                        + (self.cursor.line * self.frame_buffer_width - x) * 2)
-                                        as *const u16)
-                                        == ' ' as u16
-                                } {
-                                    self.cursor.character = self.frame_buffer_width - x - 1;
-                                    unsafe {
+                match code as char {
+                    '\r' => self.cursor.character = 0,
+                    '\n' => {
+                        unsafe {
+                            *((self.frame_buffer_address
+                                + (self.cursor.line * self.frame_buffer_width
+                                    + self.cursor.character)
+                                    * 2) as *mut u16) = ' ' as u16;
+                        } //暫定的な目印(カラーコードは0にすることで区別)
+                        self.cursor.character = 0;
+                        self.cursor.line += 1;
+                    }
+                    '\x08' => {
+                        if self.cursor.character == 0 {
+                            if self.cursor.line > 0 {
+                                self.cursor.character = 0;
+                                for x in 0..self.frame_buffer_width {
+                                    if unsafe {
                                         *((self.frame_buffer_address
                                             + (self.cursor.line * self.frame_buffer_width - x) * 2)
-                                            as *mut u16) = 0; //目印の削除
+                                            as *const u16)
+                                            == ' ' as u16
+                                    } {
+                                        self.cursor.character = self.frame_buffer_width - x - 1;
+                                        unsafe {
+                                            *((self.frame_buffer_address
+                                                + (self.cursor.line * self.frame_buffer_width - x)
+                                                    * 2)
+                                                as *mut u16) = 0; //目印の削除
+                                        }
+                                        break;
                                     }
-                                    break;
                                 }
+                                self.cursor.line -= 1;
                             }
-                            self.cursor.line -= 1;
+                        } else {
+                            self.cursor.character -= 1;
                         }
-                    } else {
-                        self.cursor.character -= 1;
+                        self.putchar(' ');
                     }
-                    self.put_char(' ');
-                }
-                c => {
-                    self.put_char(c);
-                    self.cursor.character += 1;
-                    if self.cursor.character >= self.frame_buffer_width {
-                        self.cursor.line += 1;
-                        self.cursor.character = 0;
-                        //溢れ対策してない
+                    c => {
+                        self.putchar(c);
+                        self.cursor.character += 1;
+                        if self.cursor.character >= self.frame_buffer_width {
+                            self.cursor.line += 1;
+                            self.cursor.character = 0;
+                            //溢れ対策してない
+                        }
                     }
+                };
+                if self.cursor.line >= self.frame_buffer_height {
+                    for i in 0..(self.frame_buffer_width * (self.frame_buffer_height - 1)) as usize
+                    {
+                        unsafe {
+                            *((self.frame_buffer_address + i * 2) as *mut u16) = *((self
+                                .frame_buffer_address
+                                + (self.frame_buffer_width as usize + i) * 2)
+                                as *mut u16);
+                        }
+                    }
+                    for i in (self.frame_buffer_width * (self.frame_buffer_height - 1))
+                        ..(self.frame_buffer_width * self.frame_buffer_height)
+                    {
+                        unsafe {
+                            *((self.frame_buffer_address + i as usize * 2) as *mut u16) =
+                                ' ' as u16;
+                        }
+                    }
+                    self.cursor.line -= 1;
+                    self.cursor.character = 0;
                 }
-            };
+            }
+            // カーソル移動
+            crt::set_cursor_position(
+                (self.cursor.line * self.frame_buffer_width + self.cursor.character) as u16,
+            );
         }
         true
     }
@@ -166,7 +207,7 @@ impl GraphicManager {
 
 impl fmt::Write for GraphicManager {
     fn write_str(&mut self, string: &str) -> fmt::Result {
-        if self.write_string(string) {
+        if self.puts(string) {
             return Ok(());
         } else {
             return Err(fmt::Error {});
@@ -175,11 +216,9 @@ impl fmt::Write for GraphicManager {
 }
 
 pub fn print_string_to_default_screen(args: fmt::Arguments) -> bool {
-    let graphic_manager_lock =
-        unsafe { STATIC_BOOT_INFORMATION_MANAGER.graphic_manager.try_lock() };
-    if graphic_manager_lock.is_ok() {
+    if let Ok(mut graphic_manager) = get_kernel_manager_cluster().graphic_manager.try_lock() {
         use core::fmt::Write;
-        if graphic_manager_lock.unwrap().write_fmt(args).is_ok() {
+        if graphic_manager.write_fmt(args).is_ok() {
             return true;
         }
     }

@@ -3,6 +3,7 @@ TSS(64bit)実装、割り込みを扱うために行う。
 */
 
 use core::mem;
+
 const IO_MAP_SIZE: usize = 0xFFFF;
 
 #[repr(C)]

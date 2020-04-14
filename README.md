@@ -1,6 +1,6 @@
 # Methylenix
 (Format:UTF-8)  
-Rustで書かれたOS
+The operating system written in Rust
 
 ## 概要
 Methylenix とはRustで構成されたOSです。
@@ -8,7 +8,7 @@ Methylenix とはRustで構成されたOSです。
 ドキュメントは追々整備します。
 
 ## Methylenixとは
-このプログラムの原点は、セキュリティキャンプ全国大会2018 集中コース「X　言語やOSを自作しよう」において、書きはじめたものです。  
+このプログラムの原点は、セキュリティキャンプ全国大会2017 集中コース「X　言語やOSを自作しよう」において、書きはじめたものです。  
 セキュリティキャンプについては、[セキュリティ・キャンプ：IPA 独立行政法人 情報処理推進機構](https://www.ipa.go.jp/jinzai/camp/index.html)をご覧ください。
 セキュリティキャンプでは割り込みまでを実装しました。(参考：[セキュリティキャンプ2017参加記](https://pg-mana.net/blog/seccamp_after/))
 
@@ -17,12 +17,15 @@ Methylenixという名前は(頭弱い)自分が唐突に思いついたアイ�
 なんか重大な間違いを起こしてそう。
 
 ## 現状
-キーボード割り込みから入力された文字の表示
+
+* APICによるデバイス割り込み
+* メモリ・ページング動的管理
 
 ## 方針
 * GUIについては基本対応しない(デバイスの認識などはしておく)
 * UEFIをなるべく利用したい...?(GRUBを駆使して)
 * OS自作入門レベルのこと(割り込み・音・マルチタスクなど)を当分の目標とする
+* 動的に柔軟に対応できるようにする(UEFIなどから渡される情報をしっかり活用する)
 
 ## 対応命令セット
 * x86_64
@@ -52,7 +55,7 @@ limitations under the License.
 * nasm
 * rustc(nightly)
 * cargo
-* xargo
+* cargo-xbuild
 
 詳しくは https://soft.taprix.org/wiki/oswiki/Rust:setup を参照してください。
 
@@ -65,6 +68,13 @@ make iso
 #これでbin/img/boot.isoができる...はず
 make clean
 #objファイル削除
+```
+
+## 実行
+
+qemu-system-x86_64が必要です。
+```
+qemu-system-x86_64 --cdrom bin/img/boot.iso
 ```
 
 ## コーディング規約

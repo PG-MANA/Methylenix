@@ -5,7 +5,8 @@
 use super::text::output::EfiOutputProtocol;
 
 //type
-pub type EfiHandle = usize; //本当はポインタ
+pub type EfiHandle = usize;
+//本当はポインタ
 pub type EfiStatus = usize;
 
 #[repr(C)]
@@ -58,13 +59,16 @@ pub struct EfiSystemTable {
     pub firmware_vender: usize,
     pub firmware_version: u32,
     pub console_input_handler: EfiHandle,
-    pub console_input_protocol: usize, //*const EfiInputProtocol,
+    pub console_input_protocol: usize,
+    //*const EfiInputProtocol,
     pub console_output_handler: EfiHandle,
     pub console_output_protocol: *const EfiOutputProtocol,
     pub standard_error_handler: EfiHandle,
     pub standard_error_protocol: *const EfiOutputProtocol,
-    pub efi_runtime_services: usize,               //未実装
-    pub efi_boot_services: *const EfiBootServices, //未実装
+    pub efi_runtime_services: usize,
+    //未実装
+    pub efi_boot_services: *const EfiBootServices,
+    //未実装
     pub num_table_entries: usize,
     pub configuration_table: usize, //未実装
 }

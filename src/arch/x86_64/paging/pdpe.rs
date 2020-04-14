@@ -1,19 +1,23 @@
 use super::PAGE_MASK;
 
-pub const PTE_MAX_ENTRY: usize = 512;
+pub const PDPE_MAX_ENTRY: usize = 512;
 
-pub struct PTE {
+//PDPEの53bit目はPDEの配列がセットされているかどうかの確認に利用している。
+
+pub struct PDPE {
     flags: u64,
 }
 
-impl PTE {
+impl PDPE {
     #![allow(dead_code)]
-    pub const fn new() -> PTE {
-        PTE { flags: 0 }
+    pub const fn new() -> PDPE {
+        PDPE { flags: 0 }
     }
 
     pub fn init(&mut self) {
         self.flags = 0;
+        self.set_user_accessible(true);
+        self.set_writable(true);
     }
 
     fn set_bit(&mut self, bit: u64, b: bool) {
@@ -32,6 +36,14 @@ impl PTE {
         }
     }
 
+    pub fn is_pde_set(&self) -> bool {
+        self.get_bit(1 << 52)
+    }
+
+    pub fn set_pde_set(&mut self, b: bool) {
+        self.set_bit(1 << 52, b);
+    }
+
     pub fn is_present(&self) -> bool {
         self.get_bit(1 << 0)
     }
@@ -40,16 +52,8 @@ impl PTE {
         self.set_bit(1 << 0, b);
     }
 
-    pub fn is_writable(&self) -> bool {
-        self.get_bit(1 << 1)
-    }
-
     pub fn set_writable(&mut self, b: bool) {
         self.set_bit(1 << 1, b);
-    }
-
-    pub fn is_user_accessible(&self) -> bool {
-        self.get_bit(1 << 2)
     }
 
     pub fn set_user_accessible(&mut self, b: bool) {
@@ -89,16 +93,12 @@ impl PTE {
         self.set_bit(1 << 8, b);
     }
 
-    pub fn is_no_execute(&self) -> bool {
-        self.get_bit(1 << 63)
-    }
-
-    pub fn set_no_execute(&mut self, b: bool) {
+    pub fn set_no_excuse(&mut self, b: bool) {
         self.set_bit(1 << 63, b);
     }
 
     pub fn get_addr(&self) -> Option<usize> {
-        if self.is_present() {
+        if self.is_pde_set() {
             Some((self.flags & 0x000FFFFF_FFFFF000) as usize)
         } else {
             None
@@ -108,7 +108,7 @@ impl PTE {
     pub fn set_addr(&mut self, address: usize) -> bool {
         if (address & !PAGE_MASK) == 0 {
             self.set_bit((0x000FFFFF_FFFFF000 & address) as u64, true);
-            self.set_present(true);
+            self.set_pde_set(true);
             true
         } else {
             false

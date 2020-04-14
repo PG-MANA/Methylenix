@@ -1,87 +1,109 @@
-//module
+/*
+ * Interrupt Manager
+ * 共通部分をkernel/に持っていきたい
+ */
+
 pub mod idt;
 #[macro_use]
 pub mod handler;
 //mod tss;
 
-//use
-use arch::x86_64::device::cpu;
-use core::mem;
+use self::idt::GateDescriptor;
+use arch::target_arch::device::cpu;
+use arch::target_arch::device::io_apic::IoApicManager;
+use arch::target_arch::device::local_apic::LocalApicManager;
+
+use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::MemoryPermissionFlags;
+
+use core::mem::{size_of, MaybeUninit};
 
 pub struct InterruptManager {
-    idt: usize,
+    idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
+    main_selector: u16,
+    io_apic: IoApicManager,
 }
 
-/*
-//#[no_mangle]//関数名をそのままにするため
-pub extern "C"  fn inthandlerdef_main() {
-    let master =  isr_to_irq(unsafe { pic::get_isr_master() } );
-    let slave = isr_to_irq(unsafe { pic::get_isr_slave() } );
-    print!("Int from IRQ-{:02}",if slave != 0{ slave + 8 }else{master});
-    unsafe {
-        pic::pic0_eoi(master);
-    }
-    if master == 2{//いるかな(割り込みがないのに設定するのはどうかと思って検討中)
-        pic::pic1_eoi(slave);
-    }
-}
-
-
-fn isr_to_irq(isr : u8) -> u8 {
-    if isr == 0{
-        return 0;
-    }
-    let mut i = isr;
-    let mut cnt = 0;
-    loop{
-        if i == 1{
-            return cnt;
-        }
-        cnt = cnt + 1;
-        i = i >> 1;
-    }
-}
-*/
 impl InterruptManager {
-    pub const LIMIT_IDT: u16 = 0x100 * (mem::size_of::<idt::GateDescriptor>() as u16) - 1; //0xfffという情報あり
+    pub const LIMIT_IDT: u16 = 0x100 * (size_of::<idt::GateDescriptor>() as u16) - 1;
     pub const IDT_MAX: u16 = 0xff;
 
-    pub unsafe fn new(
-        idt_memory: usize, /*IDT用メモリ域(4KiB)*/
-        _gdt: u64,
-    ) -> InterruptManager {
-        let idt_man = InterruptManager { idt: idt_memory };
-
-        for i in 0..InterruptManager::IDT_MAX {
-            idt_man.set_gatedec(
-                i as usize,
-                idt::GateDescriptor::new(InterruptManager::dummy_handler, 0, 0, 0),
-            );
+    pub const fn new() -> InterruptManager {
+        InterruptManager {
+            idt: MaybeUninit::uninit(),
+            main_selector: 0,
+            io_apic: IoApicManager::new(),
         }
-        idt_man.flush();
-        idt_man
     }
 
-    pub const fn new_static() -> InterruptManager {
-        InterruptManager { idt: 0 }
+    pub fn dummy_handler() {}
+
+    pub fn init(&mut self, selector: u16) -> bool {
+        self.main_selector = selector;
+        self.idt.write(unsafe {
+            &mut *(get_kernel_manager_cluster()
+                .memory_manager
+                .lock()
+                .unwrap()
+                .alloc_pages(0, None, MemoryPermissionFlags::data())
+                .expect("Cannot alloc memory for interrupt manager.")
+                as *mut [_; Self::IDT_MAX as usize])
+        });
+
+        unsafe {
+            for i in 0..Self::IDT_MAX {
+                self.set_gatedec(i, GateDescriptor::new(Self::dummy_handler, 0, 0, 0));
+            }
+            self.flush();
+        }
+        self.io_apic.init();
+        return true;
     }
 
     unsafe fn flush(&self) {
         let idtr = idt::IDTR {
             limit: InterruptManager::LIMIT_IDT,
-            offset: self.idt as u64,
+            offset: self.idt.read() as *const _ as u64,
         };
         cpu::lidt(&idtr as *const _ as usize);
     }
 
-    pub unsafe fn set_gatedec(
-        &self,
-        num: usize, /*割り込み番号*/
-        descr: idt::GateDescriptor,
-    ) {
-        *((self.idt + (num * mem::size_of::<idt::GateDescriptor>())) as *mut idt::GateDescriptor) =
-            descr;
+    unsafe fn set_gatedec(&mut self, interrupt_num: u16, descr: GateDescriptor) {
+        if interrupt_num < Self::IDT_MAX {
+            self.idt.read()[interrupt_num as usize] = descr;
+        }
     }
 
-    pub fn dummy_handler() {}
+    pub fn get_main_selector(&self) -> u16 {
+        self.main_selector
+    }
+
+    pub fn set_device_interrupt_function(
+        &mut self,
+        function: unsafe fn(),
+        irq: u8,
+        index: u16,
+        privilege_level: u8,
+    ) -> bool {
+        if index <= 32 || index > 0xFF {
+            /* CPU exception interrupt */
+            /* intel reserved */
+            return false;
+        }
+        let type_attr: u8 = 0xe | (privilege_level & 0x3) << 5 | 1 << 7;
+
+        unsafe {
+            self.set_gatedec(
+                index,
+                GateDescriptor::new(function, self.main_selector, 0, type_attr),
+            );
+        }
+
+        self.io_apic.set_redirect(
+            LocalApicManager::get_running_cpu_local_apic_manager().get_apic_id(),
+            irq,
+            index as u8,
+        );
+        return true;
+    }
 }

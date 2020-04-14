@@ -6,8 +6,8 @@ bits 64
 
 ; GLOBAL
 global init_efi64
-extern initial_stack, gdt_main_code, gdtr0    ; at common.asm
-extern tss_definition, tss_address_definition, tss
+extern main_code_segment_descriptor, tss_descriptor, gdtr0 ; at common.asm
+extern tss_descriptor_adress, tss, pd, pdpt, pml4, initial_stack
 extern pd, pdpt, pml4
 extern init_x86_64
 
@@ -23,15 +23,14 @@ init_efi64:
   push  0
   popf
   push  rbx
-  push  gdt_main_code
   cmp   eax, MULTIBOOT_CHECK_MAGIC
   jne   bad_magic
   ; TSSセグメント情報書き込み
   mov   eax,  tss
-  mov   word [tss_address_definition + 2],  ax
+  mov   word [tss_descriptor_adress + 2],  ax
   shr   eax,  16
-  mov   byte [tss_address_definition + 4],  al
-  mov   byte [tss_address_definition + 7],  ah
+  mov   byte [tss_descriptor_adress + 4],  al
+  mov   byte [tss_descriptor_adress + 7],  ah
   ; ページングを設定し直す
   mov   eax,  0x80000001
   cpuid                 ; CPUID拡張モードの確認は省略
@@ -92,9 +91,16 @@ pml4_setup:
   mov   [pml4], eax         ; ページマップレベル4の最初に追加
 
 ;reset:
+  push  0                   ; mainがreturnしたときの戻り先(returnすることないので0にする)
+  push main_code_segment_descriptor
+  push init_x86_64
+  mov   ecx,  0xc0000080    ; rdmsrのための準備(レジスタ指定)
+  rdmsr                     ; モデル固有レジスタに記載(intelの場合pentium以降に搭載、cpuidで検査済)
+  or    eax,  1 << 11
+  wrmsr                     ; NXEフラグを立てる
   mov   rax,  pml4
   mov   cr3,  rax           ; PML4Eをcr3に設定する
-  lgdt  [gdtr0]
-  mov   ax,   tss_definition
+  mov   ax,   tss_descriptor
   ltr   ax
-  jmp   init_x86_64
+  lgdt  [gdtr0]
+  retfq
