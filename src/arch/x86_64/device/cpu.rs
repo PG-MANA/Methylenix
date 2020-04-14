@@ -65,15 +65,6 @@ pub unsafe fn invlpg(addr: usize) {
     asm!("invlpg (%rax)"::"{rax}"(addr));
 }
 
-#[inline(always)]
-pub unsafe fn get_func_addr(func: unsafe fn()) -> usize {
-    // 関数のアドレス取得に使用、代用案捜索中
-    #[allow(unused_assignments)]
-    let mut result: usize = 0;
-    asm!("mov rax, rbx":"={rax}"(result):"{rbx}"(func)::"intel");
-    result
-}
-
 pub unsafe fn clear_task_stack(
     task_switch_stack: usize,
     stack_size: usize,

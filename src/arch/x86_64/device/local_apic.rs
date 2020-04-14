@@ -22,7 +22,7 @@ enum LocalApicRegisters {
 impl LocalApicManager {
     const MSR_INDEX: u32 = 0x1b;
     const BASE_ADDR_MASK: u64 = 0xffffffffff000;
-    const XAPIC_ENABLED_MASK: u64 = 0x800;
+    const _XAPIC_ENABLED_MASK: u64 = 0x800;
     const X2APIC_ENABLED_MASK: u64 = 0x400;
     const CPUID_X2APIC_MASK: u32 = 1 << 21;
     const X2APIC_MSR_INDEX: u32 = 0x800;

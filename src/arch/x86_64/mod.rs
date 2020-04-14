@@ -32,8 +32,6 @@ pub extern "C" fn boot_main(
     _user_data_segment: u16,
 ) {
     //この関数はCLIされた状態で呼ばれる。
-    //PIC初期化
-    device::pic::pic_init();
     //MultiBootInformation読み込み
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
     // Graphic初期化（Panicが起きたときの表示のため)
@@ -50,7 +48,7 @@ pub extern "C" fn boot_main(
     init_interrupt(kernel_code_segment);
     //シリアルポート初期化
     let serial_port_manager = SerialPortManager::new(0x3F8 /*COM1*/);
-    serial_port_manager.init(kernel_code_segment);
+    serial_port_manager.init();
     //Boot Information Manager に格納
     get_kernel_manager_cluster().serial_port_manager = Mutex::new(serial_port_manager);
     println!("Methylenix");
@@ -58,10 +56,6 @@ pub extern "C" fn boot_main(
         "Booted from {}, cmd line: {}",
         multiboot_information.boot_loader_name, multiboot_information.boot_cmd_line
     );
-
-    let local_apic_manager = LocalApicManager::init();
-    let io_apic_manager = IoApicManager::init();
-    io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x24); //Serial Port
 
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
@@ -215,7 +209,12 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
 }
 
 fn init_interrupt(kernel_selector: u16) {
+    //PIC初期化
+    device::pic::disable_8259_pic();
+    let local_apic_manager = LocalApicManager::init();
+    let io_apic_manager = IoApicManager::init();
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
     get_kernel_manager_cluster().interrupt_manager = Mutex::new(interrupt_manager);
+    io_apic_manager.set_redirect(local_apic_manager.get_apic_id(), 4, 0x24); //Serial Port
 }

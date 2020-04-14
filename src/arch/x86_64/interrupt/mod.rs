@@ -1,6 +1,7 @@
 /*
-    Interrupt Manager
-*/
+ * Interrupt Manager
+ * 共通部分をkernel/に持っていきたい
+ */
 
 pub mod idt;
 #[macro_use]
@@ -20,40 +21,8 @@ pub struct InterruptManager {
     main_selector: u16,
 }
 
-/*
-//#[no_mangle]//関数名をそのままにするため
-pub extern "C"  fn inthandlerdef_main() {
-    let master =  isr_to_irq(unsafe { pic::get_isr_master() } );
-    let slave = isr_to_irq(unsafe { pic::get_isr_slave() } );
-    print!("Int from IRQ-{:02}",if slave != 0{ slave + 8 }else{master});
-    unsafe {
-        pic::pic0_eoi(master);
-    }
-    if master == 2{//いるかな(割り込みがないのに設定するのはどうかと思って検討中)
-        pic::pic1_eoi(slave);
-    }
-}
-
-
-fn isr_to_irq(isr : u8) -> u8 {
-    if isr == 0{
-        return 0;
-    }
-    let mut i = isr;
-    let mut cnt = 0;
-    loop{
-        if i == 1{
-            return cnt;
-        }
-        cnt = cnt + 1;
-        i = i >> 1;
-    }
-}
-*/
-
 impl InterruptManager {
     pub const LIMIT_IDT: u16 = 0x100 * (size_of::<idt::GateDescriptor>() as u16) - 1;
-    //0xfffという情報あり
     pub const IDT_MAX: u16 = 0xff;
 
     pub const fn new() -> InterruptManager {
@@ -63,6 +32,8 @@ impl InterruptManager {
         }
     }
 
+    pub fn dummy_handler() {}
+
     pub fn init(&mut self, selector: u16) -> bool {
         self.main_selector = selector;
         self.idt.write(unsafe {
@@ -70,7 +41,7 @@ impl InterruptManager {
                 .memory_manager
                 .lock()
                 .unwrap()
-                .alloc_pages(1, None, MemoryPermissionFlags::data())
+                .alloc_pages(0, None, MemoryPermissionFlags::data())
                 .expect("Cannot alloc memory for interrupt manager.")
                 as *mut [_; Self::IDT_MAX as usize])
         });
@@ -92,7 +63,7 @@ impl InterruptManager {
         cpu::lidt(&idtr as *const _ as usize);
     }
 
-    pub unsafe fn set_gatedec(&mut self, interrupt_num: u16, descr: GateDescriptor) {
+    unsafe fn set_gatedec(&mut self, interrupt_num: u16, descr: GateDescriptor) {
         if interrupt_num < Self::IDT_MAX {
             self.idt.read()[interrupt_num as usize] = descr;
         }
@@ -102,5 +73,24 @@ impl InterruptManager {
         self.main_selector
     }
 
-    pub fn dummy_handler() {}
+    pub fn set_interrupt_function(
+        &mut self,
+        function: unsafe fn(),
+        index: u16,
+        privilege_level: u8,
+    ) -> bool {
+        if index >= 22 && index <= 32 || index > 0xFF {
+            /* intel reserved */
+            return false;
+        }
+        let type_attr: u8 = 0xe | (privilege_level & 0x3) << 5 | 1 << 7;
+
+        unsafe {
+            self.set_gatedec(
+                index,
+                GateDescriptor::new(function, self.main_selector, 0, type_attr),
+            );
+        }
+        return true;
+    }
 }

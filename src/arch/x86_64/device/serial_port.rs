@@ -4,7 +4,6 @@
 //use
 use arch::target_arch::device::cpu::{in_byte, out_byte};
 use arch::target_arch::device::local_apic;
-use arch::target_arch::interrupt::idt::GateDescriptor;
 
 use kernel::fifo::FIFO;
 use kernel::manager_cluster::get_kernel_manager_cluster;
@@ -33,21 +32,17 @@ impl SerialPortManager {
         self.port //あとから変更できないようにする
     }
 
-    pub fn init(&self, selector: u16) {
+    pub fn init(&self) {
         unsafe {
             make_interrupt_hundler!(inthandler24, SerialPortManager::inthandler24_main);
             get_kernel_manager_cluster()
                 .interrupt_manager
                 .lock()
                 .unwrap()
-                .set_gatedec(
+                .set_interrupt_function(
+                    inthandler24, /*上のマクロで指定した名前*/
                     0x24,
-                    GateDescriptor::new(
-                        inthandler24, /*上のマクロで指定した名前*/
-                        selector,
-                        0,
-                        GateDescriptor::AR_INTGATE32,
-                    ),
+                    0,
                 );
 
             out_byte(self.port + 1, 0x00); // FIFOをオフ
