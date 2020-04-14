@@ -102,6 +102,7 @@ impl GraphicManager {
     pub fn init_vga_text_mode(&mut self) {
         self.is_textmode = true;
         self.cursor.front_color = 0xb; // bright cyan
+        crt::set_cursor_position(0);
     }
 
     pub fn putchar(&self, c: char) {
@@ -173,11 +174,32 @@ impl GraphicManager {
                         }
                     }
                 };
-                // カーソル移動
-                crt::set_cursor_position(
-                    (self.cursor.line * self.frame_buffer_width + self.cursor.character) as u16,
-                );
+                if self.cursor.line >= self.frame_buffer_height {
+                    for i in 0..(self.frame_buffer_width * (self.frame_buffer_height - 1)) as usize
+                    {
+                        unsafe {
+                            *((self.frame_buffer_address + i * 2) as *mut u16) = *((self
+                                .frame_buffer_address
+                                + (self.frame_buffer_width as usize + i) * 2)
+                                as *mut u16);
+                        }
+                    }
+                    for i in (self.frame_buffer_width * (self.frame_buffer_height - 1))
+                        ..(self.frame_buffer_width * self.frame_buffer_height)
+                    {
+                        unsafe {
+                            *((self.frame_buffer_address + i as usize * 2) as *mut u16) =
+                                ' ' as u16;
+                        }
+                    }
+                    self.cursor.line -= 1;
+                    self.cursor.character = 0;
+                }
             }
+            // カーソル移動
+            crt::set_cursor_position(
+                (self.cursor.line * self.frame_buffer_width + self.cursor.character) as u16,
+            );
         }
         true
     }
