@@ -18,9 +18,8 @@ Methylenixという名前は(頭弱い)自分が唐突に思いついたアイ�
 
 ## 現状
 
-* I/O APICによるデバイス割り込み
-* メモリ動的管理およびタスクスケジューラ
-* RISCV64GCサポート追加
+* APICによるデバイス割り込み
+* メモリ・ページング動的管理
 
 ## 方針
 * GUIについては基本対応しない(デバイスの認識などはしておく)
@@ -75,10 +74,8 @@ make clean
 
 qemu-system-x86_64が必要です。
 ```
-qemu-system-x86_64 --cpu host --enable-kvm --cdrom bin/img/boot.iso
+qemu-system-x86_64 --cdrom bin/img/boot.iso
 ```
-MEMO: なぜかしらないけど、QEMU標準でのCPUだと起動しない。NX Bitに対応していない?
-
 
 ## コーディング規約
 基本は https://doc.rust-lang.org/1.1.0/style/style/naming/README.html に従ってください。
