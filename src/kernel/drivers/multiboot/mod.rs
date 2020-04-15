@@ -91,7 +91,7 @@ impl MultiBootInformation {
                     mbi.boot_cmd_line = str::from_utf8(unsafe {
                         slice::from_raw_parts(
                             &*((tag + 8) as *const u8),
-                            (&*(tag as *const MultibootTag)).size as usize - 8,
+                            (&*(tag as *const MultibootTag)).size as usize - 8 - 1, /*\0*/
                         )
                     })
                     .unwrap_or("");
@@ -101,7 +101,7 @@ impl MultiBootInformation {
                     mbi.boot_loader_name = str::from_utf8(unsafe {
                         slice::from_raw_parts(
                             &*((tag + 8) as *const u8),
-                            (&*(tag as *const MultibootTag)).size as usize - 8,
+                            (&*(tag as *const MultibootTag)).size as usize - 8 - 1, /*\0*/
                         )
                     })
                     .unwrap_or("");
