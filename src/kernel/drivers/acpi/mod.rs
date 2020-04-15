@@ -1,0 +1,73 @@
+/*
+ * Advanced Configuration and Power Interface Manager
+ * Supported ACPI version 6.3
+ * https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf
+ */
+
+pub mod xsdt;
+
+use self::xsdt::XsdtManager;
+
+pub struct AcpiManager {
+    enabled: bool,
+    check_sum: u32,
+    oem_id: [u8; 6],
+    xsdt: usize,
+}
+
+#[repr(C, packed)]
+struct RSDP {
+    signature: [u8; 8],
+    checksum: u8,
+    oem_id: [u8; 6],
+    revision: u8,
+    rsdt_address: u32,
+    length: u32,
+    xsdt_address: u64,
+    ex_checksum: u32,
+    reserved: [u8; 3],
+}
+
+impl AcpiManager {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            check_sum: 0,
+            oem_id: [0; 6],
+            xsdt: 0,
+        }
+    }
+
+    pub fn init(&mut self, rsdp_ptr: usize) -> bool {
+        /* rsdp_ptr is pointer of RSDP. */
+        /* *rsdp_ptr must be readable. */
+        let rsdp = unsafe { &*(rsdp_ptr as *const RSDP) };
+        if rsdp.signature
+            != [
+                'R' as u8, 'S' as u8, 'D' as u8, ' ' as u8, 'P' as u8, 'T' as u8, 'R' as u8,
+                ' ' as u8,
+            ]
+        {
+            pr_err!("RSDP Signature is not correct.");
+            return false;
+        }
+        if rsdp.revision != 2 {
+            pr_err!("Not supported ACPI version");
+            return false;
+        }
+        //ADD: checksum verification
+        self.oem_id = rsdp.oem_id.clone();
+        self.xsdt = rsdp.xsdt_address as usize;
+        self.enabled = true;
+        let mut xsdt_manager = XsdtManager::new();
+        return xsdt_manager.init(rsdp.xsdt_address as usize);
+    }
+
+    pub fn get_oem_id(&self) -> Option<[u8; 6]> {
+        if self.enabled {
+            Some(self.oem_id)
+        } else {
+            None
+        }
+    }
+}

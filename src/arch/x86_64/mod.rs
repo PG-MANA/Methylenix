@@ -13,6 +13,7 @@ use self::device::serial_port::SerialPortManager;
 use self::interrupt::InterruptManager;
 use self::paging::{PAGE_MASK, PAGE_SIZE};
 
+use kernel::drivers::acpi::AcpiManager;
 use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic::GraphicManager;
 use kernel::manager_cluster::get_kernel_manager_cluster;
@@ -54,6 +55,15 @@ pub extern "C" fn boot_main(
     serial_port_manager.init();
     /* Boot Information Manager に格納 */
     get_kernel_manager_cluster().serial_port_manager = Mutex::new(serial_port_manager);
+    if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
+        init_acpi(rsdp_address);
+    } else {
+        if multiboot_information.old_acpi_rsdp_ptr.is_some() {
+            pr_warn!("ACPI 1.0 is not supported.");
+        } else {
+            pr_warn!("ACPI is not available.");
+        }
+    }
     pr_info!(
         "Booted from {}, cmd line: {}",
         multiboot_information.boot_loader_name,
@@ -217,4 +227,19 @@ fn init_interrupt(kernel_selector: u16) {
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
     get_kernel_manager_cluster().interrupt_manager = Mutex::new(interrupt_manager);
+}
+
+fn init_acpi(rsdp_ptr: usize) {
+    use core::str;
+
+    let mut acpi_manager = AcpiManager::new();
+
+    if !acpi_manager.init(rsdp_ptr) {
+        pr_warn!("Cannot init ACPI.");
+        return;
+    }
+    pr_info!(
+        "OEM ID:{}",
+        str::from_utf8(&acpi_manager.get_oem_id().unwrap_or([0; 6])).unwrap_or("NODATA")
+    );
 }
