@@ -1,17 +1,19 @@
 /*
-x86_64に関するCPU命令
-*/
+ * x86_64 Specific Instruction
+ */
 
 #[inline(always)]
 pub unsafe fn sti() {
     asm!("sti");
 }
+
 /*
 #[inline(always)]
 pub unsafe fn cli() {
     asm!("cli");
 }
 */
+
 #[inline(always)]
 pub unsafe fn hlt() {
     asm!("hlt");

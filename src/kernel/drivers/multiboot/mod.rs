@@ -1,4 +1,7 @@
-//参考:https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
+/*
+ * Multiboot Information
+ * https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
+ */
 
 mod elf;
 mod frame_buffer;

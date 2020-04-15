@@ -19,6 +19,3 @@ pub mod kernel;
 
 //arch
 pub mod arch;
-
-//そう...何もない!!
-//各モジュールを参照してください。

@@ -1,3 +1,7 @@
+/*
+ * Page Directory Entry
+ */
+
 use super::PAGE_MASK;
 
 pub const PDE_MAX_ENTRY: usize = 512;

@@ -1,7 +1,7 @@
 /*
-    Kernel Memory Allocation Manager
-    This manager is the frontend of memory allocation for structs and small size areas.
-*/
+ * Kernel Memory Allocation Manager
+ * This manager is the frontend of memory allocation for structs and small size areas.
+ */
 
 use arch::target_arch::paging::PAGE_SIZE;
 

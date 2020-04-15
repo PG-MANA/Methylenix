@@ -1,6 +1,7 @@
-// CRT Controller
+/*
+ * CRT Controller
+ */
 
-// use(Arch依存)
 use super::cpu;
 
 const CRT_CONTROLLER: u16 = 0x03d4;

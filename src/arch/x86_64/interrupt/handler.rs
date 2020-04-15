@@ -1,7 +1,6 @@
 /*
-アセンブリによる割り込みハンドラ、手短に済ませるべき
-できるだけNasmなどを使いたくない
-*/
+ * Interrupt Handler Maker
+ */
 
 #[macro_export]
 macro_rules! make_interrupt_hundler {

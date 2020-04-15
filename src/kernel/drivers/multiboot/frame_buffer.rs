@@ -1,3 +1,7 @@
+/*
+ * Multiboot Information Frame Buffer
+ */
+
 #[derive(Clone)]
 pub struct FrameBufferInfo {
     pub address: u64,

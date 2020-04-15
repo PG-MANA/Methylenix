@@ -1,3 +1,7 @@
+/*
+ * Page Table Entry
+ */
+
 use super::PAGE_MASK;
 
 pub const PTE_MAX_ENTRY: usize = 512;

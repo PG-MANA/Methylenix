@@ -1,8 +1,7 @@
 /*
-    Mutex(Spin Lock version)
-*/
+ * Mutex(Spin Lock version)
+ */
 
-//use
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic;

@@ -1,7 +1,7 @@
 /*
-    Kernel
-    Modules not depending on Arch
-*/
+ * Kernel
+ * Modules not depending on Arch
+ */
 
 pub mod drivers;
 pub mod fifo;

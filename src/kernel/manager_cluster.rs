@@ -1,8 +1,9 @@
 /*
-    Cluster of Managers for kernel
-    This cluster stores necessary structs for kernel.
-    All members of manager must be Mutex.
-*/
+ * Cluster of Managers for kernel
+ *
+ * This cluster stores necessary structs for kernel.
+ * All members of manager must be Mutex.
+ */
 
 use arch::target_arch::device::serial_port::SerialPortManager;
 use arch::target_arch::interrupt::InterruptManager;

@@ -1,7 +1,7 @@
-// EFIブートでテキストフレームバッファが使えないので
-// TODO: UEFIでシリアルポート
+/*
+ * Serial Port Manager
+ */
 
-//use
 use arch::target_arch::device::cpu::{in_byte, out_byte};
 use arch::target_arch::device::local_apic;
 

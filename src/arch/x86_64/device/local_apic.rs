@@ -1,6 +1,6 @@
 /*
-Local APIC
-*/
+ *Local APIC
+ */
 
 use arch::target_arch::device::cpu;
 

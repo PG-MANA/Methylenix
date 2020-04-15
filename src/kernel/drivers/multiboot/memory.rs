@@ -1,6 +1,6 @@
 /*
-MultiBoot2実装(メモリ関係)
-*/
+ * Multiboot Information Memory Map
+ */
 
 use core::mem;
 

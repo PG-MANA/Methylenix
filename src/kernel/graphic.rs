@@ -1,6 +1,7 @@
 /*
-    Graphic Manager
-*/
+ * Graphic Manager
+ * いずれはstdio.rsみたいなのを作ってそれのサブモジュールにしたい
+ */
 
 use arch::target_arch::device::crt;
 

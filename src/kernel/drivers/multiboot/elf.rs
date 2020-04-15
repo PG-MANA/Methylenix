@@ -1,6 +1,6 @@
 /*
-MultiBoot2実装(Elf解析)
-*/
+ * Multiboot Elf Information
+ */
 
 #[repr(C, packed)] //sectionsの前に余計なパッディングを入れないため
 pub struct MultibootTagElfSections {

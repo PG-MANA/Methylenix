@@ -1,6 +1,6 @@
 /*
-    Page Manager
-*/
+ * Paging Manager
+ */
 
 mod pde;
 mod pdpe;

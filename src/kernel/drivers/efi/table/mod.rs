@@ -1,10 +1,10 @@
-//EFI Tableの実装
-//https://uefi.org/sites/default/files/resources/UEFI_Spec_2_7.pdf
+/*
+ * EFI Table manager
+ * https://uefi.org/sites/default/files/resources/UEFI_Spec_2_7.pdf
+ */
 
-//use
 use super::text::output::EfiOutputProtocol;
 
-//type
 pub type EfiHandle = usize;
 //本当はポインタ
 pub type EfiStatus = usize;

@@ -1,6 +1,6 @@
 /*
-    RwLock(Spin Lock version)
-*/
+ * RwLock(Spin Lock version)
+ */
 
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};

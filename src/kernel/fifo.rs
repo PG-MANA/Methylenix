@@ -1,6 +1,6 @@
 /*
-FIFOシステム(暫定)
-*/
+ * FIFO System
+ */
 
 pub struct FIFO<T: Copy> {
     buf: [T; 128],

@@ -1,4 +1,6 @@
-// Grub2(Efi)では使えない...ハンドラをオープンする必要あり..?(ブート時に警告出てるし)
+/*
+ * EFI Output Protocol Manager
+ */
 
 //use
 use super::super::table::EfiStatus;

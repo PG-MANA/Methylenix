@@ -1,3 +1,7 @@
+/*
+ * Page Directory Pointer Entry
+ */
+
 use super::PAGE_MASK;
 
 pub const PDPE_MAX_ENTRY: usize = 512;
