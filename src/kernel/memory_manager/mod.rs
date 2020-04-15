@@ -176,13 +176,13 @@ impl MemoryManager {
         virtual_memory_may_be_reserved: bool,
     ) -> bool {
         if physical_address & !PAGE_MASK != 0 {
-            println!("Error: Physical Address is not aligned.");
+            pr_err!("Physical Address is not aligned.");
             return false;
         } else if virtual_address & !PAGE_MASK != 0 {
-            println!("Error: Virtual Address is not aligned.");
+            pr_err!("Virtual Address is not aligned.");
             return false;
         } else if size & !PAGE_MASK != 0 {
-            println!("Error: Size is not aligned.");
+            pr_err!("Size is not aligned.");
             return false;
         }
         if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
@@ -191,7 +191,7 @@ impl MemoryManager {
                 allocated_memory = true;
             } else {
                 if !physical_address_may_be_reserved {
-                    println!("Error: Cannot allocate physical address.");
+                    pr_err!("Cannot allocate physical address.");
                     return false;
                 }
             }
@@ -221,7 +221,7 @@ impl MemoryManager {
                 if allocated_memory {
                     pm_manager.free(physical_address, size, false);
                 }
-                println!("Error: Cannot reserve memory.");
+                pr_err!("Cannot reserve memory.");
                 return false;
             }
             self.virtual_memory_manager.update_paging(virtual_address);
@@ -237,15 +237,15 @@ impl MemoryManager {
 
     pub fn dump_memory_manager(&self) {
         if let Ok(physical_memory_manager) = self.physical_memory_manager.try_lock() {
-            println!("----Physical Memory Entries Dump----");
+            kprintln!("----Physical Memory Entries Dump----");
             physical_memory_manager.dump_memory_entry();
-            println!("----Physical Memory Entries Dump End----");
+            kprintln!("----Physical Memory Entries Dump End----");
         } else {
-            println!("Can not lock Physical Memory Manager.");
+            kprintln!("Can not lock Physical Memory Manager.");
         }
-        println!("----Virtual Memory Entries Dump----");
+        kprintln!("----Virtual Memory Entries Dump----");
         self.virtual_memory_manager.dump_memory_manager();
-        println!("----Virtual Memory Entries Dump End----");
+        kprintln!("----Virtual Memory Entries Dump End----");
     }
 
     pub const fn page_round_up(address: usize, size: usize) -> (usize /*address*/, usize /*size*/) {

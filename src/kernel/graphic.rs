@@ -225,6 +225,24 @@ pub fn print_string_to_default_screen(args: fmt::Arguments) -> bool {
     return false;
 }
 
+#[track_caller]
+pub fn print_debug_message(level: usize, args: fmt::Arguments) -> bool {
+    use core::panic::Location;
+    let level_str = match level {
+        3 => "[ERROR]",
+        4 => "[WARN]",
+        5 => "[NOTICE]",
+        6 => "[INFO]",
+        _ => "[???]",
+    };
+    let file = Location::caller().file(); //THINKING: filename only
+    let line = Location::caller().line();
+    return print_string_to_default_screen(format_args!(
+        "{} {}:{} | {}",
+        level_str, file, line, args
+    ));
+}
+
 // macros
 #[macro_export]
 macro_rules! puts {
@@ -244,4 +262,28 @@ macro_rules! print {
 macro_rules! println {
     ($fmt:expr) => (print!(concat!($fmt,"\n")));
     ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*)); //\nをつける
+}
+
+#[macro_export]
+macro_rules! kprintln {
+    ($fmt:expr) => (print!(concat!($fmt,"\n")));
+    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*)); //\nをつける
+}
+
+#[macro_export]
+macro_rules! pr_info {
+    ($fmt:expr) => ($crate::kernel::graphic::print_debug_message(6, format_args!(concat!($fmt,"\n"))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::graphic::print_debug_message(6, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
+}
+
+#[macro_export]
+macro_rules! pr_warn {
+    ($fmt:expr) => ($crate::kernel::graphic::print_debug_message(4, format_args!(concat!($fmt,"\n"))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::graphic::print_debug_message(4, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
+}
+
+#[macro_export]
+macro_rules! pr_err {
+    ($fmt:expr) => ($crate::kernel::graphic::print_debug_message(3, format_args!(concat!($fmt,"\n"))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::graphic::print_debug_message(3, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
 }

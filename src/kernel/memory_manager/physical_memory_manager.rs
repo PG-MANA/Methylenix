@@ -129,7 +129,7 @@ impl PhysicalMemoryManager {
                     if let Some(next) = entry.get_next_entry() {
                         self.first_entry = next as *mut _ as usize;
                     } else {
-                        panic!("Physical Memory Manager: memory ran out.");
+                        panic!("Memory ran out.");
                     }
                 }
                 entry.delete();
@@ -348,20 +348,20 @@ impl PhysicalMemoryManager {
     pub fn dump_memory_entry(&self) {
         let mut entry = unsafe { &*(self.first_entry as *const MemoryEntry) };
         if !entry.is_enabled() {
-            println!("Root Entry is not enabled.");
+            pr_info!("Root Entry is not enabled.");
             return;
         }
-        println!(
-            "Root :start:0x{:X},end:0x{:X}",
+        kprintln!(
+            "Start:0x{:X} Size:0x{:X}",
             entry.get_start_address(),
-            entry.get_end_address()
+            Self::address_to_size(entry.get_start_address(), entry.get_end_address())
         );
         while let Some(t) = entry.get_next_entry() {
             entry = t;
-            println!(
-                "Entry:start:0x{:X},end:0x{:X}",
+            kprintln!(
+                "Start:0x{:X} Size:0x{:X}",
                 entry.get_start_address(),
-                entry.get_end_address()
+                Self::address_to_size(entry.get_start_address(), entry.get_end_address())
             );
         }
     }
@@ -383,10 +383,10 @@ impl MemoryEntry {
             }
         } else {
             if let Some(next) = self.get_next_entry() {
-                println!("Physical Memory Manager: root entry was changed.");
+                pr_info!("Root entry was changed.");
                 next.unset_prev_entry();
             } else {
-                println!("Physical Memory Manager: not chained entry was deleted.");
+                pr_info!("Not chained entry was deleted.");
             }
         }
     }

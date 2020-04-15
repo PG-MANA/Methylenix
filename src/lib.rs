@@ -11,6 +11,7 @@
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_ref)]
 #![feature(panic_info_message)]
+#![feature(track_caller)]
 
 //usr
 #[macro_use]

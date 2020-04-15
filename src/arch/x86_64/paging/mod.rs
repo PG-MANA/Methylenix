@@ -168,7 +168,7 @@ impl PageManager {
             true
         } else {
             if cache_memory_list.pointer == 0 {
-                println!("Cached Memory runs out!!");
+                pr_err!("Cached Memory runs out!!");
             }
             false
         }
@@ -190,7 +190,7 @@ impl PageManager {
             return true;
         }
         if cache_memory_list.pointer == 0 {
-            println!("Cached Memory runs out!!");
+            pr_err!("Cached Memory runs out!!");
         }
         false
     }
@@ -222,7 +222,7 @@ impl PageManager {
         }
     }
 
-    pub fn dump_table(&self, end: usize) {
+    pub fn dump_table(&self, end: Option<usize>) {
         let pml4_table = unsafe { &*(self.pml4 as *const [PML4; PML4_MAX_ENTRY]) };
         for pml4 in pml4_table.iter() {
             if !pml4.is_pdpe_set() {
@@ -246,14 +246,14 @@ impl PageManager {
                         if !pte.is_present() {
                             continue;
                         }
-                        println!(
-                            "Address: 0x{:X} PM W:{}, EXE:{}, A:{}",
+                        kprintln!(
+                            "0x{:X} W:{}, EXE:{}, A:{}",
                             pte.get_addr().unwrap(),
                             pte.is_writable(),
                             !pte.is_no_execute(),
                             pte.is_accessed()
                         );
-                        if pte.get_addr().unwrap() >= end {
+                        if end.is_some() && pte.get_addr() >= end {
                             return;
                         }
                     }

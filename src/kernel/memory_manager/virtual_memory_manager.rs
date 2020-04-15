@@ -135,7 +135,7 @@ impl VirtualMemoryManager {
                 if !(unsafe { &mut (*(self.vm_map_entry as *mut VirtualMemoryEntry)) }
                     .insert_entry(e))
                 {
-                    println!("Error: cannot insert Virtual Memory Entry.");
+                    pr_err!("Cannot insert Virtual Memory Entry.");
                     return false;
                 }
                 self.vm_map_entry =
@@ -158,19 +158,19 @@ impl VirtualMemoryManager {
     ) -> Option<usize> {
         //NOTE: ページキャッシュの更新は行わない
         if physical_start_address & !PAGE_MASK != 0 {
-            println!("Error: Physical Address is not aligned.");
+            pr_err!("Physical Address is not aligned.");
             return None;
         } else if size & !PAGE_MASK != 0 {
-            println!("Error: Size is not aligned.");
+            pr_err!("Size is not aligned.");
             return None;
         }
         let entry = if let Some(address) = vm_start_address {
             if address & !PAGE_MASK != 0 {
-                println!("Error: Virtual Address is not aligned.");
+                pr_err!("Virtual Address is not aligned.");
                 return None;
             }
             if !self.check_if_usable_address_range(address, address + size - 1) {
-                println!("Error: Virtual Address is not usable.");
+                pr_warn!("Virtual Address is not usable.");
                 return None;
             }
             VirtualMemoryEntry::new(
@@ -198,12 +198,12 @@ impl VirtualMemoryManager {
                 permission,
             )
         } else {
-            println!("Error: Virtual Address is not available.");
+            pr_warn!("Virtual Address is not available.");
             return None;
         };
         let address = entry.get_vm_start_address();
         if !self.insert_entry(entry, pm_manager) {
-            println!("Error: Cannot add Virtual Memory Entry.");
+            pr_warn!("Cannot add Virtual Memory Entry.");
             return None;
         }
         for i in 0..size / PAGE_SIZE {
@@ -213,7 +213,7 @@ impl VirtualMemoryManager {
                 address + i * PAGE_SIZE,
                 permission,
             ) {
-                panic!("Error: Cannot associate physical address."); // 後で巻き戻してdelete_entryしてNoneする処理を追加
+                panic!("Cannot associate physical address."); // 後で巻き戻してdelete_entryしてNoneする処理を追加
             }
         }
         Some(address)
@@ -225,7 +225,7 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> bool {
         if vm_start_address & !PAGE_MASK != 0 {
-            println!("Error: Virtual Address is not aligned.");
+            pr_info!("Virtual Address is not aligned.");
             return false;
         }
         let root_entry = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) };
@@ -323,11 +323,14 @@ impl VirtualMemoryManager {
     pub fn dump_memory_manager(&self) {
         let mut entry = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };
         loop {
-            println!(
-                "V start:0x{:X}, end:0x{:X} P start:0x{:X} PM W:{}, U:{}, EXE:{}",
+            kprintln!(
+                "Virtual:0x{:X} Physical:0x{:X} Size:0x{:X} W:{}, U:{}, EXE:{}",
                 entry.get_vm_start_address(),
-                entry.get_vm_end_address(),
                 entry.get_physical_address(),
+                PhysicalMemoryManager::address_to_size(
+                    entry.get_vm_start_address(),
+                    entry.get_vm_end_address()
+                ),
                 entry.get_permission_flags().write,
                 entry.get_permission_flags().user_access,
                 entry.get_permission_flags().execute
@@ -338,7 +341,8 @@ impl VirtualMemoryManager {
                 break;
             }
         }
-        self.page_manager.dump_table(16 * 1024 * 1024); // 適当
+        kprintln!("----Page Manager----");
+        self.page_manager.dump_table(None); // 適当
     }
 
     pub const fn size_to_order(size: usize) -> usize {

@@ -72,9 +72,10 @@ impl LocalApicManager {
             LocalApicRegisters::SIR,
             local_apic_manager.read_apic_register(LocalApicRegisters::SIR) | 0x100,
         );
-        println!(
+        pr_info!(
             "APIC ID:{}(x2APIC:{})",
-            local_apic_manager.apic_id, is_x2apic_supported
+            local_apic_manager.apic_id,
+            is_x2apic_supported
         );
         local_apic_manager
     }

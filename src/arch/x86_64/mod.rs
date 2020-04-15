@@ -35,7 +35,7 @@ pub extern "C" fn boot_main(
     /* Graphic初期化（Panicが起きたときの表示のため) */
     get_kernel_manager_cluster().graphic_manager =
         Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
-    println!("Methylenix");
+    kprintln!("Methylenix");
     /* メモリ管理初期化 */
     let multiboot_information = init_memory(multiboot_information);
     get_kernel_manager_cluster()
@@ -50,12 +50,11 @@ pub extern "C" fn boot_main(
     serial_port_manager.init();
     /* Boot Information Manager に格納 */
     get_kernel_manager_cluster().serial_port_manager = Mutex::new(serial_port_manager);
-
-    println!(
+    pr_info!(
         "Booted from {}, cmd line: {}",
-        multiboot_information.boot_loader_name, multiboot_information.boot_cmd_line
+        multiboot_information.boot_loader_name,
+        multiboot_information.boot_cmd_line
     );
-
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
@@ -68,7 +67,7 @@ pub fn general_protection_exception_handler(e_code: usize) {
 }
 
 fn hlt() {
-    println!("All init are done!");
+    pr_info!("All init are done!");
     loop {
         unsafe {
             cpu::hlt();
