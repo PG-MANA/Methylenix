@@ -61,7 +61,7 @@ impl SerialPortManager {
         if self.port == 0 {
             return;
         }
-        let mut timeout: usize = 0xFFFFFF;
+        let mut timeout: usize = 0xFFF;
         while timeout > 0 {
             if self.is_completed_transmitter() {
                 break;
