@@ -70,6 +70,8 @@ make clean
 #objファイル削除
 ```
 
+なおビルド済みのisoイメージは https://repo.taprix.org/pg_mana/methylenix/iso/ にあります。
+
 ## 実行
 
 qemu-system-x86_64が必要です。
