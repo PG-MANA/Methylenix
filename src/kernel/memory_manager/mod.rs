@@ -231,6 +231,44 @@ impl MemoryManager {
         }
     }
 
+    pub fn get_vm_address(
+        &mut self,
+        physical_address: usize,
+        required_permission: MemoryPermissionFlags,
+        shoud_reserve_if_not_avalable: bool,
+        physical_address_may_be_reserved: bool,
+    ) -> Option<usize> {
+        /* use reverse map to search virtual address by O(1) */
+        let aligned_physical_address = physical_address & PAGE_MASK;
+        if let Some(virtual_address) = self
+            .virtual_memory_manager
+            .physical_address_to_virtual_address_with_permission(
+                physical_address,
+                required_permission,
+            )
+        {
+            return Some(virtual_address);
+        } else if shoud_reserve_if_not_avalable {
+            if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
+                if pm_manager.reserve_memory(aligned_physical_address, PAGE_SIZE, false)
+                    && !physical_address_may_be_reserved
+                {
+                    return None;
+                }
+                if let Some(vm_address) = self.virtual_memory_manager.alloc_address(
+                    PAGE_SIZE,
+                    aligned_physical_address,
+                    None,
+                    required_permission,
+                    &mut pm_manager,
+                ) {
+                    return Some(vm_address + physical_address - aligned_physical_address);
+                }
+            }
+        }
+        return None;
+    }
+
     pub fn set_paging_table(&mut self) {
         self.virtual_memory_manager.flush_paging();
     }

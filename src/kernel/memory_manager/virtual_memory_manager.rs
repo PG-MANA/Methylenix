@@ -257,37 +257,81 @@ impl VirtualMemoryManager {
         vm_start_address: usize,
         new_permission: MemoryPermissionFlags,
     ) -> bool {
-        if let Some(entry) = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) }
-            .find_entry_mut(vm_start_address)
-        {
-            entry.set_permission_flags(new_permission);
-            for i in 0..(PhysicalMemoryManager::address_to_size(
-                entry.get_vm_start_address(),
-                entry.get_vm_end_address(),
-            ) / PAGE_SIZE)
-            /* should do page_round_up ? */
-            {
-                if !self.page_manager.change_memory_permission(
-                    &mut self.reserved_memory_list,
-                    vm_start_address + i * PAGE_SIZE,
-                    new_permission,
-                ) {
-                    //do something...
-                    return false;
+        self.virtual_address_to_physical_address_with_permission(vm_start_address, new_permission)
+            != None
+    }
+
+    pub fn virtual_address_to_physical_address_with_permission(
+        &mut self,
+        virtual_address: usize,
+        permission: MemoryPermissionFlags,
+    ) -> Option<usize> {
+        let root = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) };
+        if let Some(entry) = root.find_entry_contains_address_mut(virtual_address) {
+            if entry.get_permission_flags() != permission {
+                if !self.set_memory_permission(entry, permission) {
+                    return None;
                 }
             }
-            return true;
+            Some(entry.get_physical_address() + virtual_address - entry.get_vm_start_address())
+        } else {
+            None
         }
-        false
     }
 
     pub fn virtual_address_to_physical_address(&self, virtual_address: usize) -> Option<usize> {
         let root = unsafe { &*(self.vm_map_entry as *const VirtualMemoryEntry) };
-        if let Some(entry) = root.find_entry(virtual_address) {
-            Some(entry.get_physical_address())
+        if let Some(entry) = root.find_entry_contains_address(virtual_address) {
+            Some(entry.get_physical_address() + virtual_address - entry.get_vm_start_address())
         } else {
             None
         }
+    }
+
+    pub fn physical_address_to_virtual_address_with_permission(
+        &mut self,
+        physical_address: usize,
+        permission: MemoryPermissionFlags,
+    ) -> Option<usize> {
+        /* temporary, should be replaced by rmap */
+
+        let root = unsafe { &mut *(self.vm_map_entry as *mut VirtualMemoryEntry) };
+        if let Some(entry) = root.find_entry_contains_physical_address_mut(physical_address) {
+            if entry.get_permission_flags() != permission {
+                if !self.set_memory_permission(entry, permission) {
+                    return None;
+                }
+            }
+            Some(entry.get_vm_start_address() + physical_address - entry.get_physical_address())
+        } else {
+            None
+        }
+    }
+
+    fn set_memory_permission(
+        &mut self,
+        entry: &mut VirtualMemoryEntry,
+        permission: MemoryPermissionFlags,
+    ) -> bool {
+        entry.set_permission_flags(permission);
+
+        let vm_start_address = entry.get_vm_start_address();
+        for i in 0..(PhysicalMemoryManager::address_to_size(
+            vm_start_address,
+            entry.get_vm_end_address(),
+        ) / PAGE_SIZE)
+        /* should do page_round_up ? */
+        {
+            if !self.page_manager.change_memory_permission(
+                &mut self.reserved_memory_list,
+                vm_start_address + i * PAGE_SIZE,
+                permission,
+            ) {
+                //do something...
+                return false;
+            }
+        }
+        return true;
     }
 
     pub fn get_free_address(&mut self, size: usize) -> Option<usize> {

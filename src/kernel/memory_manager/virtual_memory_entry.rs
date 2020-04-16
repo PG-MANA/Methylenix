@@ -4,6 +4,7 @@
 
 use arch::target_arch::paging::MAX_VIRTUAL_ADDRESS;
 
+use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::MemoryPermissionFlags;
 
 use core::mem;
@@ -253,6 +254,96 @@ impl VirtualMemoryEntry {
             } else {
                 None
             }
+        } else {
+            None
+        }
+    }
+
+    pub fn find_entry_contains_address(
+        &self,
+        vm_address: usize,
+    ) -> Option<&Self /*should be fixed*/> {
+        // self should be root.
+        self._find_entry_contains_address(vm_address, self.start_address < vm_address)
+    }
+
+    fn _find_entry_contains_address(
+        &self,
+        vm_address: usize,
+        search_right: bool,
+    ) -> Option<&Self /*should be fixed*/> {
+        if self.start_address <= vm_address && self.end_address >= vm_address {
+            Some(self)
+        } else if self.end_address < vm_address && search_right {
+            if let Some(address) = self.next_entry {
+                unsafe { &*(address as *const Self) }
+                    ._find_entry_contains_address(vm_address, search_right)
+            } else {
+                None
+            }
+        } else if self.start_address > vm_address && !search_right {
+            if let Some(address) = self.prev_entry {
+                unsafe { &*(address as *const Self) }
+                    ._find_entry_contains_address(vm_address, search_right)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn find_entry_contains_address_mut(
+        &mut self,
+        vm_address: usize,
+    ) -> Option<&mut Self /*should be fixed*/> {
+        // self should be root.
+        self._find_entry_contains_address_mut(vm_address, self.start_address < vm_address)
+    }
+
+    fn _find_entry_contains_address_mut(
+        &mut self,
+        vm_address: usize,
+        search_right: bool,
+    ) -> Option<&mut Self /*should be fixed*/> {
+        if self.start_address <= vm_address && self.end_address >= vm_address {
+            Some(self)
+        } else if self.end_address < vm_address && search_right {
+            if let Some(address) = self.next_entry {
+                unsafe { &mut *(address as *mut Self) }
+                    ._find_entry_contains_address_mut(vm_address, search_right)
+            } else {
+                None
+            }
+        } else if self.start_address > vm_address && !search_right {
+            if let Some(address) = self.prev_entry {
+                unsafe { &mut *(address as *mut Self) }
+                    ._find_entry_contains_address_mut(vm_address, search_right)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn find_entry_contains_physical_address_mut(
+        &mut self,
+        physical_address: usize,
+    ) -> Option<&mut Self /*should be fixed*/> {
+        // self should be root.
+        /* This function may be slow!! */
+        if self.physical_start_address <= physical_address
+            && physical_address
+                <= PhysicalMemoryManager::size_to_end_address(
+                    self.physical_start_address,
+                    PhysicalMemoryManager::address_to_size(self.start_address, self.end_address),
+                )
+        {
+            Some(self)
+        } else if let Some(e) = self.next_entry {
+            unsafe { &mut *(e as *mut Self) }
+                .find_entry_contains_physical_address_mut(physical_address)
         } else {
             None
         }
