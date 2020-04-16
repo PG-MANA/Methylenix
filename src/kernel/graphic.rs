@@ -97,6 +97,16 @@ impl GraphicManager {
                     *((self.frame_buffer_address + count * 4) as *mut u32) = 0xff7f27;
                 }
             }
+        } else if self.frame_buffer_color_depth == 24 {
+            self.is_textmode = false;
+            // 文字見えてないだろうから#FF7F27で塗りつぶす
+            for count in 0..(self.frame_buffer_width * self.frame_buffer_height) {
+                unsafe {
+                    let pixcel = (self.frame_buffer_address + count * 3) as *mut u32;
+                    *pixcel &= 0x000000ff;
+                    *pixcel |= 0xff7f27;
+                }
+            }
         }
     }
 
@@ -203,6 +213,63 @@ impl GraphicManager {
             );
         }
         true
+    }
+
+    pub fn write_bitmap(
+        &mut self,
+        buffer: usize,
+        depth: u8,
+        size_x: usize,
+        size_y: usize,
+        offset_x: usize,
+        offset_y: usize,
+    ) -> bool {
+        if self.is_textmode {
+            return false;
+        }
+        if (depth != 32 && depth != 24)
+            || (self.frame_buffer_color_depth != 32 && self.frame_buffer_color_depth != 24)
+        {
+            return false;
+        }
+        let screen_depth_byte = self.frame_buffer_color_depth as usize / 8;
+        let bitmap_depth_byte = depth as usize / 8;
+        let bitmap_aligned_bitmap_width_pointer = ((size_x * bitmap_depth_byte - 1) & !3) + 4;
+        if self.frame_buffer_color_depth == 32 {
+            for height_pointer in (0..size_y).rev() {
+                for width_pointer in 0..size_x {
+                    unsafe {
+                        *((self.frame_buffer_address
+                            + ((height_pointer + offset_y) * self.frame_buffer_width
+                                + offset_x
+                                + width_pointer)
+                                * screen_depth_byte) as *mut u32) = *((buffer
+                            + (size_y - height_pointer) * bitmap_aligned_bitmap_width_pointer
+                            + width_pointer * bitmap_depth_byte)
+                            as *const u32);
+                    }
+                }
+            }
+        } else {
+            for height_pointer in (0..size_y).rev() {
+                for width_pointer in 0..size_x {
+                    unsafe {
+                        let dot = (self.frame_buffer_address
+                            + ((height_pointer + offset_y) * self.frame_buffer_width
+                                + offset_x
+                                + width_pointer)
+                                * screen_depth_byte) as *mut u32;
+                        *dot &= 0x000000ff;
+                        *dot |= *((buffer
+                            + (size_y - height_pointer) * bitmap_aligned_bitmap_width_pointer
+                            + width_pointer * bitmap_depth_byte)
+                            as *const u32)
+                            & 0xffffff;
+                    }
+                }
+            }
+        }
+        return true;
     }
 }
 

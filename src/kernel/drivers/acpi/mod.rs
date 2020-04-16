@@ -4,15 +4,16 @@
  * https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf
  */
 
+pub mod table;
 pub mod xsdt;
 
 use self::xsdt::XsdtManager;
 
 pub struct AcpiManager {
     enabled: bool,
-    check_sum: u32,
+    _check_sum: u32,
     oem_id: [u8; 6],
-    xsdt: usize,
+    xsdt_manager: XsdtManager,
 }
 
 #[repr(C, packed)]
@@ -29,12 +30,12 @@ struct RSDP {
 }
 
 impl AcpiManager {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             enabled: false,
-            check_sum: 0,
+            _check_sum: 0,
             oem_id: [0; 6],
-            xsdt: 0,
+            xsdt_manager: XsdtManager::new(),
         }
     }
 
@@ -57,10 +58,8 @@ impl AcpiManager {
         }
         //ADD: checksum verification
         self.oem_id = rsdp.oem_id.clone();
-        self.xsdt = rsdp.xsdt_address as usize;
         self.enabled = true;
-        let mut xsdt_manager = XsdtManager::new();
-        return xsdt_manager.init(rsdp.xsdt_address as usize);
+        return self.xsdt_manager.init(rsdp.xsdt_address as usize);
     }
 
     pub fn get_oem_id(&self) -> Option<[u8; 6]> {
@@ -69,5 +68,9 @@ impl AcpiManager {
         } else {
             None
         }
+    }
+
+    pub fn get_xsdt_manager(&self) -> &XsdtManager {
+        &self.xsdt_manager
     }
 }

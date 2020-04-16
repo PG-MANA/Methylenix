@@ -166,7 +166,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             continue;
         }
         let permission = match entry.m_type {
-            3 => MemoryPermissionFlags::data(),
+            3 => MemoryPermissionFlags::data(), /* ACPI */
             4 => MemoryPermissionFlags::data(),
             5 => MemoryPermissionFlags::data(), //rodata?
             _ => MemoryPermissionFlags::rodata(),
@@ -242,4 +242,57 @@ fn init_acpi(rsdp_ptr: usize) {
         "OEM ID:{}",
         str::from_utf8(&acpi_manager.get_oem_id().unwrap_or([0; 6])).unwrap_or("NODATA")
     );
+
+    if let Some(p_bitmap_address) = acpi_manager
+        .get_xsdt_manager()
+        .get_bgrt_manager()
+        .get_bitmap_physical_address()
+    {
+        if get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .reserve_memory(
+                p_bitmap_address & PAGE_MASK,
+                p_bitmap_address & PAGE_MASK,
+                PAGE_SIZE * 32, /* must fix */
+                MemoryPermissionFlags::rodata(),
+                true,
+                true,
+            )
+        {
+            draw_boot_logo(
+                p_bitmap_address,
+                acpi_manager
+                    .get_xsdt_manager()
+                    .get_bgrt_manager()
+                    .get_image_offset()
+                    .unwrap(),
+            );
+        }
+    }
+}
+
+fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) {
+    /* if file_size > PAGE_SIZE => ?*/
+    if unsafe { *((bitmap_vm_address + 30) as *const u32) } != 0 {
+        pr_info!("Boot logo is compressed");
+        return;
+    }
+    let file_offset = unsafe { *((bitmap_vm_address + 10) as *const u32) };
+    let bitmap_width = unsafe { *((bitmap_vm_address + 18) as *const u32) };
+    let bitmap_height = unsafe { *((bitmap_vm_address + 22) as *const u32) };
+    let bitmap_color_depth = unsafe { *((bitmap_vm_address + 28) as *const u16) };
+    get_kernel_manager_cluster()
+        .graphic_manager
+        .lock()
+        .unwrap()
+        .write_bitmap(
+            bitmap_vm_address + file_offset as usize,
+            bitmap_color_depth as u8,
+            bitmap_width as usize,
+            bitmap_height as usize,
+            offset.0,
+            offset.1,
+        );
 }
