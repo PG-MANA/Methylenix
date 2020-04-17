@@ -4,7 +4,7 @@
 
 use super::table::bgrt::BgrtManager;
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::MemoryPermissionFlags;
+use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 pub struct XsdtManager {
     base_address: usize,
@@ -22,15 +22,15 @@ impl XsdtManager {
     }
 
     pub fn init(&mut self, xsdt_physical_address: usize) -> bool {
-        let xsdt_vm_address = if let Some(a) = get_kernel_manager_cluster()
+        let xsdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .get_vm_address(
+            .memory_remap(
                 xsdt_physical_address,
+                36,
                 MemoryPermissionFlags::rodata(),
-                true,
-                true,
+                MemoryOptionFlags::new(MemoryOptionFlags::DO_NOT_FREE_PHY_ADDR),
             ) {
             a
         } else {
@@ -47,21 +47,37 @@ impl XsdtManager {
             pr_err!("Not supported XSDT version");
             return false;
         }
+        let xsdt_size = unsafe { *((xsdt_vm_address + 4) as *const u32) };
+        let xsdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .resize_memory_remap(xsdt_vm_address, xsdt_size as usize)
+        {
+            a
+        } else {
+            pr_err!("Cannot reserve memory area of XSDT.");
+            return false;
+        };
         self.base_address = xsdt_vm_address;
         self.enabled = true;
 
         let mut count = 0usize;
 
         while let Some(address) = self.get_entry(count) {
-            let v_address = if let Some(a) = get_kernel_manager_cluster()
+            let v_address = if let Ok(a) = get_kernel_manager_cluster()
                 .memory_manager
                 .lock()
                 .unwrap()
-                .get_vm_address(address, MemoryPermissionFlags::rodata(), true, true)
-            {
+                .memory_remap(
+                    address,
+                    36,
+                    MemoryPermissionFlags::rodata(),
+                    MemoryOptionFlags::new(MemoryOptionFlags::DO_NOT_FREE_PHY_ADDR),
+                ) {
                 a
             } else {
-                pr_err!("Cannot reserve memory area of BGRT.");
+                pr_err!("Cannot reserve memory area of ACPI Table.");
                 return false;
             };
             match unsafe { *(v_address as *const [u8; 4]) } {

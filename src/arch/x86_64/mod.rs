@@ -20,7 +20,7 @@ use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
-use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
+use kernel::memory_manager::{MemoryManager, MemoryOptionFlags, MemoryPermissionFlags};
 use kernel::sync::spin_lock::Mutex;
 
 use core::mem;
@@ -248,51 +248,93 @@ fn init_acpi(rsdp_ptr: usize) {
         .get_bgrt_manager()
         .get_bitmap_physical_address()
     {
-        if get_kernel_manager_cluster()
+        match get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .reserve_memory(
-                p_bitmap_address & PAGE_MASK,
-                p_bitmap_address & PAGE_MASK,
-                PAGE_SIZE * 32, /* must fix */
-                MemoryPermissionFlags::rodata(),
-                true,
-                true,
-            )
-        {
-            draw_boot_logo(
+            .memory_remap(
                 p_bitmap_address,
-                acpi_manager
-                    .get_xsdt_manager()
-                    .get_bgrt_manager()
-                    .get_image_offset()
-                    .unwrap(),
-            );
-        }
+                54,
+                MemoryPermissionFlags::rodata(),
+                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            ) {
+            Ok(bitmap_vm_address) => {
+                pr_info!(
+                    "0x{:X} is mapped at 0x{:X}",
+                    p_bitmap_address,
+                    bitmap_vm_address
+                );
+                if !draw_boot_logo(
+                    bitmap_vm_address,
+                    acpi_manager
+                        .get_xsdt_manager()
+                        .get_bgrt_manager()
+                        .get_image_offset()
+                        .unwrap(),
+                ) {
+                    get_kernel_manager_cluster()
+                        .memory_manager
+                        .lock()
+                        .unwrap()
+                        .free_pages(bitmap_vm_address, 0 /*must fix*/);
+                }
+            }
+            Err(err_massage) => {
+                pr_err!("{}", err_massage);
+            }
+        };
     }
 }
 
-fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) {
+fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) -> bool {
     /* if file_size > PAGE_SIZE => ?*/
     if unsafe { *((bitmap_vm_address + 30) as *const u32) } != 0 {
         pr_info!("Boot logo is compressed");
-        return;
+        return false;
     }
     let file_offset = unsafe { *((bitmap_vm_address + 10) as *const u32) };
     let bitmap_width = unsafe { *((bitmap_vm_address + 18) as *const u32) };
     let bitmap_height = unsafe { *((bitmap_vm_address + 22) as *const u32) };
     let bitmap_color_depth = unsafe { *((bitmap_vm_address + 28) as *const u16) };
-    get_kernel_manager_cluster()
-        .graphic_manager
+    let aligned_bitmap_width =
+        ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
+    match get_kernel_manager_cluster()
+        .memory_manager
         .lock()
         .unwrap()
-        .write_bitmap(
-            bitmap_vm_address + file_offset as usize,
-            bitmap_color_depth as u8,
-            bitmap_width as usize,
-            bitmap_height as usize,
-            offset.0,
-            offset.1,
-        );
+        .resize_memory_remap(
+            bitmap_vm_address,
+            (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize / 8))
+                + file_offset as usize,
+        ) {
+        Ok(remapped_bitmap_vm_address) => {
+            pr_info!(
+                "Bitmap Data: 0x{:X} is remapped at 0x{:X}",
+                bitmap_vm_address,
+                remapped_bitmap_vm_address,
+            );
+            get_kernel_manager_cluster()
+                .graphic_manager
+                .lock()
+                .unwrap()
+                .write_bitmap(
+                    remapped_bitmap_vm_address + file_offset as usize,
+                    bitmap_color_depth as u8,
+                    bitmap_width as usize,
+                    bitmap_height as usize,
+                    offset.0,
+                    offset.1,
+                );
+            get_kernel_manager_cluster()
+                .memory_manager
+                .lock()
+                .unwrap()
+                .free_pages(remapped_bitmap_vm_address, 0 /*must fix*/);
+            return true;
+        }
+        Err(err_message) => {
+            pr_err!("{}", err_message);
+            return false;
+        }
+    };
 }

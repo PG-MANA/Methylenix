@@ -2,6 +2,8 @@
  * Boot Graphics Resource Table Manager
  */
 
+use kernel::manager_cluster::get_kernel_manager_cluster;
+
 #[repr(C, packed)]
 struct BGRT {
     signature: [u8; 4],
@@ -46,6 +48,17 @@ impl BgrtManager {
         if bgrt.version != 1 || bgrt.revision != 1 {
             pr_err!("Not supported BGRT version");
         }
+        let bgrt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .resize_memory_remap(bgrt_vm_address, 56)
+        {
+            a
+        } else {
+            pr_err!("Cannot reserve memory area of BGRT.");
+            return false;
+        };
         self.base_address = bgrt_vm_address;
         self.enabled = true;
         return true;
