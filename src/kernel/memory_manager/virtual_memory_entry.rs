@@ -5,7 +5,7 @@
 use arch::target_arch::paging::MAX_VIRTUAL_ADDRESS;
 
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use kernel::memory_manager::MemoryPermissionFlags;
+use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 use core::mem;
 
@@ -21,7 +21,7 @@ pub struct VirtualMemoryEntry {
     is_shared: bool,
     should_cow: bool,
     permission_flags: MemoryPermissionFlags,
-    /*連動するエントリ(chain?)の管理もしたい、このエントリでは一つのPhysicalMemoryしか保持できない*/
+    option_flags: MemoryOptionFlags, /* 連動するエントリ(chain?)の管理もしたい、このエントリでは一つのPhysicalMemoryしか保持できない */
 }
 // ADD: thread chain
 
@@ -33,6 +33,7 @@ impl VirtualMemoryEntry {
         vm_end_address: usize,
         physical_start_address: usize,
         permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
     ) -> Self {
         Self {
             prev_entry: None,
@@ -43,6 +44,7 @@ impl VirtualMemoryEntry {
             is_shared: false,
             should_cow: false,
             permission_flags: permission,
+            option_flags: option,
         }
     }
 
@@ -52,6 +54,14 @@ impl VirtualMemoryEntry {
 
     pub fn get_vm_end_address(&self) -> usize {
         self.end_address
+    }
+
+    pub fn set_vm_end_address(&mut self, new_end_address: usize) {
+        if let Some(next_entry_address) = self.get_next_entry() {
+            let next_entry = unsafe { &*(next_entry_address as *const Self) };
+            assert!(next_entry.get_vm_start_address() > new_end_address);
+        }
+        self.end_address = new_end_address;
     }
 
     pub fn get_physical_address(&self) -> usize {
@@ -64,6 +74,14 @@ impl VirtualMemoryEntry {
 
     pub fn set_permission_flags(&mut self, flags: MemoryPermissionFlags) {
         self.permission_flags = flags;
+    }
+
+    pub fn get_memory_option_flags(&self) -> MemoryOptionFlags {
+        self.option_flags
+    }
+
+    pub fn set_memory_option_flags(&mut self, flags: MemoryOptionFlags) {
+        self.option_flags = flags;
     }
 
     pub fn get_next_entry(&self) -> Option<usize> {

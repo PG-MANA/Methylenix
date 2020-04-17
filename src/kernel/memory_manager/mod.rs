@@ -24,7 +24,10 @@ pub struct MemoryPermissionFlags {
     flags: u8,
 }
 
-pub enum MemoryOption {}
+#[derive(Clone, Eq, PartialEq, Copy)]
+pub struct MemoryOptionFlags {
+    flags: u16,
+}
 
 pub struct FreePageList {
     pub list: [usize; PAGING_CACHE_LENGTH],
@@ -230,6 +233,83 @@ impl MemoryManager {
         }
     }
 
+    pub fn memory_remap(
+        &mut self,
+        physical_address: usize,
+        size: usize,
+        permission: MemoryPermissionFlags,
+        flags: MemoryOptionFlags,
+    ) -> Result<usize, &str> {
+        /* for io_map */
+        /* should remake... */
+        let (aligned_physical_address, aligned_size) = Self::page_round_up(physical_address, size);
+
+        let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
+            p
+        } else {
+            /* add: maybe sleep option */
+            return Err("Cannot lock physical_memory_manager");
+        };
+        pm_manager.reserve_memory(aligned_physical_address, size, false);
+        /* add: check succeeded or failed (failed because of already reserved is ok, but other... )*/
+        let virtual_address = self.virtual_memory_manager.map_address(
+            aligned_physical_address,
+            None,
+            aligned_size,
+            permission,
+            flags,
+        );
+        if virtual_address.is_err() {
+            Err(virtual_address.unwrap_err())
+        } else {
+            Ok(virtual_address.unwrap() + physical_address - aligned_physical_address)
+        }
+    }
+
+    pub fn resize_memory_remap(
+        &mut self,
+        virtual_address: usize,
+        new_size: usize,
+    ) -> Result<usize, &str> {
+        let (aligned_virtual_address, aligned_new_size) =
+            Self::page_round_up(virtual_address, new_size);
+
+        let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
+            p
+        } else {
+            /* add: maybe sleep option */
+            return Err("Cannot lock physical_memory_manager");
+        };
+        let physical_address = if let Some(a) = self
+            .virtual_memory_manager
+            .virtual_address_to_physical_address(aligned_virtual_address)
+        /* may be slow*/
+        {
+            a
+        } else {
+            return Err("Invalid virtual address");
+        };
+        pm_manager.reserve_memory(physical_address, new_size, false);
+        /* add: check succeeded or failed (failed because of already reserved is ok, but other... )*/
+        if !self
+            .virtual_memory_manager
+            .try_expand_size(aligned_virtual_address, aligned_new_size)
+        {
+            let new_virtual_address = self.virtual_memory_manager.resize_memory_mapping(
+                aligned_virtual_address,
+                aligned_new_size,
+                &mut pm_manager,
+            );
+            if new_virtual_address.is_ok() {
+                Ok(new_virtual_address.unwrap() + virtual_address - aligned_virtual_address)
+            } else {
+                Err(new_virtual_address.unwrap_err())
+            }
+        } else {
+            Ok(virtual_address)
+        }
+    }
+
     pub fn get_vm_address(
         &mut self,
         physical_address: usize,
@@ -298,6 +378,7 @@ impl MemoryManager {
 }
 
 impl MemoryPermissionFlags {
+    /* Bitfield代わりとして使っているので命名規則は変えている。 */
     pub const fn new(read: bool, write: bool, execute: bool, user_access: bool) -> Self {
         Self {
             flags: ((read as u8) << 0)
@@ -329,5 +410,31 @@ impl MemoryPermissionFlags {
 
     pub fn user_access(&self) -> bool {
         self.flags & (1 << 3) != 0
+    }
+}
+
+impl MemoryOptionFlags {
+    /* Bitfield代わりとして使っているので命名規則は変えている。 */
+    pub const NORMAL: u16 = 0;
+    pub const PRE_RESERVED: u16 = 1 << 0;
+    pub const DO_NOT_FREE_PHY_ADDR: u16 = 1 << 1;
+    pub const WIRED: u16 = 1 << 2;
+    pub const DIRECT_MAP: u16 = 1 << 3;
+
+    pub fn new(flags: u16) -> Self {
+        assert_eq!(flags & !0xF, 0);
+        Self { flags }
+    }
+
+    pub fn pre_reserved(&self) -> bool {
+        self.flags & Self::PRE_RESERVED != 0
+    }
+
+    pub fn do_not_free_phy_addr(&self) -> bool {
+        self.flags & Self::DO_NOT_FREE_PHY_ADDR != 0
+    }
+
+    pub fn wired(&self) -> bool {
+        self.flags & Self::WIRED != 0
     }
 }
