@@ -21,11 +21,10 @@ pub struct MemoryManager {
 
 #[derive(Clone, Eq, PartialEq, Copy)]
 pub struct MemoryPermissionFlags {
-    pub read: bool,
-    pub write: bool,
-    pub execute: bool,
-    pub user_access: bool,
+    flags: u8,
 }
+
+pub enum MemoryOption {}
 
 pub struct FreePageList {
     pub list: [usize; PAGING_CACHE_LENGTH],
@@ -299,20 +298,36 @@ impl MemoryManager {
 }
 
 impl MemoryPermissionFlags {
-    pub const fn rodata() -> Self {
+    pub const fn new(read: bool, write: bool, execute: bool, user_access: bool) -> Self {
         Self {
-            read: true,
-            write: false,
-            execute: false,
-            user_access: false,
+            flags: ((read as u8) << 0)
+                | ((write as u8) << 1)
+                | ((execute as u8) << 2)
+                | ((user_access as u8) << 3),
         }
     }
+
+    pub const fn rodata() -> Self {
+        Self::new(true, false, false, false)
+    }
+
     pub const fn data() -> Self {
-        Self {
-            read: true,
-            write: true,
-            execute: false,
-            user_access: false,
-        }
+        Self::new(true, true, false, false)
+    }
+
+    pub fn read(&self) -> bool {
+        self.flags & (1 << 0) != 0
+    }
+
+    pub fn write(&self) -> bool {
+        self.flags & (1 << 1) != 0
+    }
+
+    pub fn execute(&self) -> bool {
+        self.flags & (1 << 2) != 0
+    }
+
+    pub fn user_access(&self) -> bool {
+        self.flags & (1 << 3) != 0
     }
 }

@@ -161,9 +161,9 @@ impl PageManager {
 
         if let Some(pte) = self.get_target_pte(cache_memory_list, linear_address, true) {
             pte.set_addr(physical_address);
-            pte.set_no_execute(!permission.execute);
-            pte.set_writable(permission.write);
-            pte.set_user_accessible(permission.user_access);
+            pte.set_no_execute(!permission.execute());
+            pte.set_writable(permission.write());
+            pte.set_user_accessible(permission.user_access());
             /*PageManager::reset_paging_local(linear_address)*/
             true
         } else {
@@ -184,9 +184,9 @@ impl PageManager {
             return false;
         }
         if let Some(pte) = self.get_target_pte(cache_memory_list, linear_address, false) {
-            pte.set_writable(permission.write);
-            pte.set_no_execute(!permission.execute);
-            pte.set_user_accessible(permission.user_access);
+            pte.set_writable(permission.write());
+            pte.set_no_execute(!permission.execute());
+            pte.set_user_accessible(permission.user_access());
             return true;
         }
         if cache_memory_list.pointer == 0 {

@@ -136,12 +136,12 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         if !section.should_allocate() {
             continue;
         }
-        let permission = MemoryPermissionFlags {
-            read: true,
-            write: section.should_writable(),
-            execute: section.should_excusable(),
-            user_access: false,
-        };
+        let permission = MemoryPermissionFlags::new(
+            true,
+            section.should_writable(),
+            section.should_excusable(),
+            false,
+        );
         let aligned_start_address = section.addr() & PAGE_MASK;
         let aligned_size = ((section.size() + (section.addr() - aligned_start_address) - 1)
             & PAGE_MASK)

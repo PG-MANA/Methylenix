@@ -375,9 +375,9 @@ impl VirtualMemoryManager {
                     entry.get_vm_start_address(),
                     entry.get_vm_end_address()
                 ),
-                entry.get_permission_flags().write,
-                entry.get_permission_flags().user_access,
-                entry.get_permission_flags().execute
+                entry.get_permission_flags().write(),
+                entry.get_permission_flags().user_access(),
+                entry.get_permission_flags().execute()
             );
             if let Some(address) = entry.get_next_entry() {
                 unsafe { entry = &*(address as *const _) };
