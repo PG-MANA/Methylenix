@@ -230,24 +230,25 @@ impl PageManager {
             }
             let pdpe_table =
                 unsafe { &*(pml4.get_addr().unwrap() as *const [PDPE; PDPE_MAX_ENTRY]) };
-            for pdpe in pdpe_table.iter() {
+            for (pdpte_count, pdpe) in pdpe_table.iter().enumerate() {
                 if !pdpe.is_pde_set() {
                     continue;
                 }
                 let pde_table =
                     unsafe { &*(pdpe.get_addr().unwrap() as *const [PDE; PDE_MAX_ENTRY]) };
-                for pde in pde_table.iter() {
+                for (pde_count, pde) in pde_table.iter().enumerate() {
                     if !pde.is_pte_set() {
                         continue;
                     }
                     let pte_table =
                         unsafe { &*(pde.get_addr().unwrap() as *const [PTE; PTE_MAX_ENTRY]) };
-                    for pte in pte_table.iter() {
+                    for (pte_count, pte) in pte_table.iter().enumerate() {
                         if !pte.is_present() {
                             continue;
                         }
                         kprintln!(
-                            "0x{:X} W:{}, EXE:{}, A:{}",
+                            "0x:{:X}: 0x{:X} W:{}, EXE:{}, A:{}",
+                            0x40000000 * pdpte_count + 0x200000 * pde_count + 0x1000 * pte_count,
                             pte.get_addr().unwrap(),
                             pte.is_writable(),
                             !pte.is_no_execute(),
