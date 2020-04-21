@@ -22,6 +22,7 @@ pub struct InterruptManager {
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
     main_selector: u16,
     io_apic: IoApicManager,
+    local_apic: LocalApicManager, /* temporary */
 }
 
 impl InterruptManager {
@@ -33,22 +34,23 @@ impl InterruptManager {
             idt: MaybeUninit::uninit(),
             main_selector: 0,
             io_apic: IoApicManager::new(),
+            local_apic: LocalApicManager::new(),
         }
     }
 
     pub fn dummy_handler() {}
 
     pub fn init(&mut self, selector: u16) -> bool {
-        self.main_selector = selector;
         self.idt.write(unsafe {
             &mut *(get_kernel_manager_cluster()
                 .memory_manager
                 .lock()
                 .unwrap()
-                .alloc_pages(0, None, MemoryPermissionFlags::data())
+                .alloc_pages(0, MemoryPermissionFlags::data())
                 .expect("Cannot alloc memory for interrupt manager.")
                 as *mut [_; Self::IDT_MAX as usize])
         });
+        self.main_selector = selector;
 
         unsafe {
             for i in 0..Self::IDT_MAX {
@@ -57,6 +59,7 @@ impl InterruptManager {
             self.flush();
         }
         self.io_apic.init();
+        self.local_apic.init();
         return true;
     }
 
@@ -98,12 +101,12 @@ impl InterruptManager {
                 GateDescriptor::new(function, self.main_selector, 0, type_attr),
             );
         }
-
-        self.io_apic.set_redirect(
-            LocalApicManager::get_running_cpu_local_apic_manager().get_apic_id(),
-            irq,
-            index as u8,
-        );
+        self.io_apic
+            .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
         return true;
+    }
+
+    pub fn send_eoi(&self) {
+        self.local_apic.send_eoi();
     }
 }

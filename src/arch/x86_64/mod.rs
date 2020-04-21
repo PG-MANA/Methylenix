@@ -8,7 +8,6 @@ pub mod device;
 pub mod paging;
 
 use self::device::cpu;
-use self::device::local_apic::LocalApicManager;
 use self::device::serial_port::SerialPortManager;
 use self::interrupt::InterruptManager;
 use self::paging::{PAGE_MASK, PAGE_SIZE};
@@ -43,11 +42,14 @@ pub extern "C" fn boot_main(
     kprintln!("Methylenix");
     /* メモリ管理初期化 */
     let multiboot_information = init_memory(multiboot_information);
-    get_kernel_manager_cluster()
+    if !get_kernel_manager_cluster()
         .graphic_manager
         .lock()
         .unwrap()
-        .set_framebuffer_memory_permission();
+        .set_frame_buffer_memory_permission()
+    {
+        panic!("Cannot map memory for frame buffer");
+    }
     /* IDT初期化&割り込み初期化 */
     init_interrupt(kernel_code_segment);
     /* シリアルポート初期化 */
@@ -147,11 +149,12 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             & PAGE_MASK)
             + PAGE_SIZE;
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
-        if let Some(address) = virtual_memory_manager.alloc_address(
-            aligned_size,
+        if let Ok(address) = virtual_memory_manager.map_address(
             aligned_start_address,
             Some(aligned_start_address),
+            aligned_size,
             permission,
+            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             &mut physical_memory_manager,
         ) {
             if address == aligned_start_address {
@@ -160,35 +163,38 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         }
         panic!("Cannot map virtual memory correctly.");
     }
-
-    for entry in multiboot_information.memory_map_info.clone() {
-        if entry.m_type == 1 {
-            continue;
-        }
-        let permission = match entry.m_type {
-            3 => MemoryPermissionFlags::data(), /* ACPI */
-            4 => MemoryPermissionFlags::data(),
-            5 => MemoryPermissionFlags::data(), //rodata?
-            _ => MemoryPermissionFlags::rodata(),
-        };
-        let aligned_start_address = entry.addr as usize & PAGE_MASK;
-        let aligned_size =
-            ((entry.addr as usize - aligned_start_address + entry.length as usize - 1) & PAGE_MASK)
-                + PAGE_SIZE;
-        if let Some(address) = virtual_memory_manager.alloc_address(
-            aligned_size,
-            aligned_start_address,
-            Some(aligned_start_address),
-            permission,
-            &mut physical_memory_manager,
-        ) {
-            if address == aligned_start_address {
+    /* may be needless */
+    if false {
+        for entry in multiboot_information.memory_map_info.clone() {
+            if entry.m_type == 1 {
                 continue;
             }
+            let permission = match entry.m_type {
+                3 => MemoryPermissionFlags::data(), /* ACPI */
+                4 => MemoryPermissionFlags::data(),
+                5 => MemoryPermissionFlags::data(), //rodata?
+                _ => MemoryPermissionFlags::rodata(),
+            };
+            let aligned_start_address = entry.addr as usize & PAGE_MASK;
+            let aligned_size =
+                ((entry.addr as usize - aligned_start_address + entry.length as usize - 1)
+                    & PAGE_MASK)
+                    + PAGE_SIZE;
+            if let Ok(address) = virtual_memory_manager.map_address(
+                aligned_start_address,
+                Some(aligned_start_address),
+                aligned_size,
+                permission,
+                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+                &mut physical_memory_manager,
+            ) {
+                if address == aligned_start_address {
+                    continue;
+                }
+            }
+            panic!("Cannot map virtual memory correctly.");
         }
-        panic!("Cannot map virtual memory correctly.");
     }
-
     /* set up Memory Manager */
     let mut memory_manager =
         MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
@@ -222,8 +228,6 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
 
 fn init_interrupt(kernel_selector: u16) {
     device::pic::disable_8259_pic();
-
-    LocalApicManager::init();
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
     get_kernel_manager_cluster().interrupt_manager = Mutex::new(interrupt_manager);
@@ -233,7 +237,6 @@ fn init_acpi(rsdp_ptr: usize) {
     use core::str;
 
     let mut acpi_manager = AcpiManager::new();
-
     if !acpi_manager.init(rsdp_ptr) {
         pr_warn!("Cannot init ACPI.");
         return;

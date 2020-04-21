@@ -28,13 +28,13 @@ impl KernelMemoryAllocManager {
     }
 
     pub fn init(&mut self, m_manager: &mut MemoryManager) -> bool {
-        if let Some(pool_address) = m_manager.alloc_pages(1, None, MemoryPermissionFlags::data()) {
+        if let Some(pool_address) = m_manager.alloc_pages(1, MemoryPermissionFlags::data()) {
             self.alloc_manager
                 .set_memory_entry_pool(pool_address, PAGE_SIZE);
         } else {
             return false;
         }
-        if let Some(address) = m_manager.alloc_pages(1, None, MemoryPermissionFlags::data()) {
+        if let Some(address) = m_manager.alloc_pages(1, MemoryPermissionFlags::data()) {
             unsafe {
                 self.used_memory_list.write(
                     &mut *(address
@@ -59,7 +59,6 @@ impl KernelMemoryAllocManager {
             //TODO: do something...
             if let Some(address) = m_manager.alloc_pages(
                 VirtualMemoryManager::size_to_order(size),
-                None,
                 MemoryPermissionFlags::data(),
             ) {
                 let aligned_size = (1 << VirtualMemoryManager::size_to_order(size)) * PAGE_SIZE;
@@ -79,9 +78,7 @@ impl KernelMemoryAllocManager {
         }
 
         /* alloc from Memory Manager */
-        if let Some(allocated_address) =
-            m_manager.alloc_pages(0, None, MemoryPermissionFlags::data())
-        {
+        if let Some(allocated_address) = m_manager.alloc_pages(0, MemoryPermissionFlags::data()) {
             self.alloc_manager.free(allocated_address, PAGE_SIZE, true);
             return self.kmalloc(size, m_manager);
         }
@@ -99,7 +96,6 @@ impl KernelMemoryAllocManager {
 
         if let Some(address) = m_manager.alloc_nonlinear_pages(
             VirtualMemoryManager::size_to_order(size),
-            None,
             MemoryPermissionFlags::data(),
         ) {
             if self.add_entry_to_used_list(address, size) {

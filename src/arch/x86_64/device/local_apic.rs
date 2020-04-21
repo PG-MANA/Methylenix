@@ -5,7 +5,7 @@
 use arch::target_arch::device::cpu;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::MemoryPermissionFlags;
+use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 pub struct LocalApicManager {
     apic_id: u32,
@@ -27,7 +27,15 @@ impl LocalApicManager {
     const CPUID_X2APIC_MASK: u32 = 1 << 21;
     const X2APIC_MSR_INDEX: u32 = 0x800;
 
-    pub fn init() -> LocalApicManager {
+    pub const fn new() -> Self {
+        Self {
+            apic_id: 0,
+            is_x2apic_enabled: false,
+            base_address: 0,
+        }
+    }
+
+    pub fn init(&mut self) -> bool {
         let local_apic_msr = unsafe { cpu::rdmsr(LocalApicManager::MSR_INDEX) };
         let base_address = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
         let is_x2apic_supported = unsafe {
@@ -46,62 +54,42 @@ impl LocalApicManager {
                 );
             }
         }
-        if !get_kernel_manager_cluster()
+        self.apic_id = 0;
+        self.is_x2apic_enabled = is_x2apic_supported;
+        match get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .reserve_memory(
-                base_address,
+            .memory_remap(
                 base_address,
                 0x1000,
                 MemoryPermissionFlags::data(),
-                true,
-                true,
-            )
-        {
-            panic!("Cannot reserve memory of Local APIC.");
-        }
-        let mut local_apic_manager = LocalApicManager {
-            apic_id: 0,
-            is_x2apic_enabled: is_x2apic_supported,
-            base_address,
+                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            ) {
+            Ok(address) => {
+                self.base_address = address;
+            }
+            Err(err) => {
+                pr_err!("Cannot reserve memory of Local APIC: {}", err);
+                return false;
+            }
         };
-        local_apic_manager.apic_id =
-            local_apic_manager.read_apic_register(LocalApicRegisters::ApicId);
-        local_apic_manager.write_apic_register(
+
+        self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
+        self.write_apic_register(
             LocalApicRegisters::SIR,
-            local_apic_manager.read_apic_register(LocalApicRegisters::SIR) | 0x100,
+            self.read_apic_register(LocalApicRegisters::SIR) | 0x100,
         );
-        pr_info!(
-            "APIC ID:{}(x2APIC:{})",
-            local_apic_manager.apic_id,
-            is_x2apic_supported
-        );
-        local_apic_manager
-    }
-
-    pub fn get_running_cpu_local_apic_manager() -> LocalApicManager {
-        let local_apic_msr = unsafe { cpu::rdmsr(LocalApicManager::MSR_INDEX) };
-        let base_address = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
-        let is_x2apic_enabled = local_apic_msr & LocalApicManager::X2APIC_ENABLED_MASK != 0;
-        let mut local_apic_manager = LocalApicManager {
-            apic_id: 0,
-            is_x2apic_enabled,
-            base_address,
-        };
-
-        local_apic_manager.apic_id =
-            local_apic_manager.read_apic_register(LocalApicRegisters::ApicId);
-        local_apic_manager
+        pr_info!("APIC ID:{}(x2APIC:{})", self.apic_id, is_x2apic_supported);
+        return true;
     }
 
     pub fn get_apic_id(&self) -> u32 {
         self.apic_id
     }
 
-    pub fn send_eoi() {
-        let local_apic_manager = LocalApicManager::get_running_cpu_local_apic_manager();
-        local_apic_manager.write_apic_register(LocalApicRegisters::EOI, 0);
+    pub fn send_eoi(&self) {
+        self.write_apic_register(LocalApicRegisters::EOI, 0);
     }
 
     fn read_apic_register(&self, index: LocalApicRegisters) -> u32 {

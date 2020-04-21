@@ -3,7 +3,6 @@
  */
 
 use arch::target_arch::device::cpu::{in_byte, out_byte};
-use arch::target_arch::device::local_apic;
 
 use kernel::fifo::FIFO;
 use kernel::manager_cluster::get_kernel_manager_cluster;
@@ -45,7 +44,6 @@ impl SerialPortManager {
                     0x24,
                     0,
                 );
-
             out_byte(self.port + 1, 0x00); // FIFOをオフ
             out_byte(self.port + 3, 0x80); // DLABを有効化して設定できるようにする?
                                            //out_byte(self.port + 0, 0x03); // rateを設定
@@ -100,7 +98,9 @@ impl SerialPortManager {
         {
             let code = serial_port_manager.read();
             serial_port_manager.fifo.queue(code);
-            local_apic::LocalApicManager::send_eoi();
+        }
+        if let Ok(interrupt_manager) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
+            interrupt_manager.send_eoi();
         }
     }
 

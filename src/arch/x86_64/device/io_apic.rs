@@ -5,7 +5,7 @@
 use arch::target_arch::paging::PAGE_SIZE;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::MemoryPermissionFlags;
+use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 pub struct IoApicManager {
     base_address: usize,
@@ -17,23 +17,23 @@ impl IoApicManager {
     }
 
     pub fn init(&mut self) {
-        self.base_address = 0xfec00000;
-
-        if !get_kernel_manager_cluster()
+        match get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .reserve_memory(
-                self.base_address,
-                self.base_address,
-                PAGE_SIZE, /*too big...*/
+            .memory_remap(
+                0xfec00000,
+                PAGE_SIZE, /* is it ok?*/
                 MemoryPermissionFlags::data(),
-                true,
-                true,
-            )
-        {
-            panic!("Cannot reserve memory of IO APIC");
-        }
+                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            ) {
+            Ok(address) => {
+                self.base_address = address;
+            }
+            Err(err) => {
+                panic!("Cannot reserve memory of IO APIC: {}", err);
+            }
+        };
     }
 
     pub fn set_redirect(&self, local_apic_id: u32, irq: u8, index: u8) {

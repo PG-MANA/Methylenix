@@ -82,6 +82,7 @@ impl XsdtManager {
             };
             match unsafe { *(v_address as *const [u8; 4]) } {
                 BgrtManager::BGRT_SIGNATURE => {
+                    print!("WOW");
                     if !self.bgrt_manager.init(v_address) {
                         pr_err!("Cannot int BGRT Manager.");
                         return false;
@@ -94,7 +95,7 @@ impl XsdtManager {
             use core::str;
             pr_info!(
                 "{}",
-                str::from_utf8(unsafe { &*(address as *const [u8; 4]) }).unwrap_or("----")
+                str::from_utf8(unsafe { &*(v_address as *const [u8; 4]) }).unwrap_or("----")
             );
             count += 1;
         }

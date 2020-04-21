@@ -7,7 +7,7 @@ use arch::target_arch::device::crt;
 
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
+use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 use core::fmt;
 
@@ -50,28 +50,28 @@ impl GraphicManager {
         }
     }
 
-    pub fn set_framebuffer_memory_permission(&self) {
+    pub fn set_frame_buffer_memory_permission(&mut self) -> bool {
         let pixel_size = if self.is_textmode {
             2
         } else {
             self.frame_buffer_color_depth / 8
         };
-        let result = MemoryManager::page_round_up(
-            self.frame_buffer_address,
-            self.frame_buffer_height * self.frame_buffer_width * pixel_size as usize,
-        );
-        get_kernel_manager_cluster()
+        match get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .reserve_memory(
-                result.0,
-                result.0,
-                result.1,
+            .memory_remap(
+                self.frame_buffer_address,
+                self.frame_buffer_height * self.frame_buffer_width * pixel_size as usize,
                 MemoryPermissionFlags::data(),
-                true,
-                true,
-            );
+                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            ) {
+            Ok(address) => {
+                self.frame_buffer_address = address;
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     fn init_manager(&mut self, frame_buffer_info: &FrameBufferInfo) {
