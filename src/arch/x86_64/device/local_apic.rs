@@ -74,6 +74,7 @@ impl LocalApicManager {
                 return false;
             }
         };
+        drop(base_address); /* avoid page fault */
 
         self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
         self.write_apic_register(

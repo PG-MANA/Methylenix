@@ -64,13 +64,13 @@ impl XsdtManager {
 
         let mut count = 0usize;
 
-        while let Some(address) = self.get_entry(count) {
+        while let Some(entry_physical_address) = self.get_entry(count) {
             let v_address = if let Ok(a) = get_kernel_manager_cluster()
                 .memory_manager
                 .lock()
                 .unwrap()
                 .memory_remap(
-                    address,
+                    entry_physical_address,
                     36,
                     MemoryPermissionFlags::rodata(),
                     MemoryOptionFlags::new(MemoryOptionFlags::DO_NOT_FREE_PHY_ADDR),
@@ -80,9 +80,9 @@ impl XsdtManager {
                 pr_err!("Cannot reserve memory area of ACPI Table.");
                 return false;
             };
+            drop(entry_physical_address); /* avoid page fault */
             match unsafe { *(v_address as *const [u8; 4]) } {
                 BgrtManager::BGRT_SIGNATURE => {
-                    print!("WOW");
                     if !self.bgrt_manager.init(v_address) {
                         pr_err!("Cannot int BGRT Manager.");
                         return false;
