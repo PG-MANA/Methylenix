@@ -169,6 +169,7 @@ impl PhysicalMemoryManager {
         let entry = self
             .search_entry_previous_address_mut(start_address)
             .unwrap_or(unsafe { &mut *(self.first_entry as *mut MemoryEntry) });
+        println!("entry: {:X}", entry.start);
 
         if entry.get_start_address() <= start_address
             && entry.get_end_address() >= Self::size_to_end_address(start_address, size)
@@ -226,12 +227,14 @@ impl PhysicalMemoryManager {
                     start_address,
                     Self::size_to_end_address(start_address, size),
                 );
-                if entry.is_first_entry() {
+                if entry.is_first_entry() && new_entry.get_end_address() < entry.get_start_address()
+                {
                     self.first_entry = new_entry as *mut _ as usize;
                     new_entry.unset_prev_entry();
                     new_entry.chain_after_me(entry);
                 } else {
                     next.set_prev_entry(new_entry);
+                    new_entry.set_next_entry(next);
                     entry.chain_after_me(new_entry);
                 }
                 self.free_memory_size += size;
@@ -404,6 +407,7 @@ impl MemoryEntry {
     }
 
     pub fn set_range(&mut self, start: usize, end: usize) {
+        assert!(start < end);
         self.start = start;
         self.end = end;
     }
@@ -440,7 +444,7 @@ impl MemoryEntry {
         }
     }
 
-    pub fn _set_next_entry(&mut self, next: &mut Self) {
+    pub fn set_next_entry(&mut self, next: &mut Self) {
         self.next = Some(next as *mut _ as usize);
     }
 
