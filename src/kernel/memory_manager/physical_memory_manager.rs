@@ -169,7 +169,6 @@ impl PhysicalMemoryManager {
         let entry = self
             .search_entry_previous_address_mut(start_address)
             .unwrap_or(unsafe { &mut *(self.first_entry as *mut MemoryEntry) });
-        println!("entry: {:X}", entry.start);
 
         if entry.get_start_address() <= start_address
             && entry.get_end_address() >= Self::size_to_end_address(start_address, size)
