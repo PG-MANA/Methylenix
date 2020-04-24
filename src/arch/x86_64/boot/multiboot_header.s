@@ -16,7 +16,9 @@
 .equ MULTIBOOT_HEADER_TAG_TYPE_ENTRY_EFI64, 9           /* EFI64で最初に実行するアドレス */
 
 /* マルチブート用ヘッダー */
-.section .multiboot_header, "a" /* alloc flag*/
+.section .header.multiboot, "a" /* alloc flag*/
+
+.align 8
 
 multiboot_start:
   .long      MULTIBOOT_HEADER_MAGIC
