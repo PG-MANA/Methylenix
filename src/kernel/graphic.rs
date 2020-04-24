@@ -244,7 +244,7 @@ impl GraphicManager {
                                 + offset_x
                                 + width_pointer)
                                 * screen_depth_byte) as *mut u32) = *((buffer
-                            + (size_y - height_pointer) * bitmap_aligned_bitmap_width_pointer
+                            + (size_y - height_pointer - 1) * bitmap_aligned_bitmap_width_pointer
                             + width_pointer * bitmap_depth_byte)
                             as *const u32);
                     }
