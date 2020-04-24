@@ -215,8 +215,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
 
     /* free old multibootinfo area */
-    memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size); // may be already freed
-
+    memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size); /* may be already freed */
     /* apply paging */
     memory_manager.set_paging_table();
 
