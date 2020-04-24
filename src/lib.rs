@@ -5,6 +5,7 @@
 #![feature(const_loop)]
 #![feature(const_mut_refs)]
 #![feature(const_raw_ptr_deref)]
+#![feature(global_asm)]
 #![feature(lang_items)]
 #![feature(naked_functions)]
 #![feature(no_more_cas)]

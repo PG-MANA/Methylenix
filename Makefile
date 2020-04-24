@@ -37,7 +37,7 @@ export AR
 ##ビルドファイル
 KERNELFILES = kernel.elf
 RUST_OBJ = target/$(RUST_TARGET)/release/lib$(NAME).a
-BOOT_SYS_LIST = $(MAKE_OBJDIR)boot_asm.a $(RUST_OBJ)
+BOOT_SYS_LIST = $(RUST_OBJ)
 
 #初期設定
 export TARGET_ARCH

@@ -4,6 +4,7 @@
 
 #[macro_use]
 pub mod interrupt;
+pub mod boot;
 pub mod device;
 pub mod paging;
 
