@@ -7,7 +7,7 @@ macro_rules! make_interrupt_hundler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
         pub unsafe fn $handler_name() {
-            asm!("
+            llvm_asm!("
                 push    rax
                 push    rbx
                 push    rcx
@@ -51,7 +51,7 @@ macro_rules! make_error_interrupt_hundler {
     ($handler_name: ident, $handler_func: path) => {
         #[naked]
         pub unsafe fn $ handler_name() {
-            asm!("
+            llvm_asm!("
                 push    rdi
                 mov     rdi, [rsp + 8]
                 push    rax
