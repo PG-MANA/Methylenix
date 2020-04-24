@@ -26,7 +26,7 @@ RM = rm -rf
 GRUBMKRES = grub-mkrescue
 GRUB2MKRES = grub2-mkrescue #Temporary
 #LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
-LD = ld.lld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map  -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
+LD = ld.lld --no-nmagic --gc-sections --Map=$(MAKE_TMPDIR)$(NAME).map  -nostdlib --script=$(MAKE_CONGIGDIR)linkerscript.ld
 CARGO = cargo
 
 ##ビルドファイル
