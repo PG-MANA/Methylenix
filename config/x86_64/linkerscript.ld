@@ -26,4 +26,8 @@ SECTIONS {
   .bss : ALIGN(__ALIGN_SIZE) {
     *(.bss .bss.*)
   }
+
+  .got : ALIGN(__ALIGN_SIZE) {
+    *(.got .got.*)
+  }
 }
