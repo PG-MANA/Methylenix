@@ -26,13 +26,8 @@ CP = cp -r
 RM = rm -rf
 GRUBMKRES = grub-mkrescue
 GRUB2MKRES = grub2-mkrescue #Temporary
-AR = ar rcs
 LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
 CARGO = cargo
-
-##アセンブラ読み込み
-include config/$(TARGET_ARCH)/assembler.mk
-export AR
 
 ##ビルドファイル
 KERNELFILES = kernel.elf
@@ -76,9 +71,6 @@ kernel:
 # ファイル生成規則
 kernel.elf : $(BOOT_SYS_LIST)
 	$(LD) -o $(MAKE_BINDIR)kernel.elf $(BOOT_SYS_LIST)
-
-$(MAKE_OBJDIR)boot_asm.a : src/arch/$(TARGET_ARCH)/boot/Makefile .FORCE
-	$(MAKE) -C src/arch/$(TARGET_ARCH)/boot/
 
 $(RUST_OBJ) :  .FORCE
 	$(CARGO) xbuild --release --target $(RUST_TARGET_FILE_FOLDER) $(RUST_TARGET)

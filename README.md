@@ -52,12 +52,9 @@ limitations under the License.
 * make
 * ld
 * grub2-mkrescue
-* nasm
 * rustc(nightly)
 * cargo
 * cargo-xbuild
-
-詳しくは https://soft.taprix.org/wiki/oswiki/Rust:setup を参照してください。
 
 ### ビルド
 
