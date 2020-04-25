@@ -118,7 +118,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
     /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
     for section in multiboot_information.elf_info.clone() {
-        if section.should_allocate() {
+        if section.should_allocate() && section.align_size() == PAGE_SIZE {
             physical_memory_manager.reserve_memory(section.addr(), section.size(), true);
         }
     }
@@ -136,7 +136,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
 
     for section in multiboot_information.elf_info.clone() {
-        if !section.should_allocate() {
+        if !section.should_allocate() || section.align_size() != PAGE_SIZE {
             continue;
         }
         let permission = MemoryPermissionFlags::new(

@@ -89,6 +89,9 @@ impl ElfSection {
     pub fn size(&self) -> usize {
         self.section_size
     }
+    pub fn align_size(&self) -> usize {
+        self.section_addralign as usize
+    }
     pub fn flags(&self) -> usize {
         //列挙型使えるとな...
         self.section_flags

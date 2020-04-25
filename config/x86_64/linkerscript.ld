@@ -11,6 +11,10 @@ SECTIONS {
     KEEP(*(.header.*)) /*使われてないとリンクされなくなるので*/
   }
 
+  .note : ALIGN(4) {
+    *(.note)
+  }
+
   .text : ALIGN(__ALIGN_SIZE) {
     *(.text .text.*)
   }

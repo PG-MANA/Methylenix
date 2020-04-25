@@ -5,7 +5,7 @@
 .code32
 .att_syntax
 
-.global boot_from_multiboot
+.global boot_from_multiboot, boot_from_xen
 .extern init_long_mode                      /* at init_long_mode */
 .extern initial_stack, INITIAL_STACK_SIZE   /* at common */
 
@@ -13,6 +13,7 @@
 
 .section .text
 .align 4
+boot_from_xen:
 boot_from_multiboot:
   mov   $(initial_stack + INITIAL_STACK_SIZE), %esp
 
