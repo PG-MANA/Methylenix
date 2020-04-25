@@ -29,7 +29,7 @@ use core::mem;
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
 
 #[no_mangle]
-pub extern "C" fn boot_main(
+pub extern "C" fn multiboot_main(
     mbi_address: usize,       /* MultiBoot Information */
     kernel_code_segment: u16, /* Current segment is 8 */
     _user_code_segment: u16,
@@ -340,4 +340,26 @@ fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) -> bool {
             return false;
         }
     };
+}
+
+#[no_mangle]
+pub extern "C" fn directboot_main(
+    _info_address: usize,      /* DirectBoot Start Information */
+    _kernel_code_segment: u16, /* Current segment is 8 */
+    _user_code_segment: u16,
+    _user_data_segment: u16,
+) {
+    get_kernel_manager_cluster()
+        .serial_port_manager
+        .lock()
+        .unwrap()
+        .sendstr("boot success\r\n");
+    loop {
+        hlt();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn unknownboot_main() {
+    panic!("Unknown Boot System!");
 }

@@ -5,23 +5,26 @@
 .code32
 .att_syntax
 
-.global boot_from_multiboot, boot_from_xen
-.extern init_long_mode                      /* at init_long_mode */
+.global boot_from_multiboot, BOOT_FROM_MULTIBOOT_MARK
+.extern init_long_mode, fin                 /* at init_long_mode */
 .extern initial_stack, INITIAL_STACK_SIZE   /* at common */
 
 .equ MULTIBOOT_CHECK_MAGIC, 0x36d76289      /* multiboot2 magic code */
+.equ BOOT_FROM_MULTIBOOT_MARK, 1
 
 .section .text
 .align 4
-boot_from_xen:
+
 boot_from_multiboot:
   mov   $(initial_stack + INITIAL_STACK_SIZE), %esp
 
   /* init eflags */
   push  $0
   popfd
-  push  $0             /* for 64bit pop */
-  push  %ebx           /* save multiboot information */
+  push  $0                          /* for 64bit pop */
+  push  $BOOT_FROM_MULTIBOOT_MARK   /* the mark booted from multiboot */
+  push  $0                          /* for 64bit pop */
+  push  %ebx                        /* save multiboot information */
 
   cmp   $MULTIBOOT_CHECK_MAGIC, %eax
   jne   bad_magic
@@ -32,9 +35,7 @@ bad_magic:
   mov   $0xb8000, %edi
   mov   $boot_error_str, %esi
   rep   movsb
-  cli
-  hlt
-jmp bad_magic
+  jmp   fin
 
 .section .data
 

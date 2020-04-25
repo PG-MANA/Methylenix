@@ -5,7 +5,7 @@
 .code32
 .att_syntax
 
-.global init_long_mode
+.global init_long_mode, fin
 .extern init_x86_64
 .extern main_code_segment_descriptor, tss_descriptor, gdtr0 /* at common.asm */
 .extern tss_descriptor_adress, tss, pd, pdpt, pml4

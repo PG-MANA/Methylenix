@@ -1,5 +1,5 @@
 /*
- * Xen directboot header
+ * HVM directboot header
  */
 
 .section .note, "a"

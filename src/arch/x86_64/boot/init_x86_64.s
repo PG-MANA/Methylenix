@@ -8,6 +8,7 @@
 .global init_x86_64
 .extern boot_main
 .extern main_code_segment_descriptor, user_code_segment_descriptor, user_data_segment_descriptor
+.extern BOOT_FROM_MULTIBOOT_MARK, BOOT_FROM_DIRECTBOOT_MARK
 
 .section .text
 
@@ -23,8 +24,13 @@ init_x86_64:
   mov   $main_code_segment_descriptor, %rsi
   mov   $user_code_segment_descriptor, %rdx
   mov   $user_data_segment_descriptor, %rcx
+  pop   %rax                /* boot type (Multiboot:1, Directboot: 2)*/
   mov   $(stack + STACK_SIZE), %rsp
-  jmp   boot_main           /* at src/arch/x86_64/mod.rs */
+  cmp   $BOOT_FROM_MULTIBOOT_MARK, %rax
+  jz    multiboot_main      /* at src/arch/x86_64/mod.rs */
+  cmp   $BOOT_FROM_DIRECTBOOT_MARK,%rax
+  jz    directboot_main     /* at src/arch/x86_64/mod.rs */
+  jmp   unknownboot_main    /* at src/arch/x86_64/mod.rs */
 
 .section .bss
 
