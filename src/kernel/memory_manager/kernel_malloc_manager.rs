@@ -6,7 +6,6 @@
 use arch::target_arch::paging::PAGE_SIZE;
 
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
 use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
 
 use core::mem;
@@ -58,12 +57,12 @@ impl KernelMemoryAllocManager {
         if size >= PAGE_SIZE {
             //TODO: do something...
             if let Some(address) = m_manager.alloc_pages(
-                VirtualMemoryManager::size_to_order(size),
+                MemoryManager::size_to_order(size),
                 MemoryPermissionFlags::data(),
             ) {
-                let aligned_size = (1 << VirtualMemoryManager::size_to_order(size)) * PAGE_SIZE;
+                let aligned_size = (1 << MemoryManager::size_to_order(size)) * PAGE_SIZE;
                 if !self.add_entry_to_used_list(address, aligned_size) {
-                    m_manager.free_pages(address, VirtualMemoryManager::size_to_order(size));
+                    m_manager.free_pages(address, MemoryManager::size_to_order(size));
                     return None;
                 }
                 return Some(address);
@@ -95,13 +94,13 @@ impl KernelMemoryAllocManager {
         }
 
         if let Some(address) = m_manager.alloc_nonlinear_pages(
-            VirtualMemoryManager::size_to_order(size),
+            MemoryManager::size_to_order(size),
             MemoryPermissionFlags::data(),
         ) {
             if self.add_entry_to_used_list(address, size) {
                 Some(address)
             } else {
-                m_manager.free_pages(address, VirtualMemoryManager::size_to_order(size));
+                m_manager.free_pages(address, MemoryManager::size_to_order(size));
                 None
             }
         } else {
@@ -132,7 +131,7 @@ impl KernelMemoryAllocManager {
                 if e.1 < PAGE_SIZE {
                     return self.kfree(address, m_manager);
                 }
-                m_manager.free_pages(e.0, VirtualMemoryManager::size_to_order(e.1));
+                m_manager.free_pages(e.0, MemoryManager::size_to_order(e.1));
                 self.alloc_manager.free(e.0, e.1, false);
                 *e = (0, 0);
                 return;

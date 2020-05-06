@@ -700,21 +700,4 @@ impl VirtualMemoryManager {
         kprintln!("----Page Manager----");
         self.page_manager.dump_table(None); // 適当
     }
-
-    pub const fn size_to_order(size: usize) -> usize {
-        if size == 0 {
-            return 0;
-        }
-        let mut page_count = (((size - 1) & PAGE_MASK) / PAGE_SIZE) + 1;
-        let mut order = if page_count & (page_count - 1) == 0 {
-            0usize
-        } else {
-            1usize
-        };
-        while page_count != 0 {
-            page_count >>= 1;
-            order += 1;
-        }
-        order
-    }
 }
