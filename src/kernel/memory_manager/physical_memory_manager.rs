@@ -107,7 +107,13 @@ impl PhysicalMemoryManager {
         entry.get_previous_entry()
     }
 
-    fn define_used_memory(&mut self, start_address: usize, size: usize, align: bool) -> bool {
+    fn define_used_memory(
+        &mut self,
+        start_address: usize,
+        size: usize,
+        align: bool,
+        target_entry: Option<&mut MemoryEntry>,
+    ) -> bool {
         if size == 0 || self.free_memory_size < size {
             return false;
         }
@@ -115,9 +121,18 @@ impl PhysicalMemoryManager {
             let aligned_start_address = start_address & PAGE_MASK;
             let aligned_size =
                 ((size + (start_address - aligned_start_address) - 1) & PAGE_MASK) + PAGE_SIZE;
-            return self.define_used_memory(aligned_start_address, aligned_size, false);
+            return self.define_used_memory(
+                aligned_start_address,
+                aligned_size,
+                false,
+                target_entry,
+            );
         }
-        let entry = if let Some(t) = self.search_entry_containing_address_mut(start_address) {
+        let entry = if let Some(t) = target_entry {
+            assert!(t.get_start_address() <= start_address);
+            assert!(t.get_end_address() >= Self::size_to_end_address(start_address, size));
+            t
+        } else if let Some(t) = self.search_entry_containing_address_mut(start_address) {
             t
         } else {
             return false;
@@ -285,45 +300,50 @@ impl PhysicalMemoryManager {
         if size == 0 || self.free_memory_size <= size {
             return None;
         }
-        let address_to_allocate: usize;
-        let mut entry = unsafe { &mut *(self.first_entry as *mut MemoryEntry) };
-
-        loop {
-            if entry.get_size() >= size {
-                if align {
-                    let aligned_address = if entry.get_start_address() != 0 {
-                        ((entry.get_start_address() - 1) & PAGE_MASK) + PAGE_SIZE
+        let order = MemoryManager::size_to_order(size);
+        for i in order..Self::NUM_FREELIST {
+            let mut entry = if let Some(t) = self.freelist[i] {
+                unsafe { &mut *(t as *mut MemoryEntry) }
+            } else {
+                continue;
+            };
+            loop {
+                if entry.get_size() >= size {
+                    let address_to_allocate = if align {
+                        let aligned_address = if entry.get_start_address() != 0 {
+                            ((entry.get_start_address() - 1) & PAGE_MASK) + PAGE_SIZE
+                        } else {
+                            0
+                        };
+                        let aligned_available_size =
+                            entry.get_size() - (aligned_address - entry.get_start_address());
+                        if aligned_available_size < size {
+                            continue;
+                        }
+                        aligned_address
                     } else {
-                        0
+                        entry.get_start_address()
                     };
-                    let aligned_available_size =
-                        entry.get_size() - (aligned_address - entry.get_start_address());
-
-                    if size <= aligned_available_size {
-                        address_to_allocate = aligned_address;
-                        break;
-                    }
+                    return if self.define_used_memory(address_to_allocate, size, false, Some(entry))
+                    {
+                        Some(address_to_allocate)
+                    } else {
+                        None
+                    };
+                }
+                if let Some(next) = entry.list_next {
+                    entry = unsafe { &mut *(next as *mut MemoryEntry) };
                 } else {
-                    address_to_allocate = entry.get_start_address();
                     break;
                 }
             }
-            if let Some(t) = entry.get_next_entry() {
-                entry = t;
-            } else {
-                return None;
-            }
         }
-        if self.define_used_memory(address_to_allocate, size, false) {
-            Some(address_to_allocate)
-        } else {
-            None
-        }
+        None
     }
 
     pub fn reserve_memory(&mut self, start_address: usize, size: usize, align: bool) -> bool {
         /* initializing use only */
-        self.define_used_memory(start_address, size, align)
+        self.define_used_memory(start_address, size, align, None)
     }
 
     pub fn free(&mut self, start_address: usize, size: usize, is_initializing: bool) -> bool {
