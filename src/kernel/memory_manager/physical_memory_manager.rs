@@ -15,7 +15,7 @@ pub struct PhysicalMemoryManager {
     memory_size: usize,
     free_memory_size: usize,
     first_entry: usize,
-    freelist: [Option<usize>; Self::NUM_FREELIST],
+    free_list: [Option<usize>; Self::NUM_FREELIST],
     memory_entry_pool: usize,
     memory_entry_pool_size: usize,
 }
@@ -32,13 +32,13 @@ struct MemoryEntry {
 }
 
 impl PhysicalMemoryManager {
-    const NUM_FREELIST: usize = 32;
+    const NUM_OF_FREE_LIST: usize = 32;
 
     pub const fn new() -> PhysicalMemoryManager {
         PhysicalMemoryManager {
             memory_size: 0,
             free_memory_size: 0,
-            freelist: [None; Self::NUM_FREELIST],
+            free_list: [None; Self::NUM_OF_FREE_LIST],
             memory_entry_pool: 0,
             memory_entry_pool_size: 0,
             first_entry: 0,
@@ -301,8 +301,8 @@ impl PhysicalMemoryManager {
             return None;
         }
         let order = MemoryManager::size_to_order(size);
-        for i in order..Self::NUM_FREELIST {
-            let mut entry = if let Some(t) = self.freelist[i] {
+        for i in order..Self::NUM_OF_FREE_LIST {
+            let mut entry = if let Some(t) = self.free_list[i] {
                 unsafe { &mut *(t as *mut MemoryEntry) }
             } else {
                 continue;
@@ -379,10 +379,10 @@ impl PhysicalMemoryManager {
         use core::cmp::min;
         let order = min(
             MemoryManager::size_to_order(entry.get_size()),
-            Self::NUM_FREELIST - 1,
+            Self::NUM_OF_FREE_LIST - 1,
         );
-        if self.freelist[order] == Some(entry as *const _ as usize) {
-            self.freelist[order] = entry.list_next;
+        if self.free_list[order] == Some(entry as *const _ as usize) {
+            self.free_list[order] = entry.list_next;
         }
         entry.unchain_from_freelist();
     }
@@ -396,29 +396,29 @@ impl PhysicalMemoryManager {
         use core::cmp::min;
         let old_order = min(
             MemoryManager::size_to_order(old_size),
-            Self::NUM_FREELIST - 1,
+            Self::NUM_OF_FREE_LIST - 1,
         );
         let new_order = min(
             MemoryManager::size_to_order(entry.get_size()),
-            Self::NUM_FREELIST - 1,
+            Self::NUM_OF_FREE_LIST - 1,
         );
         if !entry_is_new {
             if old_order == new_order {
                 return;
             }
-            if self.freelist[old_order] == Some(entry as *const _ as usize) {
-                self.freelist[old_order] = entry.list_next;
+            if self.free_list[old_order] == Some(entry as *const _ as usize) {
+                self.free_list[old_order] = entry.list_next;
             }
             entry.unchain_from_freelist();
         }
         assert_eq!(entry.list_next, None);
         assert_eq!(entry.list_prev, None);
 
-        if self.freelist[new_order].is_none() {
-            self.freelist[new_order] = Some(entry as *const _ as usize);
+        if self.free_list[new_order].is_none() {
+            self.free_list[new_order] = Some(entry as *const _ as usize);
         } else {
             let mut tail_entry =
-                unsafe { &mut *(self.freelist[new_order].unwrap() as *mut MemoryEntry) };
+                unsafe { &mut *(self.free_list[new_order].unwrap() as *mut MemoryEntry) };
             while let Some(next_entry) = tail_entry.list_next {
                 tail_entry = unsafe { &mut *(next_entry as *mut MemoryEntry) };
             }
@@ -456,11 +456,11 @@ impl PhysicalMemoryManager {
             );
         }
         kprintln!("List:");
-        for order in 0..Self::NUM_FREELIST {
-            if self.freelist[order].is_none() {
+        for order in 0..Self::NUM_OF_FREE_LIST {
+            if self.free_list[order].is_none() {
                 continue;
             }
-            let mut entry = unsafe { &*(self.freelist[order].unwrap() as *const MemoryEntry) };
+            let mut entry = unsafe { &*(self.free_list[order].unwrap() as *const MemoryEntry) };
             kprintln!("order {}:", order);
             loop {
                 kprintln!(
