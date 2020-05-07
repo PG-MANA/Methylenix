@@ -59,9 +59,11 @@ impl VirtualMemoryManager {
         }
 
         /* set up memory pool */
-        self.entry_pool = if let Some(address) = pm_manager.alloc(PAGE_SIZE * 4, true) {
+        self.entry_pool_size = PAGE_SIZE * 4;
+        self.entry_pool = if let Some(address) = pm_manager.alloc(self.entry_pool_size, true) {
             address
         } else {
+            self.entry_pool_size = 0;
             return false;
         };
         for i in 0..(self.entry_pool_size / VirtualMemoryEntry::ENTRY_SIZE) {
@@ -72,7 +74,7 @@ impl VirtualMemoryManager {
             }
         }
         self.vm_map_entry = self.entry_pool;
-        self.entry_pool_size = PAGE_SIZE * 4;
+
         for i in 0..(self.entry_pool_size / PAGE_SIZE) {
             if !self.associate_address(
                 self.entry_pool + i * PAGE_SIZE,
@@ -153,6 +155,8 @@ impl VirtualMemoryManager {
             }
         }
         //TODO: realloc entry
+        pr_err!("WoW");
+        self.dump_memory_manager();
         return None;
     }
 
