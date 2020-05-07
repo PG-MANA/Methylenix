@@ -150,7 +150,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             & PAGE_MASK)
             + PAGE_SIZE;
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
-        if let Ok(address) = virtual_memory_manager.map_address(
+        match virtual_memory_manager.map_address(
             aligned_start_address,
             Some(aligned_start_address),
             aligned_size,
@@ -158,10 +158,20 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             &mut physical_memory_manager,
         ) {
-            if address == aligned_start_address {
-                continue;
+            Ok(address) => {
+                if address == aligned_start_address {
+                    continue;
+                }
+                pr_err!(
+                    "Virtual Address is different from Physical Address.\nV: {:X} P:{:X}",
+                    address,
+                    aligned_start_address
+                );
             }
-        }
+            Err(msg) => {
+                pr_err!("{}", msg);
+            }
+        };
         panic!("Cannot map virtual memory correctly.");
     }
     /* may be needless */
