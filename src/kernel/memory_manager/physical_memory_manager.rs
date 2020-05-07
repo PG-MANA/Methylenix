@@ -15,7 +15,7 @@ pub struct PhysicalMemoryManager {
     memory_size: usize,
     free_memory_size: usize,
     first_entry: usize,
-    free_list: [Option<usize>; Self::NUM_FREELIST],
+    free_list: [Option<usize>; Self::NUM_OF_FREE_LIST],
     memory_entry_pool: usize,
     memory_entry_pool_size: usize,
 }
@@ -32,7 +32,7 @@ struct MemoryEntry {
 }
 
 impl PhysicalMemoryManager {
-    const NUM_OF_FREE_LIST: usize = 32;
+    const NUM_OF_FREE_LIST: usize = 12;
 
     pub const fn new() -> PhysicalMemoryManager {
         PhysicalMemoryManager {
