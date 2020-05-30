@@ -47,17 +47,13 @@ impl<T: ?Sized> RwLock<T> {
         if !self.write_locked.load(Ordering::Relaxed) {
             if self
                 .readers
-                .fetch_update(
-                    |x| {
-                        if x == usize::max_value() {
-                            None
-                        } else {
-                            Some(x + 1)
-                        }
-                    },
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                )
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
+                    if x == usize::max_value() {
+                        None
+                    } else {
+                        Some(x + 1)
+                    }
+                })
                 .is_ok()
             {
                 return Ok(RwLockReadGuard {

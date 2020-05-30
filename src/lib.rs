@@ -11,7 +11,6 @@
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_ref)]
 #![feature(naked_functions)]
-#![feature(no_more_cas)]
 #![feature(panic_info_message)]
 #![feature(track_caller)]
 
