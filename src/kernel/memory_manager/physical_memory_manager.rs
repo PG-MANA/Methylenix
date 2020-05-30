@@ -428,11 +428,12 @@ impl PhysicalMemoryManager {
     }
 
     pub fn address_to_size(start_address: usize, end_address: usize) -> usize {
+        /*pub const fn ?*/
         assert!(start_address <= end_address);
         end_address - start_address + 1
     }
 
-    pub fn size_to_end_address(start_address: usize, size: usize) -> usize {
+    pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {
         start_address + size - 1
     }
 

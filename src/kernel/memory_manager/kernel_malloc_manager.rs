@@ -27,22 +27,28 @@ impl KernelMemoryAllocManager {
     }
 
     pub fn init(&mut self, m_manager: &mut MemoryManager) -> bool {
-        if let Some(pool_address) = m_manager.alloc_pages(1, MemoryPermissionFlags::data()) {
-            self.alloc_manager
-                .set_memory_entry_pool(pool_address, PAGE_SIZE);
-        } else {
-            return false;
-        }
-        if let Some(address) = m_manager.alloc_pages(1, MemoryPermissionFlags::data()) {
-            unsafe {
+        match m_manager.alloc_pages(1, MemoryPermissionFlags::data()) {
+            Ok(pool_address) => {
+                self.alloc_manager
+                    .set_memory_entry_pool(pool_address, PAGE_SIZE);
+            }
+            Err(e) => {
+                pr_err!("{:?}", e);
+                return false;
+            }
+        };
+        match m_manager.alloc_pages(1, MemoryPermissionFlags::data()) {
+            Ok(address) => unsafe {
                 self.used_memory_list.write(
                     &mut *(address
                         as *mut [(usize, usize); PAGE_SIZE / mem::size_of::<(usize, usize)>()]),
                 );
+            },
+            Err(e) => {
+                pr_err!("{:?}", e);
+                return false;
             }
-        } else {
-            return false;
-        }
+        };
         for e in unsafe { self.used_memory_list.get_mut().iter_mut() } {
             *e = (0, 0);
         }
@@ -56,17 +62,25 @@ impl KernelMemoryAllocManager {
         }
         if size >= PAGE_SIZE {
             //TODO: do something...
-            if let Some(address) = m_manager.alloc_pages(
+            return match m_manager.alloc_pages(
                 MemoryManager::size_to_order(size),
                 MemoryPermissionFlags::data(),
             ) {
-                let aligned_size = (1 << MemoryManager::size_to_order(size)) * PAGE_SIZE;
-                if !self.add_entry_to_used_list(address, aligned_size) {
-                    m_manager.free_pages(address, MemoryManager::size_to_order(size));
-                    return None;
+                Ok(address) => {
+                    let aligned_size = (1 << MemoryManager::size_to_order(size)) * PAGE_SIZE;
+                    if !self.add_entry_to_used_list(address, aligned_size) {
+                        if let Err(e) = m_manager.free(address) {
+                            pr_err!("Free memory failed Err: {:?}", e);
+                        }
+                        return None;
+                    }
+                    Some(address)
                 }
-                return Some(address);
-            }
+                Err(e) => {
+                    pr_err!("{:?}", e);
+                    None
+                }
+            };
         }
         if let Some(address) = self.alloc_manager.alloc(size, false) {
             if !self.add_entry_to_used_list(address, size) {
@@ -77,7 +91,7 @@ impl KernelMemoryAllocManager {
         }
 
         /* alloc from Memory Manager */
-        if let Some(allocated_address) = m_manager.alloc_pages(0, MemoryPermissionFlags::data()) {
+        if let Ok(allocated_address) = m_manager.alloc_pages(0, MemoryPermissionFlags::data()) {
             self.alloc_manager.free(allocated_address, PAGE_SIZE, true);
             return self.kmalloc(size, m_manager);
         }
@@ -93,18 +107,24 @@ impl KernelMemoryAllocManager {
             return self.kmalloc(size, m_manager);
         }
 
-        if let Some(address) = m_manager.alloc_nonlinear_pages(
+        match m_manager.alloc_nonlinear_pages(
             MemoryManager::size_to_order(size),
             MemoryPermissionFlags::data(),
         ) {
-            if self.add_entry_to_used_list(address, size) {
-                Some(address)
-            } else {
-                m_manager.free_pages(address, MemoryManager::size_to_order(size));
+            Ok(address) => {
+                if self.add_entry_to_used_list(address, size) {
+                    Some(address)
+                } else {
+                    if let Err(e) = m_manager.free(address) {
+                        pr_err!("Free memory failed Err: {:?}", e);
+                    }
+                    None
+                }
+            }
+            Err(e) => {
+                pr_err!("{:?}", e);
                 None
             }
-        } else {
-            None
         }
     }
 
@@ -131,7 +151,9 @@ impl KernelMemoryAllocManager {
                 if e.1 < PAGE_SIZE {
                     return self.kfree(address, m_manager);
                 }
-                m_manager.free_pages(e.0, MemoryManager::size_to_order(e.1));
+                if let Err(err) = m_manager.free(e.0) {
+                    pr_err!("Free memory failed Err: {:?}", err);
+                }
                 self.alloc_manager.free(e.0, e.1, false);
                 *e = (0, 0);
                 return;

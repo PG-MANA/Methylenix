@@ -29,6 +29,8 @@ struct RSDP {
     reserved: [u8; 3],
 }
 
+pub const INITIAL_MMAP_SIZE: usize = 36;
+
 impl AcpiManager {
     pub const fn new() -> Self {
         Self {

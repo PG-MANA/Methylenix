@@ -168,8 +168,8 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
                     aligned_start_address
                 );
             }
-            Err(msg) => {
-                pr_err!("{}", msg);
+            Err(e) => {
+                pr_err!("Mapping ELF Section was failed. Err:{:?}", e);
             }
         };
         panic!("Cannot map virtual memory correctly.");
@@ -261,15 +261,16 @@ fn init_acpi(rsdp_ptr: usize) {
         .get_bgrt_manager()
         .get_bitmap_physical_address()
     {
+        let temp_map_size = 54usize;
+
         match get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .memory_remap(
+            .mmap_dev(
                 p_bitmap_address,
-                54,
+                temp_map_size,
                 MemoryPermissionFlags::rodata(),
-                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             ) {
             Ok(bitmap_vm_address) => {
                 pr_info!(
@@ -279,27 +280,31 @@ fn init_acpi(rsdp_ptr: usize) {
                 );
                 if !draw_boot_logo(
                     bitmap_vm_address,
+                    temp_map_size,
                     acpi_manager
                         .get_xsdt_manager()
                         .get_bgrt_manager()
                         .get_image_offset()
                         .unwrap(),
                 ) {
-                    get_kernel_manager_cluster()
+                    if let Err(e) = get_kernel_manager_cluster()
                         .memory_manager
                         .lock()
                         .unwrap()
-                        .free_pages(bitmap_vm_address, 0 /*must fix*/);
+                        .free(bitmap_vm_address)
+                    {
+                        pr_err!("Freeing bitmap data failed Err:{:?}", e);
+                    }
                 }
             }
-            Err(err_massage) => {
-                pr_err!("{}", err_massage);
+            Err(e) => {
+                pr_err!("Mapping BGRT's bitmap data failed Err:{:?}", e);
             }
         };
     }
 }
 
-fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) -> bool {
+fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, usize)) -> bool {
     /* if file_size > PAGE_SIZE => ?*/
     if unsafe { *((bitmap_vm_address + 30) as *const u32) } != 0 {
         pr_info!("Boot logo is compressed");
@@ -315,8 +320,9 @@ fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) -> bool {
         .memory_manager
         .lock()
         .unwrap()
-        .resize_memory_remap(
+        .mremap_dev(
             bitmap_vm_address,
+            mapped_size,
             (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize / 8))
                 + file_offset as usize,
         ) {
@@ -338,15 +344,18 @@ fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) -> bool {
                     offset.0,
                     offset.1,
                 );
-            get_kernel_manager_cluster()
+            if let Err(e) = get_kernel_manager_cluster()
                 .memory_manager
                 .lock()
                 .unwrap()
-                .free_pages(remapped_bitmap_vm_address, 0 /*must fix*/);
+                .free(remapped_bitmap_vm_address)
+            {
+                pr_err!("Freeing bitmap data failed Err:{:?}", e);
+            }
             return true;
         }
-        Err(err_message) => {
-            pr_err!("{}", err_message);
+        Err(e) => {
+            pr_err!("Mapping BGRT's bitmap data Err:{:?}", e);
             return false;
         }
     };

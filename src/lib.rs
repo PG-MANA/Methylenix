@@ -3,6 +3,7 @@
 #![feature(const_if_match)]
 #![feature(const_loop)]
 #![feature(const_mut_refs)]
+#![feature(const_panic)]
 #![feature(const_raw_ptr_deref)]
 #![feature(global_asm)]
 #![feature(lang_items)]

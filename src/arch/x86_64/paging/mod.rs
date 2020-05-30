@@ -17,6 +17,7 @@ use arch::target_arch::device::cpu;
 use kernel::memory_manager::{FreePageList, MemoryPermissionFlags};
 
 pub const PAGE_SIZE: usize = 0x1000;
+pub const PAGE_SHIFT: usize = 12;
 pub const PAGE_MASK: usize = 0xFFFFFFFF_FFFFF000;
 pub const PAGING_CACHE_LENGTH: usize = 64;
 pub const MAX_VIRTUAL_ADDRESS: usize = 0x00007FFF_FFFFFFFF;

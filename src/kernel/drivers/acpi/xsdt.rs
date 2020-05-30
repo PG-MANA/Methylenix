@@ -3,8 +3,10 @@
  */
 
 use super::table::bgrt::BgrtManager;
+use super::INITIAL_MMAP_SIZE;
+
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
+use kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct XsdtManager {
     base_address: usize,
@@ -26,11 +28,10 @@ impl XsdtManager {
             .memory_manager
             .lock()
             .unwrap()
-            .memory_remap(
+            .mmap_dev(
                 xsdt_physical_address,
-                36,
+                INITIAL_MMAP_SIZE,
                 MemoryPermissionFlags::rodata(),
-                MemoryOptionFlags::new(MemoryOptionFlags::DO_NOT_FREE_PHY_ADDR),
             ) {
             a
         } else {
@@ -52,7 +53,7 @@ impl XsdtManager {
             .memory_manager
             .lock()
             .unwrap()
-            .resize_memory_remap(xsdt_vm_address, xsdt_size as usize)
+            .mremap_dev(xsdt_vm_address, INITIAL_MMAP_SIZE, xsdt_size as usize)
         {
             a
         } else {
@@ -69,11 +70,10 @@ impl XsdtManager {
                 .memory_manager
                 .lock()
                 .unwrap()
-                .memory_remap(
+                .mmap_dev(
                     entry_physical_address,
-                    36,
+                    INITIAL_MMAP_SIZE,
                     MemoryPermissionFlags::rodata(),
-                    MemoryOptionFlags::new(MemoryOptionFlags::DO_NOT_FREE_PHY_ADDR),
                 ) {
                 a
             } else {
