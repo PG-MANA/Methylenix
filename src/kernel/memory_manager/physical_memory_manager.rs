@@ -496,10 +496,9 @@ impl MemoryEntry {
             }
         } else {
             if let Some(next) = self.get_next_entry() {
-                pr_info!("Root entry was changed.");
                 next.unset_prev_entry();
             } else {
-                pr_info!("Not chained entry was deleted.");
+                pr_warn!("Not chained entry was deleted.");
             }
         }
     }
