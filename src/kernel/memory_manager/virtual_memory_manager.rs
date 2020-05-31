@@ -11,7 +11,7 @@ mod virtual_memory_object;
 mod virtual_memory_page;
 
 use self::virtual_memory_entry::VirtualMemoryEntry;
-use self::virtual_memory_object::VirtualMemoryObject;
+/*use self::virtual_memory_object::VirtualMemoryObject;*/
 use self::virtual_memory_page::VirtualMemoryPage;
 
 use super::physical_memory_manager::PhysicalMemoryManager;
@@ -31,14 +31,14 @@ pub struct VirtualMemoryManager {
     is_system_vm: bool,
     page_manager: PageManager,
     vm_map_entry_pool: PoolAllocator<VirtualMemoryEntry>,
-    vm_object_pool: PoolAllocator<VirtualMemoryObject>,
+    /*vm_object_pool: PoolAllocator<VirtualMemoryObject>,*/
     vm_page_pool: PoolAllocator<VirtualMemoryPage>,
     reserved_memory_list: FreePageList,
 }
 
 impl VirtualMemoryManager {
     const VM_MAP_ENTRY_POOL_SIZE: usize = PAGE_SIZE * 8;
-    const VM_OBJECT_POOL_SIZE: usize = PAGE_SIZE * 8;
+    /*const VM_OBJECT_POOL_SIZE: usize = PAGE_SIZE * 8;*/
     const VM_PAGE_POOL_SIZE: usize = PAGE_SIZE * 32;
 
     pub const fn new() -> Self {
@@ -47,7 +47,7 @@ impl VirtualMemoryManager {
             is_system_vm: false,
             page_manager: PageManager::new(),
             vm_map_entry_pool: PoolAllocator::new(),
-            vm_object_pool: PoolAllocator::new(),
+            /*vm_object_pool: PoolAllocator::new(),*/
             vm_page_pool: PoolAllocator::new(),
             reserved_memory_list: FreePageList {
                 list: [0; PAGING_CACHE_LENGTH],
@@ -159,14 +159,14 @@ impl VirtualMemoryManager {
 
         let vm_map_entry_pool_address =
             alloc_func(Self::VM_MAP_ENTRY_POOL_SIZE, "vm_map_entry", pm_manager);
-        let vm_object_pool_address = alloc_func(Self::VM_OBJECT_POOL_SIZE, "vm_object", pm_manager);
+        /*let vm_object_pool_address = alloc_func(Self::VM_OBJECT_POOL_SIZE, "vm_object", pm_manager);*/
         let vm_page_pool_address = alloc_func(Self::VM_PAGE_POOL_SIZE, "vm_page", pm_manager);
 
         unsafe {
             self.vm_map_entry_pool
                 .set_initial_pool(vm_map_entry_pool_address, Self::VM_MAP_ENTRY_POOL_SIZE);
-            self.vm_object_pool
-                .set_initial_pool(vm_object_pool_address, Self::VM_OBJECT_POOL_SIZE);
+            /*self.vm_object_pool
+            .set_initial_pool(vm_object_pool_address, Self::VM_OBJECT_POOL_SIZE);*/
             self.vm_page_pool
                 .set_initial_pool(vm_page_pool_address, Self::VM_PAGE_POOL_SIZE);
         }
@@ -178,13 +178,13 @@ impl VirtualMemoryManager {
             Self::VM_MAP_ENTRY_POOL_SIZE,
             pm_manager,
         );
-        map_func(
+        /*map_func(
             self,
             "vm_object",
             vm_object_pool_address,
             Self::VM_OBJECT_POOL_SIZE,
             pm_manager,
-        );
+        );*/
         map_func(
             self,
             "vm_page",
