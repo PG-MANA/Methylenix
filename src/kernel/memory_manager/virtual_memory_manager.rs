@@ -125,14 +125,26 @@ impl VirtualMemoryManager {
                 panic!("Cannot alloc memory for {}.", name);
             }
         };
-        let associate_func = |vm_manager: &mut Self,
-                              name: &str,
-                              address: usize,
-                              size: usize,
-                              p: &mut PhysicalMemoryManager| {
+        let map_func = |vm_manager: &mut Self,
+                        name: &str,
+                        address: usize,
+                        size: usize,
+                        p: &mut PhysicalMemoryManager| {
             assert_eq!((address & !PAGE_MASK), 0);
             assert_eq!((size & !PAGE_MASK), 0);
 
+            let mut entry = VirtualMemoryEntry::new(
+                address,
+                PhysicalMemoryManager::size_to_end_address(address, size),
+                MemoryPermissionFlags::data(),
+                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            );
+            if let Err(e) = vm_manager._map_address(&mut entry, address, address, size, p) {
+                panic!("Cannot map address for {} Err:{:?}", name, e);
+            }
+            if let Err(e) = vm_manager.insert_vm_map_entry(entry, p) {
+                panic!("Cannot insert Virtual Memory Entry Err:{:?}", e);
+            };
             for i in 0..(size >> PAGE_SHIFT) {
                 if let Err(e) = vm_manager.associate_address(
                     address + i * PAGE_SIZE,
@@ -140,55 +152,40 @@ impl VirtualMemoryManager {
                     MemoryPermissionFlags::data(),
                     p,
                 ) {
-                    panic!("Cannot associate address for {}\nErr:{:?}", name, e);
+                    panic!("Cannot associate address for {} Err:{:?}", name, e);
                 }
             }
         };
 
-        let vm_map_entry_address =
+        let vm_map_entry_pool_address =
             alloc_func(Self::VM_MAP_ENTRY_POOL_SIZE, "vm_map_entry", pm_manager);
         let vm_object_pool_address = alloc_func(Self::VM_OBJECT_POOL_SIZE, "vm_object", pm_manager);
         let vm_page_pool_address = alloc_func(Self::VM_PAGE_POOL_SIZE, "vm_page", pm_manager);
 
         unsafe {
             self.vm_map_entry_pool
-                .set_initial_pool(vm_map_entry_address, Self::VM_MAP_ENTRY_POOL_SIZE);
+                .set_initial_pool(vm_map_entry_pool_address, Self::VM_MAP_ENTRY_POOL_SIZE);
             self.vm_object_pool
                 .set_initial_pool(vm_object_pool_address, Self::VM_OBJECT_POOL_SIZE);
             self.vm_page_pool
                 .set_initial_pool(vm_page_pool_address, Self::VM_PAGE_POOL_SIZE);
         }
 
-        let mut root = VirtualMemoryEntry::new(
-            vm_map_entry_address,
-            PhysicalMemoryManager::size_to_end_address(
-                vm_map_entry_address,
-                Self::VM_MAP_ENTRY_POOL_SIZE,
-            ),
-            MemoryPermissionFlags::data(),
-            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
-        );
-        if let Err(s) = self._map_address(
-            &mut root,
-            vm_map_entry_address,
-            vm_map_entry_address,
+        map_func(
+            self,
+            "vm_map_entry",
+            vm_map_entry_pool_address,
             Self::VM_MAP_ENTRY_POOL_SIZE,
             pm_manager,
-        ) {
-            panic!("Cannot map Virtual Memory Entry: {:?}", s);
-        }
-        if let Err(e) = self.insert_vm_map_entry(root, pm_manager) {
-            panic!("Cannot insert Virtual Memory Entry Err:{:?}", e);
-        };
-
-        associate_func(
+        );
+        map_func(
             self,
             "vm_object",
             vm_object_pool_address,
             Self::VM_OBJECT_POOL_SIZE,
             pm_manager,
         );
-        associate_func(
+        map_func(
             self,
             "vm_page",
             vm_page_pool_address,
@@ -279,10 +276,10 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         if physical_address & !PAGE_MASK != 0 {
-            pr_err!("Physical Address is not aligned.");
+            pr_err!("Physical Address is not aligned: {:X}", physical_address);
             return Err(MemoryError::AddressNotAligned);
         } else if vm_address & !PAGE_MASK != 0 {
-            pr_err!("Virtual Address is not aligned.");
+            pr_err!("Virtual Address is not aligned: {:X}", vm_address);
             return Err(MemoryError::AddressNotAligned);
         } else if vm_map_entry.get_vm_start_address() > vm_address
             || vm_map_entry.get_vm_end_address()
@@ -429,11 +426,11 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         if vm_start_address & !PAGE_MASK != 0 {
-            pr_info!("Virtual Address is not aligned.");
+            pr_err!("Virtual Address is not aligned.");
             return Err(MemoryError::AddressNotAligned);
         }
         if self.vm_map_entry.get_first_entry().is_none() {
-            pr_warn!("There is no entry.");
+            pr_err!("There is no entry.");
             return Err(MemoryError::InsertEntryFailed);
         }
         if let Some(vm_map_entry) = self.find_entry_mut(vm_start_address) {
@@ -498,11 +495,9 @@ impl VirtualMemoryManager {
                         .unwrap()
                         .get_vm_start_address()
                 {
+                    assert!(entry.get_prev_entry().is_none());
                     entry.set_up_to_be_root(&mut self.vm_map_entry);
-                    self.vm_map_entry
-                        .get_first_entry_mut()
-                        .unwrap()
-                        .insert_before(entry);
+                //pr_info!("Root was changed.");
                 } else {
                     pr_err!("Cannot insert Virtual Memory Entry.");
                     return Err(MemoryError::InsertEntryFailed);
@@ -526,12 +521,16 @@ impl VirtualMemoryManager {
         _pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         if physical_address & !PAGE_MASK != 0 {
+            pr_err!("Physical Address is not aligned: {:X}", physical_address);
             return Err(MemoryError::AddressNotAligned);
-        } else if virtual_address & !PAGE_SIZE != 0 {
+        } else if virtual_address & !PAGE_MASK != 0 {
+            pr_err!("Virtual Address is not aligned: {:X}", virtual_address);
             return Err(MemoryError::AddressNotAligned);
         } else if size & !PAGE_MASK != 0 {
+            pr_err!("Size is not aligned: {:X}", size);
             return Err(MemoryError::SizeNotAligned);
         } else if size == 0 {
+            pr_err!("Size is zero");
             return Err(MemoryError::InvalidSize);
         }
         for i in 0..MemoryManager::offset_to_index(size) {
@@ -720,14 +719,17 @@ impl VirtualMemoryManager {
         new_size: usize,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<usize, MemoryError> {
-        if virtual_address & !PAGE_SIZE != 0 {
+        if virtual_address & !PAGE_MASK != 0 {
+            pr_err!("Virtual Address is not aligned: {:X}", virtual_address);
             return Err(MemoryError::AddressNotAligned);
         } else if new_size & !PAGE_MASK != 0 {
+            pr_err!("Size is not aligned: {:X}", new_size);
             return Err(MemoryError::SizeNotAligned);
         } else if new_size == 0 {
+            pr_err!("Size is zero");
             return Err(MemoryError::InvalidSize);
         } else if self.vm_map_entry.get_first_entry().is_none() {
-            pr_warn!("There is no entry.");
+            pr_err!("There is no entry.");
             return Err(MemoryError::InsertEntryFailed); /*is it ok?*/
         }
         if let Some(entry) = self.find_entry_mut(virtual_address) {
@@ -785,7 +787,7 @@ impl VirtualMemoryManager {
         for e in self.vm_map_entry.iter_mut() {
             if e.get_vm_start_address() > vm_address {
                 return e.get_prev_entry_mut();
-            } else if e.get_vm_end_address() < vm_address && e.get_next_entry().is_none() {
+            } else if e.get_next_entry().is_none() && e.get_vm_end_address() < vm_address {
                 return Some(e);
             }
         }
@@ -810,7 +812,6 @@ impl VirtualMemoryManager {
     }
 
     pub fn find_usable_memory_area(&self, size: usize) -> Option<usize> {
-        //self shoud be first entry
         for e in self.vm_map_entry.iter() {
             if let Some(prev) = e.get_prev_entry() {
                 if e.get_vm_start_address() - (prev.get_vm_end_address() + 1) >= size {
@@ -853,7 +854,7 @@ impl VirtualMemoryManager {
             ) + 1;
             for i in first_p_index..last_p_index {
                 if let Some(p) = entry.get_object().get_vm_page(i) {
-                    kprintln!(" -{} Physical Address:{}", i, p.get_physical_address());
+                    kprintln!(" -{} Physical Address:{:X}", i, p.get_physical_address());
                 }
             }
             let next = entry.get_next_entry();

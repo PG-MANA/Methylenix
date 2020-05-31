@@ -48,13 +48,17 @@ impl VirtualMemoryObject {
                 vm_page.set_root(p_index, list);
                 vm_page.insert_after(root, root_p_index);
                 self.linked_page += 1;
-                pr_info!("root vm_page entry was changed.");
+            //pr_info!("root vm_page entry was changed.");
             } else {
                 for e in list.iter_mut() {
                     if p_index < e.get_p_index() {
                         e.get_prev_entry_mut()
                             .unwrap()
                             .insert_after(vm_page, p_index);
+                        self.linked_page += 1;
+                        return;
+                    } else if e.get_next_entry().is_none() {
+                        e.insert_after(vm_page, p_index);
                         self.linked_page += 1;
                         return;
                     }

@@ -94,7 +94,11 @@ impl VirtualMemoryEntry {
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
         self.list.terminate_prev_entry();
+        let old_root = list_head.get_first_entry_mut();
         list_head.set_first_entry(&mut self.list);
+        if let Some(entry) = old_root {
+            self.list.insert_after(&mut entry.list);
+        }
     }
 
     pub fn get_object(&self) -> &VirtualMemoryObject {

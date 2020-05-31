@@ -47,7 +47,7 @@ impl VirtualMemoryPage {
 
     pub fn insert_after(&mut self, entry: &'static mut Self, p_index /*for entry*/: usize) {
         assert!(self.p_index < p_index);
-        if let Some(next) = self.get_prev_entry() {
+        if let Some(next) = self.get_next_entry() {
             assert!(next.p_index > p_index);
         }
         entry.p_index = p_index;
