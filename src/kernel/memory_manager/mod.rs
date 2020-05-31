@@ -112,9 +112,10 @@ impl MemoryManager {
 
     pub fn free(&mut self, vm_address: usize) -> Result<(), MemoryError> {
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        let aligned_vm_address = vm_address & PAGE_MASK;
         if let Err(e) = self
             .virtual_memory_manager
-            .free_address(vm_address, &mut pm_manager)
+            .free_address(aligned_vm_address, &mut pm_manager)
         {
             pr_err!("{:?}", e); /* free's error tends to be ignored. */
             Err(e)
