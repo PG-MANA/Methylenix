@@ -297,10 +297,14 @@ impl PhysicalMemoryManager {
         size: usize,
         align: bool, /*PAGE_SIZEでアラインするか*/
     ) -> Option<usize> {
+        use core::cmp::min;
         if size == 0 || self.free_memory_size <= size {
             return None;
         }
-        let order = MemoryManager::size_to_order(size);
+        let order = min(
+            MemoryManager::size_to_order(size),
+            Self::NUM_OF_FREE_LIST - 1,
+        );
         for i in order..Self::NUM_OF_FREE_LIST {
             let mut entry = if let Some(t) = self.free_list[i] {
                 unsafe { &mut *(t as *mut MemoryEntry) }
