@@ -115,6 +115,19 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             /* available memory */
             physical_memory_manager.free(entry.addr as usize, entry.length as usize, true);
         }
+        let area_name = match entry.m_type {
+            1 => "available",
+            3 => "ACPI information",
+            4 => "reserved(must save on hibernation)",
+            5 => "defective RAM",
+            _ => "reserved",
+        };
+        pr_info!(
+            "[0x{:X}~0x{:X}] {}",
+            entry.addr as usize,
+            PhysicalMemoryManager::size_to_end_address(entry.addr as usize, entry.length as usize),
+            area_name
+        );
     }
     /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
     for section in multiboot_information.elf_info.clone() {
