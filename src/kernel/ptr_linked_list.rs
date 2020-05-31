@@ -132,6 +132,8 @@ impl<T> PtrLinkedListNode<T> {
 
     pub fn insert_after(&mut self, next: &'static mut Self) {
         assert!(next.ptr.is_some());
+        assert!(next.get_next().is_none());
+        assert!(next.get_prev().is_none());
         let old_next = self.next;
         self.next = NonNull::new(next as *mut _);
         next.prev = NonNull::new(self as *mut _);
@@ -150,6 +152,14 @@ impl<T> PtrLinkedListNode<T> {
         if let Some(mut e) = &mut prev.prev {
             unsafe { e.as_mut() }.next = NonNull::new(prev as *mut _);
         }
+    }
+
+    pub fn setup_to_be_root(&mut self, old_root: &'static mut Self) {
+        assert!(self.get_next().is_none());
+        assert!(old_root.get_prev().is_none());
+        self.terminate_prev_entry();
+        self.next = NonNull::new(old_root as *mut Self);
+        old_root.prev = NonNull::new(self as *mut Self);
     }
 
     pub fn terminate_prev_entry(&mut self) {

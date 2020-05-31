@@ -93,11 +93,10 @@ impl VirtualMemoryEntry {
     pub fn set_up_to_be_root(&mut self, list_head: &mut PtrLinkedList<Self>) {
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
-        self.list.terminate_prev_entry();
         let old_root = list_head.get_first_entry_mut();
         list_head.set_first_entry(&mut self.list);
         if let Some(entry) = old_root {
-            self.list.insert_after(&mut entry.list);
+            self.list.setup_to_be_root(&mut entry.list);
         }
     }
 

@@ -63,12 +63,15 @@ impl VirtualMemoryPage {
         self.list.insert_after(&mut entry.list);
     }
 
-    pub fn set_root(&mut self, p_index: usize, list: &mut PtrLinkedList<Self>) {
+    pub fn setup_to_be_root(&mut self, p_index: usize, list: &mut PtrLinkedList<Self>) {
         self.p_index = p_index;
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
-        self.list.terminate_prev_entry();
+        let old_root = list.get_first_entry_mut();
         list.set_first_entry(&mut self.list);
+        if let Some(old_root) = old_root {
+            self.list.setup_to_be_root(&mut old_root.list);
+        }
         /*adjust tree*/
     }
 

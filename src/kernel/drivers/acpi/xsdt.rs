@@ -57,7 +57,7 @@ impl XsdtManager {
         {
             a
         } else {
-            pr_err!("Cannot reserve memory area of XSDT.");
+            pr_err!("Cannot remap memory area of XSDT.");
             return false;
         };
         self.base_address = xsdt_vm_address;

@@ -37,9 +37,9 @@ pub struct VirtualMemoryManager {
 }
 
 impl VirtualMemoryManager {
-    const VM_MAP_ENTRY_POOL_SIZE: usize = PAGE_SIZE * 4;
-    const VM_OBJECT_POOL_SIZE: usize = PAGE_SIZE * 4;
-    const VM_PAGE_POOL_SIZE: usize = PAGE_SIZE * 4;
+    const VM_MAP_ENTRY_POOL_SIZE: usize = PAGE_SIZE * 8;
+    const VM_OBJECT_POOL_SIZE: usize = PAGE_SIZE * 8;
+    const VM_PAGE_POOL_SIZE: usize = PAGE_SIZE * 32;
 
     pub const fn new() -> Self {
         Self {
@@ -484,6 +484,8 @@ impl VirtualMemoryManager {
         unsafe { *entry = source };
         let result = entry.clone();
         let entry = unsafe { &mut *(entry) };
+        assert!(entry.get_prev_entry().is_none());
+        assert!(entry.get_next_entry().is_none());
         if self.vm_map_entry.get_first_entry_mut().is_some() {
             if let Some(prev_entry) = self.find_previous_entry_mut(entry.get_vm_start_address()) {
                 prev_entry.insert_after(entry);
@@ -495,7 +497,6 @@ impl VirtualMemoryManager {
                         .unwrap()
                         .get_vm_start_address()
                 {
-                    assert!(entry.get_prev_entry().is_none());
                     entry.set_up_to_be_root(&mut self.vm_map_entry);
                 //pr_info!("Root was changed.");
                 } else {
@@ -671,18 +672,23 @@ impl VirtualMemoryManager {
                 + target_entry.get_offset(),
         );
         let not_associated_virtual_address = target_entry.get_vm_end_address() + 1;
-        let not_associated_phsycial_address = target_entry
+        let not_associated_physical_address = target_entry
             .get_object()
             .get_vm_page(old_last_p_index)
             .unwrap()
             .get_physical_address()
             + PAGE_SIZE;
 
+        target_entry.set_vm_end_address(PhysicalMemoryManager::size_to_end_address(
+            target_entry.get_vm_start_address(),
+            new_size,
+        ));
+
         for i in 0..MemoryManager::offset_to_index(new_size - old_size) {
             if let Err(s) = self._map_address(
                 target_entry,
+                not_associated_physical_address + MemoryManager::index_to_offset(i),
                 not_associated_virtual_address + MemoryManager::index_to_offset(i),
-                not_associated_phsycial_address + MemoryManager::index_to_offset(i),
                 PAGE_SIZE,
                 pm_manager,
             ) {
@@ -694,7 +700,7 @@ impl VirtualMemoryManager {
         for i in 0..MemoryManager::offset_to_index(new_size - old_size) {
             if self
                 .associate_address(
-                    not_associated_phsycial_address + MemoryManager::index_to_offset(i),
+                    not_associated_physical_address + MemoryManager::index_to_offset(i),
                     not_associated_virtual_address + MemoryManager::index_to_offset(i),
                     target_entry.get_permission_flags(),
                     pm_manager,
@@ -740,6 +746,7 @@ impl VirtualMemoryManager {
             if self.try_expand_size(entry, new_size, pm_manager) {
                 return Ok(virtual_address);
             }
+            pr_info!("expand failed");
             let permission = entry.get_permission_flags();
             let physical_address = entry
                 .get_object()
@@ -749,6 +756,7 @@ impl VirtualMemoryManager {
             /*p_index最初がマップしているアドレスの最初だと仮定*/
             let option = entry.get_memory_option_flags();
             self._free_address(entry, pm_manager)?;
+            pr_info!("wa");
             self.map_address(
                 physical_address,
                 None,

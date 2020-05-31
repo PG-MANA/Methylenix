@@ -141,7 +141,7 @@ impl MemoryManager {
     ) -> Result<usize, MemoryError> {
         /* for io_map */
         /* should remake... */
-        let (aligned_physical_address, aligned_size) = Self::page_round_up(physical_address, size);
+        let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
         let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
             p
         } else {
@@ -168,8 +168,8 @@ impl MemoryManager {
         _old_size: usize,
         new_size: usize,
     ) -> Result<usize, MemoryError> {
-        /*let (aligned_virtual_address, aligned_new_size) =
-        Self::page_round_up(old_virtual_address, new_size);*/
+        let (aligned_virtual_address, aligned_new_size) =
+            Self::page_align(old_virtual_address, new_size);
 
         let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
             p
@@ -182,11 +182,12 @@ impl MemoryManager {
         // assume: physical_address must be reserved.
         /* add: check succeeded or failed (failed because of already reserved is ok, but other... )*/
 
-        self.virtual_memory_manager.resize_memory_mapping(
-            old_virtual_address,
-            new_size,
+        let new_virtual_address = self.virtual_memory_manager.resize_memory_mapping(
+            aligned_virtual_address,
+            aligned_new_size,
             &mut pm_manager,
-        )
+        )?;
+        Ok(new_virtual_address + (old_virtual_address - aligned_virtual_address))
     }
 
     pub fn set_paging_table(&mut self) {
@@ -206,7 +207,7 @@ impl MemoryManager {
         kprintln!("----Virtual Memory Entries Dump End----");
     }
 
-    pub const fn page_round_up(address: usize, size: usize) -> (usize /*address*/, usize /*size*/) {
+    pub const fn page_align(address: usize, size: usize) -> (usize /*address*/, usize /*size*/) {
         if size == 0 && (address & PAGE_MASK) == 0 {
             (address, 0)
         } else {

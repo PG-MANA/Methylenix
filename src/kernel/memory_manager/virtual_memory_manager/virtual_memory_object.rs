@@ -37,7 +37,7 @@ impl VirtualMemoryObject {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
             if list.get_first_entry().is_none() {
                 assert_eq!(self.linked_page, 0);
-                vm_page.set_root(p_index, list);
+                vm_page.setup_to_be_root(p_index, list);
                 self.linked_page = 1;
                 return;
             }
@@ -45,7 +45,7 @@ impl VirtualMemoryObject {
                 /*must change root*/
                 let root = list.get_first_entry_mut().unwrap();
                 let root_p_index = root.get_p_index();
-                vm_page.set_root(p_index, list);
+                vm_page.setup_to_be_root(p_index, list);
                 vm_page.insert_after(root, root_p_index);
                 self.linked_page += 1;
             //pr_info!("root vm_page entry was changed.");
@@ -67,7 +67,7 @@ impl VirtualMemoryObject {
             }
         } else {
             let mut list = PtrLinkedList::<VirtualMemoryPage>::new();
-            vm_page.set_root(p_index, &mut list);
+            vm_page.setup_to_be_root(p_index, &mut list);
             self.object = VirtualMemoryObjectType::Page(list);
             self.linked_page = 1;
         }
