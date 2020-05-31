@@ -285,9 +285,14 @@ impl MemoryOptionFlags {
     pub const DO_NOT_FREE_PHY_ADDR: u16 = 1 << 1;
     pub const WIRED: u16 = 1 << 2;
     pub const DEV_MAP: u16 = 1 << 3; /* マップしている物理メモリはなにか意味がある */
+    pub const DIRECT_MAP: u16 = 1 << 4;
 
-    pub fn new(flags: u16) -> Self {
-        assert_eq!(flags & !0xF, 0);
+    pub const fn new(flags: u16) -> Self {
+        if flags & (!0x1F) != 0 {
+            /* when you add option, you must change this assert */
+            panic!("Invalid flags are set.");
+            /*static_assert*/
+        }
         Self { flags }
     }
 
@@ -305,5 +310,9 @@ impl MemoryOptionFlags {
 
     pub fn is_dev_map(&self) -> bool {
         self.flags & Self::DEV_MAP != 0
+    }
+
+    pub fn is_direct_mapped(&self) -> bool {
+        self.flags & Self::DIRECT_MAP != 0
     }
 }

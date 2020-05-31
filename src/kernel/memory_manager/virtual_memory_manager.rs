@@ -34,12 +34,18 @@ pub struct VirtualMemoryManager {
     /*vm_object_pool: PoolAllocator<VirtualMemoryObject>,*/
     vm_page_pool: PoolAllocator<VirtualMemoryPage>,
     reserved_memory_list: PoolAllocator<[u8; PAGE_SIZE]>,
+    direct_mapped_area: Option<DirectMappedArea>, /* think algorithm */
+}
+
+struct DirectMappedArea {
+    allocator: PhysicalMemoryManager,
+    entry: &'static mut VirtualMemoryEntry,
 }
 
 impl VirtualMemoryManager {
     const VM_MAP_ENTRY_POOL_SIZE: usize = PAGE_SIZE * 8;
     /*const VM_OBJECT_POOL_SIZE: usize = PAGE_SIZE * 8;*/
-    const VM_PAGE_POOL_SIZE: usize = PAGE_SIZE * 32;
+    const VM_PAGE_POOL_SIZE: usize = PAGE_SIZE * 128;
 
     pub const fn new() -> Self {
         Self {
@@ -50,6 +56,7 @@ impl VirtualMemoryManager {
             /*vm_object_pool: PoolAllocator::new(),*/
             vm_page_pool: PoolAllocator::new(),
             reserved_memory_list: PoolAllocator::new(),
+            direct_mapped_area: None,
         }
     }
 
@@ -113,6 +120,8 @@ impl VirtualMemoryManager {
                 panic!("Cannot associate address for paging cache Err:{:?}", e);
             }
         }
+
+        self.setup_direct_mapped_area(pm_manager);
     }
 
     fn setup_pools(&mut self, pm_manager: &mut PhysicalMemoryManager) {
@@ -190,6 +199,72 @@ impl VirtualMemoryManager {
             Self::VM_PAGE_POOL_SIZE,
             pm_manager,
         );
+    }
+
+    fn setup_direct_mapped_area(&mut self, pm_manager: &mut PhysicalMemoryManager) {
+        /* direct mapped area is used for page table or io map(needs DMA) (object pools should not use this) */
+        /* when use direct mapped area, you must map address into direct_mapped_area.entry. */
+        let direct_mapped_area_size = (pm_manager.get_free_memory_size() / 20) & PAGE_MASK; /* temporary */
+        assert!(PAGE_SIZE * 2 < direct_mapped_area_size);
+        let direct_mapped_area_address = pm_manager.alloc(direct_mapped_area_size, true);
+
+        if direct_mapped_area_address.is_none() {
+            panic!("Cannot alloc memory for direct map.");
+        }
+        let direct_mapped_area_address = direct_mapped_area_address.unwrap();
+
+        pr_info!(
+            "0x{:X} bytes are reserved for direct map",
+            direct_mapped_area_size
+        );
+
+        let mut entry = VirtualMemoryEntry::new(
+            direct_mapped_area_address,
+            PhysicalMemoryManager::size_to_end_address(
+                direct_mapped_area_address,
+                direct_mapped_area_size,
+            ),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::new(MemoryOptionFlags::DIRECT_MAP | MemoryOptionFlags::PRE_RESERVED),
+        );
+        if let Err(e) = self._map_address(
+            &mut entry,
+            direct_mapped_area_address,
+            direct_mapped_area_address,
+            PAGE_SIZE * 2,
+            pm_manager,
+        ) {
+            panic!("Cannot map address for direct map Err:{:?}", e);
+        }
+
+        let entry = match self.insert_vm_map_entry(entry, pm_manager) {
+            Ok(e) => e,
+            Err(e) => panic!("Cannot insert Virtual Memory Entry Err:{:?}", e),
+        };
+
+        for i in 0..(direct_mapped_area_size >> PAGE_SHIFT) {
+            if let Err(e) = self.associate_address(
+                direct_mapped_area_address + MemoryManager::index_to_offset(i),
+                direct_mapped_area_address + MemoryManager::index_to_offset(i),
+                MemoryPermissionFlags::data(),
+                pm_manager,
+            ) {
+                panic!("Cannot associate address for direct map Err:{:?}", e);
+            }
+        }
+
+        let mut direct_mapped_area_allocator = PhysicalMemoryManager::new();
+        direct_mapped_area_allocator
+            .set_memory_entry_pool(direct_mapped_area_address, PAGE_SIZE * 2);
+        direct_mapped_area_allocator.free(
+            direct_mapped_area_address + PAGE_SIZE * 2,
+            direct_mapped_area_size - PAGE_SIZE * 2,
+            true,
+        );
+        self.direct_mapped_area = Some(DirectMappedArea {
+            allocator: direct_mapped_area_allocator,
+            entry,
+        });
     }
 
     pub fn flush_paging(&mut self) {
@@ -602,29 +677,19 @@ impl VirtualMemoryManager {
         virtual_address: usize,
         _pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
-        #![allow(unused_assignments)]
-        let mut maybe_retry = false;
-        loop {
-            match self.page_manager.unassociate_address(
-                virtual_address,
-                &mut self.reserved_memory_list,
-                maybe_retry,
-            ) {
-                Ok(()) => {
-                    return Ok(());
-                }
-                Err(PagingError::MemoryCacheOverflowed) => {
-                    maybe_retry = true;
-                    unimplemented!();
-                    //maybe_retry = true;
-                    /* retry (by loop) */
-                }
-                Err(_) => {
-                    pr_err!("Cannot unassociate memory");
-                    return Err(MemoryError::PagingError);
-                }
-            };
-        }
+        match self.page_manager.unassociate_address(
+            virtual_address,
+            &mut self.reserved_memory_list,
+            false,
+        ) {
+            Ok(()) => {
+                return Ok(());
+            }
+            Err(e) => {
+                pr_err!("Cannot unassociate memory Err:{:?}", e);
+                return Err(MemoryError::PagingError);
+            }
+        };
     }
 
     fn try_expand_size(

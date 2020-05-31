@@ -45,6 +45,10 @@ impl PhysicalMemoryManager {
         }
     }
 
+    pub const fn get_free_memory_size(&self) -> usize {
+        self.free_memory_size
+    }
+
     pub fn set_memory_entry_pool(&mut self, free_address: usize, free_address_size: usize) {
         self.memory_entry_pool = free_address;
         self.memory_entry_pool_size = free_address_size;
