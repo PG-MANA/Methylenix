@@ -82,10 +82,14 @@ impl<T> PoolAllocator<T> {
     }
 
     pub fn free(&mut self, target: &'static mut T) {
+        self.free_ptr(target as *mut T)
+    }
+
+    pub fn free_ptr(&mut self, target: *mut T) {
         /*do not use target after free */
         use core::usize;
         assert!(self.linked_count < usize::MAX);
-        let e = target as *mut _ as usize as *mut FreeList;
+        let e = target as usize as *mut FreeList;
         if let Some(mut first_entry) = self.head {
             unsafe {
                 (*e).next = Some(first_entry);

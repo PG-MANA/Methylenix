@@ -9,7 +9,7 @@ pub mod pool_allocator;
 /* pub mod reverse_memory_map_manager; */
 pub mod virtual_memory_manager;
 
-use arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGING_CACHE_LENGTH};
+use arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use self::physical_memory_manager::PhysicalMemoryManager;
 use self::virtual_memory_manager::VirtualMemoryManager;
@@ -28,11 +28,6 @@ pub struct MemoryPermissionFlags {
 #[derive(Clone, Eq, PartialEq, Copy)]
 pub struct MemoryOptionFlags {
     flags: u16,
-}
-
-pub struct FreePageList {
-    pub list: [usize; PAGING_CACHE_LENGTH],
-    pub pointer: usize,
 }
 
 #[derive(Clone, Eq, PartialEq, Copy, Debug)]

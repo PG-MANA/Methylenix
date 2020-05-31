@@ -131,9 +131,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
 
     /* set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
-    if !virtual_memory_manager.init(true, &mut physical_memory_manager) {
-        panic!("Cannot init Virtual Memory Manager.");
-    }
+    virtual_memory_manager.init(true, &mut physical_memory_manager);
 
     for section in multiboot_information.elf_info.clone() {
         if !section.should_allocate() || section.align_size() != PAGE_SIZE {

@@ -17,7 +17,7 @@ use self::virtual_memory_page::VirtualMemoryPage;
 use super::physical_memory_manager::PhysicalMemoryManager;
 use super::pool_allocator::PoolAllocator;
 use super::MemoryError;
-use super::{FreePageList, MemoryManager, MemoryOptionFlags, MemoryPermissionFlags};
+use super::{MemoryManager, MemoryOptionFlags, MemoryPermissionFlags};
 
 use arch::target_arch::paging::{PageManager, PagingError};
 use arch::target_arch::paging::{
@@ -33,7 +33,7 @@ pub struct VirtualMemoryManager {
     vm_map_entry_pool: PoolAllocator<VirtualMemoryEntry>,
     /*vm_object_pool: PoolAllocator<VirtualMemoryObject>,*/
     vm_page_pool: PoolAllocator<VirtualMemoryPage>,
-    reserved_memory_list: FreePageList,
+    reserved_memory_list: PoolAllocator<[u8; PAGE_SIZE]>,
 }
 
 impl VirtualMemoryManager {
@@ -49,14 +49,11 @@ impl VirtualMemoryManager {
             vm_map_entry_pool: PoolAllocator::new(),
             /*vm_object_pool: PoolAllocator::new(),*/
             vm_page_pool: PoolAllocator::new(),
-            reserved_memory_list: FreePageList {
-                list: [0; PAGING_CACHE_LENGTH],
-                pointer: 0,
-            },
+            reserved_memory_list: PoolAllocator::new(),
         }
     }
 
-    pub fn init(&mut self, is_system_vm: bool, pm_manager: &mut PhysicalMemoryManager) -> bool {
+    pub fn init(&mut self, is_system_vm: bool, pm_manager: &mut PhysicalMemoryManager) {
         //MEMO: 勝手にダイレクトマッピング?(ストレートマッピング?)をしているが、
         //      システム起動時・プロセス起動時にダイレクトマッピングされており且つ
         //      PhysicalMemoryManagerにおいて先に利用されているメモリ領域が予約されていることに依存している。
@@ -64,17 +61,19 @@ impl VirtualMemoryManager {
         self.is_system_vm = is_system_vm;
 
         /* set up cache list */
+        let mut reserved_memory_list: [usize; PAGING_CACHE_LENGTH] = [0; PAGING_CACHE_LENGTH];
         for i in 0..PAGING_CACHE_LENGTH {
             let cache_address = pm_manager
                 .alloc(PAGE_SIZE, true)
                 .expect("Cannot alloc memory for paging cache");
-            self.reserved_memory_list.list[i] = cache_address;
+            reserved_memory_list[i] = cache_address;
+            self.reserved_memory_list
+                .free(unsafe { &mut *(cache_address as *mut [u8; PAGE_SIZE]) });
         }
-        self.reserved_memory_list.pointer = PAGING_CACHE_LENGTH;
 
         /* set up page_manager */
-        if !self.page_manager.init(&mut self.reserved_memory_list) {
-            return false;
+        if let Err(e) = self.page_manager.init(&mut self.reserved_memory_list) {
+            panic!("Cannot init PageManager Err:{:?}", e);
         }
 
         self.setup_pools(pm_manager);
@@ -83,7 +82,7 @@ impl VirtualMemoryManager {
         for i in 0..PAGING_CACHE_LENGTH
         /* 既に使われた分も */
         {
-            let cache_address = self.reserved_memory_list.list[i];
+            let cache_address = reserved_memory_list[i];
             let mut entry = VirtualMemoryEntry::new(
                 cache_address,
                 PhysicalMemoryManager::size_to_end_address(cache_address, PAGE_SIZE),
@@ -114,7 +113,6 @@ impl VirtualMemoryManager {
                 panic!("Cannot associate address for paging cache Err:{:?}", e);
             }
         }
-        return true;
     }
 
     fn setup_pools(&mut self, pm_manager: &mut PhysicalMemoryManager) {
