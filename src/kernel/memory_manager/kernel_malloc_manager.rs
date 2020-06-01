@@ -59,7 +59,7 @@ impl KernelMemoryAllocManager {
     pub fn kmalloc(
         &mut self,
         size: usize,
-        align: bool,
+        align_order: usize,
         m_manager: &mut MemoryManager,
     ) -> Option<usize> {
         if size == 0 {
@@ -87,7 +87,7 @@ impl KernelMemoryAllocManager {
                 }
             };
         }
-        if let Some(address) = self.alloc_manager.alloc(size, align) {
+        if let Some(address) = self.alloc_manager.alloc(size, align_order) {
             if !self.add_entry_to_used_list(address, size) {
                 self.alloc_manager.free(address, size, false);
                 return None;
@@ -98,7 +98,7 @@ impl KernelMemoryAllocManager {
         /* alloc from Memory Manager */
         if let Ok(allocated_address) = m_manager.alloc_pages(0, MemoryPermissionFlags::data()) {
             self.alloc_manager.free(allocated_address, PAGE_SIZE, true);
-            return self.kmalloc(size, align, m_manager);
+            return self.kmalloc(size, align_order, m_manager);
         }
         /*TODO: Free unused memory.*/
         None
@@ -107,14 +107,14 @@ impl KernelMemoryAllocManager {
     pub fn vmalloc(
         &mut self,
         size: usize,
-        align: bool,
+        align_order: usize,
         m_manager: &mut MemoryManager,
     ) -> Option<usize> {
         if size == 0 {
             return None;
         }
         if size < PAGE_SIZE {
-            return self.kmalloc(size, align, m_manager);
+            return self.kmalloc(size, align_order, m_manager);
         }
 
         match m_manager.alloc_nonlinear_pages(

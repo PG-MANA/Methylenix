@@ -4,7 +4,7 @@
  */
 /*WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている*/
 
-use arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
+use arch::target_arch::paging::PAGE_SHIFT;
 
 use core::mem;
 use kernel::memory_manager::MemoryManager;
@@ -115,22 +115,17 @@ impl PhysicalMemoryManager {
         &mut self,
         start_address: usize,
         size: usize,
-        align: bool,
+        align_order: usize,
         target_entry: Option<&mut MemoryEntry>,
     ) -> bool {
         if size == 0 || self.free_memory_size < size {
             return false;
         }
-        if align {
-            let aligned_start_address = start_address & PAGE_MASK;
-            let aligned_size =
-                ((size + (start_address - aligned_start_address) - 1) & PAGE_MASK) + PAGE_SIZE;
-            return self.define_used_memory(
-                aligned_start_address,
-                aligned_size,
-                false,
-                target_entry,
-            );
+        if align_order != 0 {
+            assert!(PAGE_SHIFT >= align_order);
+            let (aligned_start_address, aligned_size) =
+                Self::align_address_and_size(start_address, size, align_order);
+            return self.define_used_memory(aligned_start_address, aligned_size, 0, target_entry);
         }
         let entry = if let Some(t) = target_entry {
             assert!(t.get_start_address() <= start_address);
@@ -296,11 +291,7 @@ impl PhysicalMemoryManager {
         }
     }
 
-    pub fn alloc(
-        &mut self,
-        size: usize,
-        align: bool, /*PAGE_SIZEでアラインするか*/
-    ) -> Option<usize> {
+    pub fn alloc(&mut self, size: usize, align_order: usize) -> Option<usize> {
         if size == 0 || self.free_memory_size <= size {
             return None;
         }
@@ -313,14 +304,13 @@ impl PhysicalMemoryManager {
             };
             loop {
                 if entry.get_size() >= size {
-                    let address_to_allocate = if align {
-                        let aligned_address = if entry.get_start_address() != 0 {
-                            ((entry.get_start_address() - 1) & PAGE_MASK) + PAGE_SIZE
-                        } else {
-                            0
-                        };
-                        let aligned_available_size =
-                            entry.get_size() - (aligned_address - entry.get_start_address());
+                    let address_to_allocate = if align_order != 0 {
+                        let (aligned_address, aligned_available_size) =
+                            Self::align_address_and_available_size(
+                                entry.get_start_address(),
+                                entry.get_size(),
+                                align_order,
+                            );
                         if aligned_available_size < size {
                             if let Some(next) = entry.list_next {
                                 entry = unsafe { &mut *(next as *mut MemoryEntry) };
@@ -333,8 +323,7 @@ impl PhysicalMemoryManager {
                     } else {
                         entry.get_start_address()
                     };
-                    return if self.define_used_memory(address_to_allocate, size, false, Some(entry))
-                    {
+                    return if self.define_used_memory(address_to_allocate, size, 0, Some(entry)) {
                         Some(address_to_allocate)
                     } else {
                         None
@@ -350,9 +339,14 @@ impl PhysicalMemoryManager {
         None
     }
 
-    pub fn reserve_memory(&mut self, start_address: usize, size: usize, align: bool) -> bool {
+    pub fn reserve_memory(
+        &mut self,
+        start_address: usize,
+        size: usize,
+        align_order: usize,
+    ) -> bool {
         /* initializing use only */
-        self.define_used_memory(start_address, size, align, None)
+        self.define_used_memory(start_address, size, align_order, None)
     }
 
     pub fn free(&mut self, start_address: usize, size: usize, is_initializing: bool) -> bool {
@@ -437,6 +431,34 @@ impl PhysicalMemoryManager {
             MemoryManager::size_to_order(size),
             Self::NUM_OF_FREE_LIST - 1,
         )
+    }
+
+    fn align_address_and_size(
+        address: usize,
+        size: usize,
+        align_order: usize,
+    ) -> (usize /*address*/, usize /*size*/) {
+        let align_size = 1 << align_order;
+        let mask = !(align_size - 1);
+        let aligned_address = address & mask;
+        let aligned_size = ((size + (address - aligned_address) - 1) & mask) + align_size;
+        (aligned_address, aligned_size)
+    }
+
+    fn align_address_and_available_size(
+        address: usize,
+        size: usize,
+        align_order: usize,
+    ) -> (usize /*address*/, usize /*size*/) {
+        if address == 0 {
+            (0, size)
+        } else {
+            let align_size = 1 << align_order;
+            let mask = !(align_size - 1);
+            let aligned_address = ((address - 1) & mask) + align_size;
+            let aligned_available_size = size - (aligned_address - address);
+            (aligned_address, aligned_available_size)
+        }
     }
 
     pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {

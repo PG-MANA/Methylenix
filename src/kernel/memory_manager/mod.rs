@@ -75,7 +75,7 @@ impl MemoryManager {
         /* return physically continuous 2 ^ order pages memory. */
         let size = Self::index_to_offset(1 << order);
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
-        if let Some(physical_address) = physical_memory_manager.alloc(size, true) {
+        if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT) {
             match self.virtual_memory_manager.alloc_address(
                 size,
                 physical_address,

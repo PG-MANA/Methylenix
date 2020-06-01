@@ -11,7 +11,7 @@ pub mod paging;
 use self::device::cpu;
 use self::device::serial_port::SerialPortManager;
 use self::interrupt::InterruptManager;
-use self::paging::{PAGE_MASK, PAGE_SIZE};
+use self::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use kernel::drivers::acpi::AcpiManager;
 use kernel::drivers::multiboot::MultiBootInformation;
@@ -136,14 +136,14 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
     for section in multiboot_information.elf_info.clone() {
         if section.should_allocate() && section.align_size() == PAGE_SIZE {
-            physical_memory_manager.reserve_memory(section.addr(), section.size(), true);
+            physical_memory_manager.reserve_memory(section.addr(), section.size(), PAGE_SHIFT);
         }
     }
     /* reserve Multiboot Information area */
     physical_memory_manager.reserve_memory(
         multiboot_information.address,
         multiboot_information.size,
-        false,
+        0,
     );
 
     /* set up Virtual Memory Manager */
@@ -231,7 +231,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
 
     /* move Multiboot Information to allocated memory area */
     let new_mbi_address = kernel_memory_alloc_manager
-        .kmalloc(multiboot_information.size, false, &mut memory_manager)
+        .kmalloc(multiboot_information.size, 3, &mut memory_manager)
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
         unsafe {

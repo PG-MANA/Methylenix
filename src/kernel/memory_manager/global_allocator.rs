@@ -33,7 +33,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
             .kernel_memory_alloc_manager
             .lock()
             .unwrap()
-            .vmalloc(layout.size(), true, &mut memory_manager)
+            .vmalloc(layout.size(), layout.align(), &mut memory_manager)
         {
             address as *mut u8
         } else {

@@ -71,7 +71,7 @@ impl VirtualMemoryManager {
         let mut reserved_memory_list: [usize; PAGING_CACHE_LENGTH] = [0; PAGING_CACHE_LENGTH];
         for i in 0..PAGING_CACHE_LENGTH {
             let cache_address = pm_manager
-                .alloc(PAGE_SIZE, true)
+                .alloc(PAGE_SIZE, PAGE_SHIFT)
                 .expect("Cannot alloc memory for paging cache");
             reserved_memory_list[i] = cache_address;
             self.reserved_memory_list
@@ -126,7 +126,7 @@ impl VirtualMemoryManager {
 
     fn setup_pools(&mut self, pm_manager: &mut PhysicalMemoryManager) {
         let alloc_func = |size: usize, name: &str, p: &mut PhysicalMemoryManager| -> usize {
-            if let Some(address) = p.alloc(size, true) {
+            if let Some(address) = p.alloc(size, PAGE_SHIFT) {
                 address
             } else {
                 panic!("Cannot alloc memory for {}.", name);
@@ -206,7 +206,7 @@ impl VirtualMemoryManager {
         /* when use direct mapped area, you must map address into direct_mapped_area.entry. */
         let direct_mapped_area_size = (pm_manager.get_free_memory_size() / 20) & PAGE_MASK; /* temporary */
         assert!(PAGE_SIZE * 2 < direct_mapped_area_size);
-        let direct_mapped_area_address = pm_manager.alloc(direct_mapped_area_size, true);
+        let direct_mapped_area_address = pm_manager.alloc(direct_mapped_area_size, PAGE_SHIFT);
 
         if direct_mapped_area_address.is_none() {
             panic!("Cannot alloc memory for direct map.");
