@@ -88,5 +88,4 @@ qemu-system-x86_64 --cdrom bin/img/boot.iso
   https://pg-mana.net
 ### 公式ページ
   https://methylenix.org (現在はGitHubへリダイレクトするだけ。いつできるかな。)
-### OS Wiki
-  https://soft.taprix.org/wiki/oswiki/
+
