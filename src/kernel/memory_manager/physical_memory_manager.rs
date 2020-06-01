@@ -301,14 +301,10 @@ impl PhysicalMemoryManager {
         size: usize,
         align: bool, /*PAGE_SIZEでアラインするか*/
     ) -> Option<usize> {
-        use core::cmp::min;
         if size == 0 || self.free_memory_size <= size {
             return None;
         }
-        let order = min(
-            MemoryManager::size_to_order(size),
-            Self::NUM_OF_FREE_LIST - 1,
-        );
+        let order = Self::size_to_order(size);
         for i in order..Self::NUM_OF_FREE_LIST {
             let mut entry = if let Some(t) = self.free_list[i] {
                 unsafe { &mut *(t as *mut MemoryEntry) }
@@ -389,11 +385,7 @@ impl PhysicalMemoryManager {
     }
 
     fn unchain_entry_from_free_list(&mut self, entry: &mut MemoryEntry) {
-        use core::cmp::min;
-        let order = min(
-            MemoryManager::size_to_order(entry.get_size()),
-            Self::NUM_OF_FREE_LIST - 1,
-        );
+        let order = Self::size_to_order(entry.get_size());
         if self.free_list[order] == Some(entry as *const _ as usize) {
             self.free_list[order] = entry.list_next;
         }
@@ -406,15 +398,8 @@ impl PhysicalMemoryManager {
         old_size: usize,
         entry_is_new: bool,
     ) {
-        use core::cmp::min;
-        let old_order = min(
-            MemoryManager::size_to_order(old_size),
-            Self::NUM_OF_FREE_LIST - 1,
-        );
-        let new_order = min(
-            MemoryManager::size_to_order(entry.get_size()),
-            Self::NUM_OF_FREE_LIST - 1,
-        );
+        let old_order = Self::size_to_order(old_size);
+        let new_order = Self::size_to_order(entry.get_size());
         if !entry_is_new {
             if old_order == new_order {
                 return;
@@ -444,6 +429,14 @@ impl PhysicalMemoryManager {
         /*pub const fn ?*/
         assert!(start_address <= end_address);
         end_address - start_address + 1
+    }
+
+    fn size_to_order(size: usize) -> usize {
+        use core::cmp::min;
+        min(
+            MemoryManager::size_to_order(size),
+            Self::NUM_OF_FREE_LIST - 1,
+        )
     }
 
     pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {

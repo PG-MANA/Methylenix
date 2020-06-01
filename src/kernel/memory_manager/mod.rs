@@ -216,7 +216,7 @@ impl MemoryManager {
     }
 
     pub const fn size_to_order(size: usize) -> usize {
-        if size == 0 {
+        if size <= PAGE_SIZE {
             return 0;
         }
         let mut page_count = (((size - 1) & PAGE_MASK) >> PAGE_SHIFT) + 1;
