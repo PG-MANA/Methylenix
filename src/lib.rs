@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(alloc_error_handler)]
 #![feature(const_fn)]
 #![feature(const_if_match)]
 #![feature(const_loop)]
@@ -13,6 +14,9 @@
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
 #![feature(track_caller)]
+
+#[macro_use]
+extern crate alloc;
 
 //usr
 #[macro_use]

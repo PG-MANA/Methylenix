@@ -3,6 +3,7 @@
  * This manager is the frontend of physical memory manager and page manager.
  */
 
+pub mod global_allocator;
 pub mod kernel_malloc_manager;
 pub mod physical_memory_manager;
 pub mod pool_allocator;

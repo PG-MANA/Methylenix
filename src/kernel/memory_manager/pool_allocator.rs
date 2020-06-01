@@ -1,6 +1,6 @@
 /*
  * Pool Allocator
- * allocator fo fixed size(in future, maybe able to alloc several size...)
+ * allocator for fixed size(in future, maybe able to alloc several size...)
  * Allow nullptr for accessing Physical Address:0
  */
 

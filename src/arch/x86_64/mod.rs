@@ -85,6 +85,10 @@ pub fn general_protection_exception_handler(e_code: usize) {
 
 fn hlt() {
     pr_info!("All init are done!");
+    use alloc::string::String;
+    let mut string = String::from("Hello,world!");
+    string.push_str("This is String Test!!");
+    println!("{}", string);
     loop {
         unsafe {
             cpu::hlt();
@@ -227,7 +231,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
 
     /* move Multiboot Information to allocated memory area */
     let new_mbi_address = kernel_memory_alloc_manager
-        .kmalloc(multiboot_information.size, &mut memory_manager)
+        .kmalloc(multiboot_information.size, false, &mut memory_manager)
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
         unsafe {

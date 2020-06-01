@@ -326,6 +326,11 @@ impl PhysicalMemoryManager {
                         let aligned_available_size =
                             entry.get_size() - (aligned_address - entry.get_start_address());
                         if aligned_available_size < size {
+                            if let Some(next) = entry.list_next {
+                                entry = unsafe { &mut *(next as *mut MemoryEntry) };
+                            } else {
+                                break;
+                            } /* fix: to duplicated code */
                             continue;
                         }
                         aligned_address

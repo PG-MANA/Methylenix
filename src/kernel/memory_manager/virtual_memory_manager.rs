@@ -225,7 +225,11 @@ impl VirtualMemoryManager {
                 direct_mapped_area_size,
             ),
             MemoryPermissionFlags::data(),
-            MemoryOptionFlags::new(MemoryOptionFlags::DIRECT_MAP | MemoryOptionFlags::PRE_RESERVED),
+            MemoryOptionFlags::new(
+                MemoryOptionFlags::DIRECT_MAP
+                    | MemoryOptionFlags::PRE_RESERVED
+                    | MemoryOptionFlags::DO_NOT_FREE_PHY_ADDR,
+            ),
         );
         if let Err(e) = self._map_address(
             &mut entry,
