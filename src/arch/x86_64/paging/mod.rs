@@ -11,12 +11,14 @@ use self::pde::{PDE, PD_MAX_ENTRY};
 use self::pdpte::{PDPTE, PDPT_MAX_ENTRY};
 use self::pml4e::{PML4E, PML4_MAX_ENTRY};
 use self::pte::{PTE, PT_MAX_ENTRY};
+use self::PagingError::MemoryCacheRanOut;
 use arch::target_arch::device::cpu;
 
 //use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use kernel::memory_manager::{FreePageList, MemoryPermissionFlags};
+use kernel::memory_manager::{pool_allocator::PoolAllocator, MemoryPermissionFlags};
 
 pub const PAGE_SIZE: usize = 0x1000;
+pub const PAGE_SHIFT: usize = 12;
 pub const PAGE_MASK: usize = 0xFFFFFFFF_FFFFF000;
 pub const PAGING_CACHE_LENGTH: usize = 64;
 pub const MAX_VIRTUAL_ADDRESS: usize = 0x00007FFF_FFFFFFFF;
@@ -27,7 +29,7 @@ pub struct PageManager {
     /*&'static mut [PML4; PML4_MAX_ENTRY]*/
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum PagingError {
     MemoryCacheRanOut,
     MemoryCacheOverflowed,
@@ -40,12 +42,11 @@ impl PageManager {
         PageManager { pml4: 0 }
     }
 
-    pub fn init(&mut self, cache_memory_list: &mut FreePageList) -> bool {
-        if cache_memory_list.pointer == 0 {
-            return false; //should throw error
-        }
-        let pml4_address = cache_memory_list.list[cache_memory_list.pointer - 1];
-        cache_memory_list.pointer -= 1;
+    pub fn init(
+        &mut self,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+    ) -> Result<(), PagingError> {
+        let pml4_address = Self::get_address_from_cache(cache_memory_list)?;
         self.pml4 = pml4_address;
         let pml4_table = unsafe { &mut *(self.pml4 as *mut [PML4E; PML4_MAX_ENTRY]) };
         for pml4 in pml4_table.iter_mut() {
@@ -57,12 +58,11 @@ impl PageManager {
             pml4_address,
             MemoryPermissionFlags::data(),
         )
-        .is_ok()
     }
 
     fn get_target_pte(
         &mut self,
-        cache_memory_list: &mut FreePageList,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
         linear_address: usize,
         should_set_present: bool,
         should_create_entry: bool,
@@ -81,11 +81,7 @@ impl PageManager {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
-            if cache_memory_list.pointer == 0 {
-                return Err(PagingError::MemoryCacheRanOut);
-            }
-            let pdpt_address = cache_memory_list.list[cache_memory_list.pointer - 1];
-            cache_memory_list.pointer -= 1;
+            let pdpt_address = Self::get_address_from_cache(cache_memory_list)?;
             let temp_pdpt = unsafe { &mut *(pdpt_address as *mut [PDPTE; PDPT_MAX_ENTRY]) };
             for entry in temp_pdpt.iter_mut() {
                 entry.init();
@@ -96,19 +92,14 @@ impl PageManager {
             pml4_table[number_of_pml4e].set_present(true);
         }
 
-        let pdpte = unsafe {
-            &mut ((&mut *(pml4_table[number_of_pml4e].get_addr().unwrap()
-                as *mut [PDPTE; PDPT_MAX_ENTRY]))[number_of_pdpte])
-        };
+        let pdpte = &mut unsafe {
+            &mut *(pml4_table[number_of_pml4e].get_addr().unwrap() as *mut [PDPTE; PDPT_MAX_ENTRY])
+        }[number_of_pdpte];
         if !pdpte.is_pd_set() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
-            if cache_memory_list.pointer == 0 {
-                return Err(PagingError::MemoryCacheRanOut);
-            }
-            let pd_address = cache_memory_list.list[cache_memory_list.pointer - 1];
-            cache_memory_list.pointer -= 1;
+            let pd_address = Self::get_address_from_cache(cache_memory_list)?;
             let temp_pd = unsafe { &mut *(pd_address as *mut [PDE; PD_MAX_ENTRY]) };
             for entry in temp_pd.iter_mut() {
                 entry.init();
@@ -118,18 +109,13 @@ impl PageManager {
         if should_set_present {
             pdpte.set_present(true);
         }
-        let pde = unsafe {
-            &mut ((&mut *(pdpte.get_addr().unwrap() as *mut [PDE; PD_MAX_ENTRY]))[number_of_pde])
-        };
+        let pde = &mut unsafe { &mut *(pdpte.get_addr().unwrap() as *mut [PDE; PD_MAX_ENTRY]) }
+            [number_of_pde];
         if !pde.is_pt_set() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
-            if cache_memory_list.pointer == 0 {
-                return Err(PagingError::MemoryCacheRanOut);
-            }
-            let pt_address = cache_memory_list.list[cache_memory_list.pointer - 1];
-            cache_memory_list.pointer -= 1;
+            let pt_address = Self::get_address_from_cache(cache_memory_list)?;
             let temp_pt = unsafe { &mut *(pt_address as *mut [PTE; PT_MAX_ENTRY]) };
             for entry in temp_pt.iter_mut() {
                 entry.init();
@@ -139,14 +125,15 @@ impl PageManager {
         if should_set_present {
             pde.set_present(true);
         }
-        Ok(unsafe {
-            &mut ((&mut *(pde.get_addr().unwrap() as *mut [PTE; PT_MAX_ENTRY]))[number_of_pte])
-        })
+        Ok(
+            &mut unsafe { &mut *(pde.get_addr().unwrap() as *mut [PTE; PT_MAX_ENTRY]) }
+                [number_of_pte],
+        )
     }
 
     pub fn associate_address(
         &mut self,
-        cache_memory_list: &mut FreePageList,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
         physical_address: usize,
         linear_address: usize,
         permission: MemoryPermissionFlags,
@@ -166,7 +153,7 @@ impl PageManager {
 
     pub fn change_memory_permission(
         &mut self,
-        cache_memory_list: &mut FreePageList,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
         linear_address: usize,
         permission: MemoryPermissionFlags,
     ) -> Result<(), PagingError> {
@@ -183,19 +170,13 @@ impl PageManager {
     pub fn unassociate_address(
         &mut self,
         linear_address: usize,
-        cache_memory_list: &mut FreePageList,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
         entry_may_be_deleted: bool,
     ) -> Result<(), PagingError> {
         match self.get_target_pte(cache_memory_list, linear_address, false, false) {
             Ok(pte) => {
-                if cache_memory_list.pointer >= PAGING_CACHE_LENGTH {
-                    Err(PagingError::MemoryCacheOverflowed)
-                } else {
-                    cache_memory_list.list[cache_memory_list.pointer] = pte.get_addr().unwrap();
-                    cache_memory_list.pointer += 1;
-                    pte.set_present(false);
-                    self.cleanup_page_table(linear_address, cache_memory_list)
-                }
+                pte.set_present(false);
+                self.cleanup_page_table(linear_address, cache_memory_list)
             }
             Err(err) => {
                 if err == PagingError::EntryIsNotFound && entry_may_be_deleted {
@@ -210,36 +191,30 @@ impl PageManager {
     pub fn cleanup_page_table(
         &mut self,
         linear_address: usize,
-        cache_memory_list: &mut FreePageList,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
     ) -> Result<(), PagingError> {
         /* return needless entry to cache_memory_list */
         let number_of_pml4e = (linear_address >> (4 * 3) + 9 * 3) & (0x1FF);
         let number_of_pdpe = (linear_address >> (4 * 3) + 9 * 2) & (0x1FF);
         let number_of_pde = (linear_address >> (4 * 3) + 9 * 1) & (0x1FF);
-        let pml4_table = unsafe { &mut *(self.pml4 as *mut [PML4E; PML4_MAX_ENTRY]) };
-        if !pml4_table[number_of_pml4e].is_pdpt_set() {
+        let pml4e =
+            &mut unsafe { &mut *(self.pml4 as *mut [PML4E; PML4_MAX_ENTRY]) }[number_of_pml4e];
+        if !pml4e.is_pdpt_set() {
             return Ok(());
         }
 
-        let pdpte = unsafe {
-            &mut ((&mut *(pml4_table[number_of_pml4e].get_addr().unwrap()
-                as *mut [PDPTE; PDPT_MAX_ENTRY]))[number_of_pdpe])
-        };
-        let pde = unsafe {
-            &mut ((&mut *(pdpte.get_addr().unwrap() as *mut [PDE; PD_MAX_ENTRY]))[number_of_pde])
-        };
+        let pdpte =
+            &mut unsafe { &mut *(pml4e.get_addr().unwrap() as *mut [PDPTE; PDPT_MAX_ENTRY]) }
+                [number_of_pdpe];
+        let pde = &mut unsafe { &mut *(pdpte.get_addr().unwrap() as *mut [PDE; PD_MAX_ENTRY]) }
+            [number_of_pde];
         if pde.is_present() {
             for e in unsafe { &*(pde.get_addr().unwrap() as *const [PTE; PT_MAX_ENTRY]) }.iter() {
                 if e.is_present() {
                     return Ok(());
                 }
             }
-            if cache_memory_list.pointer >= PAGING_CACHE_LENGTH {
-                return Err(PagingError::MemoryCacheOverflowed);
-            }
-            let pde_address = pde.get_addr().unwrap();
-            cache_memory_list.list[cache_memory_list.pointer] = pde_address;
-            cache_memory_list.pointer += 1;
+            cache_memory_list.free_ptr(pde.get_addr().unwrap() as *mut _); /*free PT*/
             pde.set_present(false);
         }
         if pdpte.is_present() {
@@ -248,15 +223,27 @@ impl PageManager {
                     return Ok(());
                 }
             }
-            if cache_memory_list.pointer >= PAGING_CACHE_LENGTH {
-                return Err(PagingError::MemoryCacheOverflowed);
-            }
-            let pdpe_address = pdpte.get_addr().unwrap();
-            cache_memory_list.list[cache_memory_list.pointer] = pdpe_address;
-            cache_memory_list.pointer += 1;
+            cache_memory_list.free_ptr(pdpte.get_addr().unwrap() as *mut _); /*free PD*/
             pdpte.set_present(false);
         }
+        for e in unsafe { &*(pml4e.get_addr().unwrap() as *const [PDPTE; PDPT_MAX_ENTRY]) }.iter() {
+            if e.is_present() {
+                return Ok(());
+            }
+            cache_memory_list.free_ptr(pml4e.get_addr().unwrap() as *mut _); /*free PDPT*/
+            pml4e.set_present(false);
+        }
         Ok(())
+    }
+
+    fn get_address_from_cache(
+        allocator: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+    ) -> Result<usize, PagingError> {
+        if let Ok(a) = allocator.alloc_ptr() {
+            Ok(a as usize)
+        } else {
+            Err(MemoryCacheRanOut)
+        }
     }
 
     pub fn reset_paging(&mut self) {

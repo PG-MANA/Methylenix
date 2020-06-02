@@ -5,7 +5,7 @@
 use arch::target_arch::device::cpu;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
+use kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct LocalApicManager {
     apic_id: u32,
@@ -60,17 +60,13 @@ impl LocalApicManager {
             .memory_manager
             .lock()
             .unwrap()
-            .memory_remap(
-                base_address,
-                0x1000,
-                MemoryPermissionFlags::data(),
-                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
-            ) {
+            .mmap_dev(base_address, 0x1000, MemoryPermissionFlags::data())
+        {
             Ok(address) => {
                 self.base_address = address;
             }
-            Err(err) => {
-                pr_err!("Cannot reserve memory of Local APIC: {}", err);
+            Err(e) => {
+                pr_err!("Cannot reserve memory of Local APIC Err:{:?}", e);
                 return false;
             }
         };

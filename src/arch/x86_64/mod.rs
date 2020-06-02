@@ -11,7 +11,7 @@ pub mod paging;
 use self::device::cpu;
 use self::device::serial_port::SerialPortManager;
 use self::interrupt::InterruptManager;
-use self::paging::{PAGE_MASK, PAGE_SIZE};
+use self::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use kernel::drivers::acpi::AcpiManager;
 use kernel::drivers::multiboot::MultiBootInformation;
@@ -85,6 +85,10 @@ pub fn general_protection_exception_handler(e_code: usize) {
 
 fn hlt() {
     pr_info!("All init are done!");
+    use alloc::string::String;
+    let mut string = String::from("Hello,world!");
+    string.push_str("This is String Test!!");
+    println!("{}", string);
     loop {
         unsafe {
             cpu::hlt();
@@ -115,25 +119,36 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             /* available memory */
             physical_memory_manager.free(entry.addr as usize, entry.length as usize, true);
         }
+        let area_name = match entry.m_type {
+            1 => "available",
+            3 => "ACPI information",
+            4 => "reserved(must save on hibernation)",
+            5 => "defective RAM",
+            _ => "reserved",
+        };
+        pr_info!(
+            "[0x{:X}~0x{:X}] {}",
+            entry.addr as usize,
+            PhysicalMemoryManager::size_to_end_address(entry.addr as usize, entry.length as usize),
+            area_name
+        );
     }
     /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
     for section in multiboot_information.elf_info.clone() {
         if section.should_allocate() && section.align_size() == PAGE_SIZE {
-            physical_memory_manager.reserve_memory(section.addr(), section.size(), true);
+            physical_memory_manager.reserve_memory(section.addr(), section.size(), PAGE_SHIFT);
         }
     }
     /* reserve Multiboot Information area */
     physical_memory_manager.reserve_memory(
         multiboot_information.address,
         multiboot_information.size,
-        false,
+        0,
     );
 
     /* set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
-    if !virtual_memory_manager.init(true, &mut physical_memory_manager) {
-        panic!("Cannot init Virtual Memory Manager.");
-    }
+    virtual_memory_manager.init(true, &mut physical_memory_manager);
 
     for section in multiboot_information.elf_info.clone() {
         if !section.should_allocate() || section.align_size() != PAGE_SIZE {
@@ -150,7 +165,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             & PAGE_MASK)
             + PAGE_SIZE;
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
-        if let Ok(address) = virtual_memory_manager.map_address(
+        match virtual_memory_manager.map_address(
             aligned_start_address,
             Some(aligned_start_address),
             aligned_size,
@@ -158,10 +173,20 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             &mut physical_memory_manager,
         ) {
-            if address == aligned_start_address {
-                continue;
+            Ok(address) => {
+                if address == aligned_start_address {
+                    continue;
+                }
+                pr_err!(
+                    "Virtual Address is different from Physical Address.\nV: {:X} P:{:X}",
+                    address,
+                    aligned_start_address
+                );
             }
-        }
+            Err(e) => {
+                pr_err!("Mapping ELF Section was failed. Err:{:?}", e);
+            }
+        };
         panic!("Cannot map virtual memory correctly.");
     }
     /* may be needless */
@@ -205,8 +230,9 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     kernel_memory_alloc_manager.init(&mut memory_manager);
 
     /* move Multiboot Information to allocated memory area */
+    let mutex_memory_manager = Mutex::new(memory_manager);
     let new_mbi_address = kernel_memory_alloc_manager
-        .kmalloc(multiboot_information.size, &mut memory_manager)
+        .kmalloc(multiboot_information.size, 3, &mutex_memory_manager)
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
         unsafe {
@@ -215,12 +241,15 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
 
     /* free old multibootinfo area */
-    memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size); /* may be already freed */
+    mutex_memory_manager
+        .lock()
+        .unwrap()
+        .free_physical_memory(multiboot_information.address, multiboot_information.size); /* may be already freed */
     /* apply paging */
-    memory_manager.set_paging_table();
+    mutex_memory_manager.lock().unwrap().set_paging_table();
 
     /* store managers to cluster */
-    get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);
+    get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
     get_kernel_manager_cluster().kernel_memory_alloc_manager =
         Mutex::new(kernel_memory_alloc_manager);
     MultiBootInformation::new(new_mbi_address, false)
@@ -251,15 +280,16 @@ fn init_acpi(rsdp_ptr: usize) {
         .get_bgrt_manager()
         .get_bitmap_physical_address()
     {
+        let temp_map_size = 54usize;
+
         match get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .memory_remap(
+            .mmap_dev(
                 p_bitmap_address,
-                54,
+                temp_map_size,
                 MemoryPermissionFlags::rodata(),
-                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             ) {
             Ok(bitmap_vm_address) => {
                 pr_info!(
@@ -269,27 +299,31 @@ fn init_acpi(rsdp_ptr: usize) {
                 );
                 if !draw_boot_logo(
                     bitmap_vm_address,
+                    temp_map_size,
                     acpi_manager
                         .get_xsdt_manager()
                         .get_bgrt_manager()
                         .get_image_offset()
                         .unwrap(),
                 ) {
-                    get_kernel_manager_cluster()
+                    if let Err(e) = get_kernel_manager_cluster()
                         .memory_manager
                         .lock()
                         .unwrap()
-                        .free_pages(bitmap_vm_address, 0 /*must fix*/);
+                        .free(bitmap_vm_address)
+                    {
+                        pr_err!("Freeing bitmap data failed Err:{:?}", e);
+                    }
                 }
             }
-            Err(err_massage) => {
-                pr_err!("{}", err_massage);
+            Err(e) => {
+                pr_err!("Mapping BGRT's bitmap data failed Err:{:?}", e);
             }
         };
     }
 }
 
-fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) -> bool {
+fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, usize)) -> bool {
     /* if file_size > PAGE_SIZE => ?*/
     if unsafe { *((bitmap_vm_address + 30) as *const u32) } != 0 {
         pr_info!("Boot logo is compressed");
@@ -305,8 +339,9 @@ fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) -> bool {
         .memory_manager
         .lock()
         .unwrap()
-        .resize_memory_remap(
+        .mremap_dev(
             bitmap_vm_address,
+            mapped_size,
             (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize / 8))
                 + file_offset as usize,
         ) {
@@ -328,15 +363,18 @@ fn draw_boot_logo(bitmap_vm_address: usize, offset: (usize, usize)) -> bool {
                     offset.0,
                     offset.1,
                 );
-            get_kernel_manager_cluster()
+            if let Err(e) = get_kernel_manager_cluster()
                 .memory_manager
                 .lock()
                 .unwrap()
-                .free_pages(remapped_bitmap_vm_address, 0 /*must fix*/);
+                .free(remapped_bitmap_vm_address)
+            {
+                pr_err!("Freeing bitmap data failed Err:{:?}", e);
+            }
             return true;
         }
-        Err(err_message) => {
-            pr_err!("{}", err_message);
+        Err(e) => {
+            pr_err!("Mapping BGRT's bitmap data Err:{:?}", e);
             return false;
         }
     };

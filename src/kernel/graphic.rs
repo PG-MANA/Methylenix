@@ -7,7 +7,7 @@ use arch::target_arch::device::crt;
 
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
+use kernel::memory_manager::MemoryPermissionFlags;
 
 use core::fmt;
 
@@ -60,11 +60,10 @@ impl GraphicManager {
             .memory_manager
             .lock()
             .unwrap()
-            .memory_remap(
+            .mmap_dev(
                 self.frame_buffer_address,
                 self.frame_buffer_height * self.frame_buffer_width * pixel_size as usize,
                 MemoryPermissionFlags::data(),
-                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             ) {
             Ok(address) => {
                 self.frame_buffer_address = address;

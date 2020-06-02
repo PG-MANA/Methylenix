@@ -2,6 +2,8 @@
  * Boot Graphics Resource Table Manager
  */
 
+use super::super::INITIAL_MMAP_SIZE;
+
 use kernel::manager_cluster::get_kernel_manager_cluster;
 
 #[repr(C, packed)]
@@ -52,7 +54,7 @@ impl BgrtManager {
             .memory_manager
             .lock()
             .unwrap()
-            .resize_memory_remap(bgrt_vm_address, 56)
+            .mremap_dev(bgrt_vm_address, INITIAL_MMAP_SIZE, 56)
         {
             a
         } else {
