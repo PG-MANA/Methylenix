@@ -22,7 +22,8 @@ pub struct KernelManagerCluster {
     pub kernel_memory_alloc_manager: Mutex<KernelMemoryAllocManager>,
     pub interrupt_manager: Mutex<InterruptManager>,
     pub efi_manager: Mutex<EfiManager>,
-    pub serial_port_manager: Mutex<SerialPortManager>,
+    pub serial_port_manager: SerialPortManager,
+    /*SerialPortManager has mutex process inner*/
     //input_manager:
 }
 
@@ -33,7 +34,7 @@ const fn init_manager_cluster() -> KernelManagerCluster {
         kernel_memory_alloc_manager: Mutex::new(KernelMemoryAllocManager::new()),
         interrupt_manager: Mutex::new(InterruptManager::new()),
         efi_manager: Mutex::new(EfiManager::new_static()),
-        serial_port_manager: Mutex::new(SerialPortManager::new_static()),
+        serial_port_manager: SerialPortManager::new(0x3F8),
     }
 }
 
