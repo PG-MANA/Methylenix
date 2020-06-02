@@ -27,13 +27,13 @@ fn alloc_error_oom(layout: Layout) -> ! {
 
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
+        let memory_manager = &get_kernel_manager_cluster().memory_manager;
         assert_eq!(layout.align() >> PAGE_SHIFT, 0);
         if let Some(address) = get_kernel_manager_cluster()
             .kernel_memory_alloc_manager
             .lock()
             .unwrap()
-            .vmalloc(layout.size(), layout.align(), &mut memory_manager)
+            .vmalloc(layout.size(), layout.align(), memory_manager)
         {
             address as *mut u8
         } else {
@@ -42,12 +42,12 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
+        let memory_manager = &get_kernel_manager_cluster().memory_manager;
         assert_eq!(layout.align() >> PAGE_SHIFT, 0);
         get_kernel_manager_cluster()
             .kernel_memory_alloc_manager
             .lock()
             .unwrap()
-            .vfree(ptr as usize, &mut memory_manager)
+            .vfree(ptr as usize, memory_manager)
     }
 }

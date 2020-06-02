@@ -230,8 +230,9 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     kernel_memory_alloc_manager.init(&mut memory_manager);
 
     /* move Multiboot Information to allocated memory area */
+    let mutex_memory_manager = Mutex::new(memory_manager);
     let new_mbi_address = kernel_memory_alloc_manager
-        .kmalloc(multiboot_information.size, 3, &mut memory_manager)
+        .kmalloc(multiboot_information.size, 3, &mutex_memory_manager)
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
         unsafe {
@@ -240,12 +241,15 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     }
 
     /* free old multibootinfo area */
-    memory_manager.free_physical_memory(multiboot_information.address, multiboot_information.size); /* may be already freed */
+    mutex_memory_manager
+        .lock()
+        .unwrap()
+        .free_physical_memory(multiboot_information.address, multiboot_information.size); /* may be already freed */
     /* apply paging */
-    memory_manager.set_paging_table();
+    mutex_memory_manager.lock().unwrap().set_paging_table();
 
     /* store managers to cluster */
-    get_kernel_manager_cluster().memory_manager = Mutex::new(memory_manager);
+    get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
     get_kernel_manager_cluster().kernel_memory_alloc_manager =
         Mutex::new(kernel_memory_alloc_manager);
     MultiBootInformation::new(new_mbi_address, false)

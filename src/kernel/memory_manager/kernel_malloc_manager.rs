@@ -7,6 +7,7 @@ use arch::target_arch::paging::PAGE_SIZE;
 
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
+use kernel::sync::spin_lock::Mutex;
 
 use core::mem;
 use core::mem::MaybeUninit;
@@ -60,21 +61,21 @@ impl KernelMemoryAllocManager {
         &mut self,
         size: usize,
         align_order: usize,
-        m_manager: &mut MemoryManager,
+        m_manager: &Mutex<MemoryManager>,
     ) -> Option<usize> {
         if size == 0 {
             return None;
         }
         if size >= PAGE_SIZE {
-            //TODO: do something...
-            return match m_manager.alloc_pages(
+            let mut locked_m_manager = m_manager.lock().unwrap();
+            return match locked_m_manager.alloc_pages(
                 MemoryManager::size_to_order(size),
                 MemoryPermissionFlags::data(),
             ) {
                 Ok(address) => {
                     let aligned_size = (1 << MemoryManager::size_to_order(size)) * PAGE_SIZE;
                     if !self.add_entry_to_used_list(address, aligned_size) {
-                        if let Err(e) = m_manager.free(address) {
+                        if let Err(e) = locked_m_manager.free(address) {
                             pr_err!("Free memory failed Err: {:?}", e);
                         }
                         return None;
@@ -95,9 +96,13 @@ impl KernelMemoryAllocManager {
             return Some(address);
         }
 
+        let mut locked_m_manager = m_manager.lock().unwrap();
         /* alloc from Memory Manager */
-        if let Ok(allocated_address) = m_manager.alloc_pages(0, MemoryPermissionFlags::data()) {
+        if let Ok(allocated_address) =
+            locked_m_manager.alloc_pages(0, MemoryPermissionFlags::data())
+        {
             self.alloc_manager.free(allocated_address, PAGE_SIZE, true);
+            drop(locked_m_manager);
             return self.kmalloc(size, align_order, m_manager);
         }
         /*TODO: Free unused memory.*/
@@ -108,7 +113,7 @@ impl KernelMemoryAllocManager {
         &mut self,
         size: usize,
         align_order: usize,
-        m_manager: &mut MemoryManager,
+        m_manager: &Mutex<MemoryManager>,
     ) -> Option<usize> {
         if size == 0 {
             return None;
@@ -117,7 +122,7 @@ impl KernelMemoryAllocManager {
             return self.kmalloc(size, align_order, m_manager);
         }
 
-        match m_manager.alloc_nonlinear_pages(
+        match m_manager.lock().unwrap().alloc_nonlinear_pages(
             MemoryManager::size_to_order(size),
             MemoryPermissionFlags::data(),
         ) {
@@ -125,7 +130,7 @@ impl KernelMemoryAllocManager {
                 if self.add_entry_to_used_list(address, size) {
                     Some(address)
                 } else {
-                    if let Err(e) = m_manager.free(address) {
+                    if let Err(e) = m_manager.lock().unwrap().free(address) {
                         pr_err!("Free memory failed Err: {:?}", e);
                     }
                     None
@@ -138,7 +143,7 @@ impl KernelMemoryAllocManager {
         }
     }
 
-    pub fn kfree(&mut self, address: usize, _m_manager: &mut MemoryManager) {
+    pub fn kfree(&mut self, address: usize, _m_manager: &Mutex<MemoryManager>) {
         for e in unsafe { self.used_memory_list.get_mut().iter_mut() } {
             if e.0 == address {
                 if e.1 == 0 {
@@ -152,7 +157,7 @@ impl KernelMemoryAllocManager {
         }
     }
 
-    pub fn vfree(&mut self, address: usize, m_manager: &mut MemoryManager) {
+    pub fn vfree(&mut self, address: usize, m_manager: &Mutex<MemoryManager>) {
         for e in unsafe { self.used_memory_list.get_mut().iter_mut() } {
             if e.0 == address {
                 if e.1 == 0 {
@@ -161,7 +166,7 @@ impl KernelMemoryAllocManager {
                 if e.1 < PAGE_SIZE {
                     return self.kfree(address, m_manager);
                 }
-                if let Err(err) = m_manager.free(e.0) {
+                if let Err(err) = m_manager.lock().unwrap().free(e.0) {
                     pr_err!("Free memory failed Err: {:?}", err);
                 }
                 self.alloc_manager.free(e.0, e.1, false);
