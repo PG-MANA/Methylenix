@@ -1,6 +1,5 @@
 /*
  * Interrupt Manager
- * 共通部分をkernel/に持っていきたい
  */
 
 pub mod idt;

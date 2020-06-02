@@ -9,7 +9,7 @@ pub struct FrameBufferInfo {
     pub width: u32,
     pub height: u32,
     pub depth: u8,
-    pub mode: u8, // 0がパレットカラー、2がDirect RGB、3がテキストモード
+    pub mode: u8, /* 0 is palette color, 2 is direct RGB, 3 is text mode*/
 }
 
 #[repr(C)]
@@ -23,9 +23,9 @@ pub struct MultibootTagFrameBuffer {
     framebuffer_height: u32,
     framebuffer_bpp: u8,
     framebuffer_type: u8,
-    //https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html 3.6.12 Framebuffer info 参照
+    /* https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html 3.6.12 Framebuffer info */
     reserved: u8,
-    /*color_infoは無視してる*/
+    /* color_info is ignored */
 }
 
 impl FrameBufferInfo {

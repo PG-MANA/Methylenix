@@ -54,9 +54,7 @@ impl ElfInfo {
 
 impl Iterator for ElfInfo {
     type Item = &'static ElfSection;
-    //                            ↓の'はライフタイムと呼ばれ、返したあとにElfSectionが消えないようにするため。
     fn next(&mut self) -> Option<&'static ElfSection> {
-        //これの実装でfor ... inが使える https://rustbyexample.com/trait/iter.html
         if self.cnt == self.num {
             return None;
         }

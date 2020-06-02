@@ -59,9 +59,7 @@ impl MemoryMapInfo {
 
 impl Iterator for MemoryMapInfo {
     type Item = &'static MemoryMapEntry;
-    //                            ↓の'はライフタイムと呼ばれ、返したあとにElf_Sectionが消えないようにするため。
     fn next(&mut self) -> Option<&'static MemoryMapEntry> {
-        //これの実装でfor ... inが使える https://rustbyexample.com/trait/iter.html
         if self.cnt == self.num {
             return None;
         }
