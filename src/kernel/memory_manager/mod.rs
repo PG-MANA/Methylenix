@@ -204,6 +204,7 @@ impl MemoryManager {
         kprintln!("----Virtual Memory Entries Dump End----");
     }
 
+    #[inline]
     pub const fn page_align(address: usize, size: usize) -> (usize /*address*/, usize /*size*/) {
         if size == 0 && (address & PAGE_MASK) == 0 {
             (address, 0)
@@ -215,6 +216,7 @@ impl MemoryManager {
         }
     }
 
+    #[inline]
     pub const fn size_to_order(size: usize) -> usize {
         if size <= PAGE_SIZE {
             return 0;
@@ -232,21 +234,25 @@ impl MemoryManager {
         order
     }
 
+    #[inline]
     pub const fn offset_to_index(offset: usize) -> usize {
         offset >> PAGE_SHIFT
     }
 
+    #[inline]
     pub const fn index_to_offset(index: usize) -> usize {
         use core::usize;
         assert!(index <= Self::offset_to_index(usize::MAX));
         index << PAGE_SHIFT
     }
 
+    #[inline]
     pub const fn address_to_size(start_address: usize, end_address: usize) -> usize {
         assert!(start_address <= end_address);
         end_address - start_address + 1
     }
 
+    #[inline]
     pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {
         start_address + size - 1
     }

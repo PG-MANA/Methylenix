@@ -425,6 +425,7 @@ impl PhysicalMemoryManager {
         }
     }
 
+    #[inline]
     fn size_to_order(size: usize) -> usize {
         use core::cmp::min;
         min(
@@ -433,7 +434,8 @@ impl PhysicalMemoryManager {
         )
     }
 
-    fn align_address_and_size(
+    #[inline]
+    const fn align_address_and_size(
         address: usize,
         size: usize,
         align_order: usize,
@@ -445,7 +447,8 @@ impl PhysicalMemoryManager {
         (aligned_address, aligned_size)
     }
 
-    fn align_address_and_available_size(
+    #[inline]
+    const fn align_address_and_available_size(
         address: usize,
         size: usize,
         align_order: usize,
