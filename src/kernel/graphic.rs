@@ -128,10 +128,9 @@ impl GraphicManager {
     }
 
     pub fn puts(&mut self, string: &str) -> bool {
-        if let Ok(serial_port_manager) = get_kernel_manager_cluster().serial_port_manager.try_lock()
-        {
-            serial_port_manager.sendstr(string);
-        }
+        get_kernel_manager_cluster()
+            .serial_port_manager
+            .sendstr(string);
         if self.is_textmode {
             for code in string.bytes() {
                 match code as char {

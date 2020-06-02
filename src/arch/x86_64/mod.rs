@@ -57,7 +57,7 @@ pub extern "C" fn multiboot_main(
     let serial_port_manager = SerialPortManager::new(0x3F8 /* COM1 */);
     serial_port_manager.init();
     /* Boot Information Manager に格納 */
-    get_kernel_manager_cluster().serial_port_manager = Mutex::new(serial_port_manager);
+    get_kernel_manager_cluster().serial_port_manager = serial_port_manager;
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
         init_acpi(rsdp_address);
     } else {
@@ -95,8 +95,6 @@ fn hlt() {
         }
         let ascii_code = get_kernel_manager_cluster()
             .serial_port_manager
-            .lock()
-            .unwrap()
             .dequeue_key()
             .unwrap_or(0);
         if ascii_code != 0 {
@@ -389,8 +387,6 @@ pub extern "C" fn directboot_main(
 ) {
     get_kernel_manager_cluster()
         .serial_port_manager
-        .lock()
-        .unwrap()
         .sendstr("boot success\r\n");
     loop {
         hlt();
