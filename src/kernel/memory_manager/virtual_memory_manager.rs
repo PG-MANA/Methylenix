@@ -92,7 +92,7 @@ impl VirtualMemoryManager {
             let cache_address = reserved_memory_list[i];
             let mut entry = VirtualMemoryEntry::new(
                 cache_address,
-                PhysicalMemoryManager::size_to_end_address(cache_address, PAGE_SIZE),
+                MemoryManager::size_to_end_address(cache_address, PAGE_SIZE),
                 MemoryPermissionFlags::data(),
                 MemoryOptionFlags::new(MemoryOptionFlags::WIRED),
             );
@@ -142,7 +142,7 @@ impl VirtualMemoryManager {
 
             let mut entry = VirtualMemoryEntry::new(
                 address,
-                PhysicalMemoryManager::size_to_end_address(address, size),
+                MemoryManager::size_to_end_address(address, size),
                 MemoryPermissionFlags::data(),
                 MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             );
@@ -220,10 +220,7 @@ impl VirtualMemoryManager {
 
         let mut entry = VirtualMemoryEntry::new(
             direct_mapped_area_address,
-            PhysicalMemoryManager::size_to_end_address(
-                direct_mapped_area_address,
-                direct_mapped_area_size,
-            ),
+            MemoryManager::size_to_end_address(direct_mapped_area_address, direct_mapped_area_size),
             MemoryPermissionFlags::data(),
             MemoryOptionFlags::new(
                 MemoryOptionFlags::DIRECT_MAP
@@ -298,7 +295,7 @@ impl VirtualMemoryManager {
         }
         let vm_start_address = if self.check_usable_address_range(
             physical_address,
-            PhysicalMemoryManager::size_to_end_address(physical_address, size),
+            MemoryManager::size_to_end_address(physical_address, size),
         ) {
             physical_address
         } else if let Some(address) = self.find_usable_memory_area(size) {
@@ -332,7 +329,7 @@ impl VirtualMemoryManager {
         let entry = if let Some(address) = self.find_usable_memory_area(size) {
             VirtualMemoryEntry::new(
                 address,
-                PhysicalMemoryManager::size_to_end_address(address, size),
+                MemoryManager::size_to_end_address(address, size),
                 permission,
                 option,
             )
@@ -360,7 +357,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::AddressNotAligned);
         } else if vm_map_entry.get_vm_start_address() > vm_address
             || vm_map_entry.get_vm_end_address()
-                < PhysicalMemoryManager::size_to_end_address(vm_address, PAGE_SIZE)
+                < MemoryManager::size_to_end_address(vm_address, PAGE_SIZE)
         {
             pr_err!("Virtual Address is out of vm_map_entry.");
             return Err(MemoryError::InvalidVirtualAddress);
@@ -424,14 +421,14 @@ impl VirtualMemoryManager {
             }*/
             VirtualMemoryEntry::new(
                 vm_start_address,
-                PhysicalMemoryManager::size_to_end_address(vm_start_address, size),
+                MemoryManager::size_to_end_address(vm_start_address, size),
                 permission,
                 option,
             )
         } else if let Some(vm_start_address) = self.find_usable_memory_area(size) {
             VirtualMemoryEntry::new(
                 vm_start_address,
-                PhysicalMemoryManager::size_to_end_address(vm_start_address, size),
+                MemoryManager::size_to_end_address(vm_start_address, size),
                 permission,
                 option,
             )
@@ -632,7 +629,7 @@ impl VirtualMemoryManager {
         assert!(vm_map_entry.get_vm_start_address() <= virtual_address);
         assert!(
             vm_map_entry.get_vm_end_address()
-                >= PhysicalMemoryManager::size_to_end_address(virtual_address, PAGE_SIZE)
+                >= MemoryManager::size_to_end_address(virtual_address, PAGE_SIZE)
         );
         let p_index =
             MemoryManager::offset_to_index(virtual_address - vm_map_entry.get_vm_start_address());
@@ -702,7 +699,7 @@ impl VirtualMemoryManager {
         new_size: usize,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> bool {
-        if PhysicalMemoryManager::address_to_size(
+        if MemoryManager::address_to_size(
             target_entry.get_vm_start_address(),
             target_entry.get_vm_end_address(),
         ) >= new_size
@@ -713,24 +710,20 @@ impl VirtualMemoryManager {
             let next_entry_start_address =
                 unsafe { &*(next_entry_address as *const VirtualMemoryEntry) }
                     .get_vm_start_address();
-            if PhysicalMemoryManager::size_to_end_address(
-                target_entry.get_vm_start_address(),
-                new_size,
-            ) >= next_entry_start_address
+            if MemoryManager::size_to_end_address(target_entry.get_vm_start_address(), new_size)
+                >= next_entry_start_address
             {
                 return false;
             }
         } else {
-            if PhysicalMemoryManager::size_to_end_address(
-                target_entry.get_vm_start_address(),
-                new_size,
-            ) >= MAX_VIRTUAL_ADDRESS
+            if MemoryManager::size_to_end_address(target_entry.get_vm_start_address(), new_size)
+                >= MAX_VIRTUAL_ADDRESS
             {
                 return false;
             }
         }
 
-        let old_size = PhysicalMemoryManager::address_to_size(
+        let old_size = MemoryManager::address_to_size(
             target_entry.get_vm_start_address(),
             target_entry.get_vm_end_address(),
         );
@@ -746,7 +739,7 @@ impl VirtualMemoryManager {
             .get_physical_address()
             + PAGE_SIZE;
 
-        target_entry.set_vm_end_address(PhysicalMemoryManager::size_to_end_address(
+        target_entry.set_vm_end_address(MemoryManager::size_to_end_address(
             target_entry.get_vm_start_address(),
             new_size,
         ));
@@ -775,7 +768,7 @@ impl VirtualMemoryManager {
                 .is_err()
             {
                 if i != 0 {
-                    target_entry.set_vm_end_address(PhysicalMemoryManager::size_to_end_address(
+                    target_entry.set_vm_end_address(MemoryManager::size_to_end_address(
                         target_entry.get_vm_start_address(),
                         not_associated_virtual_address + MemoryManager::index_to_offset(i - 1),
                     ));
@@ -915,7 +908,7 @@ impl VirtualMemoryManager {
             kprintln!(
                 "Virtual:0x{:X} Size:0x{:X} W:{}, U:{}, EXE:{}",
                 entry.get_vm_start_address(),
-                PhysicalMemoryManager::address_to_size(
+                MemoryManager::address_to_size(
                     entry.get_vm_start_address(),
                     entry.get_vm_end_address()
                 ),

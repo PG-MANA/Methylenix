@@ -129,7 +129,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         pr_info!(
             "[0x{:X}~0x{:X}] {}",
             entry.addr as usize,
-            PhysicalMemoryManager::size_to_end_address(entry.addr as usize, entry.length as usize),
+            MemoryManager::size_to_end_address(entry.addr as usize, entry.length as usize),
             area_name
         );
     }

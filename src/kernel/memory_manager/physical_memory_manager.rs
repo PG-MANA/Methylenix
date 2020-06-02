@@ -139,7 +139,7 @@ impl PhysicalMemoryManager {
         }
         let entry = if let Some(t) = target_entry {
             assert!(t.get_start_address() <= start_address);
-            assert!(t.get_end_address() >= Self::size_to_end_address(start_address, size));
+            assert!(t.get_end_address() >= MemoryManager::size_to_end_address(start_address, size));
             t
         } else if let Some(t) = self.search_entry_containing_address_mut(start_address) {
             t
@@ -148,7 +148,7 @@ impl PhysicalMemoryManager {
         };
 
         if entry.get_start_address() == start_address {
-            if entry.get_end_address() == Self::size_to_end_address(start_address, size) {
+            if entry.get_end_address() == MemoryManager::size_to_end_address(start_address, size) {
                 /* delete the entry */
                 if entry.is_first_entry() {
                     if let Some(next) = entry.get_next_entry() {
@@ -171,7 +171,8 @@ impl PhysicalMemoryManager {
             /* allocate 1 byte of end_address */
             entry.set_range(entry.get_start_address(), start_address - 1);
             self.chain_entry_to_free_list(entry, entry.get_size() + size, false);
-        } else if entry.get_end_address() == Self::size_to_end_address(start_address, size) {
+        } else if entry.get_end_address() == MemoryManager::size_to_end_address(start_address, size)
+        {
             let old_size = entry.get_size();
             entry.set_range(entry.get_start_address(), start_address - 1);
             self.chain_entry_to_free_list(entry, old_size, false);
@@ -205,7 +206,7 @@ impl PhysicalMemoryManager {
             .unwrap_or(unsafe { &mut *(self.first_entry as *mut MemoryEntry) });
 
         if entry.get_start_address() <= start_address
-            && entry.get_end_address() >= Self::size_to_end_address(start_address, size)
+            && entry.get_end_address() >= MemoryManager::size_to_end_address(start_address, size)
         {
             /* already freed */
             return false;
@@ -213,12 +214,13 @@ impl PhysicalMemoryManager {
             /* free duplicated area */
             return self.define_free_memory(
                 entry.get_end_address() + 1,
-                Self::address_to_size(
+                MemoryManager::address_to_size(
                     entry.get_end_address() + 1,
-                    Self::size_to_end_address(start_address, size),
+                    MemoryManager::size_to_end_address(start_address, size),
                 ),
             );
-        } else if entry.get_end_address() == Self::size_to_end_address(start_address, size) {
+        } else if entry.get_end_address() == MemoryManager::size_to_end_address(start_address, size)
+        {
             /* free duplicated area */
             /* entry may be first entry */
             return self.define_free_memory(start_address, size - entry.get_size());
@@ -228,18 +230,21 @@ impl PhysicalMemoryManager {
             if entry.get_end_address() + 1 == start_address {
                 entry.set_range(
                     entry.get_start_address(),
-                    Self::size_to_end_address(start_address, size),
+                    MemoryManager::size_to_end_address(start_address, size),
                 );
                 processed = true;
             }
             if entry.is_first_entry()
-                && entry.get_start_address() == Self::size_to_end_address(start_address, size) + 1
+                && entry.get_start_address()
+                    == MemoryManager::size_to_end_address(start_address, size) + 1
             {
                 entry.set_range(start_address, entry.get_end_address());
                 processed = true;
             }
             if let Some(next) = entry.get_next_entry() {
-                if next.get_start_address() == Self::size_to_end_address(start_address, size) + 1 {
+                if next.get_start_address()
+                    == MemoryManager::size_to_end_address(start_address, size) + 1
+                {
                     next.set_range(start_address, next.get_end_address());
                     processed = true;
                 }
@@ -261,7 +266,7 @@ impl PhysicalMemoryManager {
                 };
                 new_entry.set_range(
                     start_address,
-                    Self::size_to_end_address(start_address, size),
+                    MemoryManager::size_to_end_address(start_address, size),
                 );
                 if entry.is_first_entry() && new_entry.get_end_address() < entry.get_start_address()
                 {
@@ -290,7 +295,7 @@ impl PhysicalMemoryManager {
                 };
                 new_entry.set_range(
                     start_address,
-                    Self::size_to_end_address(start_address, size),
+                    MemoryManager::size_to_end_address(start_address, size),
                 );
                 new_entry.unset_next_entry();
                 entry.chain_after_me(new_entry);
@@ -362,7 +367,7 @@ impl PhysicalMemoryManager {
             first_entry.init();
             first_entry.set_range(
                 start_address,
-                Self::size_to_end_address(start_address, size),
+                MemoryManager::size_to_end_address(start_address, size),
             );
             first_entry.set_enabled();
             self.chain_entry_to_free_list(first_entry, first_entry.get_size(), true);
@@ -420,12 +425,6 @@ impl PhysicalMemoryManager {
         }
     }
 
-    pub fn address_to_size(start_address: usize, end_address: usize) -> usize {
-        /*pub const fn ?*/
-        assert!(start_address <= end_address);
-        end_address - start_address + 1
-    }
-
     fn size_to_order(size: usize) -> usize {
         use core::cmp::min;
         min(
@@ -462,10 +461,6 @@ impl PhysicalMemoryManager {
         }
     }
 
-    pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {
-        start_address + size - 1
-    }
-
     pub fn dump_memory_entry(&self) {
         let mut entry = unsafe { &*(self.first_entry as *const MemoryEntry) };
         if !entry.is_enabled() {
@@ -475,14 +470,14 @@ impl PhysicalMemoryManager {
         kprintln!(
             "Start:0x{:X} Size:0x{:X}",
             entry.get_start_address(),
-            Self::address_to_size(entry.get_start_address(), entry.get_end_address())
+            MemoryManager::address_to_size(entry.get_start_address(), entry.get_end_address())
         );
         while let Some(t) = entry.get_next_entry() {
             entry = t;
             kprintln!(
                 "Start:0x{:X} Size:0x{:X}",
                 entry.get_start_address(),
-                Self::address_to_size(entry.get_start_address(), entry.get_end_address())
+                MemoryManager::address_to_size(entry.get_start_address(), entry.get_end_address())
             );
         }
         kprintln!("List:");
@@ -496,7 +491,10 @@ impl PhysicalMemoryManager {
                 kprintln!(
                     " Start:0x{:X} Size:0x{:X}",
                     entry.get_start_address(),
-                    Self::address_to_size(entry.get_start_address(), entry.get_end_address())
+                    MemoryManager::address_to_size(
+                        entry.get_start_address(),
+                        entry.get_end_address()
+                    )
                 );
             }
         }

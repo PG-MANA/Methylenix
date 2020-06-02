@@ -241,6 +241,15 @@ impl MemoryManager {
         assert!(index <= Self::offset_to_index(usize::MAX));
         index << PAGE_SHIFT
     }
+
+    pub const fn address_to_size(start_address: usize, end_address: usize) -> usize {
+        assert!(start_address <= end_address);
+        end_address - start_address + 1
+    }
+
+    pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {
+        start_address + size - 1
+    }
 }
 
 impl MemoryPermissionFlags {
