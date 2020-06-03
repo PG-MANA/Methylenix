@@ -131,7 +131,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             area_name
         );
     }
-    /* 先に使用中のメモリ領域を除外するためelfセクションを解析 */
+    /* reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
         if section.should_allocate() && section.align_size() == PAGE_SIZE {
             physical_memory_manager.reserve_memory(section.addr(), section.size(), PAGE_SHIFT);

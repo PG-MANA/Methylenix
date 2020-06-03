@@ -2,7 +2,7 @@
  * Multiboot Elf Information
  */
 
-#[repr(C, packed)] //sectionsの前に余計なパッディングを入れないため
+#[repr(C, packed)]
 pub struct MultibootTagElfSections {
     s_type: u32,
     size: u32,
@@ -12,8 +12,6 @@ pub struct MultibootTagElfSections {
     sections: ElfSection,
 }
 
-//セクションヘッダ(テーブル)
-//雑い設計
 #[repr(C)]
 pub struct ElfSection {
     section_name: u32,
@@ -30,53 +28,47 @@ pub struct ElfSection {
 
 #[derive(Clone)]
 pub struct ElfInfo {
-    //MultiBootのElf情報
-    pub addr: usize,
-    pub num: u32,
-    //firstを含めたelf headerの数
-    pub entsize: u32,
-    cnt: u32,
+    pub address: usize,
+    pub size_of_entry: usize,
+    pub num_of_entry: usize,
+    cnt: usize,
 }
 
 impl ElfInfo {
     pub fn new(elf: &MultibootTagElfSections) -> ElfInfo {
         ElfInfo {
-            addr: unsafe { &elf.sections as *const _ as usize },
-            entsize: elf.entsize,
-            num: elf.num,
+            address: unsafe { &elf.sections as *const _ as usize },
+            size_of_entry: elf.entsize as usize,
+            num_of_entry: elf.num as usize,
             cnt: 0,
         }
-    }
-    pub fn reset(&mut self) {
-        self.cnt = 0;
     }
 }
 
 impl Iterator for ElfInfo {
     type Item = &'static ElfSection;
-    //                            ↓の'はライフタイムと呼ばれ、返したあとにElfSectionが消えないようにするため。
     fn next(&mut self) -> Option<&'static ElfSection> {
-        //これの実装でfor ... inが使える https://rustbyexample.com/trait/iter.html
-        if self.cnt == self.num {
-            return None;
+        if self.cnt == self.num_of_entry {
+            None
+        } else {
+            let section =
+                unsafe { &*((self.address + self.cnt * self.size_of_entry) as *const ElfSection) };
+            self.cnt += 1;
+            if section.section_type == 0 {
+                self.next()
+            } else {
+                Some(section)
+            }
         }
-        let section =
-            unsafe { &*((self.addr + (self.cnt * self.entsize) as usize) as *const ElfSection) };
-        self.cnt += 1;
-        if section.section_type == 0 {
-            //できればEnum使いたい
-            return self.next(); //できればelseは使いたくない(C言語での習慣から)
-        }
-        return Some(section);
     }
 }
 
 impl Default for ElfInfo {
     fn default() -> ElfInfo {
         ElfInfo {
-            addr: 0,
-            num: 0,
-            entsize: 0,
+            address: 0,
+            num_of_entry: 0,
+            size_of_entry: 0,
             cnt: 0,
         }
     }
@@ -93,7 +85,6 @@ impl ElfSection {
         self.section_addralign as usize
     }
     pub fn flags(&self) -> usize {
-        //列挙型使えるとな...
         self.section_flags
     }
     pub fn should_writable(&self) -> bool {

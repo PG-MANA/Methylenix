@@ -13,8 +13,7 @@ pub use self::memory::{MemoryMapEntry, MemoryMapInfo};
 
 use core::mem;
 
-//構造体
-#[repr(C)] //Rustではstructが記述通りに並んでない
+#[repr(C)]
 struct MultibootTag {
     s_type: u32,
     size: u32,
@@ -41,7 +40,7 @@ pub struct MultiBootInformation {
 }
 
 impl MultiBootInformation {
-    #![allow(dead_code)] //使っていない定数でエラーが出る
+    #![allow(dead_code)]
     const TAG_ALIGN: u32 = 8;
     const TAG_TYPE_END: u32 = 0;
     const TAG_TYPE_CMDLINE: u32 = 1;
@@ -132,9 +131,7 @@ impl MultiBootInformation {
             }
             tag += ((unsafe { (&*(tag as *const MultibootTag)).size } as usize) + 7) & !7;
         }
-
-        //返却
-        mbi
+        return mbi;
     }
 
     fn test(address: usize) -> bool {

@@ -43,10 +43,6 @@ impl BgrtManager {
     pub fn init(&mut self, bgrt_vm_address: usize) -> bool {
         /* bgrt_vm_address must be accessible */
         let bgrt = unsafe { &*(bgrt_vm_address as *const BGRT) };
-        /*if bgrt.signature != Self::BGRTSIGNATURE {
-            pr_err!("BGRT Signature is not correct.");
-            return false;
-        }*/
         if bgrt.version != 1 || bgrt.revision != 1 {
             pr_err!("Not supported BGRT version");
         }
