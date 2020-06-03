@@ -25,57 +25,43 @@ pub struct MultibootTagMemoryMap {
 
 #[derive(Clone)]
 pub struct MemoryMapInfo {
-    pub addr: usize,
-    pub num: u32,
-    pub entry_size: u32,
-    cnt: u32,
+    pub address: usize,
+    pub num_of_entry: usize,
+    pub entry_size: usize,
+    cnt: usize,
 }
 
 impl MemoryMapInfo {
-    pub fn new(map: &MultibootTagMemoryMap) -> MemoryMapInfo {
-        MemoryMapInfo {
-            num: ((map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
-                / map.entry_size as usize) as u32,
-            /*+1,//0からカウントするため-1するが打ち消し*/
-            addr: &map.entries as *const MemoryMapEntry as usize,
-            entry_size: map.entry_size,
+    pub fn new(map: &MultibootTagMemoryMap) -> Self {
+        Self {
+            num_of_entry: ((map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
+                / map.entry_size as usize),
+            address: &map.entries as *const MemoryMapEntry as usize,
+            entry_size: map.entry_size as usize,
             cnt: 0,
         }
-    }
-
-    pub const fn new_static() -> MemoryMapInfo {
-        MemoryMapInfo {
-            addr: 0,
-            num: 0,
-            entry_size: 0,
-            cnt: 0,
-        }
-    }
-
-    pub fn reset(&mut self) {
-        self.cnt = 0;
     }
 }
 
 impl Iterator for MemoryMapInfo {
     type Item = &'static MemoryMapEntry;
     fn next(&mut self) -> Option<&'static MemoryMapEntry> {
-        if self.cnt == self.num {
-            return None;
+        if self.cnt == self.num_of_entry {
+            None
+        } else {
+            let entry =
+                unsafe { &*((self.address + self.cnt * self.entry_size) as *const MemoryMapEntry) };
+            self.cnt += 1;
+            Some(entry)
         }
-        let entry = unsafe {
-            &*((self.addr + (self.cnt * self.entry_size) as usize) as *const MemoryMapEntry)
-        };
-        self.cnt += 1;
-        return Some(entry);
     }
 }
 
 impl Default for MemoryMapInfo {
-    fn default() -> MemoryMapInfo {
-        MemoryMapInfo {
-            addr: 0,
-            num: 0,
+    fn default() -> Self {
+        Self {
+            address: 0,
+            num_of_entry: 0,
             entry_size: 0,
             cnt: 0,
         }

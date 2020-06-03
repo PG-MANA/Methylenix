@@ -18,7 +18,7 @@ pub fn panic(info: &panic::PanicInfo) -> ! {
     if location.is_some() && message.is_some() {
         kprintln!(
             "Line {} in {}\nMessage: {}",
-            location.unwrap().line(), //THINKING: filename only
+            location.unwrap().line(),
             location.unwrap().file(),
             message.unwrap()
         );
