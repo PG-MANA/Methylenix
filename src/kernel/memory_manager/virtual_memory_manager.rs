@@ -649,7 +649,7 @@ impl VirtualMemoryManager {
         physical_address: usize,
         virtual_address: usize,
         permission: MemoryPermissionFlags,
-        _pm_manager: &mut PhysicalMemoryManager,
+        pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         loop {
             match self.page_manager.associate_address(
@@ -662,7 +662,12 @@ impl VirtualMemoryManager {
                     return Ok(());
                 }
                 Err(PagingError::MemoryCacheRanOut) => {
-                    unimplemented!();
+                    for _ in 0..PAGING_CACHE_LENGTH {
+                        match self.alloc_from_direct_map(PAGE_SIZE, pm_manager) {
+                            Ok(address) => self.reserved_memory_list.free_ptr(address as *mut _),
+                            Err(e) => panic!("Cannot alloc memory for paging Err:{:?}", e),
+                        }
+                    }
                     /* retry (by loop) */
                 }
                 Err(_) => {
@@ -828,6 +833,55 @@ impl VirtualMemoryManager {
         } else {
             Err(MemoryError::InvalidVirtualAddress)
         }
+    }
+
+    fn alloc_from_direct_map(
+        &mut self,
+        size: usize,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<usize, MemoryError> {
+        if size & !PAGE_MASK != 0 {
+            pr_err!("Size is not aligned: {:X}", size);
+            return Err(MemoryError::SizeNotAligned);
+        }
+        if self.direct_mapped_area.is_none() {
+            pr_err!("Direct map area is not available.");
+            return Err(MemoryError::AllocPhysicalAddressFailed);
+        }
+
+        let allocated_address = self
+            .direct_mapped_area
+            .as_mut()
+            .unwrap()
+            .allocator
+            .alloc(PAGE_SIZE, PAGE_SHIFT);
+        if allocated_address.is_none() {
+            pr_err!("Cannot alloc from direct map.");
+            return Err(MemoryError::AllocPhysicalAddressFailed);
+        }
+        let allocated_address = allocated_address.unwrap();
+
+        let direct_map_entry = unsafe {
+            &mut *((self.direct_mapped_area.as_mut().unwrap().entry as *mut VirtualMemoryEntry)
+                .clone())
+        };
+        /* VirtualMemoryEntry has mutex lock inside. */
+        if let Err(e) = self._map_address(
+            direct_map_entry,
+            allocated_address,
+            allocated_address,
+            size,
+            pm_manager,
+        ) {
+            self.direct_mapped_area.as_mut().unwrap().allocator.free(
+                allocated_address,
+                size,
+                false,
+            );
+            return Err(e);
+        }
+        /* already associated address */
+        return Ok(allocated_address);
     }
 
     fn _find_entry(&self, vm_address: usize) -> Option<&'static VirtualMemoryEntry> {
