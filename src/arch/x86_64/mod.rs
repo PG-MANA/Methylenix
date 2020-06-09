@@ -85,10 +85,6 @@ pub fn general_protection_exception_handler(e_code: usize) {
 
 fn hlt() {
     pr_info!("All init are done!");
-    use alloc::string::String;
-    let mut string = String::from("Hello,world!");
-    string.push_str("This is String Test!!");
-    println!("{}", string);
     loop {
         unsafe {
             cpu::hlt();
