@@ -1,6 +1,7 @@
 /*
-共通規格(MultiBootやUEFI)の実装
-*/
+ * Modules to handle device or system like UEFI
+ */
 
+pub mod acpi;
 pub mod efi;
 pub mod multiboot;

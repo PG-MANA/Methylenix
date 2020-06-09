@@ -29,9 +29,9 @@ impl GateDescriptor {
     pub fn new(offset: unsafe fn(), selector: u16, ist: u8, type_attr: u8) -> GateDescriptor {
         let c = offset as *const unsafe fn() as usize;
         GateDescriptor {
-            offset_l: (c & 0xffff) as u16,             //(offset & 0xffff) as u16,
-            offset_m: ((c & 0xffff0000) >> 16) as u16, //(offset & 0xffff0000 >> 16) as u16,
-            offset_h: (c >> 32) as u32,                //(offset >> 32) as u32,
+            offset_l: (c & 0xffff) as u16,
+            offset_m: ((c & 0xffff0000) >> 16) as u16,
+            offset_h: (c >> 32) as u32,
             selector,
             ist: ist & 0x07,
             type_attr,

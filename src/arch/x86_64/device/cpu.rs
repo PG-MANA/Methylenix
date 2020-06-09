@@ -1,44 +1,46 @@
 /*
-x86_64に関するCPU命令
-*/
+ * x86_64 Specific Instruction
+ */
 
 #[inline(always)]
 pub unsafe fn sti() {
-    asm!("sti");
+    llvm_asm!("sti");
 }
+
 /*
 #[inline(always)]
 pub unsafe fn cli() {
-    asm!("cli");
+    llvm_asm!("cli");
 }
 */
+
 #[inline(always)]
 pub unsafe fn hlt() {
-    asm!("hlt");
+    llvm_asm!("hlt");
 }
 
 #[inline(always)]
 pub unsafe fn out_byte(addr: u16, data: u8) {
-    asm!("outb %al, %dx"::"{dx}"(addr), "{al}"(data));
+    llvm_asm!("outb %al, %dx"::"{dx}"(addr), "{al}"(data));
 }
 
 #[inline(always)]
 pub unsafe fn in_byte(data: u16) -> u8 {
     let result: u8;
-    asm!("in %dx, %al":"={al}"(result):"{dx}"(data)::"volatile");
+    llvm_asm!("in %dx, %al":"={al}"(result):"{dx}"(data)::"volatile");
     result
 }
 
 #[inline(always)]
 pub unsafe fn lidt(idtr: usize) {
-    asm!("lidt (%rax)"::"{rax}"(idtr));
+    llvm_asm!("lidt (%rax)"::"{rax}"(idtr));
 }
 
 #[inline(always)]
 pub unsafe fn rdmsr(ecx: u32) -> u64 {
     let edx: u32;
     let eax: u32;
-    asm!("rdmsr":"={edx}"(edx), "={eax}"(eax):"{ecx}"(ecx));
+    llvm_asm!("rdmsr":"={edx}"(edx), "={eax}"(eax):"{ecx}"(ecx));
     (edx as u64) << 32 | eax as u64
 }
 
@@ -46,23 +48,23 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
 pub unsafe fn wrmsr(ecx: u32, data: u64) {
     let edx: u32 = (data >> 32) as u32;
     let eax: u32 = data as u32;
-    asm!("wrmsr"::"{edx}"(edx), "{eax}"(eax),"{ecx}"(ecx));
+    llvm_asm!("wrmsr"::"{edx}"(edx), "{eax}"(eax),"{ecx}"(ecx));
 }
 
 #[inline(always)]
 pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) {
-    asm!("cpuid":"={eax}"(*eax), "={ebx}"(*ebx), "={ecx}"(*ecx), "={edx}"(*edx):
+    llvm_asm!("cpuid":"={eax}"(*eax), "={ebx}"(*ebx), "={ecx}"(*ecx), "={edx}"(*edx):
         "{eax}"(eax.clone()), "{ecx}"(ecx.clone()));
 }
 
 #[inline(always)]
 pub unsafe fn set_cr3(addr: usize) {
-    asm!("movq %rax,%cr3"::"{rax}"(addr));
+    llvm_asm!("movq %rax,%cr3"::"{rax}"(addr));
 }
 
 #[inline(always)]
 pub unsafe fn invlpg(addr: usize) {
-    asm!("invlpg (%rax)"::"{rax}"(addr));
+    llvm_asm!("invlpg (%rax)"::"{rax}"(addr));
 }
 
 pub unsafe fn clear_task_stack(
@@ -73,7 +75,7 @@ pub unsafe fn clear_task_stack(
     normal_stack_pointer: usize,
     start_addr: usize,
 ) {
-    asm!("
+    llvm_asm!("
                 push    rdi
                 mov     rdi, rsp
                 mov     rsp, rax
@@ -106,7 +108,7 @@ pub unsafe fn clear_task_stack(
 
 #[naked]
 pub unsafe fn task_switch(now_task_stack: usize, next_task_stack: usize, stack_size: usize) {
-    asm!("
+    llvm_asm!("
                 push    rdx
                 mov     rdx, rsp
                 mov     rsp, rax

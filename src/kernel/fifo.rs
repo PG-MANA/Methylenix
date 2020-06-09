@@ -1,66 +1,72 @@
 /*
-FIFOシステム(暫定)
-*/
+ * FIFO System
+ * This FIFO is lock-free.
+ * The algorithm may be wrong... if you find a mistake, please tell me...
+ */
 
-pub struct FIFO<T: Copy> {
-    buf: [T; 128],
-    r: usize,
-    w: usize,
+use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use core::sync::atomic::{fence, AtomicUsize};
+
+pub struct FIFO<T: Copy, const F_SIZE: usize> {
+    buf: [T; F_SIZE],
+    read_pointer: AtomicUsize,
+    write_pointer: AtomicUsize,
     size: usize,
-    //暫定
-    free: usize, //暫定
 }
 
-impl<T: Copy> FIFO<T> {
-    pub fn new(
-        _f_size: usize, /*可変にできないので今の所無視*/
-        default_value: &T,
-    ) -> FIFO<T> {
-        FIFO {
-            size: 128,
-            buf: [*default_value; 128],
-            r: 0,
-            w: 0,
-            free: 128,
+impl<T: Copy, const F_SIZE: usize> FIFO<T, F_SIZE> {
+    pub const fn new(default_value: &T) -> Self {
+        Self {
+            size: F_SIZE,
+            buf: [*default_value; F_SIZE],
+            read_pointer: AtomicUsize::new(0),
+            write_pointer: AtomicUsize::new(0),
         }
     }
 
-    pub const fn new_static(_f_size: usize, default_value: &T) -> FIFO<T> {
-        FIFO {
-            size: 128,
-            buf: [*default_value; 128],
-            r: 0,
-            w: 0,
-            free: 128,
+    pub fn enqueue(&mut self, v: T) -> bool {
+        loop {
+            let write_pointer = self.write_pointer.load(Relaxed);
+            let mut next_write_pointer = write_pointer + 1;
+            if next_write_pointer >= self.size {
+                next_write_pointer = 0;
+            }
+            if next_write_pointer == self.read_pointer.load(Relaxed) {
+                return false;
+            }
+            if self
+                .write_pointer
+                .compare_and_swap(write_pointer, next_write_pointer, Acquire)
+                == write_pointer
+            /*This operation has ABA problem.. but usually buffer_full occurs first and it is rare.*/
+            {
+                self.buf[write_pointer] = v;
+                fence(Release); /* may be needless */
+                return true;
+            }
         }
-    }
-
-    pub fn queue(&mut self, v: T) -> bool {
-        if self.free == 0 {
-            return false;
-        }
-        self.buf[self.w] = v;
-        self.w = if self.w + 1 == self.size {
-            0
-        } else {
-            self.w + 1
-        };
-        self.free -= 1;
-        true
     }
 
     pub fn dequeue(&mut self) -> Option<T> {
-        use core::mem;
-        if self.w == self.r {
-            return None;
+        loop {
+            let read_pointer = self.read_pointer.load(Relaxed);
+            let mut next_read_pointer = read_pointer + 1;
+            let write_pointer = self.write_pointer.load(Relaxed);
+            if read_pointer == write_pointer {
+                return None;
+            }
+            if next_read_pointer >= self.size {
+                next_read_pointer = 0;
+            }
+            if self
+                .read_pointer
+                .compare_and_swap(read_pointer, next_read_pointer, Acquire)
+                == read_pointer
+            {
+                let result = self.buf[read_pointer];
+                fence(Release); /* may be needless */
+                return Some(result);
+            }
         }
-        let result: T = unsafe { mem::transmute_copy(&self.buf[self.r]) }; //いい案ないかな
-        self.r = if self.r + 1 == self.size {
-            0
-        } else {
-            self.r + 1
-        };
-        self.free += 1;
-        Some(result)
     }
 }

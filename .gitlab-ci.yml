@@ -1,16 +1,15 @@
-image:    "opensuse/leap:latest"
+image:    "opensuse/tumbleweed:latest"
 stages:
   - build
 
 build:
   stage:  build
   script:
-    - zypper in -y gcc curl grub2 make nasm xorriso
+    - zypper in -y curl grub2 make gcc lld xorriso
     - curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly
     - source ~/.cargo/env
     - rustc --version
     - cargo --version
-    - nasm -v
     - rustup component add rust-src
     - cargo install cargo-xbuild
     - make iso

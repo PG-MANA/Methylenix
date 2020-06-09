@@ -17,23 +17,22 @@ impl IoApicManager {
     }
 
     pub fn init(&mut self) {
-        self.base_address = 0xfec00000;
-
-        if !get_kernel_manager_cluster()
+        match get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .reserve_memory(
-                self.base_address,
-                self.base_address,
-                PAGE_SIZE, /*too big...*/
+            .mmap_dev(
+                0xfec00000,
+                PAGE_SIZE, /* is it ok?*/
                 MemoryPermissionFlags::data(),
-                true,
-                true,
-            )
-        {
-            panic!("Cannot reserve memory of IO APIC");
-        }
+            ) {
+            Ok(address) => {
+                self.base_address = address;
+            }
+            Err(e) => {
+                panic!("Cannot reserve memory of IO APIC Err:{:?}", e);
+            }
+        };
     }
 
     pub fn set_redirect(&self, local_apic_id: u32, irq: u8, index: u8) {

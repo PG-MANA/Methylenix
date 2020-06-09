@@ -8,7 +8,6 @@ ifeq ($(strip $(TARGET_ARCH)),)
     TARGET_ARCH = x86_64
 endif
 RUST_TARGET = $(TARGET_ARCH)-unknown-none
-#RUST_TARGET_FILE_FOLDER = target-json/ # https://github.com/japaric/xargo/issues/146
 
 ##ディレクトリ
 SRC = src/
@@ -26,18 +25,14 @@ CP = cp -r
 RM = rm -rf
 GRUBMKRES = grub-mkrescue
 GRUB2MKRES = grub2-mkrescue #Temporary
-AR = ar rcs
-LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
+#LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
+LD = ld.lld --no-nmagic --gc-sections --Map=$(MAKE_TMPDIR)$(NAME).map  -nostdlib --script=$(MAKE_CONGIGDIR)linkerscript.ld
 CARGO = cargo
-
-##アセンブラ読み込み
-include config/$(TARGET_ARCH)/assembler.mk
-export AR
 
 ##ビルドファイル
 KERNELFILES = kernel.elf
 RUST_OBJ = target/$(RUST_TARGET)/release/lib$(NAME).a
-BOOT_SYS_LIST = $(MAKE_OBJDIR)boot_asm.a $(RUST_OBJ)
+BOOT_SYS_LIST = $(RUST_OBJ)
 
 #初期設定
 export TARGET_ARCH
@@ -76,9 +71,6 @@ kernel:
 # ファイル生成規則
 kernel.elf : $(BOOT_SYS_LIST)
 	$(LD) -o $(MAKE_BINDIR)kernel.elf $(BOOT_SYS_LIST)
-
-$(MAKE_OBJDIR)boot_asm.a : src/arch/$(TARGET_ARCH)/boot/Makefile .FORCE
-	$(MAKE) -C src/arch/$(TARGET_ARCH)/boot/
 
 $(RUST_OBJ) :  .FORCE
 	$(CARGO) xbuild --release --target $(RUST_TARGET_FILE_FOLDER) $(RUST_TARGET)

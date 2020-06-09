@@ -1,3 +1,6 @@
+/*
+ * EFI Function Manager
+ */
 pub mod table;
 pub mod text;
 

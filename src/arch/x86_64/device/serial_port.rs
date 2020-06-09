@@ -1,30 +1,25 @@
-// EFIブートでテキストフレームバッファが使えないので
-// TODO: UEFIでシリアルポート
+/*
+ * Serial Port Manager
+ */
 
-//use
 use arch::target_arch::device::cpu::{in_byte, out_byte};
-use arch::target_arch::device::local_apic;
 
 use kernel::fifo::FIFO;
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::sync::spin_lock::Mutex;
 
 pub struct SerialPortManager {
     port: u16,
-    fifo: FIFO<u8>,
+    write_lock: Mutex<()>,
+    fifo: FIFO<u8, 256usize>,
 }
 
 impl SerialPortManager {
-    pub fn new(io_port: u16) -> SerialPortManager {
+    pub const fn new(io_port: u16) -> SerialPortManager {
         SerialPortManager {
             port: io_port,
-            fifo: FIFO::new(128, &0),
-        }
-    }
-
-    pub const fn new_static() -> SerialPortManager {
-        SerialPortManager {
-            port: 0x3F8,
-            fifo: FIFO::new_static(128, &0),
+            write_lock: Mutex::new(()),
+            fifo: FIFO::new(&0),
         }
     }
 
@@ -45,7 +40,7 @@ impl SerialPortManager {
                     0x24,
                     0,
                 );
-
+            let _lock = self.write_lock.lock().unwrap();
             out_byte(self.port + 1, 0x00); // FIFOをオフ
             out_byte(self.port + 3, 0x80); // DLABを有効化して設定できるようにする?
                                            //out_byte(self.port + 0, 0x03); // rateを設定
@@ -61,7 +56,8 @@ impl SerialPortManager {
         if self.port == 0 {
             return;
         }
-        let mut timeout: usize = 0xFFFFFF;
+        let _lock = self.write_lock.lock().unwrap();
+        let mut timeout: usize = 0xFF;
         while timeout > 0 {
             if self.is_completed_transmitter() {
                 break;
@@ -93,14 +89,16 @@ impl SerialPortManager {
         self.fifo.dequeue()
     }
 
+    pub fn enqueue_key(&mut self, key: u8) {
+        self.fifo.enqueue(key);
+    }
+
     pub fn inthandler24_main() {
         //handlerをimplで実装することを考え直すべき
-        if let Ok(mut serial_port_manager) =
-            get_kernel_manager_cluster().serial_port_manager.try_lock()
-        {
-            let code = serial_port_manager.read();
-            serial_port_manager.fifo.queue(code);
-            local_apic::LocalApicManager::send_eoi();
+        let m = &mut get_kernel_manager_cluster().serial_port_manager;
+        m.enqueue_key(m.read());
+        if let Ok(interrupt_manager) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
+            interrupt_manager.send_eoi();
         }
     }
 

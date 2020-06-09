@@ -1,8 +1,12 @@
+/*
+ * Page Directory Entry
+ */
+
 use super::PAGE_MASK;
 
-pub const PDE_MAX_ENTRY: usize = 512;
+pub const PD_MAX_ENTRY: usize = 512;
 
-//PDEの53bit目はPTEの配列がセットされているかどうかの確認に利用している。
+/* PDEの53bit目はPTがセットされているかどうかの確認に利用している。 */
 
 pub struct PDE {
     flags: u64,
@@ -10,8 +14,8 @@ pub struct PDE {
 
 impl PDE {
     #![allow(dead_code)]
-    pub const fn new() -> PDE {
-        PDE { flags: 0 }
+    pub const fn new() -> Self {
+        Self { flags: 0 }
     }
 
     pub fn init(&mut self) {
@@ -36,11 +40,11 @@ impl PDE {
         }
     }
 
-    pub fn is_pte_set(&self) -> bool {
+    pub fn is_pt_set(&self) -> bool {
         self.get_bit(1 << 52)
     }
 
-    pub fn set_pte_set(&mut self, b: bool) {
+    pub fn set_pt_set(&mut self, b: bool) {
         self.set_bit(1 << 52, b);
     }
 
@@ -98,7 +102,7 @@ impl PDE {
     }
 
     pub fn get_addr(&self) -> Option<usize> {
-        if self.is_pte_set() {
+        if self.is_pt_set() {
             Some((self.flags & 0x000FFFFF_FFFFF000) as usize)
         } else {
             None
@@ -108,7 +112,7 @@ impl PDE {
     pub fn set_addr(&mut self, address: usize) -> bool {
         if (address & !PAGE_MASK) == 0 {
             self.set_bit((0x000FFFFF_FFFFF000 & address) as u64, true);
-            self.set_pte_set(true);
+            self.set_pt_set(true);
             true
         } else {
             false

@@ -1,6 +1,10 @@
+/*
+ * Page Table Entry
+ */
+
 use super::PAGE_MASK;
 
-pub const PTE_MAX_ENTRY: usize = 512;
+pub const PT_MAX_ENTRY: usize = 512;
 
 pub struct PTE {
     flags: u64,
@@ -8,8 +12,8 @@ pub struct PTE {
 
 impl PTE {
     #![allow(dead_code)]
-    pub const fn new() -> PTE {
-        PTE { flags: 0 }
+    pub const fn new() -> Self {
+        Self { flags: 0 }
     }
 
     pub fn init(&mut self) {

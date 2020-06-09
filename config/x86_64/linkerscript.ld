@@ -7,8 +7,12 @@ SECTIONS {
 
   . = 0x100000 + SIZEOF_HEADERS;
 
-  .boot_entry : {
-    KEEP(*(.multiboot_header))/*使われてないとリンクされなくなるので*/
+  .headers : ALIGN(8) {
+    KEEP(*(.header.*)) /*使われてないとリンクされなくなるので*/
+  }
+
+  .note : ALIGN(4) {
+    *(.note)
   }
 
   .text : ALIGN(__ALIGN_SIZE) {
@@ -25,5 +29,9 @@ SECTIONS {
 
   .bss : ALIGN(__ALIGN_SIZE) {
     *(.bss .bss.*)
+  }
+
+  .got : ALIGN(__ALIGN_SIZE) {
+    *(.got .got.*)
   }
 }

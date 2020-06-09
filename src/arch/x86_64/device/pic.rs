@@ -10,7 +10,7 @@ const PIC1_IMR: u16 = 0x00a1;
 
 pub fn disable_8259_pic() {
     unsafe {
-        cpu::out_byte(PIC0_IMR, 0xff); /* 全ての割り込みを受け付けない */
-        cpu::out_byte(PIC1_IMR, 0xff); /* 全ての割り込みを受け付けない */
+        cpu::out_byte(PIC0_IMR, 0xff); /* Disallow all interrupt */
+        cpu::out_byte(PIC1_IMR, 0xff); /* Disallow all interrupt */
     }
 }

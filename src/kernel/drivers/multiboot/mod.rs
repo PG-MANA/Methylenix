@@ -1,4 +1,7 @@
-//参考:https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
+/*
+ * Multiboot Information
+ * https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
+ */
 
 mod elf;
 mod frame_buffer;
@@ -7,10 +10,10 @@ mod memory;
 pub use self::elf::{ElfInfo, ElfSection};
 pub use self::frame_buffer::FrameBufferInfo;
 pub use self::memory::{MemoryMapEntry, MemoryMapInfo};
+
 use core::mem;
 
-//構造体
-#[repr(C)] //Rustではstructが記述通りに並んでない
+#[repr(C)]
 struct MultibootTag {
     s_type: u32,
     size: u32,
@@ -27,15 +30,17 @@ pub struct MultiBootInformation {
     pub elf_info: ElfInfo,
     pub memory_map_info: MemoryMapInfo,
     pub framebuffer_info: FrameBufferInfo,
-    pub efi_table_pointer: usize,
+    pub efi_table_pointer: Option<usize>,
     pub address: usize,
     pub size: usize,
     pub boot_loader_name: &'static str,
     pub boot_cmd_line: &'static str,
+    pub new_acpi_rsdp_ptr: Option<usize>,
+    pub old_acpi_rsdp_ptr: Option<usize>,
 }
 
 impl MultiBootInformation {
-    #![allow(dead_code)] //使っていない定数でエラーが出る
+    #![allow(dead_code)]
     const TAG_ALIGN: u32 = 8;
     const TAG_TYPE_END: u32 = 0;
     const TAG_TYPE_CMDLINE: u32 = 1;
@@ -82,13 +87,18 @@ impl MultiBootInformation {
                 MultiBootInformation::TAG_TYPE_MMAP => {
                     mbi.memory_map_info = MemoryMapInfo::new(unsafe { &*(tag as *const _) });
                 }
-                MultiBootInformation::TAG_TYPE_ACPI_NEW => {}
+                MultiBootInformation::TAG_TYPE_ACPI_OLD => {
+                    mbi.old_acpi_rsdp_ptr = Some(tag + 8);
+                }
+                MultiBootInformation::TAG_TYPE_ACPI_NEW => {
+                    mbi.new_acpi_rsdp_ptr = Some(tag + 8);
+                }
                 MultiBootInformation::TAG_TYPE_CMDLINE => {
                     use core::{slice, str};
                     mbi.boot_cmd_line = str::from_utf8(unsafe {
                         slice::from_raw_parts(
                             &*((tag + 8) as *const u8),
-                            (&*(tag as *const MultibootTag)).size as usize - 8,
+                            (&*(tag as *const MultibootTag)).size as usize - 8 - 1, /*\0*/
                         )
                     })
                     .unwrap_or("");
@@ -98,7 +108,7 @@ impl MultiBootInformation {
                     mbi.boot_loader_name = str::from_utf8(unsafe {
                         slice::from_raw_parts(
                             &*((tag + 8) as *const u8),
-                            (&*(tag as *const MultibootTag)).size as usize - 8,
+                            (&*(tag as *const MultibootTag)).size as usize - 8 - 1, /*\0*/
                         )
                     })
                     .unwrap_or("");
@@ -108,12 +118,11 @@ impl MultiBootInformation {
                 }
                 MultiBootInformation::TAG_TYPE_EFI64 => {
                     mbi.efi_table_pointer =
-                        unsafe { (&*(tag as *const EfiSystemTableInformation)).address };
+                        Some(unsafe { (&*(tag as *const EfiSystemTableInformation)).address });
                 }
                 MultiBootInformation::TAG_TYPE_ELF_SECTIONS => {
                     mbi.elf_info = ElfInfo::new(unsafe { &*(tag as *const _) });
                 }
-                MultiBootInformation::TAG_TYPE_BOOTDEV => {}
                 _ => {
                     if tag - address - 8 >= mbi.size {
                         break;
@@ -122,9 +131,7 @@ impl MultiBootInformation {
             }
             tag += ((unsafe { (&*(tag as *const MultibootTag)).size } as usize) + 7) & !7;
         }
-
-        //返却
-        mbi
+        return mbi;
     }
 
     fn test(address: usize) -> bool {

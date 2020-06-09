@@ -52,12 +52,9 @@ limitations under the License.
 * make
 * ld
 * grub2-mkrescue
-* nasm
 * rustc(nightly)
 * cargo
 * cargo-xbuild
-
-詳しくは https://soft.taprix.org/wiki/oswiki/Rust:setup を参照してください。
 
 ### ビルド
 
@@ -69,6 +66,8 @@ make iso
 make clean
 #objファイル削除
 ```
+
+なおビルド済みのisoイメージは https://repo.taprix.org/pg_mana/methylenix/iso/ にあります。
 
 ## 実行
 
@@ -89,5 +88,4 @@ qemu-system-x86_64 --cdrom bin/img/boot.iso
   https://pg-mana.net
 ### 公式ページ
   https://methylenix.org (現在はGitHubへリダイレクトするだけ。いつできるかな。)
-### OS Wiki
-  https://soft.taprix.org/wiki/oswiki/
+

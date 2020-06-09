@@ -1,5 +1,11 @@
-//use
+/*
+ * Panic Handler
+ */
+
 use arch::target_arch::device::cpu;
+
+use kernel::manager_cluster::get_kernel_manager_cluster;
+
 use core::panic;
 
 #[panic_handler]
@@ -8,18 +14,19 @@ pub fn panic(info: &panic::PanicInfo) -> ! {
     let location = info.location();
     let message = info.message();
 
-    println!("\n-- Kernel panic  -- You must restart this computer.\n-- Debug info --");
+    kprintln!("\n!!!! Kernel panic !!!!\n---- Debug information ----");
     if location.is_some() && message.is_some() {
-        println!(
+        kprintln!(
             "Line {} in {}\nMessage: {}",
             location.unwrap().line(),
             location.unwrap().file(),
             message.unwrap()
         );
-    } else {
-        println!("Not provided.");
     }
-    println!("-- End of the debug info --\nSystem will be halt.");
+    if let Ok(m) = get_kernel_manager_cluster().memory_manager.try_lock() {
+        m.dump_memory_manager();
+    }
+    kprintln!("---- End of Debug information ----\nSystem will be halt.");
 
     loop {
         unsafe {

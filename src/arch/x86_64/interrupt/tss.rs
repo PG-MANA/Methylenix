@@ -1,6 +1,6 @@
 /*
-TSS(64bit)実装、割り込みを扱うために行う。
-*/
+ * Task State Segment
+ */
 
 use core::mem;
 

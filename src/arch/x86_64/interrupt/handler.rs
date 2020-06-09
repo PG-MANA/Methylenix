@@ -1,14 +1,13 @@
 /*
-アセンブリによる割り込みハンドラ、手短に済ませるべき
-できるだけNasmなどを使いたくない
-*/
+ * Interrupt Handler Maker
+ */
 
 #[macro_export]
 macro_rules! make_interrupt_hundler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
         pub unsafe fn $handler_name() {
-            asm!("
+            llvm_asm!("
                 push    rax
                 push    rbx
                 push    rcx
@@ -24,8 +23,10 @@ macro_rules! make_interrupt_hundler {
                 push    r13
                 push    r14
                 push    r15
-                mov     rbp, rsp
-                call    $0
+                mov     rbp, rsp":::: "intel","volatile");
+            $handler_func();
+            /* 余計なアセンブリがcallで追加されたときにpush前に波及するのを防ぐ */
+            llvm_asm!("
                 mov     rsp, rbp
                 pop     r15
                 pop     r14
@@ -42,7 +43,7 @@ macro_rules! make_interrupt_hundler {
                 pop     rcx
                 pop     rbx
                 pop     rax
-                iretq" ::"X"($handler_func as unsafe fn()):: "intel","volatile");
+                iretq" :::: "intel","volatile");
         }
     };
 }
@@ -52,7 +53,7 @@ macro_rules! make_error_interrupt_hundler {
     ($handler_name: ident, $handler_func: path) => {
         #[naked]
         pub unsafe fn $ handler_name() {
-            asm!("
+            llvm_asm!("
                 push    rdi
                 mov     rdi, [rsp + 8]
                 push    rax

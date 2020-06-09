@@ -1,14 +1,16 @@
 /*
-    Memory Manager
-    This manager is the frontend of physical memory manager and page manager.
-*/
+ * Memory Manager
+ * This manager is the frontend of physical memory manager and page manager.
+ */
 
+pub mod global_allocator;
 pub mod kernel_malloc_manager;
 pub mod physical_memory_manager;
-pub mod virtual_memory_entry;
+pub mod pool_allocator;
+/* pub mod reverse_memory_map_manager; */
 pub mod virtual_memory_manager;
 
-use arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE, PAGING_CACHE_LENGTH};
+use arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use self::physical_memory_manager::PhysicalMemoryManager;
 use self::virtual_memory_manager::VirtualMemoryManager;
@@ -21,15 +23,28 @@ pub struct MemoryManager {
 
 #[derive(Clone, Eq, PartialEq, Copy)]
 pub struct MemoryPermissionFlags {
-    pub read: bool,
-    pub write: bool,
-    pub execute: bool,
-    pub user_access: bool,
+    flags: u8,
 }
 
-pub struct FreePageList {
-    pub list: [usize; PAGING_CACHE_LENGTH],
-    pub pointer: usize,
+#[derive(Clone, Eq, PartialEq, Copy)]
+pub struct MemoryOptionFlags {
+    flags: u16,
+}
+
+#[derive(Clone, Eq, PartialEq, Copy, Debug)]
+pub enum MemoryError {
+    SizeNotAligned,
+    InvalidSize,
+    AddressNotAligned,
+    AllocPhysicalAddressFailed,
+    FreeAddressFailed,
+    InvalidPhysicalAddress,
+    MapAddressFailed,
+    InvalidVirtualAddress,
+    InsertEntryFailed,
+    AddressNotAvailable,
+    PagingError,
+    MutexError,
 }
 
 impl MemoryManager {
@@ -54,107 +69,93 @@ impl MemoryManager {
     pub fn alloc_pages(
         &mut self,
         order: usize,
-        vm_start_address: Option<usize>,
         permission: MemoryPermissionFlags,
-    ) -> Option<usize> {
-        /*TODO: lazy allocation*/
-        // return physically continuous 2 ^ order pages memory.
-        // this function is called by kmalloc.
-        let size = PAGE_SIZE * (1 << order);
-        if let Some(vm_address) = vm_start_address {
-            if !self
-                .virtual_memory_manager
-                .check_if_usable_address_range(vm_address, vm_address + size - 1)
-            {
-                return None;
-            }
-        }
+    ) -> Result<usize, MemoryError> {
+        /* ADD: lazy allocation */
+        /* return physically continuous 2 ^ order pages memory. */
+        let size = Self::index_to_offset(1 << order);
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
-        if let Some(physical_address) = physical_memory_manager.alloc(size, true) {
-            if let Some(address) = self.virtual_memory_manager.alloc_address(
+        if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT) {
+            match self.virtual_memory_manager.alloc_address(
                 size,
                 physical_address,
-                vm_start_address,
                 permission,
                 &mut physical_memory_manager,
             ) {
-                self.virtual_memory_manager.update_paging(address);
-                Some(address)
-            } else {
-                physical_memory_manager.free(physical_address, size, false);
-                None
+                Ok(address) => {
+                    self.virtual_memory_manager.update_paging(address);
+                    Ok(address)
+                }
+                Err(e) => {
+                    physical_memory_manager.free(physical_address, size, false);
+                    Err(e)
+                }
             }
         } else {
-            None
+            Err(MemoryError::AllocPhysicalAddressFailed)
         }
     }
 
     pub fn alloc_nonlinear_pages(
         &mut self,
         order: usize,
-        vm_start_address: Option<usize>,
         permission: MemoryPermissionFlags,
-    ) -> Option<usize> {
-        /*THINK: rename*/
-        // return virtually 2 ^ order pages memory.
-        // this function is called by vmalloc.
-        // vfreeの際に全てのメモリが開放されないバグを含んでいる
-        if order == 0 {
-            return self.alloc_pages(order, vm_start_address, permission);
+    ) -> Result<usize, MemoryError> {
+        /* THINK: rename*/
+        /* vmalloc */
+        let size = 2 << order;
+        if size <= PAGE_SIZE {
+            return self.alloc_pages(order, permission);
         }
-        let count = 1 << order;
-        let size = PAGE_SIZE * count;
-        let address = if let Some(addr) = vm_start_address {
-            if !self
-                .virtual_memory_manager
-                .check_if_usable_address_range(addr, addr + size - 1)
-            {
-                return None;
-            }
-            addr
-        } else {
-            if let Some(addr) = self.virtual_memory_manager.get_free_address(size) {
-                addr
-            } else {
-                return None;
-            }
-        };
-        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
-        for i in 0..count {
-            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, true) {
-                self.virtual_memory_manager.alloc_address(
-                    PAGE_SIZE,
-                    physical_address,
-                    Some(address + i * PAGE_SIZE),
-                    permission,
-                    &mut pm_manager,
-                );
-                self.virtual_memory_manager
-                    .update_paging(address + i * PAGE_SIZE);
-            } else {
-                for j in 0..i {
-                    self.virtual_memory_manager
-                        .free_address(address + j * PAGE_SIZE, &mut pm_manager);
-                    self.virtual_memory_manager
-                        .update_paging(address + j * PAGE_SIZE);
+        let pm_manager = self.physical_memory_manager.try_lock();
+        if pm_manager.is_err() {
+            return Err(MemoryError::MutexError);
+        }
+        let mut pm_manager = pm_manager.unwrap();
+        let entry = self.virtual_memory_manager.alloc_address_without_mapping(
+            size,
+            permission,
+            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            &mut pm_manager,
+        )?;
+        let vm_start_address = entry.get_vm_start_address();
+        for i in 0..Self::offset_to_index(size) {
+            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, PAGE_SHIFT) {
+                if let Err(e) = self
+                    .virtual_memory_manager
+                    .insert_physical_page_into_vm_map_entry(
+                        entry,
+                        vm_start_address + Self::index_to_offset(i),
+                        physical_address,
+                        &mut pm_manager,
+                    )
+                {
+                    panic!("Cannot insert physical page into vm_entry Err:{:?}", e);
                 }
-                return None;
             }
         }
-        Some(address)
+        if let Err(e) = self
+            .virtual_memory_manager
+            .finalize_vm_map_entry(entry, &mut pm_manager)
+        {
+            panic!("Cannot finalize vm_map_entry Err:{:?}", e);
+        }
+        Ok(vm_start_address)
     }
 
-    pub fn free_pages(&mut self, vm_address: usize, _order: usize) -> bool {
-        //let count = 1 << order;
+    pub fn free(&mut self, vm_address: usize) -> Result<(), MemoryError> {
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
-        if !self
+        let aligned_vm_address = vm_address & PAGE_MASK;
+        if let Err(e) = self
             .virtual_memory_manager
-            .free_address(vm_address, &mut pm_manager)
+            .free_address(aligned_vm_address, &mut pm_manager)
         {
-            return false;
+            pr_err!("{:?}", e); /* free's error tends to be ignored. */
+            Err(e)
+        } else {
+            Ok(())
         }
-        //物理メモリの開放はfree_addressでやっているが本来はここでやるべきか?
-        true
+        /* Freeing Physical Memory will be done by Virtual Memory Manager, if it be needed. */
     }
 
     pub fn free_physical_memory(&mut self, physical_address: usize, size: usize) -> bool {
@@ -166,69 +167,61 @@ impl MemoryManager {
         }
     }
 
-    pub fn reserve_memory(
+    pub fn mmap_dev(
         &mut self,
         physical_address: usize,
-        virtual_address: usize,
         size: usize,
         permission: MemoryPermissionFlags,
-        physical_address_may_be_reserved: bool,
-        virtual_memory_may_be_reserved: bool,
-    ) -> bool {
-        if physical_address & !PAGE_MASK != 0 {
-            println!("Error: Physical Address is not aligned.");
-            return false;
-        } else if virtual_address & !PAGE_MASK != 0 {
-            println!("Error: Virtual Address is not aligned.");
-            return false;
-        } else if size & !PAGE_MASK != 0 {
-            println!("Error: Size is not aligned.");
-            return false;
-        }
-        if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
-            let mut allocated_memory = false;
-            if pm_manager.reserve_memory(physical_address, size, false) {
-                allocated_memory = true;
-            } else {
-                if !physical_address_may_be_reserved {
-                    println!("Error: Cannot allocate physical address.");
-                    return false;
-                }
-            }
-            if self.virtual_memory_manager.alloc_address(
-                size,
-                physical_address,
-                Some(virtual_address),
-                permission,
-                &mut pm_manager,
-            ) != Some(virtual_address)
-            {
-                if virtual_memory_may_be_reserved {
-                    if self
-                        .virtual_memory_manager
-                        .virtual_address_to_physical_address(virtual_address)
-                        == Some(physical_address)
-                    {
-                        if self
-                            .virtual_memory_manager
-                            .update_memory_permission(virtual_address, permission)
-                        {
-                            self.virtual_memory_manager.update_paging(virtual_address);
-                            return true;
-                        }
-                    }
-                }
-                if allocated_memory {
-                    pm_manager.free(physical_address, size, false);
-                }
-                println!("Error: Cannot reserve memory.");
-                return false;
-            }
-            self.virtual_memory_manager.update_paging(virtual_address);
-            return true;
+    ) -> Result<usize, MemoryError> {
+        /* for io_map */
+        /* should remake... */
+        let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
+        let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
+            p
         } else {
-            return false;
-        }
+            /* add: maybe sleep option */
+            return Err(MemoryError::MutexError);
+        };
+
+        //pm_manager.reserve_memory(aligned_physical_address, size, false);
+        // assume: physical_address must be reserved.
+        /* add: check succeeded or failed (failed because of already reserved is ok, but other... )*/
+        let virtual_address = self.virtual_memory_manager.mmap_dev(
+            aligned_physical_address,
+            None,
+            aligned_size,
+            permission,
+            &mut pm_manager,
+        )?;
+        Ok(virtual_address + physical_address - aligned_physical_address)
+    }
+
+    pub fn mremap_dev(
+        &mut self,
+        old_virtual_address: usize,
+        _old_size: usize,
+        new_size: usize,
+    ) -> Result<usize, MemoryError> {
+        let (aligned_virtual_address, aligned_new_size) =
+            Self::page_align(old_virtual_address, new_size);
+
+        let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
+            p
+        } else {
+            /* add: maybe sleep option */
+            return Err(MemoryError::MutexError);
+        };
+
+        //pm_manager.reserve_memory(aligned_physical_address, size, false);
+        // assume: physical_address must be reserved.
+        /* add: check succeeded or failed (failed because of already reserved is ok, but other... )*/
+
+        let new_virtual_address = self.virtual_memory_manager.resize_memory_mapping(
+            aligned_virtual_address,
+            aligned_new_size,
+            &mut pm_manager,
+        )?;
+        Ok(new_virtual_address + (old_virtual_address - aligned_virtual_address))
     }
 
     pub fn set_paging_table(&mut self) {
@@ -237,18 +230,19 @@ impl MemoryManager {
 
     pub fn dump_memory_manager(&self) {
         if let Ok(physical_memory_manager) = self.physical_memory_manager.try_lock() {
-            println!("----Physical Memory Entries Dump----");
+            kprintln!("----Physical Memory Entries Dump----");
             physical_memory_manager.dump_memory_entry();
-            println!("----Physical Memory Entries Dump End----");
+            kprintln!("----Physical Memory Entries Dump End----");
         } else {
-            println!("Can not lock Physical Memory Manager.");
+            kprintln!("Can not lock Physical Memory Manager.");
         }
-        println!("----Virtual Memory Entries Dump----");
+        kprintln!("----Virtual Memory Entries Dump----");
         self.virtual_memory_manager.dump_memory_manager();
-        println!("----Virtual Memory Entries Dump End----");
+        kprintln!("----Virtual Memory Entries Dump End----");
     }
 
-    pub const fn page_round_up(address: usize, size: usize) -> (usize /*address*/, usize /*size*/) {
+    #[inline]
+    pub const fn page_align(address: usize, size: usize) -> (usize /*address*/, usize /*size*/) {
         if size == 0 && (address & PAGE_MASK) == 0 {
             (address, 0)
         } else {
@@ -258,23 +252,120 @@ impl MemoryManager {
             )
         }
     }
+
+    #[inline]
+    pub const fn size_to_order(size: usize) -> usize {
+        if size <= PAGE_SIZE {
+            return 0;
+        }
+        let mut page_count = (((size - 1) & PAGE_MASK) >> PAGE_SHIFT) + 1;
+        let mut order = if page_count & (page_count - 1) == 0 {
+            0usize
+        } else {
+            1usize
+        };
+        while page_count != 0 {
+            page_count >>= 1;
+            order += 1;
+        }
+        order
+    }
+
+    #[inline]
+    pub const fn offset_to_index(offset: usize) -> usize {
+        offset >> PAGE_SHIFT
+    }
+
+    #[inline]
+    pub const fn index_to_offset(index: usize) -> usize {
+        use core::usize;
+        assert!(index <= Self::offset_to_index(usize::MAX));
+        index << PAGE_SHIFT
+    }
+
+    #[inline]
+    pub const fn address_to_size(start_address: usize, end_address: usize) -> usize {
+        assert!(start_address <= end_address);
+        end_address - start_address + 1
+    }
+
+    #[inline]
+    pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {
+        start_address + size - 1
+    }
 }
 
 impl MemoryPermissionFlags {
-    pub const fn rodata() -> Self {
+    /* Bitfield代わりとして使っているので命名規則は変えている。 */
+    pub const fn new(read: bool, write: bool, execute: bool, user_access: bool) -> Self {
         Self {
-            read: true,
-            write: false,
-            execute: false,
-            user_access: false,
+            flags: ((read as u8) << 0)
+                | ((write as u8) << 1)
+                | ((execute as u8) << 2)
+                | ((user_access as u8) << 3),
         }
     }
+
+    pub const fn rodata() -> Self {
+        Self::new(true, false, false, false)
+    }
+
     pub const fn data() -> Self {
-        Self {
-            read: true,
-            write: true,
-            execute: false,
-            user_access: false,
+        Self::new(true, true, false, false)
+    }
+
+    pub fn read(&self) -> bool {
+        self.flags & (1 << 0) != 0
+    }
+
+    pub fn write(&self) -> bool {
+        self.flags & (1 << 1) != 0
+    }
+
+    pub fn execute(&self) -> bool {
+        self.flags & (1 << 2) != 0
+    }
+
+    pub fn user_access(&self) -> bool {
+        self.flags & (1 << 3) != 0
+    }
+}
+
+impl MemoryOptionFlags {
+    /* Bitfield代わりとして使っているので命名規則は変えている。 */
+    pub const NORMAL: u16 = 0;
+    pub const PRE_RESERVED: u16 = 1 << 0;
+    pub const DO_NOT_FREE_PHY_ADDR: u16 = 1 << 1;
+    pub const WIRED: u16 = 1 << 2;
+    pub const DEV_MAP: u16 = 1 << 3; /* マップしている物理メモリはなにか意味がある */
+    pub const DIRECT_MAP: u16 = 1 << 4;
+
+    pub const fn new(flags: u16) -> Self {
+        if flags & (!0x1F) != 0 {
+            /* when you add option, you must change this assert */
+            panic!("Invalid flags are set.");
+            /*static_assert*/
         }
+        Self { flags }
+    }
+
+    pub fn pre_reserved(&self) -> bool {
+        self.flags & Self::PRE_RESERVED != 0
+    }
+
+    pub fn do_not_free_phy_addr(&self) -> bool {
+        self.flags & Self::DO_NOT_FREE_PHY_ADDR != 0
+    }
+
+    pub fn wired(&self) -> bool {
+        self.flags & Self::WIRED != 0
+    }
+
+    pub fn is_dev_map(&self) -> bool {
+        self.flags & Self::DEV_MAP != 0
+    }
+
+    pub fn is_direct_mapped(&self) -> bool {
+        self.flags & Self::DIRECT_MAP != 0
     }
 }

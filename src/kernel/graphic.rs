@@ -1,12 +1,13 @@
 /*
-    Graphic Manager
-*/
+ * Graphic Manager
+ * いずれはstdio.rsみたいなのを作ってそれのサブモジュールにしたい
+ */
 
 use arch::target_arch::device::crt;
 
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
+use kernel::memory_manager::MemoryPermissionFlags;
 
 use core::fmt;
 
@@ -49,28 +50,27 @@ impl GraphicManager {
         }
     }
 
-    pub fn set_framebuffer_memory_permission(&self) {
+    pub fn set_frame_buffer_memory_permission(&mut self) -> bool {
         let pixel_size = if self.is_textmode {
             2
         } else {
             self.frame_buffer_color_depth / 8
         };
-        let result = MemoryManager::page_round_up(
-            self.frame_buffer_address,
-            self.frame_buffer_height * self.frame_buffer_width * pixel_size as usize,
-        );
-        get_kernel_manager_cluster()
+        match get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
-            .reserve_memory(
-                result.0,
-                result.0,
-                result.1,
+            .mmap_dev(
+                self.frame_buffer_address,
+                self.frame_buffer_height * self.frame_buffer_width * pixel_size as usize,
                 MemoryPermissionFlags::data(),
-                true,
-                true,
-            );
+            ) {
+            Ok(address) => {
+                self.frame_buffer_address = address;
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     fn init_manager(&mut self, frame_buffer_info: &FrameBufferInfo) {
@@ -96,6 +96,16 @@ impl GraphicManager {
                     *((self.frame_buffer_address + count * 4) as *mut u32) = 0xff7f27;
                 }
             }
+        } else if self.frame_buffer_color_depth == 24 {
+            self.is_textmode = false;
+            // 文字見えてないだろうから#FF7F27で塗りつぶす
+            for count in 0..(self.frame_buffer_width * self.frame_buffer_height) {
+                unsafe {
+                    let pixcel = (self.frame_buffer_address + count * 3) as *mut u32;
+                    *pixcel &= 0x000000ff;
+                    *pixcel |= 0xff7f27;
+                }
+            }
         }
     }
 
@@ -118,10 +128,9 @@ impl GraphicManager {
     }
 
     pub fn puts(&mut self, string: &str) -> bool {
-        if let Ok(serial_port_manager) = get_kernel_manager_cluster().serial_port_manager.try_lock()
-        {
-            serial_port_manager.sendstr(string);
-        }
+        get_kernel_manager_cluster()
+            .serial_port_manager
+            .sendstr(string);
         if self.is_textmode {
             for code in string.bytes() {
                 match code as char {
@@ -203,6 +212,63 @@ impl GraphicManager {
         }
         true
     }
+
+    pub fn write_bitmap(
+        &mut self,
+        buffer: usize,
+        depth: u8,
+        size_x: usize,
+        size_y: usize,
+        offset_x: usize,
+        offset_y: usize,
+    ) -> bool {
+        if self.is_textmode {
+            return false;
+        }
+        if (depth != 32 && depth != 24)
+            || (self.frame_buffer_color_depth != 32 && self.frame_buffer_color_depth != 24)
+        {
+            return false;
+        }
+        let screen_depth_byte = self.frame_buffer_color_depth as usize / 8;
+        let bitmap_depth_byte = depth as usize / 8;
+        let bitmap_aligned_bitmap_width_pointer = ((size_x * bitmap_depth_byte - 1) & !3) + 4;
+        if self.frame_buffer_color_depth == 32 {
+            for height_pointer in (0..size_y).rev() {
+                for width_pointer in 0..size_x {
+                    unsafe {
+                        *((self.frame_buffer_address
+                            + ((height_pointer + offset_y) * self.frame_buffer_width
+                                + offset_x
+                                + width_pointer)
+                                * screen_depth_byte) as *mut u32) = *((buffer
+                            + (size_y - height_pointer - 1) * bitmap_aligned_bitmap_width_pointer
+                            + width_pointer * bitmap_depth_byte)
+                            as *const u32);
+                    }
+                }
+            }
+        } else {
+            for height_pointer in (0..size_y).rev() {
+                for width_pointer in 0..size_x {
+                    unsafe {
+                        let dot = (self.frame_buffer_address
+                            + ((height_pointer + offset_y) * self.frame_buffer_width
+                                + offset_x
+                                + width_pointer)
+                                * screen_depth_byte) as *mut u32;
+                        *dot &= 0x000000ff;
+                        *dot |= *((buffer
+                            + (size_y - height_pointer) * bitmap_aligned_bitmap_width_pointer
+                            + width_pointer * bitmap_depth_byte)
+                            as *const u32)
+                            & 0xffffff;
+                    }
+                }
+            }
+        }
+        return true;
+    }
 }
 
 impl fmt::Write for GraphicManager {
@@ -225,6 +291,24 @@ pub fn print_string_to_default_screen(args: fmt::Arguments) -> bool {
     return false;
 }
 
+#[track_caller]
+pub fn print_debug_message(level: usize, args: fmt::Arguments) -> bool {
+    use core::panic::Location;
+    let level_str = match level {
+        3 => "[ERROR]",
+        4 => "[WARN]",
+        5 => "[NOTICE]",
+        6 => "[INFO]",
+        _ => "[???]",
+    };
+    let file = Location::caller().file(); //THINKING: filename only
+    let line = Location::caller().line();
+    return print_string_to_default_screen(format_args!(
+        "{} {}:{} | {}",
+        level_str, file, line, args
+    ));
+}
+
 // macros
 #[macro_export]
 macro_rules! puts {
@@ -244,4 +328,28 @@ macro_rules! print {
 macro_rules! println {
     ($fmt:expr) => (print!(concat!($fmt,"\n")));
     ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*)); //\nをつける
+}
+
+#[macro_export]
+macro_rules! kprintln {
+    ($fmt:expr) => (print!(concat!($fmt,"\n")));
+    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*)); //\nをつける
+}
+
+#[macro_export]
+macro_rules! pr_info {
+    ($fmt:expr) => ($crate::kernel::graphic::print_debug_message(6, format_args!(concat!($fmt,"\n"))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::graphic::print_debug_message(6, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
+}
+
+#[macro_export]
+macro_rules! pr_warn {
+    ($fmt:expr) => ($crate::kernel::graphic::print_debug_message(4, format_args!(concat!($fmt,"\n"))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::graphic::print_debug_message(4, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
+}
+
+#[macro_export]
+macro_rules! pr_err {
+    ($fmt:expr) => ($crate::kernel::graphic::print_debug_message(3, format_args!(concat!($fmt,"\n"))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::graphic::print_debug_message(3, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
 }
