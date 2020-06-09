@@ -321,7 +321,7 @@ impl VirtualMemoryManager {
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
         pm_manager: &mut PhysicalMemoryManager,
-    ) -> Result<&mut VirtualMemoryEntry, MemoryError> {
+    ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
         if size & !PAGE_MASK != 0 {
             pr_err!("Size is not aligned.");
             return Err(MemoryError::SizeNotAligned);
@@ -375,7 +375,7 @@ impl VirtualMemoryManager {
     /*Don't use vm_map_entry from alloc_address_without_mapping after call this function */
     pub fn finalize_vm_map_entry(
         &mut self,
-        vm_map_entry: &mut VirtualMemoryEntry,
+        vm_map_entry: &'static mut VirtualMemoryEntry,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         vm_map_entry.get_object_mut().activate_all_page();

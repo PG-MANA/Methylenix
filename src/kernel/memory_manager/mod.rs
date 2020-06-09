@@ -98,12 +98,49 @@ impl MemoryManager {
 
     pub fn alloc_nonlinear_pages(
         &mut self,
-        _order: usize,
-        _permission: MemoryPermissionFlags,
+        order: usize,
+        permission: MemoryPermissionFlags,
     ) -> Result<usize, MemoryError> {
         /* THINK: rename*/
         /* vmalloc */
-        unimplemented!();
+        let size = 2 << order;
+        if size <= PAGE_SIZE {
+            return self.alloc_pages(order, permission);
+        }
+        let pm_manager = self.physical_memory_manager.try_lock();
+        if pm_manager.is_err() {
+            return Err(MemoryError::MutexError);
+        }
+        let mut pm_manager = pm_manager.unwrap();
+        let entry = self.virtual_memory_manager.alloc_address_without_mapping(
+            size,
+            permission,
+            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            &mut pm_manager,
+        )?;
+        let vm_start_address = entry.get_vm_start_address();
+        for i in 0..Self::offset_to_index(size) {
+            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, PAGE_SHIFT) {
+                if let Err(e) = self
+                    .virtual_memory_manager
+                    .insert_physical_page_into_vm_map_entry(
+                        entry,
+                        vm_start_address + Self::index_to_offset(i),
+                        physical_address,
+                        &mut pm_manager,
+                    )
+                {
+                    panic!("Cannot insert physical page into vm_entry Err:{:?}", e);
+                }
+            }
+        }
+        if let Err(e) = self
+            .virtual_memory_manager
+            .finalize_vm_map_entry(entry, &mut pm_manager)
+        {
+            panic!("Cannot finalize vm_map_entry Err:{:?}", e);
+        }
+        Ok(vm_start_address)
     }
 
     pub fn free(&mut self, vm_address: usize) -> Result<(), MemoryError> {
