@@ -243,15 +243,14 @@ impl VirtualMemoryManager {
             Err(e) => panic!("Cannot insert Virtual Memory Entry Err:{:?}", e),
         };
 
-        for i in 0..(direct_mapped_area_size >> PAGE_SHIFT) {
-            if let Err(e) = self.associate_address(
-                direct_mapped_area_address + MemoryManager::index_to_offset(i),
-                direct_mapped_area_address + MemoryManager::index_to_offset(i),
-                MemoryPermissionFlags::data(),
-                pm_manager,
-            ) {
-                panic!("Cannot associate address for direct map Err:{:?}", e);
-            }
+        if let Err(e) = self.associate_address_with_size(
+            direct_mapped_area_address,
+            direct_mapped_area_address,
+            direct_mapped_area_size,
+            MemoryPermissionFlags::data(),
+            pm_manager,
+        ) {
+            panic!("Cannot associate address for direct map Err:{:?}", e);
         }
 
         let mut direct_mapped_area_allocator = PhysicalMemoryManager::new();
@@ -678,6 +677,42 @@ impl VirtualMemoryManager {
         }
     }
 
+    fn associate_address_with_size(
+        &mut self,
+        physical_address: usize,
+        virtual_address: usize,
+        size: usize,
+        permission: MemoryPermissionFlags,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        loop {
+            match self.page_manager.associate_area(
+                &mut self.reserved_memory_list,
+                physical_address,
+                virtual_address,
+                size,
+                permission,
+            ) {
+                Ok(()) => {
+                    return Ok(());
+                }
+                Err(PagingError::MemoryCacheRanOut) => {
+                    for _ in 0..PAGING_CACHE_LENGTH {
+                        match self.alloc_from_direct_map(PAGE_SIZE, pm_manager) {
+                            Ok(address) => self.reserved_memory_list.free_ptr(address as *mut _),
+                            Err(e) => panic!("Cannot alloc memory for paging Err:{:?}", e),
+                        }
+                    }
+                    /* retry (by loop) */
+                }
+                Err(_) => {
+                    pr_err!("Cannot associate physical address.");
+                    return Err(MemoryError::PagingError);
+                }
+            };
+        }
+    }
+
     fn unassociate_address(
         &mut self,
         virtual_address: usize,
@@ -976,7 +1011,7 @@ impl VirtualMemoryManager {
             ) + 1;
             for i in first_p_index..last_p_index {
                 if let Some(p) = entry.get_object().get_vm_page(i) {
-                    kprintln!(" -{} Physical Address:{:X}", i, p.get_physical_address());
+                    kprintln!(" -{} Physical Address:0x{:X}", i, p.get_physical_address());
                 }
             }
             let next = entry.get_next_entry();
