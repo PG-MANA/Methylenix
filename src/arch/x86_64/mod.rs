@@ -183,38 +183,6 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         };
         panic!("Cannot map virtual memory correctly.");
     }
-    /* may be needless */
-    if false {
-        for entry in multiboot_information.memory_map_info.clone() {
-            if entry.m_type == 1 {
-                continue;
-            }
-            let permission = match entry.m_type {
-                3 => MemoryPermissionFlags::data(), /* ACPI */
-                4 => MemoryPermissionFlags::data(),
-                5 => MemoryPermissionFlags::data(), //rodata?
-                _ => MemoryPermissionFlags::rodata(),
-            };
-            let aligned_start_address = entry.addr as usize & PAGE_MASK;
-            let aligned_size =
-                ((entry.addr as usize - aligned_start_address + entry.length as usize - 1)
-                    & PAGE_MASK)
-                    + PAGE_SIZE;
-            if let Ok(address) = virtual_memory_manager.map_address(
-                aligned_start_address,
-                Some(aligned_start_address),
-                aligned_size,
-                permission,
-                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
-                &mut physical_memory_manager,
-            ) {
-                if address == aligned_start_address {
-                    continue;
-                }
-            }
-            panic!("Cannot map virtual memory correctly.");
-        }
-    }
     /* set up Memory Manager */
     let mut memory_manager =
         MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
