@@ -471,14 +471,14 @@ impl PhysicalMemoryManager {
             return;
         }
         kprintln!(
-            "Start:0x{:X} Size:0x{:X}",
+            "Start:{:#X} Size:{:#X}",
             entry.get_start_address(),
             MemoryManager::address_to_size(entry.get_start_address(), entry.get_end_address())
         );
         while let Some(t) = entry.get_next_entry() {
             entry = t;
             kprintln!(
-                "Start:0x{:X} Size:0x{:X}",
+                "Start:{:#X} Size:{:#X}",
                 entry.get_start_address(),
                 MemoryManager::address_to_size(entry.get_start_address(), entry.get_end_address())
             );
@@ -492,7 +492,7 @@ impl PhysicalMemoryManager {
             kprintln!("order {}:", order);
             for entry in first_entry.list_iter() {
                 kprintln!(
-                    " Start:0x{:X} Size:0x{:X}",
+                    " Start:{:#X} Size:{:#X}",
                     entry.get_start_address(),
                     MemoryManager::address_to_size(
                         entry.get_start_address(),

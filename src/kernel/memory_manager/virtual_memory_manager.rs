@@ -214,7 +214,7 @@ impl VirtualMemoryManager {
         let direct_mapped_area_address = direct_mapped_area_address.unwrap();
 
         pr_info!(
-            "0x{:X} bytes are reserved for direct map",
+            "{:#X} bytes are reserved for direct map",
             direct_mapped_area_size
         );
 
@@ -349,10 +349,10 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         if physical_address & !PAGE_MASK != 0 {
-            pr_err!("Physical Address is not aligned: {:X}", physical_address);
+            pr_err!("Physical Address is not aligned: {:#x}", physical_address);
             return Err(MemoryError::AddressNotAligned);
         } else if vm_address & !PAGE_MASK != 0 {
-            pr_err!("Virtual Address is not aligned: {:X}", vm_address);
+            pr_err!("Virtual Address is not aligned: {:#x}", vm_address);
             return Err(MemoryError::AddressNotAligned);
         } else if vm_map_entry.get_vm_start_address() > vm_address
             || vm_map_entry.get_vm_end_address()
@@ -595,13 +595,13 @@ impl VirtualMemoryManager {
         _pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         if physical_address & !PAGE_MASK != 0 {
-            pr_err!("Physical Address is not aligned: {:X}", physical_address);
+            pr_err!("Physical Address is not aligned: {:#x}", physical_address);
             return Err(MemoryError::AddressNotAligned);
         } else if virtual_address & !PAGE_MASK != 0 {
-            pr_err!("Virtual Address is not aligned: {:X}", virtual_address);
+            pr_err!("Virtual Address is not aligned: {:#x}", virtual_address);
             return Err(MemoryError::AddressNotAligned);
         } else if size & !PAGE_MASK != 0 {
-            pr_err!("Size is not aligned: {:X}", size);
+            pr_err!("Size is not aligned: {:#x}", size);
             return Err(MemoryError::SizeNotAligned);
         } else if size == 0 {
             pr_err!("Size is zero");
@@ -826,10 +826,10 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<usize, MemoryError> {
         if virtual_address & !PAGE_MASK != 0 {
-            pr_err!("Virtual Address is not aligned: {:X}", virtual_address);
+            pr_err!("Virtual Address is not aligned: {:#x}", virtual_address);
             return Err(MemoryError::AddressNotAligned);
         } else if new_size & !PAGE_MASK != 0 {
-            pr_err!("Size is not aligned: {:X}", new_size);
+            pr_err!("Size is not aligned: {:#x}", new_size);
             return Err(MemoryError::SizeNotAligned);
         } else if new_size == 0 {
             pr_err!("Size is zero");
@@ -876,7 +876,7 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<usize, MemoryError> {
         if size & !PAGE_MASK != 0 {
-            pr_err!("Size is not aligned: {:X}", size);
+            pr_err!("Size is not aligned: {:#x}", size);
             return Err(MemoryError::SizeNotAligned);
         }
         if self.direct_mapped_area.is_none() {
@@ -995,7 +995,7 @@ impl VirtualMemoryManager {
         let mut entry = self.vm_map_entry.get_first_entry().unwrap();
         loop {
             kprintln!(
-                "Virtual:0x{:X} Size:0x{:X} W:{}, U:{}, EXE:{}",
+                "Virtual Address:{:#X} Size:{:#X} W:{}, U:{}, EXE:{}",
                 entry.get_vm_start_address(),
                 MemoryManager::address_to_size(
                     entry.get_vm_start_address(),
@@ -1011,7 +1011,7 @@ impl VirtualMemoryManager {
             ) + 1;
             for i in first_p_index..last_p_index {
                 if let Some(p) = entry.get_object().get_vm_page(i) {
-                    kprintln!(" -{} Physical Address:0x{:X}", i, p.get_physical_address());
+                    kprintln!(" -{} Physical Address:{:#X}", i, p.get_physical_address());
                 }
             }
             let next = entry.get_next_entry();

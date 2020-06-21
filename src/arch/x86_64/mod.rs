@@ -121,7 +121,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             _ => "reserved",
         };
         pr_info!(
-            "[0x{:X}~0x{:X}] {}",
+            "[{:#X}~{:#X}] {}",
             entry.addr as usize,
             MemoryManager::size_to_end_address(entry.addr as usize, entry.length as usize),
             area_name
@@ -172,7 +172,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
                     continue;
                 }
                 pr_err!(
-                    "Virtual Address is different from Physical Address.\nV: {:X} P:{:X}",
+                    "Virtual Address is different from Physical Address.\nV:{:#X} P:{:#X}",
                     address,
                     aligned_start_address
                 );
@@ -255,7 +255,7 @@ fn init_acpi(rsdp_ptr: usize) {
             ) {
             Ok(bitmap_vm_address) => {
                 pr_info!(
-                    "0x{:X} is mapped at 0x{:X}",
+                    "{:#X} is mapped at {:#X}",
                     p_bitmap_address,
                     bitmap_vm_address
                 );
@@ -309,7 +309,7 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
         ) {
         Ok(remapped_bitmap_vm_address) => {
             pr_info!(
-                "Bitmap Data: 0x{:X} is remapped at 0x{:X}",
+                "Bitmap Data: {:#X} is remapped at {:#X}",
                 bitmap_vm_address,
                 remapped_bitmap_vm_address,
             );
