@@ -240,6 +240,7 @@ impl PageManager {
             return Err(PagingError::AddressIsNotAligned);
         }
         let pte = self.get_target_pte(cache_memory_list, linear_address, true, true, None)?;
+        pte.init();
         pte.set_address(physical_address);
         pte.set_no_execute(!permission.execute());
         pte.set_writable(permission.write());
@@ -288,6 +289,7 @@ impl PageManager {
                     true,
                 )?;
                 if !pdpte.is_present() {
+                    pdpte.init();
                     pdpte.set_huge(true);
                     pdpte.set_no_execute(!permission.execute());
                     pdpte.set_writable(permission.write());
@@ -307,6 +309,7 @@ impl PageManager {
                     None,
                 )?;
                 if !pde.is_present() {
+                    pde.init();
                     pde.set_huge(true);
                     pde.set_no_execute(!permission.execute());
                     pde.set_writable(permission.write());
@@ -353,7 +356,7 @@ impl PageManager {
     ) -> Result<(), PagingError> {
         match self.get_target_paging_entry(cache_memory_list, linear_address, false, false) {
             Ok(entry) => {
-                entry.set_present(false);
+                entry.set_present(false); /* Huge bitは下げないでないでおくことで 渡されたlinearアドレス*/
                 self.cleanup_page_table(linear_address, cache_memory_list)
             }
             Err(err) => {
