@@ -452,11 +452,12 @@ impl VirtualMemoryManager {
             }
         };
 
-        for i in 0..size >> PAGE_SHIFT {
+        if entry.get_memory_option_flags().is_dev_map() {
             if self
-                .associate_address(
-                    physical_address + i * PAGE_SIZE,
-                    vm_start_address + i * PAGE_SIZE,
+                .associate_address_with_size(
+                    physical_address,
+                    vm_start_address,
+                    size,
                     permission,
                     pm_manager,
                 )
@@ -470,7 +471,30 @@ impl VirtualMemoryManager {
                 self.vm_map_entry_pool.free(entry);
                 return Err(MemoryError::PagingError);
             }
-            self.update_paging(vm_start_address + i * PAGE_SIZE);
+            for i in 0..size >> PAGE_SHIFT {
+                self.update_paging(vm_start_address + i * PAGE_SIZE);
+            }
+        } else {
+            for i in 0..size >> PAGE_SHIFT {
+                if self
+                    .associate_address(
+                        physical_address + i * PAGE_SIZE,
+                        vm_start_address + i * PAGE_SIZE,
+                        permission,
+                        pm_manager,
+                    )
+                    .is_err()
+                {
+                    pr_err!("Cannnot associate address.");
+                    entry.remove_from_list();
+                    //for rev_i in (0..i).rev() {
+                    /*add: self.unassociate_address() */
+                    //}
+                    self.vm_map_entry_pool.free(entry);
+                    return Err(MemoryError::PagingError);
+                }
+                self.update_paging(vm_start_address + i * PAGE_SIZE);
+            }
         }
         Ok(vm_start_address)
     }
