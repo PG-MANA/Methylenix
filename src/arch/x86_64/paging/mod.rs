@@ -35,6 +35,27 @@ pub enum PagingError {
     MemoryCacheOverflowed,
     EntryIsNotFound,
     AddressIsNotAligned,
+    SizeIsNotAligned,
+}
+
+trait PagingEntry {
+    fn is_present(&self) -> bool;
+    fn set_present(&mut self, b: bool);
+    fn is_writable(&self) -> bool;
+    fn set_writable(&mut self, b: bool);
+    fn is_user_accessible(&self) -> bool;
+    fn set_user_accessible(&mut self, b: bool);
+    fn set_wtc(&mut self, b: bool);
+    fn set_disable_cache(&mut self, b: bool);
+    fn is_accessed(&self) -> bool;
+    fn off_accessed(&mut self);
+    fn is_dirty(&self) -> bool;
+    fn off_dirty(&mut self);
+    fn set_global(&mut self, b: bool);
+    fn is_no_execute(&self) -> bool;
+    fn set_no_execute(&mut self, b: bool);
+    fn get_address(&self) -> Option<usize>;
+    fn set_address(&mut self, address: usize) -> bool;
 }
 
 impl PageManager {
@@ -60,24 +81,23 @@ impl PageManager {
         )
     }
 
-    fn get_target_pte(
+    fn get_target_pdpte(
         &mut self,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
         linear_address: usize,
         should_set_present: bool,
         should_create_entry: bool,
-    ) -> Result<&'static mut PTE, PagingError> {
+    ) -> Result<&'static mut PDPTE, PagingError> {
         if (linear_address & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);
         }
 
-        let number_of_pml4e = (linear_address >> (4 * 3) + 9 * 3) & (0x1FF);
-        let number_of_pdpte = (linear_address >> (4 * 3) + 9 * 2) & (0x1FF);
-        let number_of_pde = (linear_address >> (4 * 3) + 9 * 1) & (0x1FF);
-        let number_of_pte = (linear_address >> (4 * 3) + 9 * 0) & (0x1FF);
         let pml4_table = unsafe { &mut *(self.pml4 as *mut [PML4E; PML4_MAX_ENTRY]) };
 
-        if !pml4_table[number_of_pml4e].is_pdpt_set() {
+        let number_of_pml4e = (linear_address >> (4 * 3) + 9 * 3) & (0x1FF);
+        let number_of_pdpte = (linear_address >> (4 * 3) + 9 * 2) & (0x1FF);
+
+        if !pml4_table[number_of_pml4e].is_address_set() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
@@ -86,16 +106,40 @@ impl PageManager {
             for entry in temp_pdpt.iter_mut() {
                 entry.init();
             }
-            pml4_table[number_of_pml4e].set_addr(pdpt_address);
+            pml4_table[number_of_pml4e].set_address(pdpt_address);
         }
         if should_set_present {
             pml4_table[number_of_pml4e].set_present(true);
         }
 
         let pdpte = &mut unsafe {
-            &mut *(pml4_table[number_of_pml4e].get_addr().unwrap() as *mut [PDPTE; PDPT_MAX_ENTRY])
+            &mut *(pml4_table[number_of_pml4e].get_address().unwrap()
+                as *mut [PDPTE; PDPT_MAX_ENTRY])
         }[number_of_pdpte];
-        if !pdpte.is_pd_set() {
+        if should_set_present {
+            pdpte.set_present(true);
+        }
+        Ok(pdpte)
+    }
+
+    fn get_target_pde(
+        &mut self,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        linear_address: usize,
+        should_set_present: bool,
+        should_create_entry: bool,
+        pdpte: Option<&'static mut PDPTE>,
+    ) -> Result<&'static mut PDE, PagingError> {
+        let number_of_pde = (linear_address >> (4 * 3) + 9 * 1) & (0x1FF);
+
+        let pdpte = pdpte.unwrap_or(self.get_target_pdpte(
+            cache_memory_list,
+            linear_address,
+            should_set_present,
+            should_create_entry,
+        )?);
+
+        if !pdpte.is_address_set() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
@@ -104,14 +148,34 @@ impl PageManager {
             for entry in temp_pd.iter_mut() {
                 entry.init();
             }
-            pdpte.set_addr(pd_address);
+            pdpte.set_address(pd_address);
         }
-        if should_set_present {
-            pdpte.set_present(true);
-        }
-        let pde = &mut unsafe { &mut *(pdpte.get_addr().unwrap() as *mut [PDE; PD_MAX_ENTRY]) }
+        let pde = &mut unsafe { &mut *(pdpte.get_address().unwrap() as *mut [PDE; PD_MAX_ENTRY]) }
             [number_of_pde];
-        if !pde.is_pt_set() {
+        if should_set_present {
+            pde.set_present(true);
+        }
+        Ok(pde)
+    }
+
+    fn get_target_pte(
+        &mut self,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        linear_address: usize,
+        should_set_present: bool,
+        should_create_entry: bool,
+        pde: Option<&'static mut PDE>,
+    ) -> Result<&'static mut PTE, PagingError> {
+        let number_of_pte = (linear_address >> (4 * 3) + 9 * 0) & (0x1FF);
+
+        let pde = pde.unwrap_or(self.get_target_pde(
+            cache_memory_list,
+            linear_address,
+            should_set_present,
+            should_create_entry,
+            None,
+        )?);
+        if !pde.is_address_set() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
@@ -120,15 +184,48 @@ impl PageManager {
             for entry in temp_pt.iter_mut() {
                 entry.init();
             }
-            pde.set_addr(pt_address);
-        }
-        if should_set_present {
-            pde.set_present(true);
+            pde.set_address(pt_address);
         }
         Ok(
-            &mut unsafe { &mut *(pde.get_addr().unwrap() as *mut [PTE; PT_MAX_ENTRY]) }
+            &mut unsafe { &mut *(pde.get_address().unwrap() as *mut [PTE; PT_MAX_ENTRY]) }
                 [number_of_pte],
         )
+    }
+
+    fn get_target_paging_entry(
+        &mut self,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        linear_address: usize,
+        should_set_present: bool,
+        should_create_entry: bool,
+    ) -> Result<&'static mut dyn PagingEntry, PagingError> {
+        let pdpte = self.get_target_pdpte(
+            cache_memory_list,
+            linear_address,
+            should_set_present,
+            should_create_entry,
+        )?;
+        if pdpte.is_huge() {
+            return Ok(pdpte);
+        }
+        let pde = self.get_target_pde(
+            cache_memory_list,
+            linear_address,
+            should_set_present,
+            should_create_entry,
+            Some(pdpte),
+        )?;
+        if pde.is_huge() {
+            return Ok(pde);
+        }
+        let pte = self.get_target_pte(
+            cache_memory_list,
+            linear_address,
+            should_set_present,
+            should_create_entry,
+            Some(pde),
+        )?;
+        Ok(pte)
     }
 
     pub fn associate_address(
@@ -142,12 +239,95 @@ impl PageManager {
         if ((physical_address & !PAGE_MASK) != 0) || ((linear_address & !PAGE_MASK) != 0) {
             return Err(PagingError::AddressIsNotAligned);
         }
-        let pte = self.get_target_pte(cache_memory_list, linear_address, true, true)?;
-        pte.set_addr(physical_address);
+        let pte = self.get_target_pte(cache_memory_list, linear_address, true, true, None)?;
+        pte.init();
+        pte.set_address(physical_address);
         pte.set_no_execute(!permission.execute());
         pte.set_writable(permission.write());
         pte.set_user_accessible(permission.user_access());
         /* PageManager::reset_paging_local(linear_address) */
+        Ok(())
+    }
+
+    pub fn associate_area(
+        &mut self,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        physical_address: usize,
+        linear_address: usize,
+        size: usize,
+        permission: MemoryPermissionFlags,
+    ) -> Result<(), PagingError> {
+        if ((physical_address & !PAGE_MASK) != 0) || ((linear_address & !PAGE_MASK) != 0) {
+            return Err(PagingError::AddressIsNotAligned);
+        } else if (size & !PAGE_MASK) != 0 {
+            return Err(PagingError::SizeIsNotAligned);
+        }
+        if size == PAGE_SIZE {
+            return self.associate_address(
+                cache_memory_list,
+                physical_address,
+                linear_address,
+                permission,
+            );
+        }
+
+        let mut processed_size = 0usize;
+        while processed_size <= size {
+            let processing_linear_address = linear_address + processed_size;
+            let processing_physical_address = physical_address + processed_size;
+            let number_of_pde = (processing_linear_address >> (4 * 3) + 9 * 1) & (0x1FF);
+            let number_of_pte = (processing_linear_address >> (4 * 3) + 9 * 0) & (0x1FF);
+
+            if number_of_pte == 0
+                && number_of_pde == 0
+                && (size - processed_size) >= 1024 * 1024 * 1024
+            {
+                let pdpte = self.get_target_pdpte(
+                    cache_memory_list,
+                    processing_linear_address,
+                    false,
+                    true,
+                )?;
+                if !pdpte.is_present() {
+                    pdpte.init();
+                    pdpte.set_huge(true);
+                    pdpte.set_no_execute(!permission.execute());
+                    pdpte.set_writable(permission.write());
+                    pdpte.set_user_accessible(permission.user_access());
+                    pdpte.set_address(processing_physical_address);
+                    pdpte.set_present(true);
+                    processed_size += 1024 * 1024 * 1024;
+                    continue;
+                }
+            }
+            if number_of_pte == 0 && (size - processed_size) >= 2 * 1024 * 1024 {
+                let pde = self.get_target_pde(
+                    cache_memory_list,
+                    processing_linear_address,
+                    false,
+                    true,
+                    None,
+                )?;
+                if !pde.is_present() {
+                    pde.init();
+                    pde.set_huge(true);
+                    pde.set_no_execute(!permission.execute());
+                    pde.set_writable(permission.write());
+                    pde.set_user_accessible(permission.user_access());
+                    pde.set_address(processing_physical_address);
+                    pde.set_present(true);
+                    processed_size += 2 * 1024 * 1024;
+                    continue;
+                }
+            }
+            self.associate_address(
+                cache_memory_list,
+                processing_physical_address,
+                processing_linear_address,
+                permission,
+            )?;
+            processed_size += PAGE_SIZE;
+        }
         Ok(())
     }
 
@@ -160,10 +340,11 @@ impl PageManager {
         if (linear_address & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);
         }
-        let pte = self.get_target_pte(cache_memory_list, linear_address, false, false)?;
-        pte.set_writable(permission.write());
-        pte.set_no_execute(!permission.execute());
-        pte.set_user_accessible(permission.user_access());
+        let entry =
+            self.get_target_paging_entry(cache_memory_list, linear_address, false, false)?;
+        entry.set_writable(permission.write());
+        entry.set_no_execute(!permission.execute());
+        entry.set_user_accessible(permission.user_access());
         Ok(())
     }
 
@@ -173,9 +354,9 @@ impl PageManager {
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
         entry_may_be_deleted: bool,
     ) -> Result<(), PagingError> {
-        match self.get_target_pte(cache_memory_list, linear_address, false, false) {
-            Ok(pte) => {
-                pte.set_present(false);
+        match self.get_target_paging_entry(cache_memory_list, linear_address, false, false) {
+            Ok(entry) => {
+                entry.set_present(false); /* Huge bitは下げないでないでおくことで 渡されたlinearアドレス*/
                 self.cleanup_page_table(linear_address, cache_memory_list)
             }
             Err(err) => {
@@ -199,38 +380,50 @@ impl PageManager {
         let number_of_pde = (linear_address >> (4 * 3) + 9 * 1) & (0x1FF);
         let pml4e =
             &mut unsafe { &mut *(self.pml4 as *mut [PML4E; PML4_MAX_ENTRY]) }[number_of_pml4e];
-        if !pml4e.is_pdpt_set() {
+        if !pml4e.is_address_set() {
             return Ok(());
         }
 
         let pdpte =
-            &mut unsafe { &mut *(pml4e.get_addr().unwrap() as *mut [PDPTE; PDPT_MAX_ENTRY]) }
+            &mut unsafe { &mut *(pml4e.get_address().unwrap() as *mut [PDPTE; PDPT_MAX_ENTRY]) }
                 [number_of_pdpe];
-        let pde = &mut unsafe { &mut *(pdpte.get_addr().unwrap() as *mut [PDE; PD_MAX_ENTRY]) }
-            [number_of_pde];
-        if pde.is_present() {
-            for e in unsafe { &*(pde.get_addr().unwrap() as *const [PTE; PT_MAX_ENTRY]) }.iter() {
-                if e.is_present() {
-                    return Ok(());
-                }
-            }
-            cache_memory_list.free_ptr(pde.get_addr().unwrap() as *mut _); /*free PT*/
-            pde.set_present(false);
-        }
         if pdpte.is_present() {
-            for e in unsafe { &*(pdpte.get_addr().unwrap() as *const [PDE; PD_MAX_ENTRY]) }.iter() {
-                if e.is_present() {
-                    return Ok(());
+            if !pdpte.is_huge() {
+                let pde = &mut unsafe {
+                    &mut *(pdpte.get_address().unwrap() as *mut [PDE; PD_MAX_ENTRY])
+                }[number_of_pde];
+                if pde.is_present() {
+                    if !pde.is_huge() {
+                        for e in
+                            unsafe { &*(pde.get_address().unwrap() as *const [PTE; PT_MAX_ENTRY]) }
+                                .iter()
+                        {
+                            if e.is_present() {
+                                return Ok(());
+                            }
+                        }
+                        cache_memory_list.free_ptr(pde.get_address().unwrap() as *mut _); /*free PT*/
+                        pde.set_present(false);
+                    }
                 }
+                for e in
+                    unsafe { &*(pdpte.get_address().unwrap() as *const [PDE; PD_MAX_ENTRY]) }.iter()
+                {
+                    if e.is_present() {
+                        return Ok(());
+                    }
+                }
+                cache_memory_list.free_ptr(pdpte.get_address().unwrap() as *mut _); /*free PD*/
+                pdpte.set_present(false);
             }
-            cache_memory_list.free_ptr(pdpte.get_addr().unwrap() as *mut _); /*free PD*/
-            pdpte.set_present(false);
         }
-        for e in unsafe { &*(pml4e.get_addr().unwrap() as *const [PDPTE; PDPT_MAX_ENTRY]) }.iter() {
+        for e in
+            unsafe { &*(pml4e.get_address().unwrap() as *const [PDPTE; PDPT_MAX_ENTRY]) }.iter()
+        {
             if e.is_present() {
                 return Ok(());
             }
-            cache_memory_list.free_ptr(pml4e.get_addr().unwrap() as *mut _); /*free PDPT*/
+            cache_memory_list.free_ptr(pml4e.get_address().unwrap() as *mut _); /*free PDPT*/
             pml4e.set_present(false);
         }
         Ok(())
@@ -261,36 +454,62 @@ impl PageManager {
     pub fn dump_table(&self, end: Option<usize>) {
         let pml4_table = unsafe { &*(self.pml4 as *const [PML4E; PML4_MAX_ENTRY]) };
         for pml4 in pml4_table.iter() {
-            if !pml4.is_pdpt_set() {
+            if !pml4.is_address_set() {
                 continue;
             }
-            let pdpe_table =
-                unsafe { &*(pml4.get_addr().unwrap() as *const [PDPTE; PDPT_MAX_ENTRY]) };
-            for (pdpte_count, pdpe) in pdpe_table.iter().enumerate() {
-                if !pdpe.is_pd_set() {
+            let pdpt = unsafe { &*(pml4.get_address().unwrap() as *const [PDPTE; PDPT_MAX_ENTRY]) };
+            for (pdpte_count, pdpte) in pdpt.iter().enumerate() {
+                if !pdpte.is_address_set() {
                     continue;
                 }
-                let pde_table =
-                    unsafe { &*(pdpe.get_addr().unwrap() as *const [PDE; PD_MAX_ENTRY]) };
-                for (pde_count, pde) in pde_table.iter().enumerate() {
-                    if !pde.is_pt_set() {
+                if pdpte.is_huge() {
+                    kprintln!(
+                        "{:#X}: {:#X} W:{}, EXE:{}, A:{} 1G",
+                        0x40000000 * pdpte_count,
+                        pdpte.get_address().unwrap(),
+                        pdpte.is_writable(),
+                        !pdpte.is_no_execute(),
+                        pdpte.is_accessed()
+                    );
+                    if end.is_some() && pdpte.get_address() >= end {
+                        return;
+                    }
+                    continue;
+                }
+                let pd = unsafe { &*(pdpte.get_address().unwrap() as *const [PDE; PD_MAX_ENTRY]) };
+                for (pde_count, pde) in pd.iter().enumerate() {
+                    if !pde.is_address_set() {
                         continue;
                     }
-                    let pte_table =
-                        unsafe { &*(pde.get_addr().unwrap() as *const [PTE; PT_MAX_ENTRY]) };
-                    for (pte_count, pte) in pte_table.iter().enumerate() {
+                    if pde.is_huge() {
+                        kprintln!(
+                            "{:#X}: {:#X} W:{}, EXE:{}, A:{} 2M",
+                            0x40000000 * pdpte_count + 0x200000 * pde_count,
+                            pde.get_address().unwrap(),
+                            pdpte.is_writable(),
+                            !pdpte.is_no_execute(),
+                            pdpte.is_accessed(),
+                        );
+                        if end.is_some() && pde.get_address() >= end {
+                            return;
+                        }
+                        continue;
+                    }
+                    let pt =
+                        unsafe { &*(pde.get_address().unwrap() as *const [PTE; PT_MAX_ENTRY]) };
+                    for (pte_count, pte) in pt.iter().enumerate() {
                         if !pte.is_present() {
                             continue;
                         }
                         kprintln!(
-                            "0x{:X}: 0x{:X} W:{}, EXE:{}, A:{}",
+                            "{:#X}: {:#X} W:{}, EXE:{}, A:{} 4K",
                             0x40000000 * pdpte_count + 0x200000 * pde_count + 0x1000 * pte_count,
-                            pte.get_addr().unwrap(),
+                            pte.get_address().unwrap(),
                             pte.is_writable(),
                             !pte.is_no_execute(),
                             pte.is_accessed()
                         );
-                        if end.is_some() && pte.get_addr() >= end {
+                        if end.is_some() && pte.get_address() >= end {
                             return;
                         }
                     }

@@ -121,7 +121,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             _ => "reserved",
         };
         pr_info!(
-            "[0x{:X}~0x{:X}] {}",
+            "[{:#X}~{:#X}] {}",
             entry.addr as usize,
             MemoryManager::size_to_end_address(entry.addr as usize, entry.length as usize),
             area_name
@@ -172,7 +172,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
                     continue;
                 }
                 pr_err!(
-                    "Virtual Address is different from Physical Address.\nV: {:X} P:{:X}",
+                    "Virtual Address is different from Physical Address.\nV:{:#X} P:{:#X}",
                     address,
                     aligned_start_address
                 );
@@ -182,38 +182,6 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             }
         };
         panic!("Cannot map virtual memory correctly.");
-    }
-    /* may be needless */
-    if false {
-        for entry in multiboot_information.memory_map_info.clone() {
-            if entry.m_type == 1 {
-                continue;
-            }
-            let permission = match entry.m_type {
-                3 => MemoryPermissionFlags::data(), /* ACPI */
-                4 => MemoryPermissionFlags::data(),
-                5 => MemoryPermissionFlags::data(), //rodata?
-                _ => MemoryPermissionFlags::rodata(),
-            };
-            let aligned_start_address = entry.addr as usize & PAGE_MASK;
-            let aligned_size =
-                ((entry.addr as usize - aligned_start_address + entry.length as usize - 1)
-                    & PAGE_MASK)
-                    + PAGE_SIZE;
-            if let Ok(address) = virtual_memory_manager.map_address(
-                aligned_start_address,
-                Some(aligned_start_address),
-                aligned_size,
-                permission,
-                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
-                &mut physical_memory_manager,
-            ) {
-                if address == aligned_start_address {
-                    continue;
-                }
-            }
-            panic!("Cannot map virtual memory correctly.");
-        }
     }
     /* set up Memory Manager */
     let mut memory_manager =
@@ -276,7 +244,7 @@ fn init_acpi(rsdp_ptr: usize) {
     {
         let temp_map_size = 54usize;
 
-        match get_kernel_manager_cluster()
+        let result = get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
@@ -284,36 +252,35 @@ fn init_acpi(rsdp_ptr: usize) {
                 p_bitmap_address,
                 temp_map_size,
                 MemoryPermissionFlags::rodata(),
-            ) {
-            Ok(bitmap_vm_address) => {
-                pr_info!(
-                    "0x{:X} is mapped at 0x{:X}",
-                    p_bitmap_address,
-                    bitmap_vm_address
-                );
-                if !draw_boot_logo(
-                    bitmap_vm_address,
-                    temp_map_size,
-                    acpi_manager
-                        .get_xsdt_manager()
-                        .get_bgrt_manager()
-                        .get_image_offset()
-                        .unwrap(),
-                ) {
-                    if let Err(e) = get_kernel_manager_cluster()
-                        .memory_manager
-                        .lock()
-                        .unwrap()
-                        .free(bitmap_vm_address)
-                    {
-                        pr_err!("Freeing bitmap data failed Err:{:?}", e);
-                    }
-                }
+            );
+        if result.is_err() {
+            pr_err!("Mapping BGRT's bitmap data failed Err:{:?}", result.err());
+            return;
+        }
+        let bitmap_vm_address = result.unwrap();
+        pr_info!(
+            "{:#X} is mapped at {:#X}",
+            p_bitmap_address,
+            bitmap_vm_address
+        );
+        if !draw_boot_logo(
+            bitmap_vm_address,
+            temp_map_size,
+            acpi_manager
+                .get_xsdt_manager()
+                .get_bgrt_manager()
+                .get_image_offset()
+                .unwrap(),
+        ) {
+            if let Err(e) = get_kernel_manager_cluster()
+                .memory_manager
+                .lock()
+                .unwrap()
+                .free(bitmap_vm_address)
+            {
+                pr_err!("Freeing bitmap data failed Err:{:?}", e);
             }
-            Err(e) => {
-                pr_err!("Mapping BGRT's bitmap data failed Err:{:?}", e);
-            }
-        };
+        }
     }
 }
 
@@ -329,7 +296,8 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
     let bitmap_color_depth = unsafe { *((bitmap_vm_address + 28) as *const u16) };
     let aligned_bitmap_width =
         ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
-    match get_kernel_manager_cluster()
+
+    let result = get_kernel_manager_cluster()
         .memory_manager
         .lock()
         .unwrap()
@@ -338,40 +306,42 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
             mapped_size,
             (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize / 8))
                 + file_offset as usize,
-        ) {
-        Ok(remapped_bitmap_vm_address) => {
-            pr_info!(
-                "Bitmap Data: 0x{:X} is remapped at 0x{:X}",
-                bitmap_vm_address,
-                remapped_bitmap_vm_address,
-            );
-            get_kernel_manager_cluster()
-                .graphic_manager
-                .lock()
-                .unwrap()
-                .write_bitmap(
-                    remapped_bitmap_vm_address + file_offset as usize,
-                    bitmap_color_depth as u8,
-                    bitmap_width as usize,
-                    bitmap_height as usize,
-                    offset.0,
-                    offset.1,
-                );
-            if let Err(e) = get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .free(remapped_bitmap_vm_address)
-            {
-                pr_err!("Freeing bitmap data failed Err:{:?}", e);
-            }
-            return true;
-        }
-        Err(e) => {
-            pr_err!("Mapping BGRT's bitmap data Err:{:?}", e);
-            return false;
-        }
-    };
+        );
+
+    if result.is_err() {
+        pr_err!("Mapping BGRT's bitmap data Err:{:?}", result.err());
+        return false;
+    }
+    let remapped_bitmap_vm_address = result.unwrap();
+
+    pr_info!(
+        "Bitmap Data: {:#X} is remapped at {:#X}",
+        bitmap_vm_address,
+        remapped_bitmap_vm_address,
+    );
+
+    get_kernel_manager_cluster()
+        .graphic_manager
+        .lock()
+        .unwrap()
+        .write_bitmap(
+            remapped_bitmap_vm_address + file_offset as usize,
+            bitmap_color_depth as u8,
+            bitmap_width as usize,
+            bitmap_height as usize,
+            offset.0,
+            offset.1,
+        );
+
+    if let Err(e) = get_kernel_manager_cluster()
+        .memory_manager
+        .lock()
+        .unwrap()
+        .free(remapped_bitmap_vm_address)
+    {
+        pr_err!("Freeing bitmap data failed Err:{:?}", e);
+    }
+    return true;
 }
 
 #[no_mangle]

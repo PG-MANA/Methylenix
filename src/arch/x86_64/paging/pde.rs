@@ -2,6 +2,7 @@
  * Page Directory Entry
  */
 
+use super::PagingEntry;
 use super::PAGE_MASK;
 
 pub const PD_MAX_ENTRY: usize = 512;
@@ -40,79 +41,106 @@ impl PDE {
         }
     }
 
-    pub fn is_pt_set(&self) -> bool {
+    pub fn is_address_set(&self) -> bool {
         self.get_bit(1 << 52)
     }
 
-    pub fn set_pt_set(&mut self, b: bool) {
+    pub fn set_address_set(&mut self, b: bool) {
         self.set_bit(1 << 52, b);
     }
 
-    pub fn is_present(&self) -> bool {
+    pub fn is_huge(&self) -> bool {
+        self.get_bit(1 << 7)
+    }
+
+    pub fn set_huge(&mut self, b: bool) {
+        assert_eq!(self.is_present(), false);
+        self.set_bit(1 << 7, b);
+    }
+}
+
+impl PagingEntry for PDE {
+    fn is_present(&self) -> bool {
         self.get_bit(1 << 0)
     }
 
-    pub fn set_present(&mut self, b: bool) {
+    fn set_present(&mut self, b: bool) {
         self.set_bit(1 << 0, b);
     }
 
-    pub fn set_writable(&mut self, b: bool) {
+    fn is_writable(&self) -> bool {
+        self.get_bit(1 << 1)
+    }
+
+    fn set_writable(&mut self, b: bool) {
         self.set_bit(1 << 1, b);
     }
 
-    pub fn set_user_accessible(&mut self, b: bool) {
+    fn is_user_accessible(&self) -> bool {
+        self.get_bit(1 << 2)
+    }
+
+    fn set_user_accessible(&mut self, b: bool) {
         self.set_bit(1 << 2, b);
     }
 
-    pub fn set_wtc(&mut self, b: bool) {
+    fn set_wtc(&mut self, b: bool) {
         //write through caching
         self.set_bit(1 << 3, b);
     }
 
-    pub fn set_disable_cache(&mut self, b: bool) {
+    fn set_disable_cache(&mut self, b: bool) {
         self.set_bit(1 << 4, b);
     }
 
-    pub fn is_accessed(&self) -> bool {
+    fn is_accessed(&self) -> bool {
         self.get_bit(1 << 5)
     }
 
-    pub fn off_accessed(&mut self) {
+    fn off_accessed(&mut self) {
         self.set_bit(1 << 5, false);
     }
 
-    pub fn is_dirty(&self) -> bool {
+    fn is_dirty(&self) -> bool {
         self.get_bit(1 << 6)
     }
 
-    pub fn off_dirty(&mut self) {
+    fn off_dirty(&mut self) {
         self.set_bit(1 << 6, false);
     }
 
-    pub fn set_huge(&mut self, b: bool) {
-        self.set_bit(1 << 7, b);
-    }
-
-    pub fn set_global(&mut self, b: bool) {
+    fn set_global(&mut self, b: bool) {
         self.set_bit(1 << 8, b);
     }
 
-    pub fn set_no_excuse(&mut self, b: bool) {
+    fn is_no_execute(&self) -> bool {
+        self.get_bit(1 << 63)
+    }
+
+    fn set_no_execute(&mut self, b: bool) {
         self.set_bit(1 << 63, b);
     }
 
-    pub fn get_addr(&self) -> Option<usize> {
-        if self.is_pt_set() {
-            Some((self.flags & 0x000FFFFF_FFFFF000) as usize)
+    fn get_address(&self) -> Option<usize> {
+        if self.is_address_set() {
+            if self.is_huge() {
+                Some((self.flags & 0x000FFFFF_FFFF0000) as usize)
+            } else {
+                Some((self.flags & 0x000FFFFF_FFFFF000) as usize)
+            }
         } else {
             None
         }
     }
 
-    pub fn set_addr(&mut self, address: usize) -> bool {
+    fn set_address(&mut self, address: usize) -> bool {
         if (address & !PAGE_MASK) == 0 {
-            self.set_bit((0x000FFFFF_FFFFF000 & address) as u64, true);
-            self.set_pt_set(true);
+            if self.is_huge() {
+                self.set_bit((0x000FFFFF_FFFF0000 & address) as u64, true);
+            } else {
+                self.set_bit((0x000FFFFF_FFFFF000 & address) as u64, true);
+            }
+            self.set_address_set(true);
             true
         } else {
             false

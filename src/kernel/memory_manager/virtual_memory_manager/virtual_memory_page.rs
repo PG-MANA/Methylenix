@@ -4,10 +4,12 @@
  */
 
 use kernel::memory_manager::MemoryOptionFlags;
+use kernel::sync::spin_lock::SpinLockFlag;
 
 use kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 
 pub struct VirtualMemoryPage {
+    lock: SpinLockFlag,
     list: PtrLinkedListNode<Self>,
     status: PageStatus,
     p_index: usize,
@@ -25,6 +27,7 @@ enum PageStatus {
 impl VirtualMemoryPage {
     pub fn new(physical_address: usize, p_index: usize) -> Self {
         Self {
+            lock: SpinLockFlag::new(),
             list: PtrLinkedListNode::new(),
             status: PageStatus::InActive,
             p_index,
@@ -34,11 +37,13 @@ impl VirtualMemoryPage {
 
     pub fn set_page_status(&mut self, option: MemoryOptionFlags) {
         if option.wired() {
+            let _lock = self.lock.lock();
             self.status = PageStatus::Unswappable
         }
     }
 
     pub fn activate(&mut self) {
+        let _lock = self.lock.lock();
         assert!(self.status != PageStatus::Free);
         if self.status == PageStatus::InActive {
             self.status = PageStatus::Active;
@@ -46,6 +51,7 @@ impl VirtualMemoryPage {
     }
 
     pub fn insert_after(&mut self, entry: &'static mut Self, p_index /*for entry*/: usize) {
+        let _lock = self.lock.lock();
         assert!(self.p_index < p_index);
         if let Some(next) = self.get_next_entry() {
             assert!(next.p_index > p_index);
@@ -64,6 +70,7 @@ impl VirtualMemoryPage {
     }
 
     pub fn setup_to_be_root(&mut self, p_index: usize, list: &mut PtrLinkedList<Self>) {
+        let _lock = self.lock.lock();
         self.p_index = p_index;
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
@@ -76,6 +83,7 @@ impl VirtualMemoryPage {
     }
 
     pub fn remove_from_list(&mut self) {
+        let _lock = self.lock.lock();
         self.list.remove_from_list();
     }
 
@@ -84,6 +92,7 @@ impl VirtualMemoryPage {
     }
 
     pub fn set_p_index(&mut self, p_index: usize) {
+        let _lock = self.lock.lock();
         assert!(self.list.get_next().is_none());
         assert!(self.list.get_prev().is_none());
         self.p_index = p_index;

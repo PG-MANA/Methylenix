@@ -214,7 +214,7 @@ impl VirtualMemoryManager {
         let direct_mapped_area_address = direct_mapped_area_address.unwrap();
 
         pr_info!(
-            "0x{:X} bytes are reserved for direct map",
+            "{:#X} bytes are reserved for direct map",
             direct_mapped_area_size
         );
 
@@ -243,15 +243,14 @@ impl VirtualMemoryManager {
             Err(e) => panic!("Cannot insert Virtual Memory Entry Err:{:?}", e),
         };
 
-        for i in 0..(direct_mapped_area_size >> PAGE_SHIFT) {
-            if let Err(e) = self.associate_address(
-                direct_mapped_area_address + MemoryManager::index_to_offset(i),
-                direct_mapped_area_address + MemoryManager::index_to_offset(i),
-                MemoryPermissionFlags::data(),
-                pm_manager,
-            ) {
-                panic!("Cannot associate address for direct map Err:{:?}", e);
-            }
+        if let Err(e) = self.associate_address_with_size(
+            direct_mapped_area_address,
+            direct_mapped_area_address,
+            direct_mapped_area_size,
+            MemoryPermissionFlags::data(),
+            pm_manager,
+        ) {
+            panic!("Cannot associate address for direct map Err:{:?}", e);
         }
 
         let mut direct_mapped_area_allocator = PhysicalMemoryManager::new();
@@ -350,10 +349,10 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         if physical_address & !PAGE_MASK != 0 {
-            pr_err!("Physical Address is not aligned: {:X}", physical_address);
+            pr_err!("Physical Address is not aligned: {:#x}", physical_address);
             return Err(MemoryError::AddressNotAligned);
         } else if vm_address & !PAGE_MASK != 0 {
-            pr_err!("Virtual Address is not aligned: {:X}", vm_address);
+            pr_err!("Virtual Address is not aligned: {:#x}", vm_address);
             return Err(MemoryError::AddressNotAligned);
         } else if vm_map_entry.get_vm_start_address() > vm_address
             || vm_map_entry.get_vm_end_address()
@@ -453,11 +452,12 @@ impl VirtualMemoryManager {
             }
         };
 
-        for i in 0..size >> PAGE_SHIFT {
+        if entry.get_memory_option_flags().is_dev_map() {
             if self
-                .associate_address(
-                    physical_address + i * PAGE_SIZE,
-                    vm_start_address + i * PAGE_SIZE,
+                .associate_address_with_size(
+                    physical_address,
+                    vm_start_address,
+                    size,
                     permission,
                     pm_manager,
                 )
@@ -471,7 +471,30 @@ impl VirtualMemoryManager {
                 self.vm_map_entry_pool.free(entry);
                 return Err(MemoryError::PagingError);
             }
-            self.update_paging(vm_start_address + i * PAGE_SIZE);
+            for i in 0..size >> PAGE_SHIFT {
+                self.update_paging(vm_start_address + i * PAGE_SIZE);
+            }
+        } else {
+            for i in 0..size >> PAGE_SHIFT {
+                if self
+                    .associate_address(
+                        physical_address + i * PAGE_SIZE,
+                        vm_start_address + i * PAGE_SIZE,
+                        permission,
+                        pm_manager,
+                    )
+                    .is_err()
+                {
+                    pr_err!("Cannnot associate address.");
+                    entry.remove_from_list();
+                    //for rev_i in (0..i).rev() {
+                    /*add: self.unassociate_address() */
+                    //}
+                    self.vm_map_entry_pool.free(entry);
+                    return Err(MemoryError::PagingError);
+                }
+                self.update_paging(vm_start_address + i * PAGE_SIZE);
+            }
         }
         Ok(vm_start_address)
     }
@@ -484,6 +507,7 @@ impl VirtualMemoryManager {
         permission: MemoryPermissionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<usize, MemoryError> {
+        assert_eq!(permission.execute(), false); /*Disallow executing code on device mapping*/
         self.map_address(
             physical_address,
             virtual_address,
@@ -596,13 +620,13 @@ impl VirtualMemoryManager {
         _pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         if physical_address & !PAGE_MASK != 0 {
-            pr_err!("Physical Address is not aligned: {:X}", physical_address);
+            pr_err!("Physical Address is not aligned: {:#x}", physical_address);
             return Err(MemoryError::AddressNotAligned);
         } else if virtual_address & !PAGE_MASK != 0 {
-            pr_err!("Virtual Address is not aligned: {:X}", virtual_address);
+            pr_err!("Virtual Address is not aligned: {:#x}", virtual_address);
             return Err(MemoryError::AddressNotAligned);
         } else if size & !PAGE_MASK != 0 {
-            pr_err!("Size is not aligned: {:X}", size);
+            pr_err!("Size is not aligned: {:#x}", size);
             return Err(MemoryError::SizeNotAligned);
         } else if size == 0 {
             pr_err!("Size is zero");
@@ -656,6 +680,42 @@ impl VirtualMemoryManager {
                 &mut self.reserved_memory_list,
                 physical_address,
                 virtual_address,
+                permission,
+            ) {
+                Ok(()) => {
+                    return Ok(());
+                }
+                Err(PagingError::MemoryCacheRanOut) => {
+                    for _ in 0..PAGING_CACHE_LENGTH {
+                        match self.alloc_from_direct_map(PAGE_SIZE, pm_manager) {
+                            Ok(address) => self.reserved_memory_list.free_ptr(address as *mut _),
+                            Err(e) => panic!("Cannot alloc memory for paging Err:{:?}", e),
+                        }
+                    }
+                    /* retry (by loop) */
+                }
+                Err(_) => {
+                    pr_err!("Cannot associate physical address.");
+                    return Err(MemoryError::PagingError);
+                }
+            };
+        }
+    }
+
+    fn associate_address_with_size(
+        &mut self,
+        physical_address: usize,
+        virtual_address: usize,
+        size: usize,
+        permission: MemoryPermissionFlags,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        loop {
+            match self.page_manager.associate_area(
+                &mut self.reserved_memory_list,
+                physical_address,
+                virtual_address,
+                size,
                 permission,
             ) {
                 Ok(()) => {
@@ -791,10 +851,10 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<usize, MemoryError> {
         if virtual_address & !PAGE_MASK != 0 {
-            pr_err!("Virtual Address is not aligned: {:X}", virtual_address);
+            pr_err!("Virtual Address is not aligned: {:#x}", virtual_address);
             return Err(MemoryError::AddressNotAligned);
         } else if new_size & !PAGE_MASK != 0 {
-            pr_err!("Size is not aligned: {:X}", new_size);
+            pr_err!("Size is not aligned: {:#x}", new_size);
             return Err(MemoryError::SizeNotAligned);
         } else if new_size == 0 {
             pr_err!("Size is zero");
@@ -841,7 +901,7 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<usize, MemoryError> {
         if size & !PAGE_MASK != 0 {
-            pr_err!("Size is not aligned: {:X}", size);
+            pr_err!("Size is not aligned: {:#x}", size);
             return Err(MemoryError::SizeNotAligned);
         }
         if self.direct_mapped_area.is_none() {
@@ -960,7 +1020,7 @@ impl VirtualMemoryManager {
         let mut entry = self.vm_map_entry.get_first_entry().unwrap();
         loop {
             kprintln!(
-                "Virtual:0x{:X} Size:0x{:X} W:{}, U:{}, EXE:{}",
+                "Virtual Address:{:#X} Size:{:#X} W:{}, U:{}, EXE:{}",
                 entry.get_vm_start_address(),
                 MemoryManager::address_to_size(
                     entry.get_vm_start_address(),
@@ -976,7 +1036,7 @@ impl VirtualMemoryManager {
             ) + 1;
             for i in first_p_index..last_p_index {
                 if let Some(p) = entry.get_object().get_vm_page(i) {
-                    kprintln!(" -{} Physical Address:{:X}", i, p.get_physical_address());
+                    kprintln!(" -{} Physical Address:{:#X}", i, p.get_physical_address());
                 }
             }
             let next = entry.get_next_entry();
