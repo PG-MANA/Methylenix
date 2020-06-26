@@ -6,11 +6,11 @@ use arch::target_arch::device::cpu::{in_byte, out_byte};
 
 use kernel::fifo::FIFO;
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::sync::spin_lock::Mutex;
+use kernel::sync::spin_lock::SpinLockFlag;
 
 pub struct SerialPortManager {
     port: u16,
-    write_lock: Mutex<()>,
+    write_lock: SpinLockFlag,
     fifo: FIFO<u8, 256usize>,
 }
 
@@ -18,7 +18,7 @@ impl SerialPortManager {
     pub const fn new(io_port: u16) -> SerialPortManager {
         SerialPortManager {
             port: io_port,
-            write_lock: Mutex::new(()),
+            write_lock: SpinLockFlag::new(),
             fifo: FIFO::new(&0),
         }
     }
@@ -40,7 +40,7 @@ impl SerialPortManager {
                     0x24,
                     0,
                 );
-            let _lock = self.write_lock.lock().unwrap();
+            let _lock = self.write_lock.lock();
             out_byte(self.port + 1, 0x00); // FIFOをオフ
             out_byte(self.port + 3, 0x80); // DLABを有効化して設定できるようにする?
                                            //out_byte(self.port + 0, 0x03); // rateを設定
@@ -56,7 +56,7 @@ impl SerialPortManager {
         if self.port == 0 {
             return;
         }
-        let _lock = self.write_lock.lock().unwrap();
+        let _lock = self.write_lock.lock();
         let mut timeout: usize = 0xFF;
         while timeout > 0 {
             if self.is_completed_transmitter() {
