@@ -12,6 +12,8 @@ use kernel::drivers::efi::EfiManager;
 use kernel::graphic::GraphicManager;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::MemoryManager;
+use kernel::task_manager::TaskManager;
+
 use kernel::sync::spin_lock::Mutex;
 
 pub static mut STATIC_KERNEL_MANAGER_CLUSTER: KernelManagerCluster = init_manager_cluster();
@@ -23,6 +25,7 @@ pub struct KernelManagerCluster {
     pub interrupt_manager: Mutex<InterruptManager>,
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
+    pub task_manager: Mutex<TaskManager>,
     /*SerialPortManager has mutex process inner*/
     //input_manager:
 }
@@ -35,6 +38,7 @@ const fn init_manager_cluster() -> KernelManagerCluster {
         interrupt_manager: Mutex::new(InterruptManager::new()),
         efi_manager: Mutex::new(EfiManager::new_static()),
         serial_port_manager: SerialPortManager::new(0x3F8),
+        task_manager: Mutex::new(TaskManager::new()),
     }
 }
 

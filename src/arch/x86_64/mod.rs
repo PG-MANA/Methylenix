@@ -5,6 +5,7 @@
 #[macro_use]
 pub mod interrupt;
 pub mod boot;
+pub mod context;
 pub mod device;
 pub mod paging;
 
@@ -51,6 +52,13 @@ pub extern "C" fn multiboot_main(
     {
         panic!("Cannot map memory for frame buffer");
     }
+
+    get_kernel_manager_cluster()
+        .task_manager
+        .lock()
+        .unwrap()
+        .init();
+
     /* IDT初期化&割り込み初期化 */
     init_interrupt(kernel_code_segment);
     /* シリアルポート初期化 */
