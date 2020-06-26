@@ -507,6 +507,7 @@ impl VirtualMemoryManager {
         permission: MemoryPermissionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<usize, MemoryError> {
+        assert_eq!(permission.execute(), false); /*Disallow executing code on device mapping*/
         self.map_address(
             physical_address,
             virtual_address,
