@@ -6,11 +6,13 @@ use kernel::memory_manager::virtual_memory_manager::virtual_memory_object::Virtu
 use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 use kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use kernel::sync::spin_lock::SpinLockFlag;
 
 use core::mem;
 
 #[allow(dead_code)]
 pub struct VirtualMemoryEntry {
+    lock: SpinLockFlag,
     list: PtrLinkedListNode<Self>,
     start_address: usize,
     end_address: usize,
@@ -33,6 +35,7 @@ impl VirtualMemoryEntry {
         option: MemoryOptionFlags,
     ) -> Self {
         Self {
+            lock: SpinLockFlag::new(),
             list: PtrLinkedListNode::new(),
             start_address: vm_start_address,
             end_address: vm_end_address,
@@ -54,6 +57,7 @@ impl VirtualMemoryEntry {
     }
 
     pub fn set_vm_end_address(&mut self, new_end_address: usize) {
+        let _lock = self.lock.lock();
         if let Some(next_entry) = self.get_next_entry() {
             assert!(next_entry.get_vm_start_address() > new_end_address);
         }
@@ -77,6 +81,7 @@ impl VirtualMemoryEntry {
     }
 
     pub fn set_memory_option_flags(&mut self, flags: MemoryOptionFlags) {
+        let _lock = self.lock.lock();
         self.option_flags = flags;
     }
 
@@ -85,12 +90,14 @@ impl VirtualMemoryEntry {
     }
 
     pub fn set_disabled(&mut self) {
+        let _lock = self.lock.lock();
         self.start_address = 0;
         self.end_address = 0;
         self.object.set_disabled();
     }
 
     pub fn set_up_to_be_root(&mut self, list_head: &mut PtrLinkedList<Self>) {
+        let _lock = self.lock.lock();
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
         let old_root = list_head.get_first_entry_mut();
@@ -124,6 +131,7 @@ impl VirtualMemoryEntry {
     }
 
     pub fn insert_after(&mut self /*must be chained*/, entry: &'static mut Self) {
+        let _lock = self.lock.lock();
         if entry.list.is_invalid_ptr() {
             let ptr = entry as *mut Self;
             entry.list.set_ptr(ptr);
@@ -132,6 +140,7 @@ impl VirtualMemoryEntry {
     }
 
     pub fn insert_before(&mut self /*must be chained*/, entry: &'static mut Self) {
+        let _lock = self.lock.lock();
         if entry.list.is_invalid_ptr() {
             let ptr = entry as *mut Self;
             entry.list.set_ptr(ptr);
