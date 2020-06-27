@@ -11,6 +11,7 @@ use self::process_entry::ProcessEntry;
 use self::thread_entry::ThreadEntry;
 
 use arch::target_arch::context::ContextManager;
+use arch::target_arch::device::cpu::halt;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::pool_allocator::PoolAllocator;
@@ -27,6 +28,18 @@ pub struct TaskManager {
     thread_entry_pool: PoolAllocator<ThreadEntry>,
 }
 
+pub enum TaskSignal {
+    Normal,
+    Stop,
+    Kill,
+}
+
+pub enum TaskStatus {
+    New,
+    Running,
+    Zombie,
+}
+
 impl TaskManager {
     const NUM_OF_INITIAL_THREAD_ENTRIES: usize = 6;
     const NUM_OF_INITIAL_PROCESS_ENTRIES: usize = 6;
@@ -41,7 +54,7 @@ impl TaskManager {
         }
     }
 
-    pub fn init(&mut self) {
+    pub fn init(&mut self, context_manager: ContextManager) {
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
         let mut kernel_memory_allocator = get_kernel_manager_cluster()
             .kernel_memory_alloc_manager
@@ -71,10 +84,55 @@ impl TaskManager {
             self.thread_entry_pool.free_ptr(address as *mut ThreadEntry);
         }
 
-        self.context_manager.init();
+        self.context_manager = context_manager;
     }
 
-    pub fn create_new_process(&mut self) -> Option<()> {
-        None
+    pub fn create_init_process(&mut self, entry_point: usize) {
+        use core::i8;
+        let process_entry = self.process_entry_pool.alloc().unwrap();
+        let thread_entry = self.thread_entry_pool.alloc().unwrap();
+        let idle_thread_entry = self.thread_entry_pool.alloc().unwrap();
+
+        let mut kernel_memory_alloc_manager = get_kernel_manager_cluster()
+            .kernel_memory_alloc_manager
+            .lock()
+            .unwrap();
+        let memory_manager = &get_kernel_manager_cluster().memory_manager;
+        let stack_for_init = kernel_memory_alloc_manager
+            .vmalloc(
+                ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM,
+                ContextManager::DEFAULT_STACK_SIZE_OF_USER,
+                memory_manager,
+            )
+            .unwrap();
+        let stack_for_idle = kernel_memory_alloc_manager
+            .vmalloc(
+                ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM,
+                ContextManager::DEFAULT_STACK_SIZE_OF_USER,
+                memory_manager,
+            )
+            .unwrap();
+        drop(kernel_memory_alloc_manager);
+
+        let context_data_for_init = self
+            .context_manager
+            .create_system_context(entry_point, stack_for_init);
+        let context_data_for_idle = self
+            .context_manager
+            .create_system_context(idle as *const fn() as usize, stack_for_idle);
+
+        thread_entry.init(1, process_entry, 0, 0, context_data_for_init);
+        idle_thread_entry.init(2, process_entry, 0, i8::MIN, context_data_for_idle);
+
+        process_entry.init(1, thread_entry, 0, 0);
+        process_entry.add_thread(idle_thread_entry);
+    }
+}
+
+fn idle() -> ! {
+    loop {
+        unsafe {
+            halt();
+        }
     }
 }

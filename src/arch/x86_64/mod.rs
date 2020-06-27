@@ -9,6 +9,7 @@ pub mod context;
 pub mod device;
 pub mod paging;
 
+use self::context::ContextManager;
 use self::device::cpu;
 use self::device::serial_port::SerialPortManager;
 use self::interrupt::InterruptManager;
@@ -33,9 +34,10 @@ static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SI
 pub extern "C" fn multiboot_main(
     mbi_address: usize,       /* MultiBoot Information */
     kernel_code_segment: u16, /* Current segment is 8 */
-    _user_code_segment: u16,
-    _user_data_segment: u16,
+    user_code_segment: u16,
+    user_data_segment: u16,
 ) {
+    //TODO: set up xsave
     /* MultiBootInformation読み込み */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
     /* Graphic初期化（Panicが起きたときの表示のため) */
@@ -53,11 +55,19 @@ pub extern "C" fn multiboot_main(
         panic!("Cannot map memory for frame buffer");
     }
 
+    let mut context_manager = ContextManager::new();
+    context_manager.init(
+        kernel_code_segment as usize,
+        0, /*is it ok?*/
+        user_code_segment as usize,
+        user_data_segment as usize,
+    );
+
     get_kernel_manager_cluster()
         .task_manager
         .lock()
         .unwrap()
-        .init();
+        .init(context_manager);
 
     /* IDT初期化&割り込み初期化 */
     init_interrupt(kernel_code_segment);
@@ -80,6 +90,11 @@ pub extern "C" fn multiboot_main(
         multiboot_information.boot_loader_name,
         multiboot_information.boot_cmd_line
     );
+    get_kernel_manager_cluster()
+        .task_manager
+        .lock()
+        .unwrap()
+        .create_init_process(main_process as *const fn() as usize);
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
@@ -89,6 +104,22 @@ pub extern "C" fn multiboot_main(
 
 pub fn general_protection_exception_handler(e_code: usize) {
     panic!("General Protection Exception \nError Code:0x{:X}", e_code);
+}
+
+fn main_process() -> ! {
+    pr_info!("All init are done!");
+    loop {
+        unsafe {
+            cpu::hlt();
+        }
+        let ascii_code = get_kernel_manager_cluster()
+            .serial_port_manager
+            .dequeue_key()
+            .unwrap_or(0);
+        if ascii_code != 0 {
+            print!("{}", ascii_code as char);
+        }
+    }
 }
 
 fn hlt() {
