@@ -527,7 +527,7 @@ impl VirtualMemoryManager {
             pr_err!("Virtual Address is not aligned.");
             return Err(MemoryError::AddressNotAligned);
         }
-        if self.vm_map_entry.get_first_entry().is_none() {
+        if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
             pr_err!("There is no entry.");
             return Err(MemoryError::InsertEntryFailed);
         }
@@ -584,14 +584,12 @@ impl VirtualMemoryManager {
         let entry = unsafe { &mut *(entry) };
         assert!(entry.get_prev_entry().is_none());
         assert!(entry.get_next_entry().is_none());
-        if self.vm_map_entry.get_first_entry_mut().is_some() {
+        if self.vm_map_entry.get_first_entry_as_ptr().is_some() {
             if let Some(prev_entry) = self.find_previous_entry_mut(entry.get_vm_start_address()) {
                 prev_entry.insert_after(entry);
             } else {
                 if entry.get_vm_end_address()
-                    < self
-                        .vm_map_entry
-                        .get_first_entry()
+                    < unsafe { self.vm_map_entry.get_first_entry() }
                         .unwrap()
                         .get_vm_start_address()
                 {
@@ -859,7 +857,7 @@ impl VirtualMemoryManager {
         } else if new_size == 0 {
             pr_err!("Size is zero");
             return Err(MemoryError::InvalidSize);
-        } else if self.vm_map_entry.get_first_entry().is_none() {
+        } else if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
             pr_err!("There is no entry.");
             return Err(MemoryError::InsertEntryFailed); /*is it ok?*/
         }
@@ -946,6 +944,7 @@ impl VirtualMemoryManager {
 
     fn _find_entry(&self, vm_address: usize) -> Option<&'static VirtualMemoryEntry> {
         for e in self.vm_map_entry.iter() {
+            let e = unsafe { &*e };
             if e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address {
                 return Some(e);
             }
@@ -955,6 +954,7 @@ impl VirtualMemoryManager {
 
     fn find_entry_mut(&mut self, vm_address: usize) -> Option<&'static mut VirtualMemoryEntry> {
         for e in self.vm_map_entry.iter_mut() {
+            let e = unsafe { &mut *e };
             if e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address {
                 return Some(e);
             }
@@ -967,6 +967,7 @@ impl VirtualMemoryManager {
         vm_address: usize,
     ) -> Option<&'static mut VirtualMemoryEntry> {
         for e in self.vm_map_entry.iter_mut() {
+            let e = unsafe { &mut *e };
             if e.get_vm_start_address() > vm_address {
                 return e.get_prev_entry_mut();
             } else if e.get_next_entry().is_none() && e.get_vm_end_address() < vm_address {
@@ -979,6 +980,7 @@ impl VirtualMemoryManager {
     fn check_usable_address_range(&self, vm_start_address: usize, vm_end_address: usize) -> bool {
         assert!(vm_start_address < vm_end_address);
         for e in self.vm_map_entry.iter() {
+            let e = unsafe { &*e };
             if (e.get_vm_start_address() <= vm_start_address
                 && e.get_vm_end_address() >= vm_start_address)
                 || (e.get_vm_start_address() <= vm_end_address
@@ -995,6 +997,7 @@ impl VirtualMemoryManager {
 
     pub fn find_usable_memory_area(&self, size: usize) -> Option<usize> {
         for e in self.vm_map_entry.iter() {
+            let e = unsafe { &*e };
             if let Some(prev) = e.get_prev_entry() {
                 if e.get_vm_start_address() - (prev.get_vm_end_address() + 1) >= size {
                     return Some(prev.get_vm_end_address() + 1);
@@ -1013,11 +1016,11 @@ impl VirtualMemoryManager {
 
     pub fn dump_memory_manager(&self) {
         kprintln!("is systemvm :{}", self.is_system_vm);
-        if self.vm_map_entry.get_first_entry().is_none() {
+        if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
             kprintln!("There is no root entry.");
             return;
         }
-        let mut entry = self.vm_map_entry.get_first_entry().unwrap();
+        let mut entry = unsafe { self.vm_map_entry.get_first_entry() }.unwrap();
         loop {
             kprintln!(
                 "Virtual Address:{:#X} Size:{:#X} W:{}, U:{}, EXE:{}",

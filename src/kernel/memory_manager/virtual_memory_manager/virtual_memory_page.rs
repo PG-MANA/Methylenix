@@ -74,7 +74,7 @@ impl VirtualMemoryPage {
         self.p_index = p_index;
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
-        let old_root = list.get_first_entry_mut();
+        let old_root = unsafe { list.get_first_entry_mut() };
         list.set_first_entry(&mut self.list);
         if let Some(old_root) = old_root {
             self.list.setup_to_be_root(&mut old_root.list);
@@ -93,25 +93,25 @@ impl VirtualMemoryPage {
 
     pub fn set_p_index(&mut self, p_index: usize) {
         let _lock = self.lock.lock();
-        assert!(self.list.get_next().is_none());
-        assert!(self.list.get_prev().is_none());
+        assert!(self.list.get_next_as_ptr().is_none());
+        assert!(self.list.get_prev_as_ptr().is_none());
         self.p_index = p_index;
     }
 
     pub fn get_next_entry(&self) -> Option<&Self> {
-        self.list.get_next()
+        unsafe { self.list.get_next() }
     }
 
     pub fn get_prev_entry(&self) -> Option<&Self> {
-        self.list.get_prev()
+        unsafe { self.list.get_prev() }
     }
 
     pub fn get_next_entry_mut(&mut self) -> Option<&mut Self> {
-        self.list.get_next_mut()
+        unsafe { self.list.get_next_mut() }
     }
 
     pub fn get_prev_entry_mut(&mut self) -> Option<&mut Self> {
-        self.list.get_prev_mut()
+        unsafe { self.list.get_prev_mut() }
     }
 
     pub const fn get_physical_address(&self) -> usize {
