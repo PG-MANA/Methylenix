@@ -37,7 +37,7 @@ pub extern "C" fn multiboot_main(
     user_code_segment: u16,
     user_data_segment: u16,
 ) {
-    //TODO: set up xsave
+    enable_sse();
     /* MultiBootInformation読み込み */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
     /* Graphic初期化（Panicが起きたときの表示のため) */
@@ -136,6 +136,16 @@ fn hlt() {
             print!("{}", ascii_code as char);
         }
     }
+}
+
+fn enable_sse() {
+    let mut cr0 = unsafe { cpu::get_cr0() };
+    cr0 &= !(1 << 2); /* clear EM */
+    cr0 |= 1 << 1; /* set MP */
+    unsafe { cpu::set_cr0(cr0) };
+    let mut cr4 = unsafe { cpu::get_cr4() };
+    cr4 |= (1 << 10) | (1 << 9); /*set OSFXSR and OSXMMEXCPT*/
+    unsafe { cpu::set_cr4(cr4) };
 }
 
 fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformation {

@@ -40,7 +40,7 @@ pub unsafe fn in_byte(data: u16) -> u8 {
 
 #[inline(always)]
 pub unsafe fn lidt(idtr: usize) {
-    llvm_asm!("lidt (%rax)"::"{rax}"(idtr));
+    llvm_asm!("lidt (%rdi)"::"{rdi}"(idtr));
 }
 
 #[inline(always)]
@@ -65,13 +65,37 @@ pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) 
 }
 
 #[inline(always)]
+pub unsafe fn get_cr0() -> u64 {
+    let rax: u64;
+    llvm_asm!("movq %cr0, %rax":"={rax}"(rax));
+    rax
+}
+
+#[inline(always)]
+pub unsafe fn set_cr0(cr4: u64) {
+    llvm_asm!("movq %rdi, %cr0"::"{rdi}"(cr4));
+}
+
+#[inline(always)]
 pub unsafe fn set_cr3(addr: usize) {
-    llvm_asm!("movq %rax,%cr3"::"{rax}"(addr));
+    llvm_asm!("movq %rdi, %cr3"::"{rdi}"(addr));
+}
+
+#[inline(always)]
+pub unsafe fn get_cr4() -> u64 {
+    let rax: u64;
+    llvm_asm!("movq %cr4, %rax":"={rax}"(rax));
+    rax
+}
+
+#[inline(always)]
+pub unsafe fn set_cr4(cr4: u64) {
+    llvm_asm!("movq %rdi, %cr4"::"{rdi}"(cr4));
 }
 
 #[inline(always)]
 pub unsafe fn invlpg(addr: usize) {
-    llvm_asm!("invlpg (%rax)"::"{rax}"(addr));
+    llvm_asm!("invlpg (%rdi)"::"{rdi}"(addr));
 }
 
 pub unsafe fn clear_task_stack(
