@@ -9,6 +9,8 @@ pub mod context_data;
 use self::context_data::ContextData;
 use arch::target_arch::device::cpu;
 
+use core::mem;
+
 pub struct ContextManager {
     system_ss: usize,
     system_cs: usize,
@@ -50,13 +52,20 @@ impl ContextManager {
         )
     }
 
+    pub unsafe fn jump_to_context(&mut self, context: &mut ContextData) {
+        /* for init process */
+        assert_eq!(mem::align_of_val(context), 64);
+        cpu::run_task(context as *mut _);
+    }
+
     /* ContextSwitch */
     pub unsafe fn switch_context(
         &mut self,
         old_context: &mut ContextData,
         next_context: &mut ContextData,
     ) {
-        //assert!(align)
-        cpu::task_switch(old_context as *mut _, next_context as *mut _);
+        assert_eq!(mem::align_of_val(old_context), 64);
+        assert_eq!(mem::align_of_val(next_context), 64);
+        cpu::task_switch(next_context as *mut _, old_context as *mut _);
     }
 }

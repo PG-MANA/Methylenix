@@ -28,14 +28,18 @@ pub struct TaskManager {
     thread_entry_pool: PoolAllocator<ThreadEntry>,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum TaskSignal {
     Normal,
     Stop,
     Kill,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum TaskStatus {
     New,
+    Sleeping,
+    CanRun,
     Running,
     Zombie,
 }
@@ -126,6 +130,38 @@ impl TaskManager {
 
         process_entry.init(1, thread_entry, 0, 0);
         process_entry.add_thread(idle_thread_entry);
+
+        thread_entry.set_up_to_be_root_of_run_list(&mut self.run_list);
+        thread_entry.insert_after_of_run_list(idle_thread_entry);
+    }
+
+    pub fn execute_init_process(&mut self) -> ! {
+        let init_thread = unsafe { self.run_list.get_first_entry_mut().unwrap() };
+        assert_eq!(init_thread.get_process().get_pid(), 1);
+        self.running_thread = Some(init_thread);
+        init_thread.set_task_status(TaskStatus::Running);
+        unsafe {
+            self.context_manager
+                .jump_to_context(init_thread.get_context())
+        };
+        /* not return here. */
+        panic!("Switching to init process was failed.");
+    }
+
+    pub fn switch_to_next_thread(&mut self) {
+        let running_thread = unsafe { &mut *self.running_thread.unwrap() };
+        let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
+            unsafe { self.run_list.get_first_entry_mut().unwrap() }
+        } else {
+            running_thread.set_task_status(TaskStatus::CanRun);
+            running_thread.get_next_from_run_list_mut().unwrap()
+        };
+        next_thread.set_task_status(TaskStatus::Running);
+        self.running_thread = Some(next_thread as *mut _);
+        unsafe {
+            self.context_manager
+                .switch_context(running_thread.get_context(), next_thread.get_context());
+        }
     }
 }
 

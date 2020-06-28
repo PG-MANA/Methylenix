@@ -3,7 +3,7 @@
  * This entry contains some arch-depending data
  */
 
-use super::{ProcessEntry, TaskSignal, TaskStatus};
+use super::{ProcessEntry, TaskStatus};
 
 use arch::target_arch::context::context_data::ContextData;
 
@@ -14,7 +14,7 @@ use core::ptr::NonNull;
 
 pub struct ThreadEntry {
     lock: SpinLockFlag,
-    p_list: PtrLinkedListNode<Self>,
+    p_list: PtrLinkedListNode<Self>, /* All thread in process */
     run_list: PtrLinkedListNode<Self>,
     status: TaskStatus,
     thread_id: usize,
@@ -63,11 +63,49 @@ impl ThreadEntry {
         }
         let ptr = self as *mut _;
         self.p_list.set_ptr(ptr);
-        self.p_list
-            .insert_after(unsafe { &mut *(&mut entry.p_list as *mut _) }); //must fix
+        self.p_list.insert_after(&mut entry.p_list);
+    }
+
+    pub fn set_up_to_be_root_of_run_list(&mut self, list_head: &mut PtrLinkedList<Self>) {
+        let _lock = self.lock.lock();
+        let ptr = self as *mut _;
+        self.run_list.set_ptr(ptr);
+        self.run_list.terminate_prev_entry();
+        list_head.set_first_entry(&mut self.run_list);
+    }
+
+    pub fn insert_after_of_run_list(&mut self, entry: &mut Self) {
+        let _lock = self.lock.lock();
+        if entry.run_list.is_invalid_ptr() {
+            let ptr = entry as *mut Self;
+            entry.run_list.set_ptr(ptr);
+        }
+        let ptr = self as *mut _;
+        self.run_list.set_ptr(ptr);
+        self.run_list.insert_after(&mut entry.run_list);
     }
 
     pub fn set_process(&mut self, process: *mut ProcessEntry) {
         self.process = NonNull::new(process).unwrap();
+    }
+
+    pub fn get_process(&self) -> &ProcessEntry {
+        unsafe { self.process.as_ref() }
+    }
+
+    pub const fn get_task_status(&self) -> TaskStatus {
+        self.status
+    }
+
+    pub const fn set_task_status(&mut self, status: TaskStatus) {
+        self.status = status;
+    }
+
+    pub fn get_context(&mut self) -> &mut ContextData {
+        &mut self.context_data
+    }
+
+    pub fn get_next_from_run_list_mut(&mut self) -> Option<&'static mut Self> {
+        unsafe { self.run_list.get_next_mut() }
     }
 }

@@ -48,6 +48,10 @@ impl ProcessEntry {
         self.num_of_thread = 1;
     }
 
+    pub const fn get_pid(&self) -> usize {
+        self.process_id
+    }
+
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) {
         let _lock = self.lock.lock();
         if self.num_of_thread == 0 {

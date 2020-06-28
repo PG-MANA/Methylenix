@@ -138,9 +138,44 @@ pub unsafe fn clear_task_stack(
 }
 
 #[naked]
+pub unsafe fn run_task(context_data_address: *mut ContextData) {
+    llvm_asm!("
+
+                fxrstor [rdi]
+                mov     rdx, [rdi + 512 + 8 *  1]
+                mov     rcx, [rdi + 512 + 8 *  2]
+                mov     rbx, [rdi + 512 + 8 *  3]
+                mov     rbp, [rdi + 512 + 8 *  4]
+                mov     rsi, [rdi + 512 + 8 *  5]
+                mov     r8,  [rdi + 512 + 8 *  7]
+                mov     r9,  [rdi + 512 + 8 *  8]
+                mov     r10, [rdi + 512 + 8 *  9]
+                mov     r11, [rdi + 512 + 8 * 10]
+                mov     r12, [rdi + 512 + 8 * 11]
+                mov     r13, [rdi + 512 + 8 * 12]
+                mov     r14, [rdi + 512 + 8 * 13]
+                mov     r15, [rdi + 512 + 8 * 14]
+                mov     rax, [rdi + 512 + 8 * 15]
+                mov     fs, ax
+                mov     rax, [rdi + 512 + 8 * 16]
+                mov     gs, ax
+                mov     rax, [rdi + 512]
+                
+                push    [rdi + 512 + 8 * 17] ; SS
+                push    [rdi + 512 + 8 * 18] ; RSP
+                push    [rdi + 512 + 8 * 19] ; RFLAGS
+                push    [rdi + 512 + 8 * 20] ; CS
+                push    [rdi + 512 + 8 * 21] ; RIP
+
+                mov     rdi, [rdi + 512 + 8 *  6]
+                iretq
+                "::"{rdi}"(context_data_address)::"intel", "volatile");
+}
+
+#[naked]
 pub unsafe fn task_switch(
-    now_context_data_address: *mut ContextData,
     next_context_data_address: *mut ContextData,
+    now_context_data_address: *mut ContextData,
 ) {
     llvm_asm!("
                 fxsave  [rsi]
