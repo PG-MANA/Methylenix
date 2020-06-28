@@ -51,21 +51,21 @@ impl ProcessEntry {
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) {
         let _lock = self.lock.lock();
         if self.num_of_thread == 0 {
-            assert!(self.thread.get_first_entry().is_none());
+            assert!(self.thread.get_first_entry_as_ptr().is_none());
             assert!(self.single_thread.is_none());
             self.num_of_thread = 1;
             self.single_thread = Some(thread as *mut _);
         } else if self.num_of_thread == 1 {
-            assert!(self.thread.get_first_entry().is_none());
+            assert!(self.thread.get_first_entry_as_ptr().is_none());
             assert!(self.single_thread.is_some());
             let old_thread = self.single_thread.unwrap();
             self.single_thread = None;
             unsafe { &mut *old_thread }.set_up_to_be_root_of_p_list(&mut self.thread);
             unsafe { &mut *old_thread }.insert_after_of_p_list(thread);
         } else {
-            assert!(self.thread.get_first_entry().is_none());
+            assert!(self.thread.get_first_entry_as_ptr().is_none());
             assert!(self.single_thread.is_none());
-            let old_entry = self.thread.get_first_entry_mut().unwrap();
+            let old_entry = unsafe { self.thread.get_first_entry_mut().unwrap() };
             thread.set_up_to_be_root_of_p_list(&mut self.thread);
             thread.insert_after_of_p_list(old_entry);
         }
