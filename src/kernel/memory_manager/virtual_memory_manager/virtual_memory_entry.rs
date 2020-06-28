@@ -100,7 +100,7 @@ impl VirtualMemoryEntry {
         let _lock = self.lock.lock();
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
-        let old_root = list_head.get_first_entry_mut();
+        let old_root = unsafe { list_head.get_first_entry_mut() };
         list_head.set_first_entry(&mut self.list);
         if let Some(entry) = old_root {
             self.list.setup_to_be_root(&mut entry.list);
@@ -116,18 +116,18 @@ impl VirtualMemoryEntry {
     }
 
     pub fn get_next_entry(&self) -> Option<&Self> {
-        self.list.get_next()
+        unsafe { self.list.get_next() }
     }
 
     pub fn get_next_entry_mut(&mut self) -> Option<&'static mut Self> {
-        self.list.get_next_mut()
+        unsafe { self.list.get_next_mut() }
     }
 
     pub fn get_prev_entry(&self) -> Option<&Self> {
-        self.list.get_prev()
+        unsafe { self.list.get_prev() }
     }
     pub fn get_prev_entry_mut(&mut self) -> Option<&'static mut Self> {
-        self.list.get_prev_mut()
+        unsafe { self.list.get_prev_mut() }
     }
 
     pub fn insert_after(&mut self /*must be chained*/, entry: &'static mut Self) {
