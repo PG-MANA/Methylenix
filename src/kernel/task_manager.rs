@@ -163,6 +163,27 @@ impl TaskManager {
                 .switch_context(running_thread.get_context(), next_thread.get_context());
         }
     }
+
+    /* sleep running thread and switch to next thread */
+    pub fn sleep(&mut self) {
+        let mut running_thread = unsafe { &mut *self.running_thread.unwrap() };
+        running_thread.insert_self_to_sleep_queue(&mut self.sleep_list);
+        self.switch_to_next_thread();
+        /* woke up and return */
+    }
+
+    pub fn wakeup(&mut self, p_id: usize, t_id: usize) {
+        for e in self.sleep_list.iter_mut() {
+            let e = unsafe { &mut *e };
+            let e_p_id = e.get_process().get_pid();
+            let e_t_id = e.get_t_id();
+            if e_p_id == p_id && e_t_id == t_id {
+                e.wakeup(&mut self.run_list);
+                return;
+            }
+        }
+        pr_err!("There is no thread to wakeup.");
+    }
 }
 
 fn idle() -> ! {

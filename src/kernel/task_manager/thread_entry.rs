@@ -16,6 +16,7 @@ pub struct ThreadEntry {
     lock: SpinLockFlag,
     p_list: PtrLinkedListNode<Self>, /* All thread in process */
     run_list: PtrLinkedListNode<Self>,
+    sleep_list: PtrLinkedListNode<Self>,
     status: TaskStatus,
     thread_id: usize,
     process: NonNull<ProcessEntry>,
@@ -39,6 +40,7 @@ impl ThreadEntry {
         let _lock = self.lock.lock();
         self.p_list = PtrLinkedListNode::new();
         self.run_list = PtrLinkedListNode::new();
+        self.sleep_list = PtrLinkedListNode::new();
         self.status = TaskStatus::New;
         self.thread_id = thread_id;
         self.process = NonNull::new(process).unwrap();
@@ -86,6 +88,7 @@ impl ThreadEntry {
     }
 
     pub fn set_process(&mut self, process: *mut ProcessEntry) {
+        let _lock = self.lock.lock();
         self.process = NonNull::new(process).unwrap();
     }
 
@@ -97,7 +100,16 @@ impl ThreadEntry {
         self.status
     }
 
-    pub const fn set_task_status(&mut self, status: TaskStatus) {
+    pub const fn get_t_id(&self) -> usize {
+        self.thread_id
+    }
+
+    pub fn set_task_status(&mut self, status: TaskStatus) {
+        let _lock = self.lock.lock();
+        self._set_task_status(status);
+    }
+
+    const fn _set_task_status(&mut self, status: TaskStatus) {
         self.status = status;
     }
 
@@ -107,5 +119,43 @@ impl ThreadEntry {
 
     pub fn get_next_from_run_list_mut(&mut self) -> Option<&'static mut Self> {
         unsafe { self.run_list.get_next_mut() }
+    }
+
+    pub fn insert_self_to_sleep_queue(&mut self, sleep_queue_head: &mut PtrLinkedList<Self>) {
+        let _lock = self.lock.lock();
+        assert_ne!(self.status, TaskStatus::Sleeping);
+        let old_first_entry = unsafe { sleep_queue_head.get_first_entry_mut() };
+        if old_first_entry.is_none() {
+            self.sleep_list.terminate_prev_entry();
+            sleep_queue_head.set_first_entry(&mut self.sleep_list as *mut _);
+        } else {
+            self.sleep_list.terminate_prev_entry();
+            old_first_entry
+                .unwrap()
+                .sleep_list
+                .insert_before(&mut self.sleep_list);
+            sleep_queue_head.set_first_entry(&mut self.sleep_list as *mut _);
+        }
+        self._set_task_status(TaskStatus::Sleeping);
+        self.run_list.remove_from_list();
+    }
+
+    pub fn wakeup(&mut self, run_queue_head: &mut PtrLinkedList<Self>) {
+        let _lock = self.lock.lock();
+        assert_eq!(self.status, TaskStatus::Sleeping);
+        let old_first_entry = unsafe { run_queue_head.get_first_entry_mut() };
+        if old_first_entry.is_none() {
+            self.run_list.terminate_prev_entry();
+            run_queue_head.set_first_entry(&mut self.run_list as *mut _);
+        } else {
+            self.run_list.terminate_prev_entry();
+            old_first_entry
+                .unwrap()
+                .run_list
+                .insert_before(&mut self.run_list);
+            run_queue_head.set_first_entry(&mut self.run_list as *mut _);
+        }
+        self._set_task_status(TaskStatus::CanRun);
+        self.sleep_list.remove_from_list();
     }
 }
