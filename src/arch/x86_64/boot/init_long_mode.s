@@ -52,8 +52,9 @@ init_long_mode:
 
   /* Paging */
   /* is 1GB paging supported? */
-  test  $(1 << 26), %edx
-  jz    init_normal_paging
+  /*test  $(1 << 26), %edx
+  jz    init_normal_paging */
+  jmp   init_normal_paging
 
 init_4level_paging:
   xor   %ecx,  %ecx             /* counter */
