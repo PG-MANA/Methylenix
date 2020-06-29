@@ -24,9 +24,11 @@ macro_rules! make_interrupt_hundler {
                 push    r14
                 push    r15
                 mov     rbp, rsp":::: "intel","volatile");
-            $handler_func();
-            /* 余計なアセンブリがcallで追加されたときにpush前に波及するのを防ぐ */
-            llvm_asm!("
+            llvm_asm!(
+                "call    $0"
+                ::"X"($handler_func as unsafe fn() as *const unsafe fn())
+                :: "intel","volatile");
+            llvm_asm!("    
                 mov     rsp, rbp
                 pop     r15
                 pop     r14
@@ -43,7 +45,7 @@ macro_rules! make_interrupt_hundler {
                 pop     rcx
                 pop     rbx
                 pop     rax
-                iretq" :::: "intel","volatile");
+                iretq":::: "intel","volatile");
         }
     };
 }

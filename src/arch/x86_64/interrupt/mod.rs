@@ -63,6 +63,15 @@ impl InterruptManager {
         self.io_apic.init();
         self.local_apic.init();
         self.lvt_timer.init(&mut self.local_apic);
+        if self.lvt_timer.is_interrupt_enabled() {
+            make_interrupt_hundler!(inthandler30, LocalApicTimer::inthandler30_main);
+            self.set_device_interrupt_function(
+                inthandler30, /*上のマクロで指定した名前*/
+                None,
+                0x30,
+                0,
+            );
+        }
         return true;
     }
 

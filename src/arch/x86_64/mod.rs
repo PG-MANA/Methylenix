@@ -89,11 +89,11 @@ pub extern "C" fn multiboot_main(
         multiboot_information.boot_loader_name,
         multiboot_information.boot_cmd_line
     );
-    get_kernel_manager_cluster()
-        .task_manager
-        .lock()
-        .unwrap()
-        .create_init_process(main_process as *const fn() as usize);
+    /*get_kernel_manager_cluster()
+    .task_manager
+    .lock()
+    .unwrap()
+    .create_init_process(main_process as *const fn() as usize);*/
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();

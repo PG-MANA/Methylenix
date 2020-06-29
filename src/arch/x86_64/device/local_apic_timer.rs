@@ -11,6 +11,7 @@ use kernel::manager_cluster::get_kernel_manager_cluster;
 pub struct LocalApicTimer {
     is_deadline_mode_supported: bool,
     tsc_frequency: usize,
+    is_interrupt_enabled: bool,
 }
 
 impl LocalApicTimer {
@@ -18,6 +19,7 @@ impl LocalApicTimer {
         Self {
             is_deadline_mode_supported: false,
             tsc_frequency: 0,
+            is_interrupt_enabled: false,
         }
     }
 
@@ -29,31 +31,17 @@ impl LocalApicTimer {
         unsafe { cpuid(&mut eax, &mut ebx, &mut ecx, &mut edx) };
         self.is_deadline_mode_supported = ecx & (1 << 24) != 0;
         if self.enable_deadline_mode(local_apic_manager) {
-            make_interrupt_hundler!(inthandler41, LocalApicTimer::inthandler41_main);
-            get_kernel_manager_cluster()
-                .interrupt_manager
-                .lock()
-                .unwrap()
-                .set_device_interrupt_function(
-                    inthandler41, /*上のマクロで指定した名前*/
-                    None,
-                    0x30,
-                    0,
-                );
-            pr_info!("{:#b}", unsafe { rdmsr(0xce) as usize });
-
-            self.set_deadline(30000);
             pr_info!("TimeStampCounter's frequency: {:#X}", self.tsc_frequency);
         } else {
             pr_err!("APIC deadline timer is not enabled.");
         }
     }
 
-    pub fn inthandler41_main() {
+    pub fn inthandler30_main() {
         if let Ok(im) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
             im.send_eoi();
         }
-        kprintln!("Hello,from APIC Deadline Timer!");
+        pr_info!("Deadline mode test!");
     }
 
     pub fn enable_deadline_mode(&mut self, local_apic_manager: &mut LocalApicManager) -> bool {
@@ -62,18 +50,22 @@ impl LocalApicTimer {
             /* 2.12 MSRS IN THE 3RD GENERATION INTEL(R) CORE(TM) PROCESSOR FAMILY
              * (BASED ON INTEL® MICROARCHITECTURE CODE NAME IVY BRIDGE) Intel SDM Vol.4 2-189 */
             if self.tsc_frequency == 0 {
-                return false;
+                //return false;
             }
-            let mut lvt_timer_status =
-                local_apic_manager.read_apic_register(LocalApicRegisters::Timer);
-            lvt_timer_status &= !(0b11 << 16);
-            lvt_timer_status |= (1 << 18) | (0x30/*Vector*/);
+
+            let lvt_timer_status = (0b100 << 16) | (0x30/*Vector*/);
             /* [18:17:16] <- 0b100 */
             local_apic_manager.write_apic_register(LocalApicRegisters::Timer, lvt_timer_status);
+            unsafe { wrmsr(0x6e0, 0xA0991F43F) };
+            self.is_interrupt_enabled = true;
             true
         } else {
             false
         }
+    }
+
+    pub const fn is_interrupt_enabled(&self) -> bool {
+        self.is_interrupt_enabled
     }
 
     pub fn set_deadline(&self, ms: usize) -> bool {
