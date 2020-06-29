@@ -36,7 +36,7 @@ impl SerialPortManager {
                 .unwrap()
                 .set_device_interrupt_function(
                     inthandler24, /*上のマクロで指定した名前*/
-                    4,
+                    Some(4),
                     0x24,
                     0,
                 );

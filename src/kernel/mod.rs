@@ -13,3 +13,4 @@ pub mod panic;
 pub mod ptr_linked_list;
 pub mod sync;
 pub mod task_manager;
+pub mod timer_manager;

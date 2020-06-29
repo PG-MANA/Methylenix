@@ -11,6 +11,7 @@ use self::idt::GateDescriptor;
 use arch::target_arch::device::cpu;
 use arch::target_arch::device::io_apic::IoApicManager;
 use arch::target_arch::device::local_apic::LocalApicManager;
+use arch::target_arch::device::local_apic_timer::LocalApicTimer;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::MemoryPermissionFlags;
@@ -22,6 +23,7 @@ pub struct InterruptManager {
     main_selector: u16,
     io_apic: IoApicManager,
     local_apic: LocalApicManager, /* temporary */
+    lvt_timer: LocalApicTimer,
 }
 
 impl InterruptManager {
@@ -34,6 +36,7 @@ impl InterruptManager {
             main_selector: 0,
             io_apic: IoApicManager::new(),
             local_apic: LocalApicManager::new(),
+            lvt_timer: LocalApicTimer::new(),
         }
     }
 
@@ -59,6 +62,7 @@ impl InterruptManager {
         }
         self.io_apic.init();
         self.local_apic.init();
+        self.lvt_timer.init(&mut self.local_apic);
         return true;
     }
 
@@ -83,7 +87,7 @@ impl InterruptManager {
     pub fn set_device_interrupt_function(
         &mut self,
         function: unsafe fn(),
-        irq: u8,
+        irq: Option<u8>,
         index: u16,
         privilege_level: u8,
     ) -> bool {
@@ -100,8 +104,10 @@ impl InterruptManager {
                 GateDescriptor::new(function, self.main_selector, 0, type_attr),
             );
         }
-        self.io_apic
-            .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
+        if let Some(irq) = irq {
+            self.io_apic
+                .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
+        }
         return true;
     }
 

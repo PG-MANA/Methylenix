@@ -141,6 +141,10 @@ pub unsafe fn clear_task_stack(
 pub unsafe fn run_task(context_data_address: *mut ContextData) {
     llvm_asm!("
 
+                lea     rax, [rdi + 512 + 8 * 18]
+                add     rax, 8                      ; Stack-Alignment
+                mov     [rdi + 512 + 8 * 18], rax
+
                 fxrstor [rdi]
                 mov     rdx, [rdi + 512 + 8 *  1]
                 mov     rcx, [rdi + 512 + 8 *  2]
@@ -200,7 +204,8 @@ pub unsafe fn task_switch(
                 mov     [rsi + 512 + 8 * 16], rax
                 mov     rax, ss
                 mov     [rsi + 512 + 8 * 17], rax
-                mov     [rsi + 512 + 8 * 18], rsp
+                lea     rax, [rsp + 8]
+                mov     [rsi + 512 + 8 * 18], rax; RSP(Stack-Alignment)
                 pushfq
                 pop     rax
                 and     ax, 0x022a

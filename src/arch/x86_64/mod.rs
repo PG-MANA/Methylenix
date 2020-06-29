@@ -54,7 +54,6 @@ pub extern "C" fn multiboot_main(
     {
         panic!("Cannot map memory for frame buffer");
     }
-
     let mut context_manager = ContextManager::new();
     context_manager.init(
         kernel_code_segment as usize,
