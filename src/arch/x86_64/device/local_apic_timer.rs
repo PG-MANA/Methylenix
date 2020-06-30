@@ -33,7 +33,7 @@ impl LocalApicTimer {
         if self.enable_deadline_mode(local_apic_manager) {
             pr_info!("TimeStampCounter's frequency: {:#X}", self.tsc_frequency);
         } else {
-            pr_err!("APIC deadline timer is not enabled.");
+            pr_info!("APIC deadline timer is not enabled.");
         }
     }
 
@@ -45,23 +45,35 @@ impl LocalApicTimer {
     }
 
     pub fn enable_deadline_mode(&mut self, local_apic_manager: &mut LocalApicManager) -> bool {
-        if self.is_deadline_mode_supported == true {
-            self.tsc_frequency = ((unsafe { rdmsr(0xce) as usize } >> 8) & 0xff) * 1000000;
-            /* 2.12 MSRS IN THE 3RD GENERATION INTEL(R) CORE(TM) PROCESSOR FAMILY
-             * (BASED ON INTEL® MICROARCHITECTURE CODE NAME IVY BRIDGE) Intel SDM Vol.4 2-189 */
-            if self.tsc_frequency == 0 {
-                //return false;
-            }
-
-            let lvt_timer_status = (0b100 << 16) | (0x30/*Vector*/);
-            /* [18:17:16] <- 0b100 */
-            local_apic_manager.write_apic_register(LocalApicRegisters::Timer, lvt_timer_status);
-            unsafe { wrmsr(0x6e0, 0xA0991F43F) };
-            self.is_interrupt_enabled = true;
-            true
-        } else {
-            false
+        if self.is_deadline_mode_supported == false {
+            return false;
         }
+        self.tsc_frequency = ((unsafe { rdmsr(0xce) as usize } >> 8) & 0xff) * 1000000;
+        /* 2.12 MSRS IN THE 3RD GENERATION INTEL(R) CORE(TM) PROCESSOR FAMILY
+         * (BASED ON INTEL® MICROARCHITECTURE CODE NAME IVY BRIDGE) Intel SDM Vol.4 2-189 */
+        if self.tsc_frequency == 0 {
+            return false;
+        }
+        let is_invariant_tsc = unsafe {
+            let mut eax = 0x80000007u32;
+            let mut ebx = 0;
+            let mut edx = 0;
+            let mut ecx = 0;
+            cpuid(&mut eax, &mut ebx, &mut ecx, &mut edx);
+            (edx & (1 << 8)) != 0
+        };
+        if !is_invariant_tsc {
+            self.is_deadline_mode_supported = false;
+            pr_warn!("TSC is not invariant, TSC deadline timer was disabled.");
+            return false;
+        }
+
+        let lvt_timer_status = (0b100 << 16) | (0x30/*Vector*/);
+        /* [18:17:16] <- 0b100 */
+        local_apic_manager.write_apic_register(LocalApicRegisters::Timer, lvt_timer_status);
+        unsafe { wrmsr(0x6e0, 0xA0991F43F) };
+        self.is_interrupt_enabled = true;
+        true
     }
 
     pub const fn is_interrupt_enabled(&self) -> bool {
