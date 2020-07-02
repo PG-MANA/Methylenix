@@ -12,7 +12,6 @@
 #![feature(maybe_uninit_ref)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
-#![feature(track_caller)]
 
 #[macro_use]
 extern crate alloc;
