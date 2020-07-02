@@ -18,7 +18,10 @@ pub enum LocalApicRegisters {
     ApicId = 0x02,
     EOI = 0x0b,
     SIR = 0x0f,
-    Timer = 0x32,
+    LvtTimer = 0x32,
+    TimerInitialCount = 0x38,
+    TimerCurrentCount = 0x39,
+    TimerDivide = 0x3e,
 }
 
 impl LocalApicManager {

@@ -98,6 +98,11 @@ pub extern "C" fn multiboot_main(
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
     }
+    get_kernel_manager_cluster()
+        .interrupt_manager
+        .lock()
+        .unwrap()
+        .start_timer();
     hlt();
 }
 
@@ -284,6 +289,18 @@ fn init_acpi(rsdp_ptr: usize) {
         "OEM ID:{}",
         str::from_utf8(&acpi_manager.get_oem_id().unwrap_or([0; 6])).unwrap_or("NODATA")
     );
+
+    if let Some(pm_timer) = acpi_manager
+        .get_xsdt_manager()
+        .get_fadt_manager()
+        .get_acpi_pm_timer()
+    {
+        get_kernel_manager_cluster()
+            .interrupt_manager
+            .lock()
+            .unwrap()
+            .sync_timer(&pm_timer);
+    }
 
     if let Some(p_bitmap_address) = acpi_manager
         .get_xsdt_manager()

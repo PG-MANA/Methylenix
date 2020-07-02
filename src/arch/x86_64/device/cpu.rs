@@ -9,12 +9,10 @@ pub unsafe fn sti() {
     llvm_asm!("sti");
 }
 
-/*
 #[inline(always)]
 pub unsafe fn cli() {
     llvm_asm!("cli");
 }
-*/
 
 #[inline(always)]
 pub unsafe fn halt() {
@@ -28,13 +26,30 @@ pub unsafe fn hlt() {
 
 #[inline(always)]
 pub unsafe fn out_byte(addr: u16, data: u8) {
-    llvm_asm!("outb %al, %dx"::"{dx}"(addr), "{al}"(data));
+    llvm_asm!("outb %al, %dx"::"{dx}"(addr), "{al}"(data)::"volatile");
 }
 
 #[inline(always)]
-pub unsafe fn in_byte(data: u16) -> u8 {
+pub unsafe fn in_byte(port: u16) -> u8 {
     let result: u8;
-    llvm_asm!("in %dx, %al":"={al}"(result):"{dx}"(data)::"volatile");
+    llvm_asm!("in %dx, %al":"={al}"(result):"{dx}"(port)::"volatile");
+    result
+}
+
+#[inline(always)]
+pub unsafe fn in_byte_twice(port: u16) -> (u8 /*first*/, u8 /*second*/) {
+    let r1: u8;
+    let r2: u8;
+    llvm_asm!("in  %dx, %al
+               mov %al, %bl
+               in  %dx, %al":"={bl}"(r1),"={al}"(r2):"{dx}"(port)::"volatile");
+    (r1, r2)
+}
+
+#[inline(always)]
+pub unsafe fn in_dword(port: u16) -> u32 {
+    let result: u32;
+    llvm_asm!("in %dx, %eax":"={eax}"(result):"{dx}"(port)::"volatile");
     result
 }
 
@@ -47,7 +62,7 @@ pub unsafe fn lidt(idtr: usize) {
 pub unsafe fn rdmsr(ecx: u32) -> u64 {
     let edx: u32;
     let eax: u32;
-    llvm_asm!("rdmsr":"={edx}"(edx), "={eax}"(eax):"{ecx}"(ecx));
+    llvm_asm!("rdmsr":"={edx}"(edx), "={eax}"(eax):"{ecx}"(ecx)::"volatile");
     (edx as u64) << 32 | eax as u64
 }
 
@@ -55,7 +70,7 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
 pub unsafe fn wrmsr(ecx: u32, data: u64) {
     let edx: u32 = (data >> 32) as u32;
     let eax: u32 = data as u32;
-    llvm_asm!("wrmsr"::"{edx}"(edx), "{eax}"(eax),"{ecx}"(ecx));
+    llvm_asm!("wrmsr"::"{edx}"(edx), "{eax}"(eax),"{ecx}"(ecx)::"volatile");
 }
 
 #[inline(always)]
@@ -67,35 +82,35 @@ pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) 
 #[inline(always)]
 pub unsafe fn get_cr0() -> u64 {
     let rax: u64;
-    llvm_asm!("movq %cr0, %rax":"={rax}"(rax));
+    llvm_asm!("movq %cr0, %rax":"={rax}"(rax):::"volatile");
     rax
 }
 
 #[inline(always)]
 pub unsafe fn set_cr0(cr4: u64) {
-    llvm_asm!("movq %rdi, %cr0"::"{rdi}"(cr4));
+    llvm_asm!("movq %rdi, %cr0"::"{rdi}"(cr4)::"volatile");
 }
 
 #[inline(always)]
 pub unsafe fn set_cr3(addr: usize) {
-    llvm_asm!("movq %rdi, %cr3"::"{rdi}"(addr));
+    llvm_asm!("movq %rdi, %cr3"::"{rdi}"(addr)::"volatile");
 }
 
 #[inline(always)]
 pub unsafe fn get_cr4() -> u64 {
     let rax: u64;
-    llvm_asm!("movq %cr4, %rax":"={rax}"(rax));
+    llvm_asm!("movq %cr4, %rax":"={rax}"(rax):::"volatile");
     rax
 }
 
 #[inline(always)]
 pub unsafe fn set_cr4(cr4: u64) {
-    llvm_asm!("movq %rdi, %cr4"::"{rdi}"(cr4));
+    llvm_asm!("movq %rdi, %cr4"::"{rdi}"(cr4)::"volatile");
 }
 
 #[inline(always)]
 pub unsafe fn invlpg(addr: usize) {
-    llvm_asm!("invlpg (%rdi)"::"{rdi}"(addr));
+    llvm_asm!("invlpg (%rdi)"::"{rdi}"(addr):::"volatile");
 }
 
 pub unsafe fn clear_task_stack(
