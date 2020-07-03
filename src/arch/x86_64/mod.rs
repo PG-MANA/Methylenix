@@ -192,7 +192,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             _ => "reserved",
         };
         pr_info!(
-            "[{:#X}~{:#X}] {}",
+            "[{:#016X}~{:#016X}] {}",
             entry.addr as usize,
             MemoryManager::size_to_end_address(entry.addr as usize, entry.length as usize),
             area_name
