@@ -41,7 +41,7 @@ impl LocalApicTimer {
         ecx & (1 << 24) != 0
     }
 
-    pub fn inthandler30_main() {
+    pub fn local_apic_timer_handler() {
         println!("hello!");
         if let Ok(im) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
             im.send_eoi();
@@ -51,7 +51,7 @@ impl LocalApicTimer {
     pub fn enable_deadline_mode(
         &mut self,
         vector: u16,
-        local_apic_manager: &mut LocalApicManager,
+        local_apic_manager: &LocalApicManager,
     ) -> bool {
         if self.is_deadline_mode_supported() == false {
             return false;
@@ -87,8 +87,8 @@ impl LocalApicTimer {
 
     pub fn set_up_interrupt<T: Timer>(
         &mut self,
-        local_apic: &mut LocalApicManager,
         vector: u16,
+        local_apic: &LocalApicManager,
         timer: &T, /**/
     ) -> bool {
         use core::u32;
@@ -133,15 +133,6 @@ impl LocalApicTimer {
         true
     }
 
-    pub fn get_difference(&self, earlier: usize, later: usize) -> usize {
-        assert_eq!(self.is_deadline_mode_enabled, false);
-        if earlier <= later {
-            earlier + (self.reload_value as usize - later)
-        } else {
-            earlier - later
-        }
-    }
-
     pub const fn is_interrupt_enabled(&self) -> bool {
         self.is_interrupt_setup
     }
@@ -162,5 +153,37 @@ impl LocalApicTimer {
 
     pub unsafe fn set_deadline_without_checking(deadline: u64) {
         wrmsr(0x6e0, deadline)
+    }
+}
+
+impl Timer for LocalApicTimer {
+    fn get_count(&self) -> usize {
+        unimplemented!();
+    }
+
+    fn get_frequency_hz(&self) -> usize {
+        self.frequency
+    }
+
+    fn is_count_up_timer(&self) -> bool {
+        true
+    }
+
+    fn get_difference(&self, earlier: usize, later: usize) -> usize {
+        assert_eq!(self.is_deadline_mode_enabled, false);
+        if earlier <= later {
+            earlier + (self.reload_value as usize - later)
+        } else {
+            earlier - later
+        }
+    }
+
+    fn get_ending_count_value(&self, start: usize, difference: usize) -> usize {
+        unimplemented!()
+    }
+
+    fn get_max_counter_value(&self) -> usize {
+        use core::u32;
+        u32::MAX as usize
     }
 }

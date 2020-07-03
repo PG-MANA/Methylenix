@@ -4,13 +4,13 @@
 
 use arch::target_arch::device::cpu;
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::sync::spin_lock::SpinLockFlag;
 use kernel::timer_manager::Timer;
 
 pub struct PitManager {
     lock: SpinLockFlag,
     reload_value: u16,
+    is_interrupt_enabled: bool,
 }
 
 impl PitManager {
@@ -18,42 +18,37 @@ impl PitManager {
         Self {
             lock: SpinLockFlag::new(),
             reload_value: 0,
+            is_interrupt_enabled: false,
         }
     }
 
     pub fn init(&mut self) {
+        let _lock = self.lock.lock();
         unsafe {
-            cpu::out_byte(0x43, 0);
+            cpu::out_byte(0x43, 0x34);
             cpu::out_byte(0x40, 0xff);
             cpu::out_byte(0x40, 0xff);
         }
         self.reload_value = 0xffff;
     }
 
+    pub fn stop_counting(&mut self) {
+        let _lock = self.lock.lock();
+        unsafe { cpu::out_byte(0x43, 0) };
+        self.reload_value = 0;
+        self.is_interrupt_enabled = false;
+    }
+
+    #[allow(dead_code)]
     pub fn set_up_interrupt(&mut self) {
+        let _lock = self.lock.lock();
         unsafe {
             self.reload_value = 11932u16;
             cpu::out_byte(0x43, 0x34);
             cpu::out_byte(0x40, (self.reload_value & 0xff) as u8);
             cpu::out_byte(0x40, (self.reload_value >> 8) as u8);
         }
-        /*make_interrupt_hundler!(inthandler20, PitManager::inthandler20_main);
-        let mut interrupt_manager = get_kernel_manager_cluster()
-            .interrupt_manager
-            .lock()
-            .unwrap();
-        interrupt_manager.set_device_interrupt_function(
-            inthandler20,
-            Some(0),
-            0x20,
-            0,
-        );*/
-    }
-
-    pub fn inthandler20_main() {
-        if let Ok(im) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
-            im.send_eoi();
-        }
+        self.is_interrupt_enabled = true;
     }
 }
 

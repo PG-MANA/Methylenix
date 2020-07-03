@@ -11,8 +11,10 @@ pub mod paging;
 
 use self::context::ContextManager;
 use self::device::cpu;
+use self::device::local_apic_timer::LocalApicTimer;
+use self::device::pit::PitManager;
 use self::device::serial_port::SerialPortManager;
-use self::interrupt::InterruptManager;
+use self::interrupt::{InterruptManager, InterruptNumber};
 use self::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use kernel::drivers::acpi::AcpiManager;
@@ -38,12 +40,21 @@ pub extern "C" fn multiboot_main(
     user_data_segment: u16,
 ) {
     enable_sse();
+
     /* MultiBootInformation読み込み */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
+
     /* Graphic初期化（Panicが起きたときの表示のため) */
     get_kernel_manager_cluster().graphic_manager =
         Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
+
     kprintln!("Methylenix");
+    pr_info!(
+        "Booted from {}, cmd line: {}",
+        multiboot_information.boot_loader_name,
+        multiboot_information.boot_cmd_line
+    );
+
     /* メモリ管理初期化 */
     let multiboot_information = init_memory(multiboot_information);
     if !get_kernel_manager_cluster()
@@ -54,6 +65,31 @@ pub extern "C" fn multiboot_main(
     {
         panic!("Cannot map memory for frame buffer");
     }
+
+    /* IDT初期化&割り込み初期化 */
+    init_interrupt(kernel_code_segment);
+    /* シリアルポート初期化 */
+    let serial_port_manager = SerialPortManager::new(0x3F8 /* COM1 */);
+    serial_port_manager.init();
+    /* Boot Information Manager に格納 */
+    get_kernel_manager_cluster().serial_port_manager = serial_port_manager;
+    let acpi_manager = if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
+        init_acpi(rsdp_address)
+    } else {
+        if multiboot_information.old_acpi_rsdp_ptr.is_some() {
+            pr_warn!("ACPI 1.0 is not supported.");
+        } else {
+            pr_warn!("ACPI is not available.");
+        }
+        None
+    };
+    /* Init Local APIC Timer*/
+    let mut local_apic_timer = init_timer(acpi_manager.as_ref());
+
+    /*Set up graphic*/
+    init_graphic(acpi_manager.as_ref());
+
+    /*Set up task system*/
     let mut context_manager = ContextManager::new();
     context_manager.init(
         kernel_code_segment as usize,
@@ -67,42 +103,24 @@ pub extern "C" fn multiboot_main(
         .lock()
         .unwrap()
         .init(context_manager);
-
-    /* IDT初期化&割り込み初期化 */
-    init_interrupt(kernel_code_segment);
-    /* シリアルポート初期化 */
-    let serial_port_manager = SerialPortManager::new(0x3F8 /* COM1 */);
-    serial_port_manager.init();
-    /* Boot Information Manager に格納 */
-    get_kernel_manager_cluster().serial_port_manager = serial_port_manager;
-    if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
-        init_acpi(rsdp_address);
-    } else {
-        if multiboot_information.old_acpi_rsdp_ptr.is_some() {
-            pr_warn!("ACPI 1.0 is not supported.");
-        } else {
-            pr_warn!("ACPI is not available.");
-        }
-    }
-    pr_info!(
-        "Booted from {}, cmd line: {}",
-        multiboot_information.boot_loader_name,
-        multiboot_information.boot_cmd_line
-    );
     /*get_kernel_manager_cluster()
     .task_manager
     .lock()
     .unwrap()
     .create_init_process(main_process as *const fn() as usize);*/
+
     unsafe {
         //IDT&PICの初期化が終わったのでSTIする
         cpu::sti();
     }
-    get_kernel_manager_cluster()
-        .interrupt_manager
-        .lock()
-        .unwrap()
-        .start_timer();
+
+    local_apic_timer.start_interrupt(
+        get_kernel_manager_cluster()
+            .interrupt_manager
+            .lock()
+            .unwrap()
+            .get_local_apic_manager(),
+    );
     hlt();
 }
 
@@ -277,32 +295,37 @@ fn init_interrupt(kernel_selector: u16) {
     get_kernel_manager_cluster().interrupt_manager = Mutex::new(interrupt_manager);
 }
 
-fn init_acpi(rsdp_ptr: usize) {
+fn init_acpi(rsdp_ptr: usize) -> Option<AcpiManager> {
     use core::str;
 
     let mut acpi_manager = AcpiManager::new();
     if !acpi_manager.init(rsdp_ptr) {
         pr_warn!("Cannot init ACPI.");
-        return;
+        return None;
     }
     pr_info!(
         "OEM ID:{}",
         str::from_utf8(&acpi_manager.get_oem_id().unwrap_or([0; 6])).unwrap_or("NODATA")
     );
+    Some(acpi_manager)
+}
 
-    if let Some(pm_timer) = acpi_manager
-        .get_xsdt_manager()
-        .get_fadt_manager()
-        .get_acpi_pm_timer()
-    {
-        get_kernel_manager_cluster()
-            .interrupt_manager
-            .lock()
-            .unwrap()
-            .sync_timer(&pm_timer);
+fn init_graphic(acpi_manager: Option<&AcpiManager>) {
+    /*0xFF7F27で塗りつぶす*/
+    let mut graphic_manager = get_kernel_manager_cluster().graphic_manager.lock().unwrap();
+    if graphic_manager.is_text_mode() {
+        return;
+    }
+    let (size_x, size_y) = graphic_manager.get_framer_buffer_size();
+    graphic_manager.fill(0, 0, size_x, size_y, 0xff7f27);
+    drop(graphic_manager);
+
+    if acpi_manager.is_none() {
+        return;
     }
 
     if let Some(p_bitmap_address) = acpi_manager
+        .unwrap()
         .get_xsdt_manager()
         .get_bgrt_manager()
         .get_bitmap_physical_address()
@@ -332,6 +355,7 @@ fn init_acpi(rsdp_ptr: usize) {
             bitmap_vm_address,
             temp_map_size,
             acpi_manager
+                .unwrap()
                 .get_xsdt_manager()
                 .get_bgrt_manager()
                 .get_image_offset()
@@ -350,7 +374,6 @@ fn init_acpi(rsdp_ptr: usize) {
 }
 
 fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, usize)) -> bool {
-    /* if file_size > PAGE_SIZE => ?*/
     if unsafe { *((bitmap_vm_address + 30) as *const u32) } != 0 {
         pr_info!("Boot logo is compressed");
         return false;
@@ -407,6 +430,69 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
         pr_err!("Freeing bitmap data failed Err:{:?}", e);
     }
     return true;
+}
+
+fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
+    /* This function assumes that interrupt is not enabled */
+    /* This function does not enable interrupt */
+    let mut local_apic_timer = LocalApicTimer::new();
+    local_apic_timer.init();
+    if local_apic_timer.enable_deadline_mode(
+        InterruptNumber::LocalApicTimer as u16,
+        get_kernel_manager_cluster()
+            .interrupt_manager
+            .lock()
+            .unwrap()
+            .get_local_apic_manager(),
+    ) {
+        pr_info!("Using Local APIC TSC Deadline Mode");
+    } else if let Some(pm_timer) = acpi_manager
+        .unwrap_or(&AcpiManager::new())
+        .get_xsdt_manager()
+        .get_fadt_manager()
+        .get_acpi_pm_timer()
+    {
+        pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
+        local_apic_timer.set_up_interrupt(
+            InterruptNumber::LocalApicTimer as u16,
+            get_kernel_manager_cluster()
+                .interrupt_manager
+                .lock()
+                .unwrap()
+                .get_local_apic_manager(),
+            &pm_timer,
+        );
+    } else {
+        pr_info!("Using PIT to calculate frequency of Local APIC Timer.");
+        let mut pit = PitManager::new();
+        pit.init();
+        local_apic_timer.set_up_interrupt(
+            InterruptNumber::LocalApicTimer as u16,
+            get_kernel_manager_cluster()
+                .interrupt_manager
+                .lock()
+                .unwrap()
+                .get_local_apic_manager(),
+            &pit,
+        );
+        pit.stop_counting();
+    }
+    /*setup IDT*/
+    make_interrupt_hundler!(
+        local_apic_timer_handler,
+        LocalApicTimer::local_apic_timer_handler
+    );
+    get_kernel_manager_cluster()
+        .interrupt_manager
+        .lock()
+        .unwrap()
+        .set_device_interrupt_function(
+            local_apic_timer_handler,
+            None,
+            InterruptNumber::LocalApicTimer as u16,
+            0,
+        );
+    local_apic_timer
 }
 
 #[no_mangle]

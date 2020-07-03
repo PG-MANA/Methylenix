@@ -11,11 +11,9 @@ use self::idt::GateDescriptor;
 use arch::target_arch::device::cpu;
 use arch::target_arch::device::io_apic::IoApicManager;
 use arch::target_arch::device::local_apic::LocalApicManager;
-use arch::target_arch::device::local_apic_timer::LocalApicTimer;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::MemoryPermissionFlags;
-use kernel::timer_manager::Timer;
 
 use core::mem::{size_of, MaybeUninit};
 
@@ -24,7 +22,11 @@ pub struct InterruptManager {
     main_selector: u16,
     io_apic: IoApicManager,
     local_apic: LocalApicManager, /* temporary */
-    lvt_timer: LocalApicTimer,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum InterruptNumber {
+    LocalApicTimer = 0xef,
 }
 
 impl InterruptManager {
@@ -37,7 +39,6 @@ impl InterruptManager {
             main_selector: 0,
             io_apic: IoApicManager::new(),
             local_apic: LocalApicManager::new(),
-            lvt_timer: LocalApicTimer::new(),
         }
     }
 
@@ -63,7 +64,6 @@ impl InterruptManager {
         }
         self.io_apic.init();
         self.local_apic.init();
-        self.lvt_timer.init();
         return true;
     }
 
@@ -116,33 +116,7 @@ impl InterruptManager {
         self.local_apic.send_eoi();
     }
 
-    pub fn sync_timer<T: Timer>(&mut self, timer: &T) {
-        if self
-            .lvt_timer
-            .enable_deadline_mode(0x30, &mut self.local_apic)
-            == false
-        {
-            if self
-                .lvt_timer
-                .set_up_interrupt(&mut self.local_apic, 0x30, timer)
-                == false
-            {
-                panic!("Cannot set up APIC Timer");
-            }
-            pr_info!("Using Local APIC Timer");
-        } else {
-            pr_info!("Using Local APIC Timer TSC Deadline Mode");
-        }
-        make_interrupt_hundler!(inthandler30, LocalApicTimer::inthandler30_main);
-        self.set_device_interrupt_function(
-            inthandler30, /*上のマクロで指定した名前*/
-            None,
-            0x30,
-            0,
-        );
-    }
-
-    pub fn start_timer(&mut self) {
-        self.lvt_timer.start_interrupt(&self.local_apic);
+    pub fn get_local_apic_manager(&self) -> &LocalApicManager {
+        &self.local_apic
     }
 }
