@@ -10,16 +10,17 @@ mod thread_entry;
 use self::process_entry::ProcessEntry;
 use self::thread_entry::ThreadEntry;
 
-use arch::target_arch::context::ContextManager;
-use arch::target_arch::device::cpu::halt;
+use arch::target_arch::context::{context_data::ContextData, ContextManager};
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::pool_allocator::PoolAllocator;
 use kernel::ptr_linked_list::PtrLinkedList;
+use kernel::sync::spin_lock::SpinLockFlag;
 
 use core::mem;
 
 pub struct TaskManager {
+    lock: SpinLockFlag,
     run_list: PtrLinkedList<ThreadEntry>,
     sleep_list: PtrLinkedList<ThreadEntry>,
     running_thread: Option<*mut ThreadEntry>,
@@ -49,6 +50,7 @@ impl TaskManager {
     const NUM_OF_INITIAL_PROCESS_ENTRIES: usize = 6;
     pub const fn new() -> Self {
         Self {
+            lock: SpinLockFlag::new(),
             run_list: PtrLinkedList::new(),
             sleep_list: PtrLinkedList::new(),
             running_thread: None,
@@ -59,6 +61,7 @@ impl TaskManager {
     }
 
     pub fn init(&mut self, context_manager: ContextManager) {
+        let _lock = self.lock.lock();
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
         let mut kernel_memory_allocator = get_kernel_manager_cluster()
             .kernel_memory_alloc_manager
@@ -91,42 +94,19 @@ impl TaskManager {
         self.context_manager = context_manager;
     }
 
-    pub fn create_init_process(&mut self, entry_point: usize) {
+    pub fn create_init_process(
+        &mut self,
+        context_for_init: ContextData,
+        context_for_idle: ContextData,
+    ) {
+        let _lock = self.lock.lock();
         use core::i8;
         let process_entry = self.process_entry_pool.alloc().unwrap();
         let thread_entry = self.thread_entry_pool.alloc().unwrap();
         let idle_thread_entry = self.thread_entry_pool.alloc().unwrap();
 
-        let mut kernel_memory_alloc_manager = get_kernel_manager_cluster()
-            .kernel_memory_alloc_manager
-            .lock()
-            .unwrap();
-        let memory_manager = &get_kernel_manager_cluster().memory_manager;
-        let stack_for_init = kernel_memory_alloc_manager
-            .vmalloc(
-                ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM,
-                ContextManager::DEFAULT_STACK_SIZE_OF_USER,
-                memory_manager,
-            )
-            .unwrap();
-        let stack_for_idle = kernel_memory_alloc_manager
-            .vmalloc(
-                ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM,
-                ContextManager::DEFAULT_STACK_SIZE_OF_USER,
-                memory_manager,
-            )
-            .unwrap();
-        drop(kernel_memory_alloc_manager);
-
-        let context_data_for_init = self
-            .context_manager
-            .create_system_context(entry_point, stack_for_init);
-        let context_data_for_idle = self
-            .context_manager
-            .create_system_context(idle as *const fn() as usize, stack_for_idle);
-
-        thread_entry.init(1, process_entry, 0, 0, context_data_for_init);
-        idle_thread_entry.init(2, process_entry, 0, i8::MIN, context_data_for_idle);
+        thread_entry.init(1, process_entry, 0, 0, context_for_init);
+        idle_thread_entry.init(2, process_entry, 0, i8::MIN, context_for_idle);
 
         process_entry.init(1, thread_entry, 0, 0);
         process_entry.add_thread(idle_thread_entry);
@@ -136,10 +116,12 @@ impl TaskManager {
     }
 
     pub fn execute_init_process(&mut self) -> ! {
+        let _lock = self.lock.lock();
         let init_thread = unsafe { self.run_list.get_first_entry_mut().unwrap() };
         assert_eq!(init_thread.get_process().get_pid(), 1);
         self.running_thread = Some(init_thread);
         init_thread.set_task_status(TaskStatus::Running);
+        drop(_lock);
         unsafe {
             self.context_manager
                 .jump_to_context(init_thread.get_context())
@@ -149,15 +131,26 @@ impl TaskManager {
     }
 
     pub fn switch_to_next_thread(&mut self) {
+        let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
             unsafe { self.run_list.get_first_entry_mut().unwrap() }
         } else {
             running_thread.set_task_status(TaskStatus::CanRun);
-            running_thread.get_next_from_run_list_mut().unwrap()
+            if let Some(t) = running_thread.get_next_from_run_list_mut() {
+                t
+            } else {
+                unsafe { self.run_list.get_first_entry_mut().unwrap() }
+            }
         };
+        pr_info!(
+            "Task Switch[thread_id:{}=>{}]",
+            running_thread.get_t_id(),
+            next_thread.get_t_id(),
+        );
         next_thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(next_thread as *mut _);
+        drop(_lock);
         unsafe {
             self.context_manager
                 .switch_context(running_thread.get_context(), next_thread.get_context());
@@ -166,13 +159,16 @@ impl TaskManager {
 
     /* sleep running thread and switch to next thread */
     pub fn sleep(&mut self) {
+        let _lock = self.lock.lock();
         let mut running_thread = unsafe { &mut *self.running_thread.unwrap() };
         running_thread.insert_self_to_sleep_queue(&mut self.sleep_list);
+        drop(_lock);
         self.switch_to_next_thread();
         /* woke up and return */
     }
 
     pub fn wakeup(&mut self, p_id: usize, t_id: usize) {
+        let _lock = self.lock.lock();
         for e in self.sleep_list.iter_mut() {
             let e = unsafe { &mut *e };
             let e_p_id = e.get_process().get_pid();
@@ -184,12 +180,8 @@ impl TaskManager {
         }
         pr_err!("There is no thread to wakeup.");
     }
-}
 
-fn idle() -> ! {
-    loop {
-        unsafe {
-            halt();
-        }
+    pub fn get_context_manager(&self) -> &ContextManager {
+        &self.context_manager
     }
 }

@@ -4,13 +4,10 @@
  * Arch-specific timer call this function to process timer queue
  * when task-switch, once return to arch-specific timer function
  *  for process of sending end of interrupt and recall this manager
+ * The member of this manager may be changed
  */
 
-pub struct TimerManager {
-    resolution: usize,
-    counter: usize,
-    ms_counter: usize,
-}
+pub struct TimerManager {}
 
 pub trait Timer {
     fn get_count(&self) -> usize;
@@ -33,19 +30,5 @@ pub trait Timer {
         } else {
             while self.get_count() > end {}
         }
-    }
-}
-
-impl TimerManager {
-    pub const fn new() -> Self {
-        Self {
-            resolution: 0,
-            counter: 0,
-            ms_counter: 0,
-        }
-    }
-
-    pub fn init(&mut self, resolution: usize) {
-        self.resolution = resolution;
     }
 }

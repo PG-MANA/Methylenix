@@ -40,19 +40,21 @@ impl ContextManager {
     }
 
     pub fn create_system_context(
-        &mut self,
+        &self,
         entry_address: usize,
         stack_address: usize,
+        pml4_address: usize,
     ) -> ContextData {
         ContextData::create_context_data_for_system(
             entry_address,
             stack_address,
             self.system_cs,
             self.system_ss,
+            pml4_address,
         )
     }
 
-    pub unsafe fn jump_to_context(&mut self, context: &mut ContextData) {
+    pub unsafe fn jump_to_context(&self, context: &mut ContextData) {
         /* for init process */
         assert_eq!(mem::align_of_val(context), 64);
         cpu::run_task(context as *mut _);
@@ -60,7 +62,7 @@ impl ContextManager {
 
     /* ContextSwitch */
     pub unsafe fn switch_context(
-        &mut self,
+        &self,
         old_context: &mut ContextData,
         next_context: &mut ContextData,
     ) {

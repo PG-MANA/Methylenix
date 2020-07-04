@@ -34,12 +34,13 @@ struct Registers {
     rflags: usize,
     cs: usize,
     rip: usize,
+    cr3: usize,
 }
 
 impl ContextData {
     pub fn new() -> Self {
         use core::mem;
-        if mem::size_of::<Registers>() != 22 * mem::size_of::<usize>() {
+        if mem::size_of::<Registers>() != 23 * mem::size_of::<usize>() {
             panic!("GeneralRegisters was changed.\nYou must check task_switch function.");
         }
         Self {
@@ -53,6 +54,7 @@ impl ContextData {
         stack: usize,
         cs: usize,
         ss: usize,
+        cr3: usize,
     ) -> Self {
         let mut data = Self::new();
         data.registers.rip = entry_address;
@@ -60,6 +62,7 @@ impl ContextData {
         data.registers.ss = ss;
         data.registers.rflags = 0x202;
         data.registers.rsp = stack;
+        data.registers.cr3 = cr3;
         data
     }
 }

@@ -32,13 +32,15 @@ use core::mem;
 /* Memory Areas for initial processes*/
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
 
+static mut LOCAL_APIC_TIMER: LocalApicTimer = LocalApicTimer::new();
+
 #[no_mangle]
 pub extern "C" fn multiboot_main(
     mbi_address: usize,       /* MultiBoot Information */
     kernel_code_segment: u16, /* Current segment is 8 */
     user_code_segment: u16,
     user_data_segment: u16,
-) {
+) -> ! {
     enable_sse();
 
     /* MultiBootInformation読み込み */
@@ -68,11 +70,13 @@ pub extern "C" fn multiboot_main(
 
     /* IDT初期化&割り込み初期化 */
     init_interrupt(kernel_code_segment);
+
     /* シリアルポート初期化 */
     let serial_port_manager = SerialPortManager::new(0x3F8 /* COM1 */);
     serial_port_manager.init();
-    /* Boot Information Manager に格納 */
     get_kernel_manager_cluster().serial_port_manager = serial_port_manager;
+
+    /* ACPI */
     let acpi_manager = if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
         init_acpi(rsdp_address)
     } else {
@@ -83,45 +87,21 @@ pub extern "C" fn multiboot_main(
         }
         None
     };
-    /* Init Local APIC Timer*/
-    let mut local_apic_timer = init_timer(acpi_manager.as_ref());
 
-    /*Set up graphic*/
+    /* Init Local APIC Timer*/
+    unsafe { LOCAL_APIC_TIMER = init_timer(acpi_manager.as_ref()) };
+
+    /* Set up graphic */
     init_graphic(acpi_manager.as_ref());
 
-    /*Set up task system*/
-    let mut context_manager = ContextManager::new();
-    context_manager.init(
-        kernel_code_segment as usize,
-        0, /*is it ok?*/
-        user_code_segment as usize,
-        user_data_segment as usize,
-    );
+    /* Set up task system */
+    init_task(kernel_code_segment, user_code_segment, user_data_segment);
 
+    /* Switch to main process */
     get_kernel_manager_cluster()
         .task_manager
-        .lock()
-        .unwrap()
-        .init(context_manager);
-    /*get_kernel_manager_cluster()
-    .task_manager
-    .lock()
-    .unwrap()
-    .create_init_process(main_process as *const fn() as usize);*/
-
-    unsafe {
-        //IDT&PICの初期化が終わったのでSTIする
-        cpu::sti();
-    }
-
-    local_apic_timer.start_interrupt(
-        get_kernel_manager_cluster()
-            .interrupt_manager
-            .lock()
-            .unwrap()
-            .get_local_apic_manager(),
-    );
-    hlt();
+        .execute_init_process()
+    /* Never return to here */
 }
 
 pub fn general_protection_exception_handler(e_code: usize) {
@@ -129,11 +109,22 @@ pub fn general_protection_exception_handler(e_code: usize) {
 }
 
 fn main_process() -> ! {
+    /* interrupt is enabled */
+    unsafe {
+        LOCAL_APIC_TIMER.start_interrupt(
+            get_kernel_manager_cluster()
+                .interrupt_manager
+                .lock()
+                .unwrap()
+                .get_local_apic_manager(),
+        );
+    }
     pr_info!("All init are done!");
     loop {
         unsafe {
             cpu::hlt();
         }
+        pr_info!("Main!!");
         let ascii_code = get_kernel_manager_cluster()
             .serial_port_manager
             .dequeue_key()
@@ -144,18 +135,11 @@ fn main_process() -> ! {
     }
 }
 
-fn hlt() {
-    pr_info!("All init are done!");
+fn idle() -> ! {
     loop {
+        pr_info!("Idle Task");
         unsafe {
-            cpu::hlt();
-        }
-        let ascii_code = get_kernel_manager_cluster()
-            .serial_port_manager
-            .dequeue_key()
-            .unwrap_or(0);
-        if ascii_code != 0 {
-            print!("{}", ascii_code as char);
+            cpu::halt();
         }
     }
 }
@@ -286,6 +270,58 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     get_kernel_manager_cluster().kernel_memory_alloc_manager =
         Mutex::new(kernel_memory_alloc_manager);
     MultiBootInformation::new(new_mbi_address, false)
+}
+
+fn init_task(system_cs: u16, user_cs: u16, user_ss: u16) {
+    let mut context_manager = ContextManager::new();
+    context_manager.init(
+        system_cs as usize,
+        0, /*is it ok?*/
+        user_cs as usize,
+        user_ss as usize,
+    );
+
+    let mut kernel_memory_alloc_manager = get_kernel_manager_cluster()
+        .kernel_memory_alloc_manager
+        .lock()
+        .unwrap();
+    let memory_manager = &get_kernel_manager_cluster().memory_manager;
+
+    let stack_for_init = kernel_memory_alloc_manager
+        .vmalloc(
+            ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM,
+            ContextManager::STACK_ALIGN_ORDER,
+            memory_manager,
+        )
+        .unwrap()
+        + ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM;
+    let stack_for_idle = kernel_memory_alloc_manager
+        .vmalloc(
+            ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM,
+            ContextManager::STACK_ALIGN_ORDER,
+            memory_manager,
+        )
+        .unwrap()
+        + ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM;
+    drop(kernel_memory_alloc_manager);
+
+    let context_data_for_init = context_manager.create_system_context(
+        main_process as *const fn() as usize,
+        stack_for_init,
+        unsafe { cpu::get_cr3() },
+    );
+    let context_data_for_idle = context_manager.create_system_context(
+        idle as *const fn() as usize,
+        stack_for_idle,
+        unsafe { cpu::get_cr3() },
+    );
+
+    get_kernel_manager_cluster()
+        .task_manager
+        .init(context_manager);
+    get_kernel_manager_cluster()
+        .task_manager
+        .create_init_process(context_data_for_init, context_data_for_idle);
 }
 
 fn init_interrupt(kernel_selector: u16) {
@@ -506,7 +542,9 @@ pub extern "C" fn directboot_main(
         .serial_port_manager
         .sendstr("boot success\r\n");
     loop {
-        hlt();
+        unsafe {
+            cpu::hlt();
+        }
     }
 }
 

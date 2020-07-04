@@ -25,7 +25,7 @@ pub struct KernelManagerCluster {
     pub interrupt_manager: Mutex<InterruptManager>,
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
-    pub task_manager: Mutex<TaskManager>,
+    pub task_manager: TaskManager,
     /*SerialPortManager has mutex process inner*/
     //input_manager:
 }
@@ -38,7 +38,7 @@ const fn init_manager_cluster() -> KernelManagerCluster {
         interrupt_manager: Mutex::new(InterruptManager::new()),
         efi_manager: Mutex::new(EfiManager::new_static()),
         serial_port_manager: SerialPortManager::new(0x3F8),
-        task_manager: Mutex::new(TaskManager::new()),
+        task_manager: TaskManager::new(),
     }
 }
 

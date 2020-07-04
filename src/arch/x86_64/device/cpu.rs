@@ -97,8 +97,15 @@ pub unsafe fn set_cr3(addr: usize) {
 }
 
 #[inline(always)]
+pub unsafe fn get_cr3() -> usize {
+    let mut rax: u64;
+    llvm_asm!("movq %cr3, %rax":"={rax}"(rax):::"volatile");
+    rax as usize
+}
+
+#[inline(always)]
 pub unsafe fn get_cr4() -> u64 {
-    let rax: u64;
+    let mut rax: u64;
     llvm_asm!("movq %cr4, %rax":"={rax}"(rax):::"volatile");
     rax
 }
@@ -113,51 +120,12 @@ pub unsafe fn invlpg(addr: usize) {
     llvm_asm!("invlpg (%rdi)"::"{rdi}"(addr):::"volatile");
 }
 
-pub unsafe fn clear_task_stack(
-    task_switch_stack: usize,
-    stack_size: usize,
-    ss: u16,
-    cs: u16,
-    normal_stack_pointer: usize,
-    start_addr: usize,
-) {
-    llvm_asm!("
-                push    rdi
-                mov     rdi, rsp
-                mov     rsp, rax
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    0
-                push    rcx
-                push    rbx
-                pushfq
-                pop     rax
-                and     ax, 0x022a
-                or      ax, 0x0200
-                push    rax
-                push    rsi
-                push    rdx
-                mov     rsp, rdi
-                pop     rdi
-    "::"{rax}"(task_switch_stack + stack_size), "{rbx}"(normal_stack_pointer), "{rcx}"(ss), "{rsi}"(cs), "{rdx}"(start_addr)::"intel", "volatile");
-}
-
 #[naked]
 pub unsafe fn run_task(context_data_address: *mut ContextData) {
     llvm_asm!("
 
-                lea     rax, [rdi + 512 + 8 * 18]
-                add     rax, 8                      ; Stack-Alignment
+                mov     rax, [rdi + 512 + 8 * 18]
+                add     rax, 8                      // Stack-Alignment(is it OK?)
                 mov     [rdi + 512 + 8 * 18], rax
 
                 fxrstor [rdi]
@@ -178,14 +146,16 @@ pub unsafe fn run_task(context_data_address: *mut ContextData) {
                 mov     fs, ax
                 mov     rax, [rdi + 512 + 8 * 16]
                 mov     gs, ax
-                mov     rax, [rdi + 512]
                 
-                push    [rdi + 512 + 8 * 17] ; SS
-                push    [rdi + 512 + 8 * 18] ; RSP
-                push    [rdi + 512 + 8 * 19] ; RFLAGS
-                push    [rdi + 512 + 8 * 20] ; CS
-                push    [rdi + 512 + 8 * 21] ; RIP
+                push    [rdi + 512 + 8 * 17] // SS
+                push    [rdi + 512 + 8 * 18] // RSP
+                push    [rdi + 512 + 8 * 19] // RFLAGS
+                push    [rdi + 512 + 8 * 20] // CS
+                push    [rdi + 512 + 8 * 21] // RIP
 
+                mov     rax, [rdi + 512 + 8 * 22]
+                mov     cr3, rax
+                mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]
                 iretq
                 "::"{rdi}"(context_data_address)::"intel", "volatile");
@@ -200,7 +170,7 @@ pub unsafe fn task_switch(
                 fxsave  [rsi]
                 mov     [rsi + 512],          rax
                 mov     [rsi + 512 + 8 *  1], rdx
-                mov     [rsi + 512 + 8 *  2]. rcx
+                mov     [rsi + 512 + 8 *  2], rcx
                 mov     [rsi + 512 + 8 *  3], rbx
                 mov     [rsi + 512 + 8 *  4], rbp
                 mov     [rsi + 512 + 8 *  5], rsi
@@ -219,16 +189,19 @@ pub unsafe fn task_switch(
                 mov     [rsi + 512 + 8 * 16], rax
                 mov     rax, ss
                 mov     [rsi + 512 + 8 * 17], rax
-                lea     rax, [rsp + 8]
-                mov     [rsi + 512 + 8 * 18], rax; RSP(Stack-Alignment)
+                mov     rax, rsp
+                mov     [rsi + 512 + 8 * 18], rax
                 pushfq
                 pop     rax
                 and     ax, 0x022a
                 or      rax, 0x200
-                mov     [rsi + 512 + 8 * 19], rax   ; RFLAGS
+                mov     [rsi + 512 + 8 * 19], rax   // RFLAGS
                 mov     rax, cs
                 mov     [rsi + 512 + 8 * 20], rax
-                mov     [rsi + 512 + 8 * 21], [rsp] ; RIP
+                lea     rax, 1f
+                mov     [rsi + 512 + 8 * 21], rax   // RIP
+                mov     rax, cr3
+                mov     [rsi + 512 + 8 * 22], rax
 
                 fxrstor [rdi]
                 mov     rdx, [rdi + 512 + 8 *  1]
@@ -248,15 +221,18 @@ pub unsafe fn task_switch(
                 mov     fs, ax
                 mov     rax, [rdi + 512 + 8 * 16]
                 mov     gs, ax
-                mov     rax, [rdi + 512]
                 
-                push    [rdi + 512 + 8 * 17] ; SS
-                push    [rdi + 512 + 8 * 18] ; RSP
-                push    [rdi + 512 + 8 * 19] ; RFLAGS
-                push    [rdi + 512 + 8 * 20] ; CS
-                push    [rdi + 512 + 8 * 21] ; RIP
+                push    [rdi + 512 + 8 * 17] // SS
+                push    [rdi + 512 + 8 * 18] // RSP
+                push    [rdi + 512 + 8 * 19] // RFLAGS
+                push    [rdi + 512 + 8 * 20] // CS
+                push    [rdi + 512 + 8 * 21] // RIP
 
+                mov     rax, [rdi + 512 + 8 * 22]
+                mov     cr3, rax
+                mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]
                 iretq
+                1:
                 "::"{rsi}"(now_context_data_address),"{rdi}"(next_context_data_address)::"intel", "volatile");
 }

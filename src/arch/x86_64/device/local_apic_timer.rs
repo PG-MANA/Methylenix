@@ -42,10 +42,12 @@ impl LocalApicTimer {
     }
 
     pub fn local_apic_timer_handler() {
-        println!("hello!");
         if let Ok(im) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
             im.send_eoi();
         }
+        get_kernel_manager_cluster()
+            .task_manager
+            .switch_to_next_thread();
     }
 
     pub fn enable_deadline_mode(
