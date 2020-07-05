@@ -121,9 +121,7 @@ fn main_process() -> ! {
     }
     pr_info!("All init are done!");
     loop {
-        unsafe {
-            cpu::hlt();
-        }
+        get_kernel_manager_cluster().task_manager.sleep();
         pr_info!("Main!!");
         let ascii_code = get_kernel_manager_cluster()
             .serial_port_manager
@@ -137,7 +135,6 @@ fn main_process() -> ! {
 
 fn idle() -> ! {
     loop {
-        pr_info!("Idle Task");
         unsafe {
             cpu::halt();
         }

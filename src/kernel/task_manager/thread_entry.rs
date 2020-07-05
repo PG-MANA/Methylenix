@@ -123,21 +123,28 @@ impl ThreadEntry {
 
     pub fn insert_self_to_sleep_queue(&mut self, sleep_queue_head: &mut PtrLinkedList<Self>) {
         let _lock = self.lock.lock();
-        assert_ne!(self.status, TaskStatus::Sleeping);
+        assert_eq!(self.status, TaskStatus::Sleeping);
         let old_first_entry = unsafe { sleep_queue_head.get_first_entry_mut() };
         if old_first_entry.is_none() {
             self.sleep_list.terminate_prev_entry();
+            let ptr = self as *mut _;
+            self.sleep_list.set_ptr(ptr);
             sleep_queue_head.set_first_entry(&mut self.sleep_list as *mut _);
         } else {
             self.sleep_list.terminate_prev_entry();
+            let ptr = self as *mut _;
+            self.sleep_list.set_ptr(ptr);
             old_first_entry
                 .unwrap()
                 .sleep_list
                 .insert_before(&mut self.sleep_list);
             sleep_queue_head.set_first_entry(&mut self.sleep_list as *mut _);
         }
-        self._set_task_status(TaskStatus::Sleeping);
         self.run_list.remove_from_list();
+    }
+
+    pub fn is_root_of_run_list(&self) -> bool {
+        self.run_list.get_prev_as_ptr().is_none()
     }
 
     pub fn wakeup(&mut self, run_queue_head: &mut PtrLinkedList<Self>) {

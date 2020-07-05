@@ -100,6 +100,7 @@ impl SerialPortManager {
         if let Ok(interrupt_manager) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
             interrupt_manager.send_eoi();
         }
+        get_kernel_manager_cluster().task_manager.wakeup(1, 1);
     }
 
     fn is_completed_transmitter(&self) -> bool {

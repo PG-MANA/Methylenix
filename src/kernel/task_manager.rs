@@ -134,7 +134,19 @@ impl TaskManager {
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
-            unsafe { self.run_list.get_first_entry_mut().unwrap() }
+            let should_change_root = running_thread.is_root_of_run_list();
+            let next_entry = running_thread.get_next_from_run_list_mut();
+            running_thread.insert_self_to_sleep_queue(&mut self.sleep_list);
+            if should_change_root {
+                /*assert!(next_entry.is_some());*/
+                let next_entry = next_entry.unwrap();
+                next_entry.set_up_to_be_root_of_run_list(&mut self.run_list);
+                next_entry
+            } else if let Some(next_entry) = next_entry {
+                next_entry
+            } else {
+                unsafe { self.run_list.get_first_entry_mut().unwrap() }
+            }
         } else {
             running_thread.set_task_status(TaskStatus::CanRun);
             if let Some(t) = running_thread.get_next_from_run_list_mut() {
@@ -161,9 +173,9 @@ impl TaskManager {
     pub fn sleep(&mut self) {
         let _lock = self.lock.lock();
         let mut running_thread = unsafe { &mut *self.running_thread.unwrap() };
-        running_thread.insert_self_to_sleep_queue(&mut self.sleep_list);
+        running_thread.set_task_status(TaskStatus::Sleeping);
         drop(_lock);
-        self.switch_to_next_thread();
+        self.switch_to_next_thread(); /* running_thread will be linked in sleep_list in this function*/
         /* woke up and return */
     }
 
