@@ -24,6 +24,11 @@ pub struct InterruptManager {
     local_apic: LocalApicManager, /* temporary */
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum InterruptNumber {
+    LocalApicTimer = 0xef,
+}
+
 impl InterruptManager {
     pub const LIMIT_IDT: u16 = 0x100 * (size_of::<idt::GateDescriptor>() as u16) - 1;
     pub const IDT_MAX: u16 = 0xff;
@@ -83,7 +88,7 @@ impl InterruptManager {
     pub fn set_device_interrupt_function(
         &mut self,
         function: unsafe fn(),
-        irq: u8,
+        irq: Option<u8>,
         index: u16,
         privilege_level: u8,
     ) -> bool {
@@ -100,12 +105,18 @@ impl InterruptManager {
                 GateDescriptor::new(function, self.main_selector, 0, type_attr),
             );
         }
-        self.io_apic
-            .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
+        if let Some(irq) = irq {
+            self.io_apic
+                .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
+        }
         return true;
     }
 
     pub fn send_eoi(&self) {
         self.local_apic.send_eoi();
+    }
+
+    pub fn get_local_apic_manager(&self) -> &LocalApicManager {
+        &self.local_apic
     }
 }

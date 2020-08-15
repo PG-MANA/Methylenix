@@ -3,6 +3,7 @@
  */
 
 use super::table::bgrt::BgrtManager;
+use super::table::fadt::FadtManager;
 use super::INITIAL_MMAP_SIZE;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
@@ -12,6 +13,7 @@ pub struct XsdtManager {
     base_address: usize,
     enabled: bool,
     bgrt_manager: BgrtManager,
+    fadt_manager: FadtManager,
 }
 
 impl XsdtManager {
@@ -20,6 +22,7 @@ impl XsdtManager {
             base_address: 0,
             enabled: false,
             bgrt_manager: BgrtManager::new(),
+            fadt_manager: FadtManager::new(),
         }
     }
 
@@ -84,7 +87,13 @@ impl XsdtManager {
             match unsafe { *(v_address as *const [u8; 4]) } {
                 BgrtManager::BGRT_SIGNATURE => {
                     if !self.bgrt_manager.init(v_address) {
-                        pr_err!("Cannot int BGRT Manager.");
+                        pr_err!("Cannot init BGRT Manager.");
+                        return false;
+                    }
+                }
+                FadtManager::SIGNATURE => {
+                    if !self.fadt_manager.init(v_address) {
+                        pr_err!("Cannot init FADT Manager.");
                         return false;
                     }
                 }
@@ -104,6 +113,10 @@ impl XsdtManager {
 
     pub fn get_bgrt_manager(&self) -> &BgrtManager {
         &self.bgrt_manager
+    }
+
+    pub fn get_fadt_manager(&self) -> &FadtManager {
+        &self.fadt_manager
     }
 
     fn get_length(&self) -> Option<usize> {

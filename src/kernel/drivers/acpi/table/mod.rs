@@ -3,3 +3,4 @@
  */
 
 pub mod bgrt;
+pub mod fadt;

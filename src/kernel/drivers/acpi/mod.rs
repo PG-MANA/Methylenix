@@ -4,6 +4,7 @@
  * https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf
  */
 
+pub mod acpi_pm_timer;
 pub mod table;
 pub mod xsdt;
 

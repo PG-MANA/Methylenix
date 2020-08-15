@@ -2,8 +2,6 @@
 #![feature(alloc_error_handler)]
 #![feature(const_fn)]
 #![feature(const_generics)]
-#![feature(const_if_match)]
-#![feature(const_loop)]
 #![feature(const_mut_refs)]
 #![feature(const_panic)]
 #![feature(const_raw_ptr_deref)]
@@ -14,7 +12,6 @@
 #![feature(maybe_uninit_ref)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
-#![feature(track_caller)]
 
 #[macro_use]
 extern crate alloc;

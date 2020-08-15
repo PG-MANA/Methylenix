@@ -50,6 +50,14 @@ impl GraphicManager {
         }
     }
 
+    pub const fn get_framer_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
+        (self.frame_buffer_width, self.frame_buffer_height)
+    }
+
+    pub const fn is_text_mode(&self) -> bool {
+        self.is_textmode
+    }
+
     pub fn set_frame_buffer_memory_permission(&mut self) -> bool {
         let pixel_size = if self.is_textmode {
             2
@@ -86,27 +94,38 @@ impl GraphicManager {
         }
     }
 
-    pub fn init_color_mode(&mut self) {
-        //こっからテスト
+    pub fn fill(&mut self, start_x: usize, start_y: usize, end_x: usize, end_y: usize, color: u32) {
+        assert!(start_x < end_x);
+        assert!(start_y < end_y);
+        assert!(end_x <= self.frame_buffer_width);
+        assert!(end_y <= self.frame_buffer_height);
+
         if self.frame_buffer_color_depth == 32 {
-            self.is_textmode = false;
-            // 文字見えてないだろうから#FF7F27で塗りつぶす
-            for count in 0..(self.frame_buffer_width * self.frame_buffer_height) {
-                unsafe {
-                    *((self.frame_buffer_address + count * 4) as *mut u32) = 0xff7f27;
+            for y in start_y..end_y {
+                for x in start_x..end_x {
+                    unsafe {
+                        *((self.frame_buffer_address + (y * self.frame_buffer_width + x) * 4)
+                            as *mut u32) = color;
+                    }
                 }
             }
         } else if self.frame_buffer_color_depth == 24 {
-            self.is_textmode = false;
-            // 文字見えてないだろうから#FF7F27で塗りつぶす
-            for count in 0..(self.frame_buffer_width * self.frame_buffer_height) {
-                unsafe {
-                    let pixcel = (self.frame_buffer_address + count * 3) as *mut u32;
-                    *pixcel &= 0x000000ff;
-                    *pixcel |= 0xff7f27;
+            for y in start_y..end_y {
+                for x in start_x..end_x {
+                    unsafe {
+                        let pixel = (self.frame_buffer_address
+                            + (y * self.frame_buffer_width + x) * 3)
+                            as *mut u32;
+                        *pixel &= 0x000000ff;
+                        *pixel |= color;
+                    }
                 }
             }
         }
+    }
+
+    pub fn init_color_mode(&mut self) {
+        self.is_textmode = false;
     }
 
     pub fn init_vga_text_mode(&mut self) {
