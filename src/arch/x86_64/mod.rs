@@ -24,8 +24,11 @@ use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
-use kernel::memory_manager::{MemoryManager, MemoryOptionFlags, MemoryPermissionFlags};
+use kernel::memory_manager::{
+    MemoryManager, MemoryOptionFlags, MemoryPermissionFlags, SystemMemoryManager,
+};
 use kernel::sync::spin_lock::Mutex;
+use kernel::task_manager::TaskManager;
 
 use core::mem;
 
@@ -42,13 +45,16 @@ pub extern "C" fn multiboot_main(
     user_data_segment: u16,
 ) -> ! {
     enable_sse();
+    get_kernel_manager_cluster().serial_port_manager =
+        SerialPortManager::new(0x3F8 /* COM1 */); /* For debug */
 
     /* MultiBootInformation読み込み */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
     /* Graphic初期化（Panicが起きたときの表示のため) */
-    get_kernel_manager_cluster().graphic_manager =
-        Mutex::new(GraphicManager::new(&multiboot_information.framebuffer_info));
+    let mut graphic_manager = GraphicManager::new();
+    graphic_manager.init(&multiboot_information.framebuffer_info);
+    get_kernel_manager_cluster().graphic_manager = Mutex::new(graphic_manager);
 
     kprintln!("Methylenix");
     pr_info!(
@@ -72,9 +78,7 @@ pub extern "C" fn multiboot_main(
     init_interrupt(kernel_code_segment);
 
     /* シリアルポート初期化 */
-    let serial_port_manager = SerialPortManager::new(0x3F8 /* COM1 */);
-    serial_port_manager.init();
-    get_kernel_manager_cluster().serial_port_manager = serial_port_manager;
+    get_kernel_manager_cluster().serial_port_manager.init();
 
     /* ACPI */
     let acpi_manager = if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
@@ -236,8 +240,11 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         panic!("Cannot map virtual memory correctly.");
     }
     /* set up Memory Manager */
-    let mut memory_manager =
-        MemoryManager::new(Mutex::new(physical_memory_manager), virtual_memory_manager);
+    get_kernel_manager_cluster().system_memory_manager =
+        SystemMemoryManager::new(physical_memory_manager);
+    let mut memory_manager = get_kernel_manager_cluster()
+        .system_memory_manager
+        .create_new_memory_manager(virtual_memory_manager);
 
     /* set up Kernel Memory Alloc Manager */
     let mut kernel_memory_alloc_manager = KernelMemoryAllocManager::new();
@@ -313,6 +320,7 @@ fn init_task(system_cs: u16, user_cs: u16, user_ss: u16) {
         unsafe { cpu::get_cr3() },
     );
 
+    get_kernel_manager_cluster().task_manager = TaskManager::new();
     get_kernel_manager_cluster()
         .task_manager
         .init(context_manager);

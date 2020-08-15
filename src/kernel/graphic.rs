@@ -28,14 +28,8 @@ struct TextCursor {
 }
 
 impl GraphicManager {
-    pub fn new(frame_buffer_info: &FrameBufferInfo) -> GraphicManager {
-        let mut graphic_manager = GraphicManager::new_static();
-        graphic_manager.init_manager(frame_buffer_info);
-        graphic_manager
-    }
-
-    pub const fn new_static() -> GraphicManager {
-        GraphicManager {
+    pub const fn new() -> Self {
+        Self {
             frame_buffer_address: 0,
             frame_buffer_width: 0,
             frame_buffer_height: 0,
@@ -81,7 +75,7 @@ impl GraphicManager {
         }
     }
 
-    fn init_manager(&mut self, frame_buffer_info: &FrameBufferInfo) {
+    pub fn init(&mut self, frame_buffer_info: &FrameBufferInfo) {
         self.frame_buffer_address = frame_buffer_info.address as usize;
         self.frame_buffer_width = frame_buffer_info.width as usize;
         self.frame_buffer_height = frame_buffer_info.height as usize;
