@@ -180,7 +180,7 @@ impl Timer for LocalApicTimer {
         }
     }
 
-    fn get_ending_count_value(&self, start: usize, difference: usize) -> usize {
+    fn get_ending_count_value(&self, _start: usize, _difference: usize) -> usize {
         unimplemented!()
     }
 

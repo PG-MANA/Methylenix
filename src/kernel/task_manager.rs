@@ -172,7 +172,7 @@ impl TaskManager {
     /* sleep running thread and switch to next thread */
     pub fn sleep(&mut self) {
         let _lock = self.lock.lock();
-        let mut running_thread = unsafe { &mut *self.running_thread.unwrap() };
+        let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         running_thread.set_task_status(TaskStatus::Sleeping);
         drop(_lock);
         self.switch_to_next_thread(); /* running_thread will be linked in sleep_list in this function*/
