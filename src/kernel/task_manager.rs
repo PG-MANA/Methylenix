@@ -186,7 +186,9 @@ impl TaskManager {
             let e_p_id = e.get_process().get_pid();
             let e_t_id = e.get_t_id();
             if e_p_id == p_id && e_t_id == t_id {
-                e.wakeup(&mut self.run_list);
+                if e.get_task_status() == TaskStatus::Sleeping {
+                    e.wakeup(&mut self.run_list);
+                }
                 return;
             }
         }
