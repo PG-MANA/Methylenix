@@ -1,6 +1,7 @@
 /*
  * Memory Manager
  * This manager is the frontend of physical memory manager and page manager.
+ * In this memory system, you should not use alloc::*, use only core::*
  */
 
 pub mod global_allocator;
@@ -17,8 +18,13 @@ use self::virtual_memory_manager::VirtualMemoryManager;
 use kernel::sync::spin_lock::Mutex;
 
 pub struct MemoryManager {
-    physical_memory_manager: Mutex<PhysicalMemoryManager>,
+    physical_memory_manager: &'static Mutex<PhysicalMemoryManager>,
     virtual_memory_manager: VirtualMemoryManager,
+}
+
+/* To share PhysicalMemoryManager */
+pub struct SystemMemoryManager {
+    original_physical_memory_manager: Mutex<PhysicalMemoryManager>,
 }
 
 #[derive(Clone, Eq, PartialEq, Copy)]
@@ -47,22 +53,33 @@ pub enum MemoryError {
     MutexError,
 }
 
+impl SystemMemoryManager {
+    pub const fn new(physical_memory_manager: PhysicalMemoryManager) -> Self {
+        Self {
+            original_physical_memory_manager: Mutex::new(physical_memory_manager),
+        }
+    }
+
+    pub fn create_new_memory_manager(
+        &'static self,
+        virtual_memory_manager: VirtualMemoryManager,
+    ) -> MemoryManager {
+        MemoryManager::new(
+            &self.original_physical_memory_manager,
+            virtual_memory_manager,
+        )
+    }
+}
+
 impl MemoryManager {
     pub fn new(
-        physical_memory_manager: Mutex<PhysicalMemoryManager>,
+        physical_memory_manager: &'static Mutex<PhysicalMemoryManager>,
         virtual_memory_manager: VirtualMemoryManager,
     ) -> Self {
         /*カーネル領域の予約*/
         MemoryManager {
             physical_memory_manager,
             virtual_memory_manager,
-        }
-    }
-
-    pub const fn new_static() -> MemoryManager {
-        MemoryManager {
-            physical_memory_manager: Mutex::new(PhysicalMemoryManager::new()),
-            virtual_memory_manager: VirtualMemoryManager::new(),
         }
     }
 
