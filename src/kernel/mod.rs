@@ -4,7 +4,7 @@
  */
 
 #[macro_use]
-pub mod graphic;
+pub mod graphic_manager;
 pub mod drivers;
 pub mod fifo;
 pub mod manager_cluster;

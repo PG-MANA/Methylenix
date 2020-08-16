@@ -19,7 +19,7 @@ use self::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use kernel::drivers::acpi::AcpiManager;
 use kernel::drivers::multiboot::MultiBootInformation;
-use kernel::graphic::GraphicManager;
+use kernel::graphic_manager::GraphicManager;
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;

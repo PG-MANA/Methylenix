@@ -9,7 +9,7 @@ use arch::target_arch::device::serial_port::SerialPortManager;
 use arch::target_arch::interrupt::InterruptManager;
 
 use kernel::drivers::efi::EfiManager;
-use kernel::graphic::GraphicManager;
+use kernel::graphic_manager::GraphicManager;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::{MemoryManager, SystemMemoryManager};
 use kernel::task_manager::TaskManager;
