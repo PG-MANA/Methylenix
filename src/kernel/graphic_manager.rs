@@ -3,9 +3,11 @@
  * いずれはstdio.rsみたいなのを作ってそれのサブモジュールにしたい
  */
 
+pub mod font;
 pub mod frame_buffer_manager;
 pub mod text_buffer_driver;
 
+use self::font::pff2::Pff2FontManager;
 use self::frame_buffer_manager::FrameBufferManager;
 use self::text_buffer_driver::TextBufferDriver;
 
@@ -20,6 +22,7 @@ pub struct GraphicManager {
     text: VgaTextDriver,
     graphic: FrameBufferManager,
     is_text_mode: bool,
+    font: Pff2FontManager,
 }
 
 impl GraphicManager {
@@ -28,6 +31,7 @@ impl GraphicManager {
             is_text_mode: false,
             text: VgaTextDriver::new(),
             graphic: FrameBufferManager::new(),
+            font: Pff2FontManager::new(),
         }
     }
 
@@ -50,6 +54,27 @@ impl GraphicManager {
         {
             self.text.init_by_multiboot_information(frame_buffer_info);
             self.is_text_mode = true;
+        }
+    }
+
+    pub fn load_pff2_font(&mut self, virtual_font_address: usize, size: usize) -> bool {
+        self.font.load(virtual_font_address, size)
+    }
+
+    pub fn font_test(&mut self) {
+        let mut offset_x = 0;
+        for c in ['A', 'B', 'C', 'a', 'b', 'c', '1', '2', '3'].iter() {
+            let a = self.font.get_char_data(*c).unwrap();
+            self.graphic.write_bitmap(
+                a.bitmap_address,
+                1,
+                a.width as usize,
+                a.height as usize,
+                offset_x,
+                0,
+                true,
+            );
+            offset_x += a.width as usize;
         }
     }
 
@@ -85,7 +110,7 @@ impl GraphicManager {
     ) -> bool {
         if !self.is_text_mode {
             self.graphic
-                .write_bitmap(buffer, depth, size_x, size_y, offset_x, offset_y)
+                .write_bitmap(buffer, depth, size_x, size_y, offset_x, offset_y, false)
         } else {
             false
         }

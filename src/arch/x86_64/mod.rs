@@ -18,7 +18,7 @@ use self::interrupt::{InterruptManager, InterruptNumber};
 use self::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use kernel::drivers::acpi::AcpiManager;
-use kernel::drivers::multiboot::MultiBootInformation;
+use kernel::drivers::multiboot::{ModuleInfo, MultiBootInformation};
 use kernel::graphic_manager::GraphicManager;
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
@@ -97,6 +97,7 @@ pub extern "C" fn multiboot_main(
 
     /* Set up graphic */
     init_graphic(acpi_manager.as_ref());
+    test_font(&multiboot_information.modules[0]);
 
     /* Set up task system */
     init_task(kernel_code_segment, user_code_segment, user_data_segment);
@@ -195,6 +196,16 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         multiboot_information.size,
         0,
     );
+    /* reserve Multiboot modules area */
+    for e in multiboot_information.modules.iter() {
+        if e.start_address != 0 && e.end_address != 0 {
+            physical_memory_manager.reserve_memory(
+                e.start_address,
+                e.end_address - e.start_address,
+                0,
+            );
+        }
+    }
 
     /* set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
@@ -471,6 +482,39 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
         pr_err!("Freeing bitmap data failed Err:{:?}", e);
     }
     return true;
+}
+
+fn test_font(font_module: &ModuleInfo) {
+    match get_kernel_manager_cluster()
+        .memory_manager
+        .lock()
+        .unwrap()
+        .mmap_dev(
+            font_module.start_address,
+            font_module.end_address - font_module.start_address,
+            MemoryPermissionFlags::rodata(),
+        ) {
+        Ok(address) => {
+            if !get_kernel_manager_cluster()
+                .graphic_manager
+                .lock()
+                .unwrap()
+                .load_pff2_font(address, font_module.end_address - font_module.start_address)
+            {
+                pr_err!("Font read");
+                return;
+            }
+            pr_info!("Font read end!!");
+            get_kernel_manager_cluster()
+                .graphic_manager
+                .lock()
+                .unwrap()
+                .font_test();
+        }
+        Err(e) => {
+            pr_err!("{:?}", e);
+        }
+    }
 }
 
 fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
