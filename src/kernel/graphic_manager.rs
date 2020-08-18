@@ -71,8 +71,11 @@ impl GraphicManager {
 
     pub fn font_test(&mut self) {
         let mut offset_x = 0usize;
-        for c in ['A', 'B', 'C', 'a', 'b', 'c', '1', '2', '3'].iter() {
-            let a = self.font.get_char_data(*c).unwrap();
+        for c in "Methylenix, Rustで書かれたOSです。Grub2のunicode.pf2を解析しました。"
+            .chars()
+            .into_iter()
+        {
+            let a = self.font.get_char_data(c).unwrap();
             let font_bottom = self.font.get_ascent() as isize - a.y_offset as isize;
             let font_top = font_bottom as usize - a.height as usize;
             let font_left = (offset_x as isize + a.x_offset as isize) as usize;

@@ -29,6 +29,7 @@ pub struct FontData {
 
 pub struct FontCache {
     ascii: [FontData; 0x7f - 0x20],
+    normal: [(char, FontData); Self::DEFAULT_CACHE_LEN],
 }
 
 #[repr(C, packed)]
@@ -39,7 +40,7 @@ struct Pff2CharIndex {
 }
 
 #[repr(C, packed)]
-struct Pff2FontData {
+pub struct Pff2FontData {
     width: [u8; 2],
     height: [u8; 2],
     x_offset: [u8; 2],
@@ -174,14 +175,7 @@ impl Pff2FontManager {
                 &*((u32::from_be_bytes(char_index.offset) as usize + self.base_address)
                     as *const Pff2FontData)
             };
-            let font_data = FontData {
-                width: u16::from_be_bytes(pff2_font_data.width),
-                height: u16::from_be_bytes(pff2_font_data.height),
-                x_offset: i16::from_be_bytes(pff2_font_data.x_offset),
-                y_offset: i16::from_be_bytes(pff2_font_data.y_offset),
-                device_width: i16::from_be_bytes(pff2_font_data.device_width),
-                bitmap_address: (&(pff2_font_data.bitmap) as *const u8 as usize),
-            };
+            let font_data = FontData::from_pff2_font_data(pff2_font_data);
 
             self.font_cache.add_ascii_font_cache(a, font_data);
             pointer += 1;
@@ -199,8 +193,45 @@ impl Pff2FontManager {
         if c.is_ascii() {
             Some(self.font_cache.get_cached_ascii_font_data(c))
         } else {
-            None /*TODO*/
+            if let Some(f) = self.font_cache.get_cached_normal_font_data(c) {
+                Some(f)
+            } else if let Some(f) = self.find_uni_code_data(c) {
+                self.font_cache.add_normal_font_cache(c, f.clone());
+                Some(f)
+            } else {
+                None
+            }
         }
+    }
+
+    fn find_uni_code_data(&self, c: char) -> Option<FontData> {
+        let char_utf32: [u8; 4] = (c as u32).to_be_bytes();
+        let char_index = {
+            let mut entry;
+            let mut pointer = 0;
+            use core::mem::size_of;
+            let index_entry_size = size_of::<Pff2CharIndex>();
+
+            loop {
+                entry = unsafe {
+                    &*((self.char_index_address + pointer * index_entry_size)
+                        as *const Pff2CharIndex)
+                };
+                if entry.code == char_utf32 {
+                    break;
+                }
+                pointer += 1;
+                if pointer * index_entry_size >= self.char_index_size {
+                    return None;
+                }
+            }
+            entry
+        };
+        let pff2_font_data = unsafe {
+            &*((u32::from_be_bytes(char_index.offset) as usize + self.base_address)
+                as *const Pff2FontData)
+        };
+        Some(FontData::from_pff2_font_data(pff2_font_data))
     }
 }
 
@@ -209,6 +240,7 @@ impl FontCache {
     pub const fn new() -> Self {
         Self {
             ascii: [FontData::new_const(); 0x7f - 0x20],
+            normal: [('\0', FontData::new_const()); Self::DEFAULT_CACHE_LEN],
         }
     }
 
@@ -221,6 +253,23 @@ impl FontCache {
         assert!(c.is_ascii());
         self.ascii[(c as usize) - 0x20].clone()
     }
+
+    pub fn add_normal_font_cache(&mut self, c: char, font_data: FontData) -> bool {
+        if let Some(cache) = self.normal.iter_mut().find(|t| t.0 == '\0') {
+            *cache = (c, font_data);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_cached_normal_font_data(&self, c: char) -> Option<FontData> {
+        if let Some(cache) = self.normal.iter().find(|&t| t.0 == c) {
+            Some(cache.1.clone())
+        } else {
+            None
+        }
+    }
 }
 
 impl FontData {
@@ -232,6 +281,17 @@ impl FontData {
             x_offset: 0,
             y_offset: 0,
             bitmap_address: 0,
+        }
+    }
+
+    pub fn from_pff2_font_data(pff2_font_data: &Pff2FontData) -> Self {
+        Self {
+            width: u16::from_be_bytes(pff2_font_data.width),
+            height: u16::from_be_bytes(pff2_font_data.height),
+            x_offset: i16::from_be_bytes(pff2_font_data.x_offset),
+            y_offset: i16::from_be_bytes(pff2_font_data.y_offset),
+            device_width: i16::from_be_bytes(pff2_font_data.device_width),
+            bitmap_address: (&(pff2_font_data.bitmap) as *const u8 as usize),
         }
     }
 }
