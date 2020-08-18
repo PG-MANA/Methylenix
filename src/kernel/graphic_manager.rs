@@ -75,7 +75,7 @@ impl GraphicManager {
             .chars()
             .into_iter()
         {
-            let a = self.font.get_char_data(c).unwrap();
+            let a = self.font.get_char_font_data(c).unwrap();
             let font_bottom = self.font.get_ascent() as isize - a.y_offset as isize;
             let font_top = font_bottom as usize - a.height as usize;
             let font_left = (offset_x as isize + a.x_offset as isize) as usize;
