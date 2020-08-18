@@ -1,6 +1,6 @@
 /*
  * Font Management
- *
+ * 現在はBitmapフォントでPff2だけだが、他の方式にも対応できるようにしている(trait作る必要あり)
  */
 
 pub mod font_cache;

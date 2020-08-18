@@ -1,7 +1,7 @@
 /*
- * Frame Buffer Driver
+ * Text Buffer Driver
  * To write text
- * Don't have a text buffer, that should be done by stdio manager.
+ * Don't have a string buffer, that should be done by stdio manager.
  */
 
 pub trait TextBufferDriver {

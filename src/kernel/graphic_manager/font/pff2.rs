@@ -28,7 +28,7 @@ struct Pff2CharIndex {
 }
 
 #[repr(C, packed)]
-pub struct Pff2FontData {
+struct Pff2FontData {
     width: [u8; 2],
     height: [u8; 2],
     x_offset: [u8; 2],
