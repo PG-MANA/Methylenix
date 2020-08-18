@@ -54,6 +54,7 @@ pub extern "C" fn multiboot_main(
     /* Graphic初期化（Panicが起きたときの表示のため) */
     let mut graphic_manager = GraphicManager::new();
     graphic_manager.init(&multiboot_information.framebuffer_info);
+    graphic_manager.clear_screen();
     get_kernel_manager_cluster().graphic_manager = Mutex::new(graphic_manager);
 
     kprintln!("Methylenix");
@@ -363,16 +364,13 @@ fn init_acpi(rsdp_ptr: usize) -> Option<AcpiManager> {
 }
 
 fn init_graphic(acpi_manager: Option<&AcpiManager>) {
-    /*0xFF7F27で塗りつぶす*/
-    let mut graphic_manager = get_kernel_manager_cluster().graphic_manager.lock().unwrap();
-    if graphic_manager.is_text_mode() {
-        return;
-    }
-    let (size_x, size_y) = graphic_manager.get_framer_buffer_size();
-    graphic_manager.fill(0, 0, size_x, size_y, 0xff7f27);
-    drop(graphic_manager);
-
-    if acpi_manager.is_none() {
+    if get_kernel_manager_cluster()
+        .graphic_manager
+        .lock()
+        .unwrap()
+        .is_text_mode()
+        || acpi_manager.is_none()
+    {
         return;
     }
 

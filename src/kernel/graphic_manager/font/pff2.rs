@@ -188,6 +188,10 @@ impl Pff2FontManager {
         }
     }
 
+    pub const fn get_ascent(&self) -> u16 {
+        self.ascent
+    }
+
     pub fn get_char_data(&mut self, c: char) -> Option<FontData> {
         if c.is_control() {
             return None;

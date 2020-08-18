@@ -99,6 +99,65 @@ impl FrameBufferManager {
         }
     }
 
+    pub fn write_monochrome_bitmap(
+        &mut self,
+        buffer: usize,
+        size_x: usize,
+        size_y: usize,
+        offset_x: usize,
+        offset_y: usize,
+        front_color: u32,
+        back_color: u32,
+        is_not_aligned_data: bool,
+    ) {
+        assert_ne!(self.frame_buffer_height, 0);
+        assert_ne!(self.frame_buffer_width, 0);
+
+        let screen_depth_byte = self.frame_buffer_color_depth as usize / 8;
+        let bitmap_aligned_bitmap_width_pointer = if is_not_aligned_data {
+            size_x
+        } else {
+            (size_x & !3) + 4
+        };
+        let color = [back_color, front_color];
+
+        let get_bit = |x: usize, y: usize| -> usize {
+            let offset = y * bitmap_aligned_bitmap_width_pointer + x;
+            unsafe {
+                (((*((buffer + offset / 8) as *const u8)) >> (7 - (offset & 0b111))) & 1) as usize
+            }
+        };
+
+        if self.frame_buffer_color_depth == 32 {
+            for height_pointer in (0..size_y).rev() {
+                for width_pointer in 0..size_x {
+                    unsafe {
+                        *((self.frame_buffer_address
+                            + ((height_pointer + offset_y) * self.frame_buffer_width
+                                + offset_x
+                                + width_pointer)
+                                * screen_depth_byte) as *mut u32) =
+                            color[get_bit(width_pointer, height_pointer)];
+                    };
+                }
+            }
+        } else {
+            for height_pointer in (0..size_y).rev() {
+                for width_pointer in 0..size_x {
+                    unsafe {
+                        let dot = (self.frame_buffer_address
+                            + ((height_pointer + offset_y) * self.frame_buffer_width
+                                + offset_x
+                                + width_pointer)
+                                * screen_depth_byte) as *mut u32;
+                        *dot &= 0x000000ff;
+                        *dot |= (color[get_bit(width_pointer, height_pointer)]) & 0xffffff;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn write_bitmap(
         &mut self,
         buffer: usize,
@@ -112,9 +171,7 @@ impl FrameBufferManager {
         assert_ne!(self.frame_buffer_height, 0);
         assert_ne!(self.frame_buffer_width, 0);
 
-        if (depth != 32 && depth != 24 && depth != 1)
-            || (self.frame_buffer_color_depth != 32 && self.frame_buffer_color_depth != 24)
-        {
+        if depth != 32 && depth != 24 {
             return false;
         }
         let screen_depth_byte = self.frame_buffer_color_depth as usize / 8;
@@ -124,102 +181,42 @@ impl FrameBufferManager {
         } else {
             ((size_x * bitmap_depth_byte - 1) & !3) + 4
         };
-        if depth == 1 {
-            if self.frame_buffer_color_depth == 32 {
-                for height_pointer in (0..size_y).rev() {
-                    for width_pointer in 0..size_x {
-                        unsafe {
-                            *((self.frame_buffer_address
-                                + ((height_pointer + offset_y) * self.frame_buffer_width
-                                    + offset_x
-                                    + width_pointer)) as *mut u32) = if ((*((buffer
-                                + (height_pointer * bitmap_aligned_bitmap_width_pointer
-                                    + width_pointer)
-                                    / 8)
-                                as *const u8)
-                                >> (7
-                                    - ((height_pointer * bitmap_aligned_bitmap_width_pointer
-                                        + width_pointer)
-                                        & 0b111)))
-                                & 1)
-                                != 0
-                            {
-                                0xffffff
-                            } else {
-                                0
-                            };
-                        }
-                    }
-                }
-            } else {
-                for height_pointer in (0..size_y).rev() {
-                    for width_pointer in 0..size_x {
-                        unsafe {
-                            let dot = (self.frame_buffer_address
-                                + ((height_pointer + offset_y) * self.frame_buffer_width
-                                    + offset_x
-                                    + width_pointer)
-                                    * screen_depth_byte)
-                                as *mut u32;
-                            *dot &= 0x000000ff;
-                            *dot |= (if ((*((buffer
-                                + (height_pointer * bitmap_aligned_bitmap_width_pointer
-                                    + width_pointer)
-                                    / 8) as *const u8)
-                                >> (7
-                                    - ((height_pointer * bitmap_aligned_bitmap_width_pointer
-                                        + width_pointer)
-                                        & 0b111)))
-                                & 1)
-                                != 0
-                            {
-                                0xffffff
-                            } else {
-                                0
-                            }) & 0xffffff;
-                        }
+
+        if self.frame_buffer_color_depth == 32 {
+            for height_pointer in (0..size_y).rev() {
+                for width_pointer in 0..size_x {
+                    unsafe {
+                        *((self.frame_buffer_address
+                            + ((height_pointer + offset_y) * self.frame_buffer_width
+                                + offset_x
+                                + width_pointer)
+                                * screen_depth_byte) as *mut u32) = *((buffer
+                            + (size_y - height_pointer - 1) * bitmap_aligned_bitmap_width_pointer
+                            + width_pointer * bitmap_depth_byte)
+                            as *const u32);
                     }
                 }
             }
         } else {
-            if self.frame_buffer_color_depth == 32 {
-                for height_pointer in (0..size_y).rev() {
-                    for width_pointer in 0..size_x {
-                        unsafe {
-                            *((self.frame_buffer_address
-                                + ((height_pointer + offset_y) * self.frame_buffer_width
-                                    + offset_x
-                                    + width_pointer)
-                                    * screen_depth_byte)
-                                as *mut u32) = *((buffer
-                                + (size_y - height_pointer - 1)
-                                    * bitmap_aligned_bitmap_width_pointer
-                                + width_pointer * bitmap_depth_byte)
-                                as *const u32);
-                        }
-                    }
-                }
-            } else {
-                for height_pointer in (0..size_y).rev() {
-                    for width_pointer in 0..size_x {
-                        unsafe {
-                            let dot = (self.frame_buffer_address
-                                + ((height_pointer + offset_y) * self.frame_buffer_width
-                                    + offset_x
-                                    + width_pointer)
-                                    * screen_depth_byte)
-                                as *mut u32;
-                            *dot &= 0x000000ff;
-                            *dot |= *((buffer
-                                + (size_y - height_pointer) * bitmap_aligned_bitmap_width_pointer
-                                + width_pointer * bitmap_depth_byte)
-                                as *const u32)
-                                & 0xffffff;
-                        }
+            for height_pointer in (0..size_y).rev() {
+                for width_pointer in 0..size_x {
+                    unsafe {
+                        let dot = (self.frame_buffer_address
+                            + ((height_pointer + offset_y) * self.frame_buffer_width
+                                + offset_x
+                                + width_pointer)
+                                * screen_depth_byte) as *mut u32;
+                        *dot &= 0x000000ff;
+                        *dot |= *((buffer
+                            + (size_y - height_pointer) * bitmap_aligned_bitmap_width_pointer
+                            + width_pointer * bitmap_depth_byte)
+                            as *const u32)
+                            & 0xffffff;
                     }
                 }
             }
         }
+
         return true;
     }
 }

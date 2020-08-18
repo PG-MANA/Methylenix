@@ -57,24 +57,36 @@ impl GraphicManager {
         }
     }
 
+    pub fn clear_screen(&mut self) {
+        if self.is_text_mode {
+            self.text.clear_screen();
+        } else {
+            self.graphic.clear_screen();
+        }
+    }
+
     pub fn load_pff2_font(&mut self, virtual_font_address: usize, size: usize) -> bool {
         self.font.load(virtual_font_address, size)
     }
 
     pub fn font_test(&mut self) {
-        let mut offset_x = 0;
+        let mut offset_x = 0usize;
         for c in ['A', 'B', 'C', 'a', 'b', 'c', '1', '2', '3'].iter() {
             let a = self.font.get_char_data(*c).unwrap();
-            self.graphic.write_bitmap(
+            let font_bottom = self.font.get_ascent() as isize - a.y_offset as isize;
+            let font_top = font_bottom as usize - a.height as usize;
+            let font_left = (offset_x as isize + a.x_offset as isize) as usize;
+            self.graphic.write_monochrome_bitmap(
                 a.bitmap_address,
-                1,
                 a.width as usize,
                 a.height as usize,
-                offset_x,
+                font_left,
+                font_top,
+                0x55ffff,
                 0,
                 true,
             );
-            offset_x += a.width as usize;
+            offset_x = font_left + a.width as usize;
         }
     }
 
