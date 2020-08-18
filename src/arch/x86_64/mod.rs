@@ -18,7 +18,7 @@ use self::interrupt::{InterruptManager, InterruptNumber};
 use self::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use kernel::drivers::acpi::AcpiManager;
-use kernel::drivers::multiboot::{ModuleInfo, MultiBootInformation};
+use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic_manager::GraphicManager;
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
@@ -31,6 +31,7 @@ use kernel::sync::spin_lock::Mutex;
 use kernel::task_manager::TaskManager;
 
 use core::mem;
+use kernel::graphic_manager::font::FontType;
 
 /* Memory Areas for initial processes*/
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
@@ -97,8 +98,7 @@ pub extern "C" fn multiboot_main(
     unsafe { LOCAL_APIC_TIMER = init_timer(acpi_manager.as_ref()) };
 
     /* Set up graphic */
-    init_graphic(acpi_manager.as_ref());
-    test_font(&multiboot_information.modules[0]);
+    init_graphic(acpi_manager.as_ref(), &multiboot_information);
 
     /* Set up task system */
     init_task(kernel_code_segment, user_code_segment, user_data_segment);
@@ -363,14 +363,56 @@ fn init_acpi(rsdp_ptr: usize) -> Option<AcpiManager> {
     Some(acpi_manager)
 }
 
-fn init_graphic(acpi_manager: Option<&AcpiManager>) {
+fn init_graphic(acpi_manager: Option<&AcpiManager>, multiboot_information: &MultiBootInformation) {
     if get_kernel_manager_cluster()
         .graphic_manager
         .lock()
         .unwrap()
         .is_text_mode()
-        || acpi_manager.is_none()
     {
+        return;
+    }
+
+    /* load font */
+    for module in multiboot_information.modules.iter() {
+        if module.name == "font.pf2" {
+            let vm_address = get_kernel_manager_cluster()
+                .memory_manager
+                .lock()
+                .unwrap()
+                .mmap(
+                    module.start_address,
+                    module.end_address - module.start_address,
+                    MemoryPermissionFlags::rodata(),
+                    MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+                    false,
+                );
+            if let Ok(vm_address) = vm_address {
+                let result = get_kernel_manager_cluster()
+                    .graphic_manager
+                    .lock()
+                    .unwrap()
+                    .load_font(
+                        vm_address,
+                        module.end_address - module.start_address,
+                        FontType::Pff2,
+                    );
+                if !result {
+                    pr_err!("Cannot load font data!");
+                }
+                /* Test */
+                get_kernel_manager_cluster()
+                    .graphic_manager
+                    .lock()
+                    .unwrap()
+                    .font_test();
+            } else {
+                pr_err!("mapping font data was failed: {:?}", vm_address.err());
+            }
+        }
+    }
+
+    if acpi_manager.is_none() {
         return;
     }
 
@@ -480,39 +522,6 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
         pr_err!("Freeing bitmap data failed Err:{:?}", e);
     }
     return true;
-}
-
-fn test_font(font_module: &ModuleInfo) {
-    match get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .mmap_dev(
-            font_module.start_address,
-            font_module.end_address - font_module.start_address,
-            MemoryPermissionFlags::rodata(),
-        ) {
-        Ok(address) => {
-            if !get_kernel_manager_cluster()
-                .graphic_manager
-                .lock()
-                .unwrap()
-                .load_pff2_font(address, font_module.end_address - font_module.start_address)
-            {
-                pr_err!("Font read");
-                return;
-            }
-            pr_info!("Font read end!!");
-            get_kernel_manager_cluster()
-                .graphic_manager
-                .lock()
-                .unwrap()
-                .font_test();
-        }
-        Err(e) => {
-            pr_err!("{:?}", e);
-        }
-    }
 }
 
 fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {

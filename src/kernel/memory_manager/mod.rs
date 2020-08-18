@@ -184,6 +184,38 @@ impl MemoryManager {
         }
     }
 
+    pub fn mmap(
+        &mut self,
+        physical_address: usize,
+        size: usize,
+        permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
+        should_reserve_physical_memory: bool,
+    ) -> Result<usize, MemoryError> {
+        /* for some data */
+        /* should remake... */
+        let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
+        let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
+            p
+        } else {
+            /* add: maybe sleep option */
+            return Err(MemoryError::MutexError);
+        };
+
+        if should_reserve_physical_memory {
+            pm_manager.reserve_memory(aligned_physical_address, size, 0);
+        }
+        let virtual_address = self.virtual_memory_manager.map_address(
+            aligned_physical_address,
+            None,
+            aligned_size,
+            permission,
+            option,
+            &mut pm_manager,
+        )?;
+        Ok(virtual_address + physical_address - aligned_physical_address)
+    }
+
     pub fn mmap_dev(
         &mut self,
         physical_address: usize,

@@ -7,7 +7,8 @@ pub mod font;
 pub mod frame_buffer_manager;
 pub mod text_buffer_driver;
 
-use self::font::pff2::Pff2FontManager;
+use self::font::FontManager;
+use self::font::FontType;
 use self::frame_buffer_manager::FrameBufferManager;
 use self::text_buffer_driver::TextBufferDriver;
 
@@ -22,7 +23,7 @@ pub struct GraphicManager {
     text: VgaTextDriver,
     graphic: FrameBufferManager,
     is_text_mode: bool,
-    font: Pff2FontManager,
+    font: FontManager,
 }
 
 impl GraphicManager {
@@ -31,7 +32,7 @@ impl GraphicManager {
             is_text_mode: false,
             text: VgaTextDriver::new(),
             graphic: FrameBufferManager::new(),
-            font: Pff2FontManager::new(),
+            font: FontManager::new(),
         }
     }
 
@@ -65,8 +66,13 @@ impl GraphicManager {
         }
     }
 
-    pub fn load_pff2_font(&mut self, virtual_font_address: usize, size: usize) -> bool {
-        self.font.load(virtual_font_address, size)
+    pub fn load_font(
+        &mut self,
+        virtual_font_address: usize,
+        size: usize,
+        font_type: FontType,
+    ) -> bool {
+        self.font.load(virtual_font_address, size, font_type)
     }
 
     pub fn font_test(&mut self) {
@@ -75,7 +81,7 @@ impl GraphicManager {
             .chars()
             .into_iter()
         {
-            let a = self.font.get_char_font_data(c).unwrap();
+            let a = self.font.get_font_data(c).unwrap();
             let font_bottom = self.font.get_ascent() as isize - a.y_offset as isize;
             let font_top = font_bottom as usize - a.height as usize;
             let font_left = (offset_x as isize + a.x_offset as isize) as usize;
