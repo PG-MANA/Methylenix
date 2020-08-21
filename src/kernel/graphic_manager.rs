@@ -115,13 +115,13 @@ impl GraphicManager {
         }
         let mut cursor = self.cursor.lock().unwrap();
         let mut font_manager = self.font.lock().unwrap();
-        let mut graphic_manager = self.graphic.lock().unwrap();
-        let frame_buffer_size = graphic_manager.get_framer_buffer_size();
+        let mut frame_buffer_manager = self.graphic.lock().unwrap();
+        let frame_buffer_size = frame_buffer_manager.get_framer_buffer_size();
 
         for c in s.chars().into_iter() {
             if c == '\n' {
                 cursor.x = 0;
-                cursor.y += font_manager.max_font_height();
+                cursor.y += font_manager.get_max_font_height();
             } else if c == '\r' {
                 cursor.x = 0;
             } else if c.is_control() {
@@ -137,10 +137,28 @@ impl GraphicManager {
                 let font_left = font_data.x_offset as usize;
                 if frame_buffer_size.0 <= font_left + font_data.width as usize {
                     cursor.x = 0;
-                    cursor.y += font_manager.max_font_height();
+                    cursor.y += font_manager.get_max_font_height();
+                }
+                if frame_buffer_size.1 <= cursor.y + font_data.height as usize {
+                    frame_buffer_manager.scroll(
+                        0,
+                        font_manager.get_max_font_height(),
+                        0,
+                        0,
+                        frame_buffer_size.0,
+                        frame_buffer_size.1 - font_manager.get_max_font_height(),
+                    ); /* scroll */
+                    frame_buffer_manager.fill(
+                        0,
+                        frame_buffer_size.1 - font_manager.get_max_font_height(),
+                        frame_buffer_size.0,
+                        frame_buffer_size.1,
+                        0,
+                    ); /* erase the last line */
+                    cursor.y -= font_manager.get_max_font_height();
                 }
 
-                graphic_manager.write_monochrome_bitmap(
+                frame_buffer_manager.write_monochrome_bitmap(
                     font_data.bitmap_address,
                     font_data.width as usize,
                     font_data.height as usize,

@@ -99,6 +99,50 @@ impl FrameBufferManager {
         }
     }
 
+    pub fn scroll(
+        &mut self,
+        from_x: usize,
+        from_y: usize,
+        to_x: usize,
+        to_y: usize,
+        size_x: usize,
+        size_y: usize,
+    ) {
+        assert!(from_x + size_x <= self.frame_buffer_width);
+        assert!(from_y + size_y <= self.frame_buffer_height);
+        assert!(to_x <= from_x);
+        assert!(to_y <= from_y);
+        if self.frame_buffer_color_depth == 32 {
+            for y in 0..size_y {
+                for x in 0..size_x {
+                    unsafe {
+                        *((self.frame_buffer_address
+                            + ((to_y + y) * self.frame_buffer_width + to_x + x) * 4)
+                            as *mut u32) = *((self.frame_buffer_address
+                            + ((from_y + y) * self.frame_buffer_width + from_x + x) * 4)
+                            as *mut u32)
+                    };
+                }
+            }
+        } else if self.frame_buffer_color_depth == 24 {
+            for y in 0..size_y {
+                for x in 0..size_x {
+                    unsafe {
+                        let color = *((self.frame_buffer_address
+                            + ((from_y + y) * self.frame_buffer_width + from_x + x) * 3)
+                            as *mut u32)
+                            & 0xffffff;
+                        let pixel = (self.frame_buffer_address
+                            + ((to_y + y) * self.frame_buffer_width + to_x + x) * 3)
+                            as *mut u32;
+                        *pixel &= 0x000000ff;
+                        *pixel |= color;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn write_monochrome_bitmap(
         &mut self,
         buffer: usize,

@@ -64,7 +64,7 @@ impl FontManager {
         self.manager.get_decent() as usize
     }
 
-    pub fn max_font_height(&self) -> usize {
+    pub fn get_max_font_height(&self) -> usize {
         self.manager.get_max_font_height() as usize
     }
 }
