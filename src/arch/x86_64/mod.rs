@@ -19,6 +19,7 @@ use self::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use kernel::drivers::acpi::AcpiManager;
 use kernel::drivers::multiboot::MultiBootInformation;
+use kernel::graphic_manager::font::FontType;
 use kernel::graphic_manager::GraphicManager;
 use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
@@ -29,9 +30,9 @@ use kernel::memory_manager::{
 };
 use kernel::sync::spin_lock::Mutex;
 use kernel::task_manager::TaskManager;
+use kernel::tty::TtyManager;
 
 use core::mem;
-use kernel::graphic_manager::font::FontType;
 
 /* Memory Areas for initial processes*/
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
@@ -52,11 +53,15 @@ pub extern "C" fn multiboot_main(
     /* MultiBootInformation読み込み */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
-    /* Graphic初期化（Panicが起きたときの表示のため) */
+    /* Graphic & TTY 初期化（Panicが起きたときの表示のため) */
     let mut graphic_manager = GraphicManager::new();
     graphic_manager.init(&multiboot_information.framebuffer_info);
     graphic_manager.clear_screen();
-    get_kernel_manager_cluster().graphic_manager = Mutex::new(graphic_manager);
+    get_kernel_manager_cluster().graphic_manager = graphic_manager;
+    get_kernel_manager_cluster().kernel_tty_manager = TtyManager::new();
+    get_kernel_manager_cluster()
+        .kernel_tty_manager
+        .open(&get_kernel_manager_cluster().graphic_manager);
 
     kprintln!("Methylenix");
     pr_info!(
@@ -69,8 +74,6 @@ pub extern "C" fn multiboot_main(
     let multiboot_information = init_memory(multiboot_information);
     if !get_kernel_manager_cluster()
         .graphic_manager
-        .lock()
-        .unwrap()
         .set_frame_buffer_memory_permission()
     {
         panic!("Cannot map memory for frame buffer");
@@ -364,12 +367,7 @@ fn init_acpi(rsdp_ptr: usize) -> Option<AcpiManager> {
 }
 
 fn init_graphic(acpi_manager: Option<&AcpiManager>, multiboot_information: &MultiBootInformation) {
-    if get_kernel_manager_cluster()
-        .graphic_manager
-        .lock()
-        .unwrap()
-        .is_text_mode()
-    {
+    if get_kernel_manager_cluster().graphic_manager.is_text_mode() {
         return;
     }
 
@@ -388,24 +386,16 @@ fn init_graphic(acpi_manager: Option<&AcpiManager>, multiboot_information: &Mult
                     false,
                 );
             if let Ok(vm_address) = vm_address {
-                let result = get_kernel_manager_cluster()
-                    .graphic_manager
-                    .lock()
-                    .unwrap()
-                    .load_font(
-                        vm_address,
-                        module.end_address - module.start_address,
-                        FontType::Pff2,
-                    );
+                let result = get_kernel_manager_cluster().graphic_manager.load_font(
+                    vm_address,
+                    module.end_address - module.start_address,
+                    FontType::Pff2,
+                );
                 if !result {
                     pr_err!("Cannot load font data!");
                 }
                 /* Test */
-                get_kernel_manager_cluster()
-                    .graphic_manager
-                    .lock()
-                    .unwrap()
-                    .font_test();
+                get_kernel_manager_cluster().graphic_manager.font_test();
             } else {
                 pr_err!("mapping font data was failed: {:?}", vm_address.err());
             }
@@ -500,18 +490,14 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
         remapped_bitmap_vm_address,
     );
 
-    get_kernel_manager_cluster()
-        .graphic_manager
-        .lock()
-        .unwrap()
-        .write_bitmap(
-            remapped_bitmap_vm_address + file_offset as usize,
-            bitmap_color_depth as u8,
-            bitmap_width as usize,
-            bitmap_height as usize,
-            offset.0,
-            offset.1,
-        );
+    get_kernel_manager_cluster().graphic_manager.write_bitmap(
+        remapped_bitmap_vm_address + file_offset as usize,
+        bitmap_color_depth as u8,
+        bitmap_width as usize,
+        bitmap_height as usize,
+        offset.0,
+        offset.1,
+    );
 
     if let Err(e) = get_kernel_manager_cluster()
         .memory_manager
