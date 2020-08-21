@@ -26,6 +26,21 @@ struct EfiSystemTableInformation {
     address: usize,
 }
 
+#[repr(C)]
+struct MultibootTagModule {
+    s_type: u32,
+    size: u32,
+    mod_start: u32,
+    mod_end: u32,
+    string: u8,
+}
+
+pub struct ModuleInfo {
+    pub start_address: usize,
+    pub end_address: usize,
+    pub name: &'static str,
+}
+
 pub struct MultiBootInformation {
     pub elf_info: ElfInfo,
     pub memory_map_info: MemoryMapInfo,
@@ -37,6 +52,7 @@ pub struct MultiBootInformation {
     pub boot_cmd_line: &'static str,
     pub new_acpi_rsdp_ptr: Option<usize>,
     pub old_acpi_rsdp_ptr: Option<usize>,
+    pub modules: [ModuleInfo; 4],
 }
 
 impl MultiBootInformation {
@@ -67,7 +83,7 @@ impl MultiBootInformation {
 
     pub fn new(address: usize, should_test: bool) -> MultiBootInformation {
         #[allow(invalid_value)]
-        let mut mbi: MultiBootInformation = unsafe { mem::zeroed() };
+        let mut mbi: MultiBootInformation = unsafe { mem::MaybeUninit::zeroed().assume_init() };
         if should_test && !MultiBootInformation::test(address) {
             panic!("Unaligned Multi Boot Information")
         }
@@ -122,6 +138,24 @@ impl MultiBootInformation {
                 }
                 MultiBootInformation::TAG_TYPE_ELF_SECTIONS => {
                     mbi.elf_info = ElfInfo::new(unsafe { &*(tag as *const _) });
+                }
+                MultiBootInformation::TAG_TYPE_MODULE => {
+                    use core::{slice, str};
+                    let module_info = unsafe { &*(tag as *const MultibootTagModule) };
+                    for e in mbi.modules.iter_mut() {
+                        if e.start_address == 0 && e.end_address == 0 {
+                            e.start_address = module_info.mod_start as usize;
+                            e.end_address = module_info.mod_end as usize;
+                            e.name = str::from_utf8(unsafe {
+                                slice::from_raw_parts(
+                                    &module_info.string,
+                                    module_info.size as usize - 16 - 1, /*\0*/
+                                )
+                            })
+                            .unwrap_or("");
+                            break;
+                        }
+                    }
                 }
                 _ => {
                     if tag - address - 8 >= mbi.size {

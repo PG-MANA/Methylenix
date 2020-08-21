@@ -13,10 +13,15 @@ pub struct LocalApicManager {
     base_address: usize,
 }
 
-enum LocalApicRegisters {
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum LocalApicRegisters {
     ApicId = 0x02,
     EOI = 0x0b,
     SIR = 0x0f,
+    LvtTimer = 0x32,
+    TimerInitialCount = 0x38,
+    TimerCurrentCount = 0x39,
+    TimerDivide = 0x3e,
 }
 
 impl LocalApicManager {
@@ -89,7 +94,7 @@ impl LocalApicManager {
         self.write_apic_register(LocalApicRegisters::EOI, 0);
     }
 
-    fn read_apic_register(&self, index: LocalApicRegisters) -> u32 {
+    pub fn read_apic_register(&self, index: LocalApicRegisters) -> u32 {
         if self.is_x2apic_enabled {
             unsafe { cpu::rdmsr(LocalApicManager::X2APIC_MSR_INDEX + (index as u32)) as u32 }
         } else {
@@ -101,7 +106,7 @@ impl LocalApicManager {
         }
     }
 
-    fn write_apic_register(&self, index: LocalApicRegisters, data: u32) {
+    pub fn write_apic_register(&self, index: LocalApicRegisters, data: u32) {
         if self.is_x2apic_enabled {
             unsafe {
                 cpu::wrmsr(

@@ -3,8 +3,8 @@
 The operating system written in Rust
 
 ## 概要
-Methylenix とはRustで構成されたOSです。
-一番最初の初期化時のアセンブリを除き、すべてRustで記述されています。
+Methylenix とはRustで構成されたOSです。  
+起動時初期化とI/O命令などアセンブリでしかかけない箇所を除き、すべてRustで記述されています。
 ドキュメントは追々整備します。
 
 ## Methylenixとは
@@ -12,18 +12,19 @@ Methylenix とはRustで構成されたOSです。
 セキュリティキャンプについては、[セキュリティ・キャンプ：IPA 独立行政法人 情報処理推進機構](https://www.ipa.go.jp/jinzai/camp/index.html)をご覧ください。
 セキュリティキャンプでは割り込みまでを実装しました。(参考：[セキュリティキャンプ2017参加記](https://pg-mana.net/blog/seccamp_after/))
 
-Methylenixという名前は(頭弱い)自分が唐突に思いついたアイデアです。  
-有機化合物みたいにいろいろな部品を組み合わせて作っていくようにモジュールを組み合わせて応用的に作っていきたいと考え、基の中で「nix」をくっつけてゴロが良さそうなメチレン基にしました。
-なんか重大な間違いを起こしてそう。
+Methylenixという名前はメチレン基(Methylene)より採っています。 
+有機化合物みたいにいろいろな部品を組み合わせて作っていくようにモジュールを組み合わせて応用的に作っていきたいと考え、
+基の中で「nix」をくっつけて語呂が良さそうなメチレン基にしました。
 
 ## 現状
 
 * APICによるデバイス割り込み
 * メモリ・ページング動的管理
+* タスク管理
 
 ## 方針
 * GUIについては基本対応しない(デバイスの認識などはしておく)
-* UEFIをなるべく利用したい...?(GRUBを駆使して)
+* マルチアーキ(Multi Arch)に対応できるような作りにしたい
 * OS自作入門レベルのこと(割り込み・音・マルチタスクなど)を当分の目標とする
 * 動的に柔軟に対応できるようにする(UEFIなどから渡される情報をしっかり活用する)
 
@@ -62,9 +63,8 @@ limitations under the License.
 git clone https://github.com/PG-MANA/Methylenix.git
 cd Methylenix
 make iso
-#これでbin/img/boot.isoができる...はず
+# created bin/img/boot.iso
 make clean
-#objファイル削除
 ```
 
 なおビルド済みのisoイメージは https://repo.taprix.org/pg_mana/methylenix/iso/ にあります。
@@ -74,6 +74,8 @@ make clean
 qemu-system-x86_64が必要です。
 ```
 qemu-system-x86_64 --cdrom bin/img/boot.iso
+# or (OVMF)
+qemu-system-x86_64 --cdrom bin/img/boot.iso -m 512M -bios /usr/bin/OVMF/OVMF.fd
 ```
 
 ## コーディング規約
