@@ -11,7 +11,6 @@ use core::mem::MaybeUninit;
 
 pub struct TtyManager {
     lock: SpinLockFlag,
-    list: usize,
     input_queue: FIFO<u8, 512usize /*Self::DEFAULT_INPUT_BUFFER_SIZE*/>,
     output_queue: FIFO<u8, 512usize /*Self::DEFAULT_OUTPUT_BUFFER_SIZE*/>,
     output_driver: Option<&'static (dyn Writer)>,
@@ -28,7 +27,6 @@ impl TtyManager {
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
-            list: 0,
             input_queue: FIFO::new(&0),
             output_queue: FIFO::new(&0),
             output_driver: None,
@@ -92,11 +90,10 @@ impl fmt::Write for TtyManager {
 
 pub fn kernel_print(args: fmt::Arguments) {
     use core::fmt::Write;
-    if get_kernel_manager_cluster()
+    let r = get_kernel_manager_cluster()
         .kernel_tty_manager
-        .write_fmt(args)
-        .is_err()
-    {
+        .write_fmt(args);
+    if r.is_err() {
         panic!("Cannot write a string");
     }
 }

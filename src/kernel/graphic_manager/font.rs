@@ -59,4 +59,12 @@ impl FontManager {
     pub fn get_ascent(&self) -> usize {
         self.manager.get_ascent() as usize
     }
+
+    pub fn get_decent(&self) -> usize {
+        self.manager.get_decent() as usize
+    }
+
+    pub fn max_font_height(&self) -> usize {
+        self.manager.get_max_font_height() as usize
+    }
 }

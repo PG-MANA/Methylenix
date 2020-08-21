@@ -394,8 +394,6 @@ fn init_graphic(acpi_manager: Option<&AcpiManager>, multiboot_information: &Mult
                 if !result {
                     pr_err!("Cannot load font data!");
                 }
-                /* Test */
-                get_kernel_manager_cluster().graphic_manager.font_test();
             } else {
                 pr_err!("mapping font data was failed: {:?}", vm_address.err());
             }

@@ -26,7 +26,14 @@ pub struct GraphicManager {
     text: Mutex<VgaTextDriver>,
     graphic: Mutex<FrameBufferManager>,
     is_text_mode: bool,
-    font: FontManager,
+    font: Mutex<FontManager>,
+    cursor: Mutex<Cursor>,
+    is_font_loaded: bool,
+}
+
+struct Cursor {
+    x: usize,
+    y: usize,
 }
 
 impl GraphicManager {
@@ -36,7 +43,9 @@ impl GraphicManager {
             is_text_mode: false,
             text: Mutex::new(VgaTextDriver::new()),
             graphic: Mutex::new(FrameBufferManager::new()),
-            font: FontManager::new(),
+            font: Mutex::new(FontManager::new()),
+            cursor: Mutex::new(Cursor { x: 0, y: 0 }),
+            is_font_loaded: false,
         }
     }
 
@@ -91,32 +100,60 @@ impl GraphicManager {
         font_type: FontType,
     ) -> bool {
         let _lock = self.lock.lock();
-        self.font.load(virtual_font_address, size, font_type)
+        self.is_font_loaded = self
+            .font
+            .lock()
+            .unwrap()
+            .load(virtual_font_address, size, font_type);
+        self.is_font_loaded
     }
 
-    pub fn font_test(&mut self) {
-        let _lock = self.lock.lock();
-        let mut offset_x = 0usize;
-        for c in "Methylenix, Rustで書かれたOSです。Grub2のunicode.pf2を解析しました。"
-            .chars()
-            .into_iter()
-        {
-            let a = self.font.get_font_data(c).unwrap();
-            let font_bottom = self.font.get_ascent() as isize - a.y_offset as isize;
-            let font_top = font_bottom as usize - a.height as usize;
-            let font_left = (offset_x as isize + a.x_offset as isize) as usize;
-            self.graphic.lock().unwrap().write_monochrome_bitmap(
-                a.bitmap_address,
-                a.width as usize,
-                a.height as usize,
-                font_left,
-                font_top,
-                0x55ffff,
-                0,
-                true,
-            );
-            offset_x = font_left + a.width as usize;
+    fn draw_string(&self, s: &str) -> fmt::Result {
+        /* assume locked */
+        if !self.is_font_loaded {
+            return Err(fmt::Error {});
         }
+        let mut cursor = self.cursor.lock().unwrap();
+        let mut font_manager = self.font.lock().unwrap();
+        let mut graphic_manager = self.graphic.lock().unwrap();
+        let frame_buffer_size = graphic_manager.get_framer_buffer_size();
+
+        for c in s.chars().into_iter() {
+            if c == '\n' {
+                cursor.x = 0;
+                cursor.y += font_manager.max_font_height();
+            } else if c == '\r' {
+                cursor.x = 0;
+            } else if c.is_control() {
+                continue;
+            } else {
+                let font_data = font_manager.get_font_data(c);
+                if font_data.is_none() {
+                    continue;
+                }
+                let font_data = font_data.unwrap();
+                let font_bottom = font_manager.get_ascent() as isize - font_data.y_offset as isize;
+                let font_top = font_bottom as usize - font_data.height as usize;
+                let font_left = font_data.x_offset as usize;
+                if frame_buffer_size.0 <= font_left + font_data.width as usize {
+                    cursor.x = 0;
+                    cursor.y += font_manager.max_font_height();
+                }
+
+                graphic_manager.write_monochrome_bitmap(
+                    font_data.bitmap_address,
+                    font_data.width as usize,
+                    font_data.height as usize,
+                    cursor.x + font_left,
+                    cursor.y + font_top,
+                    0x55ffff,
+                    0,
+                    true,
+                );
+                cursor.x += font_data.device_width as usize;
+            }
+        }
+        Ok(())
     }
 
     pub fn puts(&self, string: &str) -> bool {
@@ -127,7 +164,11 @@ impl GraphicManager {
         if self.is_text_mode {
             self.text.lock().unwrap().puts(string)
         } else {
-            true
+            if self.is_font_loaded {
+                self.draw_string(string).is_ok()
+            } else {
+                true
+            }
         }
     }
 

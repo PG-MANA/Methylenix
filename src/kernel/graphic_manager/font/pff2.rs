@@ -185,6 +185,14 @@ impl Pff2FontManager {
         self.ascent
     }
 
+    pub const fn get_decent(&self) -> u16 {
+        self.decent
+    }
+
+    pub const fn get_max_font_height(&self) -> u16 {
+        self.max_font_height
+    }
+
     pub fn get_char_font_data(&mut self, c: char) -> Option<BitmapFontData> {
         if c.is_control() {
             return None;
