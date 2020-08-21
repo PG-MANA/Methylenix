@@ -9,10 +9,11 @@ use arch::target_arch::device::serial_port::SerialPortManager;
 use arch::target_arch::interrupt::InterruptManager;
 
 use kernel::drivers::efi::EfiManager;
-use kernel::graphic::GraphicManager;
+use kernel::graphic_manager::GraphicManager;
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::{MemoryManager, SystemMemoryManager};
 use kernel::task_manager::TaskManager;
+use kernel::tty::TtyManager;
 
 use kernel::sync::spin_lock::Mutex;
 
@@ -22,7 +23,7 @@ pub static mut STATIC_KERNEL_MANAGER_CLUSTER: MaybeUninit<KernelManagerCluster> 
     MaybeUninit::uninit();
 
 pub struct KernelManagerCluster {
-    pub graphic_manager: Mutex<GraphicManager>,
+    pub graphic_manager: GraphicManager,
     pub memory_manager: Mutex<MemoryManager>,
     pub system_memory_manager: SystemMemoryManager,
     pub kernel_memory_alloc_manager: Mutex<KernelMemoryAllocManager>,
@@ -30,8 +31,8 @@ pub struct KernelManagerCluster {
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
-    /*SerialPortManager has mutex process inner*/
-    //input_manager:
+    pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
+                                        //input_manager:
 }
 
 #[inline(always)]
