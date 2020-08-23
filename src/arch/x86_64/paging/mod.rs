@@ -12,10 +12,13 @@ use self::pdpte::{PDPTE, PDPT_MAX_ENTRY};
 use self::pml4e::{PML4E, PML4_MAX_ENTRY};
 use self::pte::{PTE, PT_MAX_ENTRY};
 use self::PagingError::MemoryCacheRanOut;
+
 use arch::target_arch::device::cpu;
 
 //use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use kernel::memory_manager::{pool_allocator::PoolAllocator, MemoryPermissionFlags};
+use kernel::memory_manager::{
+    data_type::MSize, data_type::PAddress, pool_allocator::PoolAllocator, MemoryPermissionFlags,
+};
 
 pub const PAGE_SIZE: usize = 0x1000;
 pub const PAGE_SHIFT: usize = 12;
@@ -25,7 +28,7 @@ pub const MAX_VIRTUAL_ADDRESS: usize = 0x00007FFF_FFFFFFFF;
 
 #[derive(Clone)] //Test
 pub struct PageManager {
-    pml4: usize,
+    pml4: PAddress,
     /*&'static mut [PML4; PML4_MAX_ENTRY]*/
 }
 
@@ -60,7 +63,9 @@ trait PagingEntry {
 
 impl PageManager {
     pub const fn new() -> PageManager {
-        PageManager { pml4: 0 }
+        PageManager {
+            pml4: PAddress::from(0),
+        }
     }
 
     pub fn init(
@@ -68,8 +73,9 @@ impl PageManager {
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
     ) -> Result<(), PagingError> {
         let pml4_address = Self::get_address_from_cache(cache_memory_list)?;
-        self.pml4 = pml4_address;
-        let pml4_table = unsafe { &mut *(self.pml4 as *mut [PML4E; PML4_MAX_ENTRY]) };
+        self.pml4 = PAddress::from(pml4_address);
+        let pml4_table =
+            unsafe { &mut *(self.pml4.to_usize() as usize as *mut [PML4E; PML4_MAX_ENTRY]) };
         for pml4 in pml4_table.iter_mut() {
             pml4.init();
         }
@@ -92,7 +98,7 @@ impl PageManager {
             return Err(PagingError::AddressIsNotAligned);
         }
 
-        let pml4_table = unsafe { &mut *(self.pml4 as *mut [PML4E; PML4_MAX_ENTRY]) };
+        let pml4_table = unsafe { &mut *(self.pml4.to_usize() as *mut [PML4E; PML4_MAX_ENTRY]) };
 
         let number_of_pml4e = (linear_address >> (4 * 3) + 9 * 3) & (0x1FF);
         let number_of_pdpte = (linear_address >> (4 * 3) + 9 * 2) & (0x1FF);
@@ -378,8 +384,8 @@ impl PageManager {
         let number_of_pml4e = (linear_address >> (4 * 3) + 9 * 3) & (0x1FF);
         let number_of_pdpe = (linear_address >> (4 * 3) + 9 * 2) & (0x1FF);
         let number_of_pde = (linear_address >> (4 * 3) + 9 * 1) & (0x1FF);
-        let pml4e =
-            &mut unsafe { &mut *(self.pml4 as *mut [PML4E; PML4_MAX_ENTRY]) }[number_of_pml4e];
+        let pml4e = &mut unsafe { &mut *(self.pml4.to_usize() as *mut [PML4E; PML4_MAX_ENTRY]) }
+            [number_of_pml4e];
         if !pml4e.is_address_set() {
             return Ok(());
         }
@@ -441,7 +447,7 @@ impl PageManager {
 
     pub fn reset_paging(&mut self) {
         unsafe {
-            cpu::set_cr3(self.pml4);
+            cpu::set_cr3(self.pml4.to_usize());
         }
     }
 
@@ -452,7 +458,7 @@ impl PageManager {
     }
 
     pub fn dump_table(&self, end: Option<usize>) {
-        let pml4_table = unsafe { &*(self.pml4 as *const [PML4E; PML4_MAX_ENTRY]) };
+        let pml4_table = unsafe { &*(self.pml4.to_usize() as *const [PML4E; PML4_MAX_ENTRY]) };
         for pml4 in pml4_table.iter() {
             if !pml4.is_address_set() {
                 continue;

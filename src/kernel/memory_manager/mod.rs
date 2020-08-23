@@ -4,11 +4,11 @@
  * In this memory system, you should not use alloc::*, use only core::*
  */
 
+pub mod data_type;
 pub mod global_allocator;
 pub mod kernel_malloc_manager;
 pub mod physical_memory_manager;
 pub mod pool_allocator;
-/* pub mod reverse_memory_map_manager; */
 pub mod virtual_memory_manager;
 
 use arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
@@ -85,12 +85,12 @@ impl MemoryManager {
 
     pub fn alloc_pages(
         &mut self,
-        order: usize,
+        order: MOrder,
         permission: MemoryPermissionFlags,
     ) -> Result<usize, MemoryError> {
         /* ADD: lazy allocation */
         /* return physically continuous 2 ^ order pages memory. */
-        let size = Self::index_to_offset(1 << order);
+        let size = Self::index_to_offset(1 << order.0);
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT) {
             match self.virtual_memory_manager.alloc_address(
@@ -300,47 +300,6 @@ impl MemoryManager {
                 (((size + (address - (address & PAGE_MASK)) - 1) & PAGE_MASK) + PAGE_SIZE),
             )
         }
-    }
-
-    #[inline]
-    pub const fn size_to_order(size: usize) -> usize {
-        if size <= PAGE_SIZE {
-            return 0;
-        }
-        let mut page_count = (((size - 1) & PAGE_MASK) >> PAGE_SHIFT) + 1;
-        let mut order = if page_count & (page_count - 1) == 0 {
-            0usize
-        } else {
-            1usize
-        };
-        while page_count != 0 {
-            page_count >>= 1;
-            order += 1;
-        }
-        order
-    }
-
-    #[inline]
-    pub const fn offset_to_index(offset: usize) -> usize {
-        offset >> PAGE_SHIFT
-    }
-
-    #[inline]
-    pub const fn index_to_offset(index: usize) -> usize {
-        use core::usize;
-        assert!(index <= Self::offset_to_index(usize::MAX));
-        index << PAGE_SHIFT
-    }
-
-    #[inline]
-    pub const fn address_to_size(start_address: usize, end_address: usize) -> usize {
-        assert!(start_address <= end_address);
-        end_address - start_address + 1
-    }
-
-    #[inline]
-    pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {
-        start_address + size - 1
     }
 }
 
