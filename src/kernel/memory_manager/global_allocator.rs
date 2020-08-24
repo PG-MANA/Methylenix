@@ -8,6 +8,7 @@ use kernel::manager_cluster::get_kernel_manager_cluster;
 use arch::target_arch::paging::PAGE_SHIFT;
 
 use core::alloc::{GlobalAlloc, Layout};
+use kernel::memory_manager::data_type::Address;
 
 pub struct GlobalAllocator;
 
@@ -33,9 +34,9 @@ unsafe impl GlobalAlloc for GlobalAllocator {
             .kernel_memory_alloc_manager
             .lock()
             .unwrap()
-            .vmalloc(layout.size(), layout.align(), memory_manager)
+            .vmalloc(layout.size().into(), layout.align().into(), memory_manager)
         {
-            address as *mut u8
+            address.to_usize() as *mut u8
         } else {
             panic!("Cannot alloc memory for {:?}", layout);
         }
@@ -48,6 +49,6 @@ unsafe impl GlobalAlloc for GlobalAllocator {
             .kernel_memory_alloc_manager
             .lock()
             .unwrap()
-            .vfree(ptr as usize, memory_manager)
+            .vfree((ptr as usize).into(), memory_manager)
     }
 }

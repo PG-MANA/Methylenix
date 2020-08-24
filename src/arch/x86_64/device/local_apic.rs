@@ -5,12 +5,13 @@
 use arch::target_arch::device::cpu;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::data_type::{Address, VAddress};
 use kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct LocalApicManager {
     apic_id: u32,
     is_x2apic_enabled: bool,
-    base_address: usize,
+    base_address: VAddress,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -36,7 +37,7 @@ impl LocalApicManager {
         Self {
             apic_id: 0,
             is_x2apic_enabled: false,
-            base_address: 0,
+            base_address: VAddress::new(0),
         }
     }
 
@@ -65,8 +66,11 @@ impl LocalApicManager {
             .memory_manager
             .lock()
             .unwrap()
-            .mmap_dev(base_address, 0x1000, MemoryPermissionFlags::data())
-        {
+            .mmap_dev(
+                base_address.into(),
+                0x1000.into(),
+                MemoryPermissionFlags::data(),
+            ) {
             Ok(address) => {
                 self.base_address = address;
             }
@@ -100,7 +104,7 @@ impl LocalApicManager {
         } else {
             unsafe {
                 core::ptr::read_volatile(
-                    (self.base_address + (index as usize) * 0x10) as *const u32,
+                    (self.base_address.to_usize() + (index as usize) * 0x10) as *const u32,
                 )
             }
         }
@@ -117,7 +121,7 @@ impl LocalApicManager {
         } else {
             unsafe {
                 core::ptr::write_volatile(
-                    (self.base_address + (index as usize) * 0x10) as *mut u32,
+                    (self.base_address.to_usize() + (index as usize) * 0x10) as *mut u32,
                     data,
                 );
             }

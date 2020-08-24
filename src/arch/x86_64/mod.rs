@@ -22,6 +22,7 @@ use kernel::drivers::multiboot::MultiBootInformation;
 use kernel::graphic_manager::font::FontType;
 use kernel::graphic_manager::GraphicManager;
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
@@ -172,7 +173,11 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     for entry in multiboot_information.memory_map_info.clone() {
         if entry.m_type == 1 {
             /* available memory */
-            physical_memory_manager.free(entry.addr as usize, entry.length as usize, true);
+            physical_memory_manager.free(
+                (entry.addr as usize).into(),
+                (entry.length as usize).into(),
+                true,
+            );
         }
         let area_name = match entry.m_type {
             1 => "available",
@@ -184,29 +189,35 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
         pr_info!(
             "[{:#016X}~{:#016X}] {}",
             entry.addr as usize,
-            MemoryManager::size_to_end_address(entry.addr as usize, entry.length as usize),
+            MSize::from(entry.length as usize)
+                .to_end_address(PAddress::from(entry.addr as usize))
+                .to_usize(),
             area_name
         );
     }
     /* reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
         if section.should_allocate() && section.align_size() == PAGE_SIZE {
-            physical_memory_manager.reserve_memory(section.addr(), section.size(), PAGE_SHIFT);
+            physical_memory_manager.reserve_memory(
+                section.addr().into(),
+                section.size().into(),
+                PAGE_SHIFT.into(),
+            );
         }
     }
     /* reserve Multiboot Information area */
     physical_memory_manager.reserve_memory(
-        multiboot_information.address,
-        multiboot_information.size,
-        0,
+        multiboot_information.address.into(),
+        multiboot_information.size.into(),
+        0.into(),
     );
     /* reserve Multiboot modules area */
     for e in multiboot_information.modules.iter() {
         if e.start_address != 0 && e.end_address != 0 {
             physical_memory_manager.reserve_memory(
-                e.start_address,
-                e.end_address - e.start_address,
-                0,
+                e.start_address.into(),
+                (e.end_address - e.start_address).into(),
+                0.into(),
             );
         }
     }
@@ -225,27 +236,29 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
             section.should_excusable(),
             false,
         );
-        let aligned_start_address = section.addr() & PAGE_MASK;
-        let aligned_size = ((section.size() + (section.addr() - aligned_start_address) - 1)
-            & PAGE_MASK)
-            + PAGE_SIZE;
+        let aligned_start_address = PAddress::from(section.addr() & PAGE_MASK);
+        let aligned_size = MSize::from(
+            ((section.size() + (section.addr() - aligned_start_address.to_usize()) - 1)
+                & PAGE_MASK)
+                + PAGE_SIZE,
+        );
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
         match virtual_memory_manager.map_address(
             aligned_start_address,
-            Some(aligned_start_address),
+            Some(aligned_start_address.to_direct_mapped_v_address()),
             aligned_size,
             permission,
             MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             &mut physical_memory_manager,
         ) {
             Ok(address) => {
-                if address == aligned_start_address {
+                if address == aligned_start_address.to_direct_mapped_v_address() {
                     continue;
                 }
                 pr_err!(
                     "Virtual Address is different from Physical Address.\nV:{:#X} P:{:#X}",
-                    address,
-                    aligned_start_address
+                    address.to_usize(),
+                    aligned_start_address.to_usize()
                 );
             }
             Err(e) => {
@@ -268,19 +281,24 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     /* move Multiboot Information to allocated memory area */
     let mutex_memory_manager = Mutex::new(memory_manager);
     let new_mbi_address = kernel_memory_alloc_manager
-        .kmalloc(multiboot_information.size, 3, &mutex_memory_manager)
+        .kmalloc(
+            multiboot_information.size.into(),
+            3.into(),
+            &mutex_memory_manager,
+        )
         .expect("Cannot alloc memory for Multiboot Information.");
     for i in 0..multiboot_information.size {
         unsafe {
-            *((new_mbi_address + i) as *mut u8) = *((multiboot_information.address + i) as *mut u8);
+            *((new_mbi_address + MSize::from(i)).to_usize() as *mut u8) =
+                *((multiboot_information.address + i) as *mut u8);
         }
     }
 
     /* free old multibootinfo area */
-    mutex_memory_manager
-        .lock()
-        .unwrap()
-        .free_physical_memory(multiboot_information.address, multiboot_information.size); /* may be already freed */
+    mutex_memory_manager.lock().unwrap().free_physical_memory(
+        multiboot_information.address.into(),
+        multiboot_information.size.into(),
+    ); /* may be already freed */
     /* apply paging */
     mutex_memory_manager.lock().unwrap().set_paging_table();
 
@@ -288,7 +306,7 @@ fn init_memory(multiboot_information: MultiBootInformation) -> MultiBootInformat
     get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
     get_kernel_manager_cluster().kernel_memory_alloc_manager =
         Mutex::new(kernel_memory_alloc_manager);
-    MultiBootInformation::new(new_mbi_address, false)
+    MultiBootInformation::new(new_mbi_address.to_usize(), false)
 }
 
 fn init_task(system_cs: u16, user_cs: u16, user_ss: u16) {
@@ -308,30 +326,30 @@ fn init_task(system_cs: u16, user_cs: u16, user_ss: u16) {
 
     let stack_for_init = kernel_memory_alloc_manager
         .vmalloc(
-            ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM,
-            ContextManager::STACK_ALIGN_ORDER,
+            ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM.into(),
+            ContextManager::STACK_ALIGN_ORDER.into(),
             memory_manager,
         )
         .unwrap()
-        + ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM;
+        + MSize::from(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
     let stack_for_idle = kernel_memory_alloc_manager
         .vmalloc(
-            ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM,
-            ContextManager::STACK_ALIGN_ORDER,
+            ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM.into(),
+            ContextManager::STACK_ALIGN_ORDER.into(),
             memory_manager,
         )
         .unwrap()
-        + ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM;
+        + MSize::from(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
     drop(kernel_memory_alloc_manager);
 
     let context_data_for_init = context_manager.create_system_context(
         main_process as *const fn() as usize,
-        stack_for_init,
+        stack_for_init.to_usize(),
         unsafe { cpu::get_cr3() },
     );
     let context_data_for_idle = context_manager.create_system_context(
         idle as *const fn() as usize,
-        stack_for_idle,
+        stack_for_idle.to_usize(),
         unsafe { cpu::get_cr3() },
     );
 
@@ -379,8 +397,8 @@ fn init_graphic(acpi_manager: Option<&AcpiManager>, multiboot_information: &Mult
                 .lock()
                 .unwrap()
                 .mmap(
-                    module.start_address,
-                    module.end_address - module.start_address,
+                    module.start_address.into(),
+                    (module.end_address - module.start_address).into(),
                     MemoryPermissionFlags::rodata(),
                     MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
                     false,
@@ -410,7 +428,7 @@ fn init_graphic(acpi_manager: Option<&AcpiManager>, multiboot_information: &Mult
         .get_bgrt_manager()
         .get_bitmap_physical_address()
     {
-        let temp_map_size = 54usize;
+        let temp_map_size = MSize::from(54);
 
         let result = get_kernel_manager_cluster()
             .memory_manager
@@ -428,8 +446,8 @@ fn init_graphic(acpi_manager: Option<&AcpiManager>, multiboot_information: &Mult
         let bitmap_vm_address = result.unwrap();
         pr_info!(
             "{:#X} is mapped at {:#X}",
-            p_bitmap_address,
-            bitmap_vm_address
+            p_bitmap_address.to_usize(),
+            bitmap_vm_address.to_usize()
         );
         if !draw_boot_logo(
             bitmap_vm_address,
@@ -453,15 +471,16 @@ fn init_graphic(acpi_manager: Option<&AcpiManager>, multiboot_information: &Mult
     }
 }
 
-fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, usize)) -> bool {
-    if unsafe { *((bitmap_vm_address + 30) as *const u32) } != 0 {
+fn draw_boot_logo(bitmap_vm_address: VAddress, mapped_size: MSize, offset: (usize, usize)) -> bool {
+    let bitmap_address = bitmap_vm_address.to_usize();
+    if unsafe { *((bitmap_address + 30) as *const u32) } != 0 {
         pr_info!("Boot logo is compressed");
         return false;
     }
-    let file_offset = unsafe { *((bitmap_vm_address + 10) as *const u32) };
-    let bitmap_width = unsafe { *((bitmap_vm_address + 18) as *const u32) };
-    let bitmap_height = unsafe { *((bitmap_vm_address + 22) as *const u32) };
-    let bitmap_color_depth = unsafe { *((bitmap_vm_address + 28) as *const u16) };
+    let file_offset = unsafe { *((bitmap_address + 10) as *const u32) };
+    let bitmap_width = unsafe { *((bitmap_address + 18) as *const u32) };
+    let bitmap_height = unsafe { *((bitmap_address + 22) as *const u32) };
+    let bitmap_color_depth = unsafe { *((bitmap_address + 28) as *const u16) };
     let aligned_bitmap_width =
         ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
 
@@ -472,8 +491,9 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
         .mremap_dev(
             bitmap_vm_address,
             mapped_size,
-            (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize / 8))
-                + file_offset as usize,
+            ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize / 8))
+                + file_offset as usize)
+                .into(),
         );
 
     if result.is_err() {
@@ -484,12 +504,12 @@ fn draw_boot_logo(bitmap_vm_address: usize, mapped_size: usize, offset: (usize, 
 
     pr_info!(
         "Bitmap Data: {:#X} is remapped at {:#X}",
-        bitmap_vm_address,
-        remapped_bitmap_vm_address,
+        bitmap_address,
+        remapped_bitmap_vm_address.to_usize(),
     );
 
     get_kernel_manager_cluster().graphic_manager.write_bitmap(
-        remapped_bitmap_vm_address + file_offset as usize,
+        (remapped_bitmap_vm_address + MSize::from(file_offset as usize)).into(),
         bitmap_color_depth as u8,
         bitmap_width as usize,
         bitmap_height as usize,

@@ -5,6 +5,8 @@
 use super::PagingEntry;
 use super::PAGE_MASK;
 
+use kernel::memory_manager::data_type::{Address, PAddress};
+
 pub const PML4_MAX_ENTRY: usize = 512;
 
 /* PML4Eの53bit目はPDPTがセットされているかどうかの確認に利用している。 */
@@ -116,17 +118,17 @@ impl PagingEntry for PML4E {
         self.set_bit(1 << 63, b);
     }
 
-    fn get_address(&self) -> Option<usize> {
+    fn get_address(&self) -> Option<PAddress> {
         if self.is_address_set() {
-            Some((self.flags & 0x000FFFFF_FFFFF000) as usize)
+            Some(((self.flags & 0x000FFFFF_FFFFF000) as usize).into())
         } else {
             None
         }
     }
 
-    fn set_address(&mut self, address: usize) -> bool {
+    fn set_address(&mut self, address: PAddress) -> bool {
         if (address & !PAGE_MASK) == 0 {
-            self.set_bit((0x000FFFFF_FFFFF000 & address) as u64, true);
+            self.set_bit((0x000FFFFF_FFFFF000 & address.to_usize()) as u64, true);
             self.set_address_set(true);
             true
         } else {

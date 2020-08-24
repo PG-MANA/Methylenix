@@ -8,6 +8,8 @@ pub mod pff2;
 
 use self::pff2::Pff2FontManager;
 
+use kernel::memory_manager::data_type::VAddress;
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct BitmapFontData {
     pub width: u16,
@@ -15,7 +17,7 @@ pub struct BitmapFontData {
     pub x_offset: i16,
     pub y_offset: i16,
     pub device_width: i16,
-    pub bitmap_address: usize,
+    pub bitmap_address: VAddress,
 }
 
 impl BitmapFontData {
@@ -26,7 +28,7 @@ impl BitmapFontData {
             device_width: 0,
             x_offset: 0,
             y_offset: 0,
-            bitmap_address: 0,
+            bitmap_address: VAddress::new(0),
         }
     }
 }
@@ -46,7 +48,12 @@ impl FontManager {
         }
     }
 
-    pub fn load(&mut self, virtual_font_address: usize, size: usize, font_type: FontType) -> bool {
+    pub fn load(
+        &mut self,
+        virtual_font_address: VAddress,
+        size: usize,
+        font_type: FontType,
+    ) -> bool {
         match font_type {
             FontType::Pff2 => self.manager.load(virtual_font_address, size),
         }

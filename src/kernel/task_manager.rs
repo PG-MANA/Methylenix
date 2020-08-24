@@ -18,6 +18,7 @@ use kernel::ptr_linked_list::PtrLinkedList;
 use kernel::sync::spin_lock::SpinLockFlag;
 
 use core::mem;
+use kernel::memory_manager::data_type::Address;
 
 pub struct TaskManager {
     lock: SpinLockFlag,
@@ -71,24 +72,25 @@ impl TaskManager {
         for _i in 0..Self::NUM_OF_INITIAL_PROCESS_ENTRIES {
             let address = kernel_memory_allocator
                 .vmalloc(
-                    mem::size_of::<ProcessEntry>(),
-                    ProcessEntry::PROCESS_ENTRY_ALIGN_ORDER,
+                    mem::size_of::<ProcessEntry>().into(),
+                    ProcessEntry::PROCESS_ENTRY_ALIGN_ORDER.into(),
                     memory_manager,
                 )
                 .unwrap();
             self.process_entry_pool
-                .free_ptr(address as *mut ProcessEntry);
+                .free_ptr(address.to_usize() as *mut ProcessEntry);
         }
 
         for _i in 0..Self::NUM_OF_INITIAL_THREAD_ENTRIES {
             let address = kernel_memory_allocator
                 .vmalloc(
-                    mem::size_of::<ThreadEntry>(),
-                    ThreadEntry::THREAD_ENTRY_ALIGN_ORDER,
+                    mem::size_of::<ThreadEntry>().into(),
+                    ThreadEntry::THREAD_ENTRY_ALIGN_ORDER.into(),
                     memory_manager,
                 )
                 .unwrap();
-            self.thread_entry_pool.free_ptr(address as *mut ThreadEntry);
+            self.thread_entry_pool
+                .free_ptr(address.to_usize() as *mut ThreadEntry);
         }
 
         self.context_manager = context_manager;
