@@ -58,9 +58,6 @@ macro_rules! address {
 #[rustfmt::skip]
         impl const Address for $t {
             #[inline]
-
-
-            #[inline]
             fn to_usize(&self) -> usize {
                 self.0
             }
@@ -111,7 +108,8 @@ macro_rules! to_usize {
 
 macro_rules! add_and_sub_shift_with_m_size {
     ($t:ty) => {
-        impl Add<MSize> for $t {
+#[rustfmt::skip]
+        impl const Add<MSize> for $t {
             type Output = Self;
             #[inline]
             fn add(self, rhs: MSize) -> Self::Output {
@@ -119,14 +117,16 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl AddAssign<MSize> for $t {
+#[rustfmt::skip]
+        impl const AddAssign<MSize> for $t {
             #[inline]
             fn add_assign(&mut self, rhs: MSize) {
                 self.0 += rhs.0;
             }
         }
 
-        impl Sub<MSize> for $t {
+#[rustfmt::skip]
+        impl const Sub<MSize> for $t {
             type Output = Self;
             #[inline]
             fn sub(self, rhs: MSize) -> Self::Output {
@@ -134,14 +134,16 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl SubAssign<MSize> for $t {
+#[rustfmt::skip]
+        impl const SubAssign<MSize> for $t {
             #[inline]
             fn sub_assign(&mut self, rhs: MSize) {
                 self.0 -= rhs.0;
             }
         }
 
-        impl Shr<MSize> for $t {
+#[rustfmt::skip]
+        impl const Shr<MSize> for $t {
             type Output = Self;
             #[inline]
             fn shr(self, rhs: MSize) -> Self::Output {
@@ -149,14 +151,16 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl ShrAssign<MSize> for $t {
+#[rustfmt::skip]
+        impl const ShrAssign<MSize> for $t {
             #[inline]
             fn shr_assign(&mut self, rhs: MSize) {
                 self.0 >>= rhs.0;
             }
         }
 
-        impl Shl<MSize> for $t {
+#[rustfmt::skip]
+        impl const Shl<MSize> for $t {
             type Output = Self;
             #[inline]
             fn shl(self, rhs: MSize) -> Self::Output {
@@ -164,7 +168,8 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl ShlAssign<MSize> for $t {
+#[rustfmt::skip]
+        impl const ShlAssign<MSize> for $t {
             #[inline]
             fn shl_assign(&mut self, rhs: MSize) {
                 self.0 <<= rhs.0;
@@ -217,7 +222,8 @@ impl<T: Sized> Into<*const T> for VAddress {
     }
 }
 
-impl Sub<Self> for VAddress {
+#[rustfmt::skip]
+impl const Sub<Self> for VAddress {
     type Output = MSize;
     fn sub(self, rhs: Self) -> Self::Output {
         MSize(self.0 - rhs.0)
@@ -238,7 +244,8 @@ impl PAddress {
     }
 }
 
-impl Sub<Self> for PAddress {
+#[rustfmt::skip]
+impl const Sub<Self> for PAddress {
     type Output = MSize;
     fn sub(self, rhs: Self) -> Self::Output {
         MSize(self.0 - rhs.0)
@@ -261,8 +268,9 @@ impl MSize {
         Self(end_address.to_usize() - start_address.to_usize() + 1)
     }
 
-    pub fn to_end_address<T: Address>(&self, mut start_address: T) -> T {
-        T::from(start_address.to_usize() + self.0 - 1)
+    pub fn to_end_address<T: Address>(self, mut start_address: T) -> T {
+        start_address += self - MSize::new(1);
+        start_address
     }
 
     pub const fn is_zero(&self) -> bool {
