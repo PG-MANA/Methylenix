@@ -15,7 +15,6 @@ MAKE_BASEDIR ?= $(shell pwd)/
 MAKE_BINDIR = $(MAKE_BASEDIR)bin/
 MAKE_IMGDIR = $(MAKE_BINDIR)img/
 MAKE_TMPDIR = $(MAKE_BASEDIR)tmp/
-MAKE_OBJDIR = $(MAKE_TMPDIR)obj/
 MAKE_CONGIGDIR =  $(MAKE_BASEDIR)config/$(TARGET_ARCH)/
 
 ##ソフトウェア
@@ -50,7 +49,6 @@ default:
 init:
 	-$(MKDIR) $(MAKE_BINDIR)
 	-$(MKDIR) $(MAKE_TMPDIR)
-	-$(MKDIR) $(MAKE_OBJDIR)
 
 clean:
 	$(RM) $(MAKE_TMPDIR)

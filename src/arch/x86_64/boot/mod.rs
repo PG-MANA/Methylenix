@@ -1,5 +1,5 @@
 /*
- * asm files for boot
+ * Asm files for boot
  */
 
 global_asm!(include_str!("common.s"));

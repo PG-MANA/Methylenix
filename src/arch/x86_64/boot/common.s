@@ -1,40 +1,43 @@
 /*
- * common data for boot
+ * Common data for boot
  */
 
 .equ IO_MAP_SIZE,           0xffff
 .equ INITIAL_STACK_SIZE,    0x100
 .equ TSS_STACK_SIZE,        0x100
+.equ OS_STACK_SIZE,         0x1000
 
-.global initial_stack,INITIAL_STACK_SIZE, gdtr0
+.global initial_stack, INITIAL_STACK_SIZE, os_stack, OS_STACK_SIZE, gdtr0
 .global main_code_segment_descriptor, user_code_segment_descriptor, user_data_segment_descriptor
 .global tss_descriptor,tss_descriptor_adress, tss
 .global pd, pdpt, pml4
 
 .section .bss
 
-/* ページングディレクトリ(8byte * 512) * 4 */
+/* PAGE DIRECTPRY (8byte * 512) * 4 */
 .comm pd, 0x4000, 0x1000
 
-/* ページディレクトリポインタテーブル(8byte * 512) */
-.comm pdpt, 0x4000, 0x1000
+/* PAGE DIRECTPRY POINTER TABLE (8byte * 512[4 entries are used]) */
+.comm pdpt, 0x1000, 0x1000
 
-/*  ページマップレベル4(8byte * 512) */
-.comm pml4, 0x4000, 0x1000
+/* PML4 (8byte * 512[1 entry is used]) */
+.comm pml4, 0x1000, 0x1000
 
-/* 初期スタック (スタックを設定する時は+INITIAL_STACK_SIZEをする) */
+/* INITAL STACK (This stack is used until jump to the rust code.) */
 .comm initial_stack, INITIAL_STACK_SIZE, 8
 
-/* TSSスタック */
+/* TSS STACK */
 .comm tss_stack, TSS_STACK_SIZE, 8
 
+/* OS STACK */
+.comm os_stack, OS_STACK_SIZE, 8
 
 .section .data
 
 .align   16
 
 gdt:
-    /* GDT云々するとき下位3にセグメント番号がかぶらないため、わざと0エントリを立てる。 */
+    /* NULL DESCRIPTOR */
     .quad    0
 
 .equ  main_code_segment_descriptor, . - gdt
@@ -51,15 +54,15 @@ tss_descriptor_adress:
     .word    (tss_end - tss) & 0xffff   /* Limit(Low) */
     .word    0                          /* Base(Low) */
     .byte    0                          /* Base(middle) */
-    .byte    0b10001001                 /* 64ビットTSS + DPL:0 + P:1 */
+    .byte    0b10001001                 /* 64bit TSS + DPL:0 + P:1 */
     .byte    (tss_end - tss) & 0xff0000 /* Limit(High)+Granularity */
     .byte    0                          /* Base(Middle high) */
     .long    0                          /* Base(High) */
-    .word    0                          /* 予約 */
-    .word    0                          /* 予約 */
+    .word    0                          /* Reserved */
+    .word    0                          /* Reserved */
 
 gdtr0:
-  .word    . - gdt - 1                  /* リミット数(すぐ上がGDTなので計算で求めてる) */
+  .word    . - gdt - 1                  /* The byte size of descriptors */
   .quad    gdt
 
 .align   4096
