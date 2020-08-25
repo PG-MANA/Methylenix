@@ -16,6 +16,7 @@ use kernel::manager_cluster::get_kernel_manager_cluster;
 use kernel::memory_manager::MemoryPermissionFlags;
 
 use core::mem::{size_of, MaybeUninit};
+use kernel::memory_manager::data_type::Address;
 
 pub struct InterruptManager {
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
@@ -50,9 +51,9 @@ impl InterruptManager {
                 .memory_manager
                 .lock()
                 .unwrap()
-                .alloc_pages(0, MemoryPermissionFlags::data())
+                .alloc_pages(0.into(), MemoryPermissionFlags::data())
                 .expect("Cannot alloc memory for interrupt manager.")
-                as *mut [_; Self::IDT_MAX as usize])
+                .to_usize() as *mut [_; Self::IDT_MAX as usize])
         });
         self.main_selector = selector;
 

@@ -7,6 +7,7 @@
 
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::data_type::Address;
 use kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct FrameBufferManager {
@@ -47,14 +48,15 @@ impl FrameBufferManager {
             .lock()
             .unwrap()
             .mmap_dev(
-                self.frame_buffer_address,
-                self.frame_buffer_width
+                self.frame_buffer_address.into(),
+                (self.frame_buffer_width
                     * self.frame_buffer_height
-                    * (self.frame_buffer_color_depth / 8) as usize,
+                    * (self.frame_buffer_color_depth / 8) as usize)
+                    .into(),
                 MemoryPermissionFlags::data(),
             ) {
             Ok(address) => {
-                self.frame_buffer_address = address;
+                self.frame_buffer_address = address.to_usize();
                 true
             }
             Err(_) => false,

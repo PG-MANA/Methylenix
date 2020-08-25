@@ -5,6 +5,8 @@
 use super::PagingEntry;
 use super::PAGE_MASK;
 
+use kernel::memory_manager::data_type::{Address, PAddress};
+
 pub const PDPT_MAX_ENTRY: usize = 512;
 
 /* PDPTEの53bit目はPDがセットされているかどうかの確認に利用している。 */
@@ -121,24 +123,24 @@ impl PagingEntry for PDPTE {
         self.set_bit(1 << 63, b);
     }
 
-    fn get_address(&self) -> Option<usize> {
+    fn get_address(&self) -> Option<PAddress> {
         if self.is_address_set() {
             if self.is_huge() {
-                Some((self.flags & 0x000FFFFF_FFF0000) as usize)
+                Some(((self.flags & 0x000FFFFF_FFF0000) as usize).into())
             } else {
-                Some((self.flags & 0x000FFFFF_FFFFF000) as usize)
+                Some(((self.flags & 0x000FFFFF_FFFFF000) as usize).into())
             }
         } else {
             None
         }
     }
 
-    fn set_address(&mut self, address: usize) -> bool {
-        if (address & !PAGE_MASK) == 0 {
+    fn set_address(&mut self, address: PAddress) -> bool {
+        if (address.to_usize() & !PAGE_MASK) == 0 {
             if self.is_huge() {
-                self.set_bit((0x000FFFFF_FFF00000 & address) as u64, true);
+                self.set_bit((0x000FFFFF_FFF00000 & address.to_usize()) as u64, true);
             } else {
-                self.set_bit((0x000FFFFF_FFFFF000 & address) as u64, true);
+                self.set_bit((0x000FFFFF_FFFFF000 & address.to_usize()) as u64, true);
             }
             self.set_address_set(true);
             true

@@ -6,6 +6,7 @@ use super::super::INITIAL_MMAP_SIZE;
 
 use kernel::drivers::acpi::acpi_pm_timer::AcpiPmTimer;
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::data_type::{Address, VAddress};
 
 #[repr(C, packed)]
 struct FADT {
@@ -26,15 +27,22 @@ struct FADT {
 }
 
 pub struct FadtManager {
-    base_address: usize,
+    base_address: VAddress,
     enabled: bool,
 }
 
 impl FadtManager {
+    pub const fn new() -> Self {
+        Self {
+            base_address: VAddress::new(0),
+            enabled: false,
+        }
+    }
+
     pub const SIGNATURE: [u8; 4] = ['F' as u8, 'A' as u8, 'C' as u8, 'P' as u8];
-    pub fn init(&mut self, fadt_vm_address: usize) -> bool {
+    pub fn init(&mut self, fadt_vm_address: VAddress) -> bool {
         /* bgrt_vm_address must be accessible */
-        let fadt = unsafe { &*(fadt_vm_address as *const FADT) };
+        let fadt = unsafe { &*(fadt_vm_address.to_usize() as *const FADT) };
         if fadt.major_version != 1 {
             pr_err!("Not supported FADT version:{}", fadt.major_version);
         }
@@ -42,8 +50,11 @@ impl FadtManager {
             .memory_manager
             .lock()
             .unwrap()
-            .mremap_dev(fadt_vm_address, INITIAL_MMAP_SIZE, fadt.length as usize)
-        {
+            .mremap_dev(
+                fadt_vm_address,
+                INITIAL_MMAP_SIZE.into(),
+                (fadt.length as usize).into(),
+            ) {
             a
         } else {
             pr_err!("Cannot reserve memory area of BGRT.");
@@ -53,16 +64,10 @@ impl FadtManager {
         self.enabled = true;
         return true;
     }
-    pub const fn new() -> Self {
-        Self {
-            base_address: 0,
-            enabled: false,
-        }
-    }
 
     pub fn get_acpi_pm_timer(&self) -> Option<AcpiPmTimer> {
         if self.enabled {
-            let fadt = unsafe { &*(self.base_address as *const FADT) };
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
             Some(AcpiPmTimer::new(
                 fadt.pm_tmr_block as usize,
                 ((fadt.flags >> 8) & 1) != 0,

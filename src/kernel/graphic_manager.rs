@@ -16,6 +16,7 @@ use arch::target_arch::device::vga_text::VgaTextDriver;
 
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::data_type::{Address, VAddress};
 use kernel::sync::spin_lock::{Mutex, SpinLockFlag};
 use kernel::tty::Writer;
 
@@ -95,7 +96,7 @@ impl GraphicManager {
 
     pub fn load_font(
         &mut self,
-        virtual_font_address: usize,
+        virtual_font_address: VAddress,
         size: usize,
         font_type: FontType,
     ) -> bool {
@@ -159,7 +160,7 @@ impl GraphicManager {
                 }
 
                 frame_buffer_manager.write_monochrome_bitmap(
-                    font_data.bitmap_address,
+                    font_data.bitmap_address.to_usize(),
                     font_data.width as usize,
                     font_data.height as usize,
                     cursor.x + font_left,

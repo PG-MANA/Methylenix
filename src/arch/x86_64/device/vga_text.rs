@@ -7,6 +7,7 @@ use arch::target_arch::device::crt;
 use kernel::drivers::multiboot::FrameBufferInfo;
 use kernel::graphic_manager::text_buffer_driver::TextBufferDriver;
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::data_type::Address;
 use kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct VgaTextDriver {
@@ -64,12 +65,12 @@ impl VgaTextDriver {
                 .lock()
                 .unwrap()
                 .mmap_dev(
-                    self.address,
-                    self.width * self.height * 2 as usize,
+                    self.address.into(),
+                    (self.width * self.height * 2 as usize).into(),
                     MemoryPermissionFlags::data(),
                 ) {
                 Ok(address) => {
-                    self.address = address;
+                    self.address = address.to_usize();
                     true
                 }
                 Err(_) => false,

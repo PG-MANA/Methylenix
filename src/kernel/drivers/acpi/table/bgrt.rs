@@ -5,6 +5,7 @@
 use super::super::INITIAL_MMAP_SIZE;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
+use kernel::memory_manager::data_type::{Address, PAddress, VAddress};
 
 #[repr(C, packed)]
 struct BGRT {
@@ -26,7 +27,7 @@ struct BGRT {
 }
 
 pub struct BgrtManager {
-    base_address: usize,
+    base_address: VAddress,
     enabled: bool,
 }
 
@@ -35,14 +36,14 @@ impl BgrtManager {
 
     pub const fn new() -> Self {
         Self {
-            base_address: 0,
+            base_address: VAddress::new(0),
             enabled: false,
         }
     }
 
-    pub fn init(&mut self, bgrt_vm_address: usize) -> bool {
+    pub fn init(&mut self, bgrt_vm_address: VAddress) -> bool {
         /* bgrt_vm_address must be accessible */
-        let bgrt = unsafe { &*(bgrt_vm_address as *const BGRT) };
+        let bgrt = unsafe { &*(bgrt_vm_address.to_usize() as *const BGRT) };
         if bgrt.version != 1 || bgrt.revision != 1 {
             pr_err!("Not supported BGRT version");
         }
@@ -50,7 +51,7 @@ impl BgrtManager {
             .memory_manager
             .lock()
             .unwrap()
-            .mremap_dev(bgrt_vm_address, INITIAL_MMAP_SIZE, 56)
+            .mremap_dev(bgrt_vm_address, INITIAL_MMAP_SIZE.into(), 56.into())
         {
             a
         } else {
@@ -62,11 +63,11 @@ impl BgrtManager {
         return true;
     }
 
-    pub fn get_bitmap_physical_address(&self) -> Option<usize> {
+    pub fn get_bitmap_physical_address(&self) -> Option<PAddress> {
         if self.enabled {
-            let bgrt = unsafe { &*(self.base_address as *const BGRT) };
+            let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
             if bgrt.imapge_type == 0 {
-                return Some(bgrt.image_address as usize);
+                return Some((bgrt.image_address as usize).into());
             }
         }
         return None;
@@ -74,7 +75,7 @@ impl BgrtManager {
 
     pub fn get_image_offset(&self) -> Option<(usize /*x*/, usize /*y*/)> {
         if self.enabled {
-            let bgrt = unsafe { &*(self.base_address as *const BGRT) };
+            let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
             Some((bgrt.image_offset_x as usize, bgrt.image_offset_y as usize))
         } else {
             None

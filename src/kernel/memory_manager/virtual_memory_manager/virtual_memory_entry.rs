@@ -2,6 +2,7 @@
  * Virtual Memory Entry Chain
  */
 
+use kernel::memory_manager::data_type::{Address, MOffset, VAddress};
 use kernel::memory_manager::virtual_memory_manager::virtual_memory_object::VirtualMemoryObject;
 use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
@@ -14,14 +15,14 @@ use core::mem;
 pub struct VirtualMemoryEntry {
     lock: SpinLockFlag,
     list: PtrLinkedListNode<Self>,
-    start_address: usize,
-    end_address: usize,
+    start_address: VAddress,
+    end_address: VAddress,
     is_shared: bool,
     should_cow: bool,
     permission_flags: MemoryPermissionFlags,
     option_flags: MemoryOptionFlags,
     object: VirtualMemoryObject,
-    offset: usize,
+    offset: MOffset,
 }
 // ADD: thread chain
 
@@ -29,8 +30,8 @@ impl VirtualMemoryEntry {
     pub const ENTRY_SIZE: usize = mem::size_of::<Self>();
 
     pub const fn new(
-        vm_start_address: usize,
-        vm_end_address: usize,
+        vm_start_address: VAddress,
+        vm_end_address: VAddress,
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
     ) -> Self {
@@ -44,19 +45,19 @@ impl VirtualMemoryEntry {
             should_cow: false,
             permission_flags: permission,
             option_flags: option,
-            offset: 0,
+            offset: MOffset::new(0),
         }
     }
 
-    pub const fn get_vm_start_address(&self) -> usize {
+    pub const fn get_vm_start_address(&self) -> VAddress {
         self.start_address
     }
 
-    pub const fn get_vm_end_address(&self) -> usize {
+    pub const fn get_vm_end_address(&self) -> VAddress {
         self.end_address
     }
 
-    pub fn set_vm_end_address(&mut self, new_end_address: usize) {
+    pub fn set_vm_end_address(&mut self, new_end_address: VAddress) {
         let _lock = self.lock.lock();
         if let Some(next_entry) = self.get_next_entry() {
             assert!(next_entry.get_vm_start_address() > new_end_address);
@@ -64,7 +65,7 @@ impl VirtualMemoryEntry {
         self.end_address = new_end_address;
     }
 
-    pub const fn get_offset(&self) -> usize {
+    pub const fn get_offset(&self) -> MOffset {
         self.offset
     }
 
@@ -86,13 +87,13 @@ impl VirtualMemoryEntry {
     }
 
     pub fn is_disabled(&self) -> bool {
-        self.start_address == 0 && self.end_address == 0 && self.object.is_disabled()
+        self.start_address.is_zero() && self.end_address.is_zero() && self.object.is_disabled()
     }
 
     pub fn set_disabled(&mut self) {
         let _lock = self.lock.lock();
-        self.start_address = 0;
-        self.end_address = 0;
+        self.start_address = 0.into();
+        self.end_address = 0.into();
         self.object.set_disabled();
     }
 
