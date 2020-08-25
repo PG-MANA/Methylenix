@@ -26,9 +26,7 @@ use kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
-use kernel::memory_manager::{
-    MemoryManager, MemoryOptionFlags, MemoryPermissionFlags, SystemMemoryManager,
-};
+use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags, SystemMemoryManager};
 use kernel::sync::spin_lock::Mutex;
 use kernel::task_manager::TaskManager;
 use kernel::tty::TtyManager;
