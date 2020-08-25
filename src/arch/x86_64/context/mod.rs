@@ -1,8 +1,8 @@
-/*
- * Context Manager
- * This manager is the backend of task management system.
- * This manager treats arch-specific processes.
- */
+//!
+//! Context Manager
+//! This manager is the backend of task management system.
+//! This manager treats arch-specific processes.
+//!
 
 pub mod context_data;
 
@@ -21,8 +21,10 @@ pub struct ContextManager {
 impl ContextManager {
     pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x1000;
     pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x400;
-    pub const STACK_ALIGN_ORDER: usize = 6; /*size = 64*/
+    pub const STACK_ALIGN_ORDER: usize = 6; /*size = 2^6 = 64*/
 
+    /// Create Context Manager with invalid data.
+    /// This function is const fn.
     pub const fn new() -> Self {
         Self {
             system_cs: 0,
@@ -32,6 +34,7 @@ impl ContextManager {
         }
     }
 
+    /// Init Context Manager with system code/stack segment and user code/stack segment.
     pub fn init(&mut self, system_cs: usize, system_ss: usize, user_cs: usize, user_ss: usize) {
         self.system_cs = system_cs;
         self.system_ss = system_ss;
@@ -39,6 +42,8 @@ impl ContextManager {
         self.user_cs = user_cs;
     }
 
+    /// Create system context data
+    /// This function makes a context data with system code/stack segment.
     pub fn create_system_context(
         &self,
         entry_address: usize,
@@ -54,13 +59,18 @@ impl ContextManager {
         )
     }
 
+    /// Jump to specific context data.
+    /// This function ** does not ** save current process data.
+    /// This is used when OS starts task management system.
+    /// ContextData must be aligned by 64bit
     pub unsafe fn jump_to_context(&self, context: &mut ContextData) {
-        /* for init process */
         assert_eq!(mem::align_of_val(context), 64);
         cpu::run_task(context as *mut _);
     }
 
-    /* ContextSwitch */
+    /// Jump to next_context with saving current context into old_context.
+    /// This function does not return until another context jumps to this context.
+    /// each context must be aligned by 64bit (otherwise this function will panic).  
     pub unsafe fn switch_context(
         &self,
         old_context: &mut ContextData,
