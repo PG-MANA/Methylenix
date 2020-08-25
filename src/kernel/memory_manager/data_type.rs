@@ -3,7 +3,7 @@
  * basic data type for Memory Manager
  */
 
-use arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE};
+use arch::target_arch::paging::PAGE_SHIFT;
 
 use core::convert::{From, Into};
 use core::iter::Step;
@@ -210,13 +210,15 @@ impl VAddress {
     }
 }
 
-impl<T: Sized> Into<*mut T> for VAddress {
+#[rustfmt::skip]
+impl<T: Sized> const Into<*mut T> for VAddress {
     fn into(self) -> *mut T {
         self.0 as usize as *mut T
     }
 }
 
-impl<T: Sized> Into<*const T> for VAddress {
+#[rustfmt::skip]
+impl<T: Sized> const Into<*const T> for VAddress {
     fn into(self) -> *const T {
         self.0 as usize as *const T
     }
@@ -287,14 +289,16 @@ impl MSize {
     }
 }
 
-impl Add<VAddress> for MSize {
+#[rustfmt::skip]
+impl const Add<VAddress> for MSize {
     type Output = VAddress;
     fn add(self, rhs: VAddress) -> Self::Output {
         VAddress(self.0 + rhs.0)
     }
 }
 
-impl Add<PAddress> for MSize {
+#[rustfmt::skip]
+impl const Add<PAddress> for MSize {
     type Output = PAddress;
     fn add(self, rhs: PAddress) -> Self::Output {
         PAddress(self.0 + rhs.0)
@@ -359,7 +363,8 @@ impl MIndex {
     }
 }
 
-impl Add for MIndex {
+#[rustfmt::skip]
+impl const Add for MIndex {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
@@ -367,14 +372,16 @@ impl Add for MIndex {
     }
 }
 
-impl AddAssign for MIndex {
+#[rustfmt::skip]
+impl const AddAssign for MIndex {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
         self.0 += rhs.0;
     }
 }
 
-impl Sub for MIndex {
+#[rustfmt::skip]
+impl const Sub for MIndex {
     type Output = Self;
     #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
@@ -382,7 +389,8 @@ impl Sub for MIndex {
     }
 }
 
-impl SubAssign for MIndex {
+#[rustfmt::skip]
+impl const SubAssign for MIndex {
     #[inline]
     fn sub_assign(&mut self, rhs: Self) {
         self.0 -= rhs.0;
@@ -399,6 +407,7 @@ unsafe impl Step for MIndex {
         }
     }
 
+    #[inline]
     fn forward_checked(start: Self, count: usize) -> Option<Self> {
         if let Some(n) = start.0.checked_add(count) {
             Some(n.into())
@@ -407,6 +416,7 @@ unsafe impl Step for MIndex {
         }
     }
 
+    #[inline]
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
         if let Some(n) = start.0.checked_sub(count) {
             Some(n.into())

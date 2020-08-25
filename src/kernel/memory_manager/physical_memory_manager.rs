@@ -429,7 +429,8 @@ impl PhysicalMemoryManager {
     }
 
     #[inline]
-    const fn align_address_and_size(
+    /*const*/
+    fn align_address_and_size(
         address: PAddress,
         size: MSize,
         align_order: MOrder,
@@ -445,7 +446,8 @@ impl PhysicalMemoryManager {
     }
 
     #[inline]
-    const fn align_address_and_available_size(
+    /*const*/
+    fn align_address_and_available_size(
         address: PAddress,
         size: MSize,
         align_order: MOrder,
