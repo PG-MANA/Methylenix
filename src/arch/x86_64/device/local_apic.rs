@@ -5,7 +5,7 @@
 use arch::target_arch::device::cpu;
 
 use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, VAddress};
+use kernel::memory_manager::data_type::{Address, PAddress, VAddress};
 use kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct LocalApicManager {
@@ -28,7 +28,7 @@ pub enum LocalApicRegisters {
 impl LocalApicManager {
     const MSR_INDEX: u32 = 0x1b;
     const BASE_ADDR_MASK: u64 = 0xffffffffff000;
-    const _XAPIC_ENABLED_MASK: u64 = 0x800;
+    const XAPIC_ENABLED_MASK: u64 = 0x800;
     const X2APIC_ENABLED_MASK: u64 = 0x400;
     const CPUID_X2APIC_MASK: u32 = 1 << 21;
     const X2APIC_MSR_INDEX: u32 = 0x800;
@@ -42,51 +42,53 @@ impl LocalApicManager {
     }
 
     pub fn init(&mut self) -> bool {
-        let local_apic_msr = unsafe { cpu::rdmsr(LocalApicManager::MSR_INDEX) };
-        let base_address = (local_apic_msr & LocalApicManager::BASE_ADDR_MASK) as usize;
+        let local_apic_msr = unsafe { cpu::rdmsr(Self::MSR_INDEX) };
+        let base_address = PAddress::from((local_apic_msr & Self::BASE_ADDR_MASK) as usize);
         let is_x2apic_supported = unsafe {
             let mut eax = 1u32;
             let mut ebx = 0u32;
             let mut ecx = 0u32;
             let mut edx = 0u32;
             cpu::cpuid(&mut eax, &mut ebx, &mut ecx, &mut edx);
-            ecx & LocalApicManager::CPUID_X2APIC_MASK != 0
+            ecx & Self::CPUID_X2APIC_MASK != 0
         };
-        if local_apic_msr & LocalApicManager::X2APIC_ENABLED_MASK == 0 && is_x2apic_supported {
+        if is_x2apic_supported {
             unsafe {
                 cpu::wrmsr(
-                    LocalApicManager::MSR_INDEX,
-                    local_apic_msr | LocalApicManager::X2APIC_ENABLED_MASK,
+                    Self::MSR_INDEX,
+                    local_apic_msr | Self::X2APIC_ENABLED_MASK | Self::XAPIC_ENABLED_MASK,
                 );
             }
+            self.is_x2apic_enabled = true;
+        } else {
+            match get_kernel_manager_cluster()
+                .memory_manager
+                .lock()
+                .unwrap()
+                .mmap_dev(base_address, 0x1000.into(), MemoryPermissionFlags::data())
+            {
+                Ok(address) => {
+                    self.base_address = address;
+                }
+                Err(e) => {
+                    pr_err!("Cannot reserve memory of Local APIC Err:{:?}", e);
+                    return false;
+                }
+            };
+            unsafe {
+                cpu::wrmsr(Self::MSR_INDEX, local_apic_msr | Self::XAPIC_ENABLED_MASK);
+            }
         }
-        self.apic_id = 0;
-        self.is_x2apic_enabled = is_x2apic_supported;
-        match get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mmap_dev(
-                base_address.into(),
-                0x1000.into(),
-                MemoryPermissionFlags::data(),
-            ) {
-            Ok(address) => {
-                self.base_address = address;
-            }
-            Err(e) => {
-                pr_err!("Cannot reserve memory of Local APIC Err:{:?}", e);
-                return false;
-            }
-        };
-        drop(base_address); /* avoid page fault */
-
         self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
         self.write_apic_register(
             LocalApicRegisters::SIR,
             self.read_apic_register(LocalApicRegisters::SIR) | 0x100,
         );
-        pr_info!("APIC ID:{}(x2APIC:{})", self.apic_id, is_x2apic_supported);
+        pr_info!(
+            "APIC ID:{}(x2APIC:{})",
+            self.apic_id,
+            self.is_x2apic_enabled
+        );
         return true;
     }
 
