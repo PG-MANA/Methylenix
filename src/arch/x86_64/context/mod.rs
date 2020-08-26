@@ -1,7 +1,8 @@
 //!
 //! Context Manager
+//!
 //! This manager is the backend of task management system.
-//! This manager treats arch-specific processes.
+//! This treats arch-specific processes.
 //!
 
 pub mod context_data;
@@ -11,6 +12,7 @@ use arch::target_arch::device::cpu;
 
 use core::mem;
 
+/// This manager contains system/user stack/code segment pointer.
 pub struct ContextManager {
     system_ss: usize,
     system_cs: usize,
@@ -24,6 +26,7 @@ impl ContextManager {
     pub const STACK_ALIGN_ORDER: usize = 6; /*size = 2^6 = 64*/
 
     /// Create Context Manager with invalid data.
+    ///
     /// This function is const fn.
     pub const fn new() -> Self {
         Self {
@@ -43,6 +46,7 @@ impl ContextManager {
     }
 
     /// Create system context data
+    ///
     /// This function makes a context data with system code/stack segment.
     pub fn create_system_context(
         &self,
@@ -60,7 +64,8 @@ impl ContextManager {
     }
 
     /// Jump to specific context data.
-    /// This function ** does not ** save current process data.
+    ///
+    /// This function **does not** save current process data.
     /// This is used when OS starts task management system.
     /// ContextData must be aligned by 64bit
     pub unsafe fn jump_to_context(&self, context: &mut ContextData) {
@@ -69,6 +74,7 @@ impl ContextManager {
     }
 
     /// Jump to next_context with saving current context into old_context.
+    ///
     /// This function does not return until another context jumps to this context.
     /// each context must be aligned by 64bit (otherwise this function will panic).  
     pub unsafe fn switch_context(

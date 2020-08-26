@@ -1,4 +1,5 @@
 //! Assembly files for boot
+//!
 //! This module is the boot code to jump to the main code by global_asm
 //! Supported boot system:
 //!  * Multiboot2

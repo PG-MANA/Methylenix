@@ -1,6 +1,7 @@
 //!
 //! Context Entry
-//! This entry contains arch-depending data
+//!
+//! This entry contains arch-depending data.
 //!
 
 #[repr(C, align(64))]
@@ -42,7 +43,8 @@ impl ContextData {
     /// Size is zero and read in Self::new()
     const STATIC_ASSERT_OF_REGISTERS: () = Self::check_struct_size();
 
-    /// const assert(static_assert)
+    /// Operate const assert(static_assert)
+    ///
     /// This function will eval while compiling.
     /// Check if the size of Registers was changed.
     /// if you changed, you must review assembly code like context_switch and fix this function.
@@ -63,6 +65,7 @@ impl ContextData {
     }
 
     /// Create ContextData for system.
+    ///
     /// ContextData's rflags is set as 0x202(allow interrupt).
     pub fn create_context_data_for_system(
         entry_address: usize,

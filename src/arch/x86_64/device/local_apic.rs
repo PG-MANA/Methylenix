@@ -1,6 +1,8 @@
-/*
- *Local APIC
- */
+//!
+//! Local APIC Manager
+//!
+//! To read/write local apic register
+//!
 
 use arch::target_arch::device::cpu;
 
@@ -33,6 +35,11 @@ impl LocalApicManager {
     const CPUID_X2APIC_MASK: u32 = 1 << 21;
     const X2APIC_MSR_INDEX: u32 = 0x800;
 
+    /// Create LocalApicManager with invalid address.
+    ///
+    /// Before use, **you must call [`init`]**.
+    ///
+    /// [`init`]: #method.init
     pub const fn new() -> Self {
         Self {
             apic_id: 0,
@@ -41,6 +48,12 @@ impl LocalApicManager {
         }
     }
 
+    /// Init LocalApicManager.
+    ///
+    /// This function checks if x2APIC is available by cpuid.
+    /// If x2APIC is available, enable it, otherwise mmap_dev(local apic's base address).
+    /// If mapping is failed, this function will return false.   
+    /// After that, enable EOI-Broadcast Suppression.
     pub fn init(&mut self) -> bool {
         let local_apic_msr = unsafe { cpu::rdmsr(Self::MSR_INDEX) };
         let base_address = PAddress::from((local_apic_msr & Self::BASE_ADDR_MASK) as usize);
@@ -96,10 +109,14 @@ impl LocalApicManager {
         self.apic_id
     }
 
+    /// Send end of interruption to Local APIC.
     pub fn send_eoi(&self) {
         self.write_apic_register(LocalApicRegisters::EOI, 0);
     }
 
+    /// Read Local APIC registers.
+    ///
+    /// If x2APIC is enabled, this function will read MSR, otherwise it will read mapped memory area.
     pub fn read_apic_register(&self, index: LocalApicRegisters) -> u32 {
         if self.is_x2apic_enabled {
             unsafe { cpu::rdmsr(LocalApicManager::X2APIC_MSR_INDEX + (index as u32)) as u32 }
@@ -112,6 +129,9 @@ impl LocalApicManager {
         }
     }
 
+    /// Write Local APIC registers.
+    ///
+    /// If x2APIC is enabled, this function will write into MSR, otherwise it will write into mapped memory area.
     pub fn write_apic_register(&self, index: LocalApicRegisters, data: u32) {
         if self.is_x2apic_enabled {
             unsafe {

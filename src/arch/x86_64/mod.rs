@@ -119,7 +119,7 @@ pub fn general_protection_exception_handler(e_code: usize) {
 fn main_process() -> ! {
     /* interrupt is enabled */
     unsafe {
-        LOCAL_APIC_TIMER.start_interrupt(
+        LOCAL_APIC_TIMER.start_interruption(
             get_kernel_manager_cluster()
                 .interrupt_manager
                 .lock()
@@ -547,7 +547,7 @@ fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         .get_acpi_pm_timer()
     {
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
-        local_apic_timer.set_up_interrupt(
+        local_apic_timer.set_up_interruption(
             InterruptNumber::LocalApicTimer as u16,
             get_kernel_manager_cluster()
                 .interrupt_manager
@@ -560,7 +560,7 @@ fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         pr_info!("Using PIT to calculate frequency of Local APIC Timer.");
         let mut pit = PitManager::new();
         pit.init();
-        local_apic_timer.set_up_interrupt(
+        local_apic_timer.set_up_interruption(
             InterruptNumber::LocalApicTimer as u16,
             get_kernel_manager_cluster()
                 .interrupt_manager

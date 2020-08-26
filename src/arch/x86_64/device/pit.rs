@@ -1,12 +1,21 @@
-/*
- * Programmable Interval Timer 8254
- */
+//!
+//! Programmable Interval Timer 8254
+//!
+//! It is the legacy timer implemented 16bit programmable timer.
+//! The frequency is 1.19318MHz.
+//! This timer is used to sync Local APIC Timer.
 
 use arch::target_arch::device::cpu;
 
 use kernel::sync::spin_lock::SpinLockFlag;
 use kernel::timer_manager::Timer;
 
+/// PitManager
+///
+/// PitManager has SpinLockFlag inner.
+/// Reload value is 11932 and it is constant.
+/// When the interrupt started, this timer will interrupt each 10ms.
+/// If Local APIC is usable, it is better to use it.
 pub struct PitManager {
     lock: SpinLockFlag,
     reload_value: u16,
@@ -14,6 +23,11 @@ pub struct PitManager {
 }
 
 impl PitManager {
+    /// Create IoApicManager with invalid data.
+    ///
+    /// Before use, **you must call [`init`]**.
+    ///
+    /// [`init`]: #method.init
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
@@ -22,6 +36,9 @@ impl PitManager {
         }
     }
 
+    /// Init PIT as reload_value is 0xffff.
+    ///
+    /// After calling this function, the count down of the PIT will start immediately.
     pub fn init(&mut self) {
         let _lock = self.lock.lock();
         unsafe {
@@ -32,6 +49,10 @@ impl PitManager {
         self.reload_value = 0xffff;
     }
 
+    /// Stop PIT.
+    ///
+    /// This function set reload_value to zero and PIT will stop counting.
+    /// `get_count` will return zero and the timer interruption will stop.
     pub fn stop_counting(&mut self) {
         let _lock = self.lock.lock();
         unsafe { cpu::out_byte(0x43, 0) };
@@ -39,6 +60,10 @@ impl PitManager {
         self.is_interrupt_enabled = false;
     }
 
+    /// Start interruption of the PIT.
+    ///
+    /// This function sets registers to allow interruption.
+    /// Currently, this manager has no interrupt handler and does not use this function.   
     #[allow(dead_code)]
     pub fn set_up_interrupt(&mut self) {
         let _lock = self.lock.lock();
