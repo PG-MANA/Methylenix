@@ -284,11 +284,11 @@ impl VirtualMemoryManager {
     }
 
     pub fn flush_paging(&mut self) {
-        self.page_manager.reset_paging();
+        self.page_manager.flush_page_table();
     }
 
     pub fn update_paging(&mut self /*Not necessary*/, address: VAddress) {
-        PageManager::reset_paging_local(address);
+        PageManager::update_page_cache(address);
     }
 
     /* alloc virtual address for "physical_address" and map linearly.

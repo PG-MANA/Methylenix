@@ -1,6 +1,7 @@
-/*
- * Page Map Level 4 Entry
- */
+//!
+//! Page Map Level 4 Entry
+//!
+//! See PageManager for the detail.
 
 use super::PagingEntry;
 use super::PAGE_MASK;
@@ -9,7 +10,7 @@ use kernel::memory_manager::data_type::{Address, PAddress};
 
 pub const PML4_MAX_ENTRY: usize = 512;
 
-/* PML4Eの53bit目はPDPTがセットされているかどうかの確認に利用している。 */
+/* 53th bit(1 << 52) of PML4E is used to check if the address is valid. */
 
 pub struct PML4E {
     flags: u64,

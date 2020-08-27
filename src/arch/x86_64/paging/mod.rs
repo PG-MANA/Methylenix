@@ -1,6 +1,11 @@
-/*
- * Paging Manager
- */
+//!
+//! Paging Manager
+//!
+//! This modules treat the paging system of x86_64.
+//! Currently this module can handle 4K and 2M paging.
+//!
+//! This does not handle memory status(which process using what memory area).
+//! This is the back-end of VirtualMemoryManager.
 
 mod pde;
 mod pdpte;
@@ -22,18 +27,30 @@ use kernel::memory_manager::{
     MemoryPermissionFlags,
 };
 
+/// Default Page Size, the mainly using 4KiB paging.
 pub const PAGE_SIZE: usize = 0x1000;
+/// PAGE_SIZE = 1 << PAGE_SHIFT
 pub const PAGE_SHIFT: usize = 12;
+/// if !PAGE_MASK & address !=0 => address is not page aligned.
 pub const PAGE_MASK: usize = 0xFFFFFFFF_FFFFF000;
+/// Default page cache size for paging
 pub const PAGING_CACHE_LENGTH: usize = 64;
+/// Max virtual address of x86_64
 pub const MAX_VIRTUAL_ADDRESS: usize = 0x00007FFF_FFFFFFFF;
 
-#[derive(Clone)] //Test
+/// PageManager
+///
+/// This controls paging system.
+/// This manager does not check if specified address is usable,
+/// that should done by VirtualMemoryManager.
+#[derive(Clone)]
 pub struct PageManager {
     pml4: PAddress,
-    /*&'static mut [PML4; PML4_MAX_ENTRY]*/
 }
 
+/// Paging Error enum
+///
+/// This enum is used to pass error from PageManager.
 #[derive(Eq, PartialEq, Debug)]
 pub enum PagingError {
     MemoryCacheRanOut,
@@ -43,6 +60,9 @@ pub enum PagingError {
     SizeIsNotAligned,
 }
 
+/// PagingEntry
+///
+/// This trait is to treat PML4, PDPTE, PDE, and PTE as the common way.
 trait PagingEntry {
     fn is_present(&self) -> bool;
     fn set_present(&mut self, b: bool);
@@ -64,12 +84,21 @@ trait PagingEntry {
 }
 
 impl PageManager {
+    /// Create InterruptManager with invalid data.
+    ///
+    /// Before use, **you must call [`init`]**.
+    ///
+    /// [`init`]: #method.init
     pub const fn new() -> PageManager {
         PageManager {
             pml4: PAddress::new(0),
         }
     }
 
+    /// Init PageManager
+    ///
+    /// This function will take one page from cache_memory_list and set up it to PML4.
+    /// After that, this will associate address of PML4(in the process, some pages are associated).
     pub fn init(
         &mut self,
         cache_memory_list: &mut PoolAllocator<
@@ -91,6 +120,11 @@ impl PageManager {
         )
     }
 
+    /// Search the target PDPTE linked with linear_address.
+    ///
+    /// This function calculates the index number of the PDPTE linked with the linear_address.
+    /// If PML4 is not present, this will make PML4 (if should_create == true)
+    /// or return PagingError::EntryIsNotFound.
     fn get_target_pdpte(
         &mut self,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
@@ -134,6 +168,14 @@ impl PageManager {
         Ok(pdpte)
     }
 
+    /// Search the target PDE linked with linear_address.
+    ///
+    /// This function calculates the index number of the PDE linked with the linear_address.
+    /// If pdpte is none, this will call [`get_target_pdpte`].
+    /// If PML4 or PDPTE is not present, this will make them (if should_create == true)
+    /// or return PagingError::EntryIsNotFound.
+    ///
+    /// [`get_target_pdpte`]: #method.get_target_pdpte
     fn get_target_pde(
         &mut self,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
@@ -171,6 +213,14 @@ impl PageManager {
         Ok(pde)
     }
 
+    /// Search the target PTE linked with linear_address.
+    ///
+    /// This function calculates the index number of the PTE linked with the linear_address.
+    /// If pde is none, this will call [`get_target_pde`].
+    /// If PML4, PDPTE, or PDE is not present, this will make them (if should_create == true)
+    /// or return PagingError::EntryIsNotFound.
+    ///
+    /// [`get_target_pde`]: #method.get_target_pde
     fn get_target_pte(
         &mut self,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
@@ -204,6 +254,12 @@ impl PageManager {
         }[number_of_pte])
     }
 
+    /// Search the target ;aging entry linked with linear_address.
+    ///
+    /// This function calculates the index number of the PDPTE, PDE, and PTE linked with the linear_address.
+    /// If huge bit is present(means 1GB or 2MB paging is enabled), return with terminal page entry.
+    /// If PML4 or PDPTE or PDE is not present, this will make them (if should_create == true)
+    /// or return PagingError::EntryIsNotFound.
     fn get_target_paging_entry(
         &mut self,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
@@ -240,6 +296,17 @@ impl PageManager {
         Ok(pte)
     }
 
+    /// Associate physical address with linear address.
+    ///
+    /// This function will get target PTE from linear address
+    /// (if not exist, will make)and set physical address.
+    /// "permission" will be used when set the PTE attribute.
+    /// If you want to associate wide area(except physical address is non-linear),
+    /// you should use [`associate_area`].(it may use 2MB paging).
+    ///
+    /// This function does not flush page table and invoke page cache. You should do them manually.
+    ///
+    /// [`associate_area`]: #method.associate_area
     pub fn associate_address(
         &mut self,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
@@ -247,7 +314,6 @@ impl PageManager {
         linear_address: VAddress,
         permission: MemoryPermissionFlags,
     ) -> Result<(), PagingError> {
-        /*物理アドレスと理論アドレスを結びつける*/
         if ((physical_address.to_usize() & !PAGE_MASK) != 0)
             || ((linear_address.to_usize() & !PAGE_MASK) != 0)
         {
@@ -263,6 +329,17 @@ impl PageManager {
         Ok(())
     }
 
+    /// Map linear address to physical address with size.
+    ///
+    /// This function will map from linear_address to linear_address + size.
+    /// This function is used to map consecutive physical address.
+    /// This may use 2MB or 1GB paging.
+    /// If you want to map non-consecutive physical address,
+    /// you should call [`associate_address`] repeatedly.
+    ///
+    /// This function does not flush page table and invoke page cache. You should do them manually.
+    ///
+    /// [`associate_address`]: #method.associate_address
     pub fn associate_area(
         &mut self,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
@@ -298,13 +375,16 @@ impl PageManager {
                 && number_of_pde == 0
                 && (size - processed_size) >= MSize::from(1024 * 1024 * 1024)
             {
+                /* try to apply 1GB paging */
                 let pdpte = self.get_target_pdpte(
                     cache_memory_list,
                     processing_linear_address,
                     false,
                     true,
                 )?;
+                /* check if PDPTE is used */
                 if !pdpte.is_present() {
+                    /* PDPTE is free, we can use 1GB paging! */
                     pdpte.init();
                     pdpte.set_huge(true);
                     pdpte.set_no_execute(!permission.execute());
@@ -316,6 +396,7 @@ impl PageManager {
                     continue;
                 }
             }
+            /* try to apply 2MiB paging */
             if number_of_pte == 0 && (size - processed_size) >= MSize::from(2 * 1024 * 1024) {
                 let pde = self.get_target_pde(
                     cache_memory_list,
@@ -336,6 +417,7 @@ impl PageManager {
                     continue;
                 }
             }
+            /* 4KiB */
             self.associate_address(
                 cache_memory_list,
                 processing_physical_address,
@@ -347,6 +429,10 @@ impl PageManager {
         Ok(())
     }
 
+    /// Change permission of linear_address
+    ///
+    /// This function searches the target page entry(usually PTE) and change permission.
+    /// If linear address is not valid, this will return PagingError::EntryIsNotFound.
     pub fn change_memory_permission(
         &mut self,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
@@ -364,6 +450,17 @@ impl PageManager {
         Ok(())
     }
 
+    /// Unmap linear address.
+    ///
+    /// This function searches target page entry(usually PTE) and disable present flag.
+    /// After disabling, this calls [`cleanup_page_table`] to collect freed page tables.
+    /// If target entry is not exists, this function will ignore it and call [`cleanup_page_table`]
+    /// when entry_may_be_deleted == true, otherwise this will return PagingError:PagingError::EntryIsNotFound.
+    ///
+    /// This does not delete physical address and huge bit from the entry. it  disable present flag only.
+    /// It helps [`cleanup_page_table`].
+    ///
+    /// [`cleanup_page_table`]: #method.cleanup_page_table
     pub fn unassociate_address(
         &mut self,
         linear_address: VAddress,
@@ -372,7 +469,7 @@ impl PageManager {
     ) -> Result<(), PagingError> {
         match self.get_target_paging_entry(cache_memory_list, linear_address, false, false) {
             Ok(entry) => {
-                entry.set_present(false); /* Huge bitは下げないでないでおくことで 渡されたlinearアドレス*/
+                entry.set_present(false);
                 self.cleanup_page_table(linear_address, cache_memory_list)
             }
             Err(err) => {
@@ -385,12 +482,15 @@ impl PageManager {
         }
     }
 
+    /// Clean up the page table.
+    ///
+    /// This function searches non-used page tables(PDPT, PD, PT) and puts them into cache_memory_list.
+    /// Currently, this function always returns OK(()).  
     pub fn cleanup_page_table(
         &mut self,
         linear_address: VAddress,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
     ) -> Result<(), PagingError> {
-        /* return needless entry to cache_memory_list */
         let number_of_pml4e = (linear_address.to_usize() >> (4 * 3) + 9 * 3) & (0x1FF);
         let number_of_pdpe = (linear_address.to_usize() >> (4 * 3) + 9 * 2) & (0x1FF);
         let number_of_pde = (linear_address.to_usize() >> (4 * 3) + 9 * 1) & (0x1FF);
@@ -409,6 +509,7 @@ impl PageManager {
                     &mut *(pdpte.get_address().unwrap().to_usize() as *mut [PDE; PD_MAX_ENTRY])
                 }[number_of_pde];
                 if pde.is_present() {
+                    /* Try to free PT */
                     if !pde.is_huge() {
                         for e in unsafe {
                             &*(pde.get_address().unwrap().to_usize() as *const [PTE; PT_MAX_ENTRY])
@@ -419,10 +520,11 @@ impl PageManager {
                                 return Ok(());
                             }
                         }
-                        cache_memory_list.free_ptr(pde.get_address().unwrap().to_usize() as *mut _); /*free PT*/
+                        cache_memory_list.free_ptr(pde.get_address().unwrap().to_usize() as *mut _); /* free PT */
                         pde.set_present(false);
                     }
                 }
+                /* Try to free PD */
                 for e in unsafe {
                     &*(pdpte.get_address().unwrap().to_usize() as *const [PDE; PD_MAX_ENTRY])
                 }
@@ -432,10 +534,11 @@ impl PageManager {
                         return Ok(());
                     }
                 }
-                cache_memory_list.free_ptr(pdpte.get_address().unwrap().to_usize() as *mut _); /*free PD*/
+                cache_memory_list.free_ptr(pdpte.get_address().unwrap().to_usize() as *mut _); /* free PD */
                 pdpte.set_present(false);
             }
         }
+        /* Try to free PDPT */
         for e in
             unsafe { &*(pml4e.get_address().unwrap().to_usize() as *const [PDPTE; PDPT_MAX_ENTRY]) }
                 .iter()
@@ -449,6 +552,10 @@ impl PageManager {
         Ok(())
     }
 
+    /// Get 4KiB free page from allocator.
+    ///
+    /// This is the wrapper.
+    /// the page is direct mapped.
     fn get_address_from_cache(
         allocator: &mut PoolAllocator<[u8; PAGE_SIZE]>,
     ) -> Result<usize, PagingError> {
@@ -459,18 +566,30 @@ impl PageManager {
         }
     }
 
-    pub fn reset_paging(&mut self) {
+    /// Flush page table and apply new page table.
+    ///
+    /// This function sets PML4 into CR3.
+    /// **This function must call after [`init`], otherwise system may crash.**
+    ///
+    /// [`init`]: #method.init
+    pub fn flush_page_table(&mut self) {
         unsafe {
             cpu::set_cr3(self.pml4.to_usize());
         }
     }
 
-    pub fn reset_paging_local(address: VAddress) {
+    /// Delete the paging cache of the target address and update it.
+    ///
+    /// This function operates invpg.
+    pub fn update_page_cache(address: VAddress) {
         unsafe {
             cpu::invlpg(address.into());
         }
     }
 
+    /// Dump paging table
+    ///
+    /// This function shows the status of paging, it prints a lot.
     pub fn dump_table(&self, end: Option<VAddress>) {
         let pml4_table = unsafe { &*(self.pml4.to_usize() as *const [PML4E; PML4_MAX_ENTRY]) };
         for pml4 in pml4_table.iter() {

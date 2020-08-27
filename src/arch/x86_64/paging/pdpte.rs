@@ -1,6 +1,7 @@
-/*
- * Page Directory Pointer Table Entry
- */
+//!
+//! Page Directory Pointer Table Entry
+//!
+//! See PageManager for the detail.
 
 use super::PagingEntry;
 use super::PAGE_MASK;
@@ -9,7 +10,7 @@ use kernel::memory_manager::data_type::{Address, PAddress};
 
 pub const PDPT_MAX_ENTRY: usize = 512;
 
-/* PDPTEの53bit目はPDがセットされているかどうかの確認に利用している。 */
+/* 53th bit(1 << 52) of PDPTE is used to check if the address is valid. */
 
 pub struct PDPTE {
     flags: u64,

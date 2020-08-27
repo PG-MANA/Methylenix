@@ -1,6 +1,7 @@
-/*
- * Page Table Entry
- */
+//!
+//! Page Table Entry
+//!
+//! See PageManager for the detail.
 
 use super::PagingEntry;
 use super::PAGE_MASK;
