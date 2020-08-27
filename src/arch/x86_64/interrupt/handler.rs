@@ -1,9 +1,34 @@
-/*
- * Interrupt Handler Maker
- */
+//!
+//! # Interrupt Handler Maker
+//!
+//! This module is a macro to make interrupt handler.
+//! interrupt handler must save/restore registers, but it is difficult with the Rust code.
+//! This handler includes assembly code to do that.
+//!
+//! ## make_device_interrupt_handler($handler_name:ident, $handler_func:path)
+//!
+//! A macro rule to wrap normal handler with save/restore registers.
+//!
+//! This macro is used to device interruption.
+//!
+//!  * handler_name: wrapped function's name. it is used to register into InterruptManager.
+//!  * handler_func: handler written in Rust,
+//!                  the function made by this macro will call handler_func after save registers.
+//!
+//! ## make_error_interrupt_handler($handler_name: ident, $handler_func: path)
+//!
+//! A macro rule to wrap normal handler with save/restore registers.
+//!
+//! This macro is used to exception interruption. the error code will be passed to handler_func.
+//!
+//!  * handler_name: wrapped function's name. it is used to register into InterruptManager.
+//!  * handler_func: handler written in Rust,
+//!                  the function made by this macro will call handler_func after save registers.
+//!                  the this function can take one argument: error code from CPU.
+//!
 
 #[macro_export]
-macro_rules! make_interrupt_hundler {
+macro_rules! make_device_interrupt_handler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
         pub unsafe fn $handler_name() {
@@ -51,7 +76,7 @@ macro_rules! make_interrupt_hundler {
 }
 
 #[macro_export]
-macro_rules! make_error_interrupt_hundler {
+macro_rules! make_error_interrupt_handler {
     ($handler_name: ident, $handler_func: path) => {
         #[naked]
         pub unsafe fn $ handler_name() {

@@ -1,6 +1,8 @@
-/*
- * Task State Segment
- */
+//!
+//! Task State Segment
+//!
+//! Control TSS.
+//! This struct is not used, but in the future, it may be used to set up ist.
 
 use core::mem;
 
@@ -36,7 +38,7 @@ pub struct TSS {
     reserved_4: u32,
     reserved_5: u32,
     res_and_iomap: u32,
-    //I/O Mapにアクセスできるかの権限を表すメモリ空間へのポインタ(0:許可,1:禁止)
+    //I/O Permission flag (0:Allow, 1:Forbid)
     io_permission_map: [u8; IO_MAP_SIZE / 8],
 }
 

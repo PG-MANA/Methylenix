@@ -14,7 +14,7 @@ use self::device::cpu;
 use self::device::local_apic_timer::LocalApicTimer;
 use self::device::pit::PitManager;
 use self::device::serial_port::SerialPortManager;
-use self::interrupt::{InterruptManager, InterruptNumber};
+use self::interrupt::{InterruptManager, InterruptionIndex};
 use self::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use kernel::drivers::acpi::AcpiManager;
@@ -532,7 +532,7 @@ fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
     let mut local_apic_timer = LocalApicTimer::new();
     local_apic_timer.init();
     if local_apic_timer.enable_deadline_mode(
-        InterruptNumber::LocalApicTimer as u16,
+        InterruptionIndex::LocalApicTimer as u16,
         get_kernel_manager_cluster()
             .interrupt_manager
             .lock()
@@ -548,7 +548,7 @@ fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
     {
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
         local_apic_timer.set_up_interruption(
-            InterruptNumber::LocalApicTimer as u16,
+            InterruptionIndex::LocalApicTimer as u16,
             get_kernel_manager_cluster()
                 .interrupt_manager
                 .lock()
@@ -561,7 +561,7 @@ fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         let mut pit = PitManager::new();
         pit.init();
         local_apic_timer.set_up_interruption(
-            InterruptNumber::LocalApicTimer as u16,
+            InterruptionIndex::LocalApicTimer as u16,
             get_kernel_manager_cluster()
                 .interrupt_manager
                 .lock()
@@ -572,7 +572,7 @@ fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         pit.stop_counting();
     }
     /*setup IDT*/
-    make_interrupt_hundler!(
+    make_device_interrupt_handler!(
         local_apic_timer_handler,
         LocalApicTimer::local_apic_timer_handler
     );
@@ -583,7 +583,7 @@ fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         .set_device_interrupt_function(
             local_apic_timer_handler,
             None,
-            InterruptNumber::LocalApicTimer as u16,
+            InterruptionIndex::LocalApicTimer as u16,
             0,
         );
     local_apic_timer

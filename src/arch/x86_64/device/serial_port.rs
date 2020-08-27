@@ -45,7 +45,7 @@ impl SerialPortManager {
     /// After registering, send the controller to allow IRQ interruption.  
     pub fn init(&self) {
         unsafe {
-            make_interrupt_hundler!(inthandler24, SerialPortManager::inthandler24_main);
+            make_device_interrupt_handler!(inthandler24, SerialPortManager::inthandler24_main);
             get_kernel_manager_cluster()
                 .interrupt_manager
                 .lock()

@@ -1,6 +1,7 @@
-/*
- * Interrupt Manager
- */
+//!
+//! Interrupt Manager
+//!
+//! This manager controls IDT and APIC.
 
 pub mod idt;
 #[macro_use]
@@ -18,6 +19,10 @@ use kernel::memory_manager::MemoryPermissionFlags;
 use core::mem::{size_of, MaybeUninit};
 use kernel::memory_manager::data_type::Address;
 
+/// InterruptManager has no SpinLockFlag, When you use this, be careful of Mutex.
+///
+/// This has io_apic and local_apic handler inner.
+/// This struct may be changed in the future.
 pub struct InterruptManager {
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
     main_selector: u16,
@@ -25,8 +30,11 @@ pub struct InterruptManager {
     local_apic: LocalApicManager, /* temporary */
 }
 
+/// Interruption Number
+///
+/// This enum is used to decide which index the specific device should use.
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum InterruptNumber {
+pub enum InterruptionIndex {
     LocalApicTimer = 0xef,
 }
 
@@ -34,6 +42,11 @@ impl InterruptManager {
     pub const LIMIT_IDT: u16 = 0x100 * (size_of::<idt::GateDescriptor>() as u16) - 1;
     pub const IDT_MAX: u16 = 0xff;
 
+    /// Create InterruptManager with invalid data.
+    ///
+    /// Before use, **you must call [`init`]**.
+    ///
+    /// [`init`]: #method.init
     pub const fn new() -> InterruptManager {
         InterruptManager {
             idt: MaybeUninit::uninit(),
@@ -43,8 +56,13 @@ impl InterruptManager {
         }
     }
 
-    pub fn dummy_handler() {}
-
+    /// Init this manager.
+    ///
+    /// This function alloc page from memory manager and
+    /// fills all of IDT converted from the allocated page with a invalid handler.
+    /// After that, this also init IoApicManager and LocalApicManager.
+    ///
+    /// Currently, this function always returns true.
     pub fn init(&mut self, selector: u16) -> bool {
         self.idt.write(unsafe {
             &mut *(get_kernel_manager_cluster()
@@ -59,7 +77,7 @@ impl InterruptManager {
 
         unsafe {
             for i in 0..Self::IDT_MAX {
-                self.set_gatedec(i, GateDescriptor::new(Self::dummy_handler, 0, 0, 0));
+                self.set_gate_descriptor(i, GateDescriptor::new(Self::dummy_handler, 0, 0, 0));
             }
             self.flush();
         }
@@ -68,6 +86,10 @@ impl InterruptManager {
         return true;
     }
 
+    /// Flush IDT to cpu and apply it.
+    ///
+    /// This function sets the address of IDT into CPU.
+    /// Unless you change the address of IDT, you don't have to call it.
     unsafe fn flush(&self) {
         let idtr = idt::IDTR {
             limit: InterruptManager::LIMIT_IDT,
@@ -76,16 +98,38 @@ impl InterruptManager {
         cpu::lidt(&idtr as *const _ as usize);
     }
 
-    unsafe fn set_gatedec(&mut self, interrupt_num: u16, descr: GateDescriptor) {
-        if interrupt_num < Self::IDT_MAX {
-            self.idt.read()[interrupt_num as usize] = descr;
+    /// Set GateDescriptor into IDT.
+    ///
+    /// This function is used to register interrupt handler.
+    /// This is inner use only.
+    /// if index < Self::IDT_MAX, this function does nothing.
+    unsafe fn set_gate_descriptor(&mut self, index: u16, descriptor: GateDescriptor) {
+        if index < Self::IDT_MAX {
+            self.idt.read()[index as usize] = descriptor;
         }
     }
 
+    /// Return using selector.
     pub fn get_main_selector(&self) -> u16 {
         self.main_selector
     }
 
+    /// Register interrupt handler.
+    ///
+    /// This function sets the function into IDT and
+    /// redirect the target interruption into this CPU (I/O APIC).
+    ///
+    ///  * function: the handler to call when the interruption occurs
+    ///  * irq: if the target device interrupts by irq, set this argument.
+    ///         if this is some(irq), this function will call [`set_redirect`].
+    ///  * index: the index of IDT to connect handler
+    ///  * privilege_level: the ring level to allow interrupt. If you want to allow user interrupt,
+    ///                     set this to 3.
+    ///
+    ///  If index <= 32(means CPU internal exception) or index > 0xFF(means intel reserved area),
+    ///  this function will return false.
+    ///
+    ///  [`set_redirect`]: ../device/io_apic/struct.IoApicManager.html#method.set_redirect
     pub fn set_device_interrupt_function(
         &mut self,
         function: unsafe fn(),
@@ -101,7 +145,7 @@ impl InterruptManager {
         let type_attr: u8 = 0xe | (privilege_level & 0x3) << 5 | 1 << 7;
 
         unsafe {
-            self.set_gatedec(
+            self.set_gate_descriptor(
                 index,
                 GateDescriptor::new(function, self.main_selector, 0, type_attr),
             );
@@ -113,11 +157,21 @@ impl InterruptManager {
         return true;
     }
 
+    /// Send end of interruption to Local APIC.
     pub fn send_eoi(&self) {
         self.local_apic.send_eoi();
     }
 
+    /// Return the reference of LocalApicManager.
+    ///
+    /// Currently, this manager contains LocalApicManager.
+    /// If this structure is changed, this function will be deleted.
     pub fn get_local_apic_manager(&self) -> &LocalApicManager {
         &self.local_apic
     }
+
+    /// Dummy handler to init IDT
+    ///
+    /// This function does nothing.
+    pub fn dummy_handler() {}
 }
