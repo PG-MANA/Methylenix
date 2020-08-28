@@ -27,6 +27,14 @@
 //!                  the this function can take one argument: error code from CPU.
 //!
 
+/// A macro rule to wrap normal handler with save/restore registers.
+///
+/// This macro is used to device interruption.
+///
+///  * handler_name: wrapped function's name. it is used to register into InterruptManager.
+///  * handler_func: handler written in Rust,
+///                  the function made by this macro will call handler_func after save registers.
+///
 #[macro_export]
 macro_rules! make_device_interrupt_handler {
     ($handler_name:ident, $handler_func:path) => {
@@ -48,13 +56,12 @@ macro_rules! make_device_interrupt_handler {
                 push    r13
                 push    r14
                 push    r15
+                fxsave  [rsp]
                 mov     rbp, rsp":::: "intel","volatile");
-            llvm_asm!(
-                "call    $0"
-                ::"X"($handler_func as unsafe fn() as *const unsafe fn())
-                :: "intel","volatile");
+            $handler_func();
             llvm_asm!("    
                 mov     rsp, rbp
+                fxrstor [rsp]
                 pop     r15
                 pop     r14
                 pop     r13
@@ -75,6 +82,15 @@ macro_rules! make_device_interrupt_handler {
     };
 }
 
+/// A macro rule to wrap normal handler with save/restore registers.
+///
+/// This macro is used to exception interruption. the error code will be passed to handler_func.
+///
+///  * handler_name: wrapped function's name. it is used to register into InterruptManager.
+///  * handler_func: handler written in Rust,
+///                  the function made by this macro will call handler_func after save registers.
+///                  the this function can take one argument: error code from CPU.
+///
 #[macro_export]
 macro_rules! make_error_interrupt_handler {
     ($handler_name: ident, $handler_func: path) => {
