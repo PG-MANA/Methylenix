@@ -26,11 +26,11 @@ impl SerialPortManager {
     /// If you want to enable interruption of arriving data, you should call [`init`].
     ///
     /// [`init`]: #method.init
-    pub const fn new(io_port: u16) -> SerialPortManager {
+    pub fn new(io_port: u16) -> SerialPortManager {
         SerialPortManager {
             port: io_port,
             write_lock: SpinLockFlag::new(),
-            fifo: FIFO::new(&0),
+            fifo: FIFO::new(0),
         }
     }
 

@@ -27,8 +27,8 @@ impl TtyManager {
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
-            input_queue: FIFO::new(&0),
-            output_queue: FIFO::new(&0),
+            input_queue: FIFO::new(0),
+            output_queue: FIFO::new(0),
             output_driver: None,
         }
     }
