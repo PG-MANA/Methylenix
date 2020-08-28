@@ -130,6 +130,16 @@ pub unsafe fn invlpg(address: usize) {
     llvm_asm!("invlpg (%rdi)"::"{rdi}"(address):::"volatile");
 }
 
+pub unsafe fn enable_sse() {
+    let mut cr0 = get_cr0();
+    cr0 &= !(1 << 2); /* clear EM */
+    cr0 |= 1 << 1; /* set MP */
+    set_cr0(cr0);
+    let mut cr4 = get_cr4();
+    cr4 |= (1 << 10) | (1 << 9); /*set OSFXSR and OSXMMEXCPT*/
+    set_cr4(cr4);
+}
+
 /// Run ContextData.
 ///
 /// This function is called from ContextManager.

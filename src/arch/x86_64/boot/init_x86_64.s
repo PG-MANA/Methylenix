@@ -31,4 +31,4 @@ init_x86_64:
   jz    multiboot_main      /* at src/arch/x86_64/mod.rs */
   cmp   $BOOT_FROM_DIRECTBOOT_MARK,%rax
   jz    directboot_main     /* at src/arch/x86_64/mod.rs */
-  jmp   unknownboot_main    /* at src/arch/x86_64/mod.rs */
+  jmp   unknown_boot_main    /* at src/arch/x86_64/mod.rs */
