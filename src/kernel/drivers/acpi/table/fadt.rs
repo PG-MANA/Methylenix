@@ -4,9 +4,9 @@
 
 use super::super::INITIAL_MMAP_SIZE;
 
-use kernel::drivers::acpi::acpi_pm_timer::AcpiPmTimer;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::drivers::acpi::acpi_pm_timer::AcpiPmTimer;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
 
 #[repr(C, packed)]
 struct FADT {

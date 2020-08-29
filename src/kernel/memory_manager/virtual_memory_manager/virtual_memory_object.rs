@@ -4,9 +4,9 @@
  */
 
 use super::virtual_memory_page::VirtualMemoryPage;
-use kernel::memory_manager::data_type::MIndex;
-use kernel::ptr_linked_list::PtrLinkedList;
-/*use kernel::sync::spin_lock::Mutex;*/
+use crate::kernel::memory_manager::data_type::MIndex;
+use crate::kernel::ptr_linked_list::PtrLinkedList;
+/*use crate::kernel::sync::spin_lock::Mutex;*/
 
 pub struct VirtualMemoryObject {
     object: VirtualMemoryObjectType,

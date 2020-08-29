@@ -10,15 +10,15 @@ mod thread_entry;
 use self::process_entry::ProcessEntry;
 use self::thread_entry::ThreadEntry;
 
-use arch::target_arch::context::{context_data::ContextData, ContextManager};
+use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::pool_allocator::PoolAllocator;
-use kernel::ptr_linked_list::PtrLinkedList;
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
+use crate::kernel::ptr_linked_list::PtrLinkedList;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
+use crate::kernel::memory_manager::data_type::Address;
 use core::mem;
-use kernel::memory_manager::data_type::Address;
 
 pub struct TaskManager {
     lock: SpinLockFlag,

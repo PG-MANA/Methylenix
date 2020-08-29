@@ -12,13 +12,13 @@ use self::font::FontType;
 use self::frame_buffer_manager::FrameBufferManager;
 use self::text_buffer_driver::TextBufferDriver;
 
-use arch::target_arch::device::vga_text::VgaTextDriver;
+use crate::arch::target_arch::device::vga_text::VgaTextDriver;
 
-use kernel::drivers::multiboot::FrameBufferInfo;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, VAddress};
-use kernel::sync::spin_lock::{Mutex, SpinLockFlag};
-use kernel::tty::Writer;
+use crate::kernel::drivers::multiboot::FrameBufferInfo;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
+use crate::kernel::tty::Writer;
 
 use core::fmt;
 

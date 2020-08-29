@@ -3,11 +3,11 @@
 //!
 //! This manages general serial communication.
 
-use arch::target_arch::device::cpu::{in_byte, out_byte};
+use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 
-use kernel::fifo::FIFO;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::fifo::FIFO;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 /// SerialPortManager
 ///

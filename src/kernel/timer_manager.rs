@@ -13,8 +13,8 @@ pub trait Timer {
     fn get_count(&self) -> usize;
     fn get_frequency_hz(&self) -> usize;
     fn is_count_up_timer(&self) -> bool;
-    fn get_difference(&self, usize /*earlier*/, usize /*later*/) -> usize;
-    fn get_ending_count_value(&self, usize /*start*/, usize /*difference*/) -> usize;
+    fn get_difference(&self, earlier: usize, later: usize) -> usize;
+    fn get_ending_count_value(&self, start: usize, difference: usize) -> usize;
     fn get_max_counter_value(&self) -> usize;
     /*fn get_interval_ms(&self) -> usize;*/
     #[inline(always)]

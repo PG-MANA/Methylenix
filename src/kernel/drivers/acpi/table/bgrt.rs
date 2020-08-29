@@ -4,8 +4,8 @@
 
 use super::super::INITIAL_MMAP_SIZE;
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, PAddress, VAddress};
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
 
 #[repr(C, packed)]
 struct BGRT {

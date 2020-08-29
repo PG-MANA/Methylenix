@@ -4,7 +4,7 @@
 //! Use APIC instead.
 //!
 
-use arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::cpu;
 
 const PIC0_IMR: u16 = 0x0021;
 const PIC1_IMR: u16 = 0x00a1;

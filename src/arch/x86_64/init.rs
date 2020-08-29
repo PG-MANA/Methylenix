@@ -5,18 +5,18 @@
 //! This module is called by boot function.
 
 pub mod multiboot;
-use arch::target_arch::context::ContextManager;
-use arch::target_arch::device::local_apic_timer::LocalApicTimer;
-use arch::target_arch::device::pit::PitManager;
-use arch::target_arch::device::{cpu, pic};
-use arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
-use arch::target_arch::paging::PAGE_SIZE;
+use crate::arch::target_arch::context::ContextManager;
+use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
+use crate::arch::target_arch::device::pit::PitManager;
+use crate::arch::target_arch::device::{cpu, pic};
+use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
+use crate::arch::target_arch::paging::PAGE_SIZE;
 
-use kernel::drivers::acpi::AcpiManager;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, MSize};
-use kernel::sync::spin_lock::Mutex;
-use kernel::task_manager::TaskManager;
+use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::sync::spin_lock::Mutex;
+use crate::kernel::task_manager::TaskManager;
 
 /// Memory Areas for PhysicalMemoryManager
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];

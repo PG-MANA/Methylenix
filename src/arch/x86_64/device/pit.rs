@@ -5,10 +5,10 @@
 //! The frequency is 1.19318MHz.
 //! This timer is used to sync Local APIC Timer.
 
-use arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::cpu;
 
-use kernel::sync::spin_lock::SpinLockFlag;
-use kernel::timer_manager::Timer;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::timer_manager::Timer;
 
 /// PitManager
 ///

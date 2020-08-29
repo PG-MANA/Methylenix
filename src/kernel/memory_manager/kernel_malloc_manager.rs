@@ -3,12 +3,12 @@
  * This manager is the frontend of memory allocation for structs and small size areas.
  */
 
-use arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 
-use kernel::memory_manager::data_type::{Address, MOrder, MSize, VAddress};
-use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
-use kernel::sync::spin_lock::Mutex;
+use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, VAddress};
+use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use crate::kernel::memory_manager::{MemoryManager, MemoryPermissionFlags};
+use crate::kernel::sync::spin_lock::Mutex;
 
 use core::mem;
 use core::mem::MaybeUninit;

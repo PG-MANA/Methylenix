@@ -2,12 +2,12 @@
  * Virtual Memory Entry Chain
  */
 
-use kernel::memory_manager::data_type::{Address, MOffset, VAddress};
-use kernel::memory_manager::virtual_memory_manager::virtual_memory_object::VirtualMemoryObject;
-use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{Address, MOffset, VAddress};
+use crate::kernel::memory_manager::virtual_memory_manager::virtual_memory_object::VirtualMemoryObject;
+use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
-use kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::mem;
 

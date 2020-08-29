@@ -10,12 +10,12 @@
 //! which is invariant.
 //! Except TSC-Deadline mode, we must check frequency of it by PIT or ACPI PM Timer.    
 
-use arch::target_arch::device::cpu::{cpuid, rdmsr, wrmsr};
-use arch::target_arch::device::local_apic::{LocalApicManager, LocalApicRegisters};
+use crate::arch::target_arch::device::cpu::{cpuid, rdmsr, wrmsr};
+use crate::arch::target_arch::device::local_apic::{LocalApicManager, LocalApicRegisters};
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::sync::spin_lock::SpinLockFlag;
-use kernel::timer_manager::Timer;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::timer_manager::Timer;
 
 use core::sync::atomic::{fence, Ordering};
 

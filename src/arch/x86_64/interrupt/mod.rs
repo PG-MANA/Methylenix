@@ -9,15 +9,15 @@ pub mod handler;
 //mod tss;
 
 use self::idt::GateDescriptor;
-use arch::target_arch::device::cpu;
-use arch::target_arch::device::io_apic::IoApicManager;
-use arch::target_arch::device::local_apic::LocalApicManager;
+use crate::arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::io_apic::IoApicManager;
+use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::MemoryPermissionFlags;
 
+use crate::kernel::memory_manager::data_type::Address;
 use core::mem::{size_of, MaybeUninit};
-use kernel::memory_manager::data_type::Address;
 
 /// InterruptManager has no SpinLockFlag, When you use this, be careful of Mutex.
 ///

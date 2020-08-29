@@ -5,10 +5,10 @@
  * if you want to use graphic normally, make other system like wayland.
  */
 
-use kernel::drivers::multiboot::FrameBufferInfo;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::Address;
-use kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::drivers::multiboot::FrameBufferInfo;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::Address;
+use crate::kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct FrameBufferManager {
     frame_buffer_address: usize,

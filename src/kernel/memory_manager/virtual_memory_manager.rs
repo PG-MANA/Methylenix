@@ -20,12 +20,12 @@ use super::pool_allocator::PoolAllocator;
 use super::MemoryError;
 use super::{MemoryOptionFlags, MemoryPermissionFlags};
 
-use arch::target_arch::paging::{PageManager, PagingError};
-use arch::target_arch::paging::{
+use crate::arch::target_arch::paging::{PageManager, PagingError};
+use crate::arch::target_arch::paging::{
     MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGING_CACHE_LENGTH,
 };
 
-use kernel::ptr_linked_list::PtrLinkedList;
+use crate::kernel::ptr_linked_list::PtrLinkedList;
 
 pub struct VirtualMemoryManager {
     vm_map_entry: PtrLinkedList<VirtualMemoryEntry>,

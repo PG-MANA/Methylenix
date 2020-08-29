@@ -4,11 +4,11 @@
 //! To read/write local apic register
 //!
 
-use arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::cpu;
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, PAddress, VAddress};
-use kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
+use crate::kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct LocalApicManager {
     apic_id: u32,

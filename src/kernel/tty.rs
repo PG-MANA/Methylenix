@@ -2,9 +2,9 @@
  * TTY Manager
  */
 
-use kernel::fifo::FIFO;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::fifo::FIFO;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::fmt;
 use core::mem::MaybeUninit;

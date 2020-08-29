@@ -17,14 +17,14 @@ use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::{init_acpi, init_interrupt, init_task, init_timer};
 
-use kernel::drivers::acpi::AcpiManager;
-use kernel::drivers::multiboot::MultiBootInformation;
-use kernel::graphic_manager::GraphicManager;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::multiboot::MultiBootInformation;
+use crate::kernel::graphic_manager::GraphicManager;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, MSize};
 
-use kernel::memory_manager::MemoryPermissionFlags;
-use kernel::tty::TtyManager;
+use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::tty::TtyManager;
 
 static mut LOCAL_APIC_TIMER: LocalApicTimer = LocalApicTimer::new();
 static mut ACPI_MANAGER: Option<AcpiManager> = None;
