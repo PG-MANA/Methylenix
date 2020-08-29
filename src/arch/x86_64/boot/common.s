@@ -23,14 +23,15 @@
 /* PML4 (8byte * 512[1 entry is used]) */
 .comm pml4, 0x1000, 0x1000
 
+/* OS STACK */
+.comm os_stack, OS_STACK_SIZE, 0x1000
+
 /* INITAL STACK (This stack is used until jump to the rust code.) */
-.comm initial_stack, INITIAL_STACK_SIZE, 8
+.comm initial_stack, INITIAL_STACK_SIZE, 0x1000
 
 /* TSS STACK */
 .comm tss_stack, TSS_STACK_SIZE, 8
 
-/* OS STACK */
-.comm os_stack, OS_STACK_SIZE, 8
 
 .section .data
 

@@ -9,8 +9,8 @@ license = "Apache-2.0"
 edition = "2018"
 
 [profile.release]
-lto = true
-opt-level = 3
+#lto = true
+#opt-level = 1
 
 [lib]
 crate-type = ["staticlib"]

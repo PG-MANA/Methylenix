@@ -71,6 +71,10 @@ impl SerialPortManager {
             return;
         }
         let _lock = self.write_lock.lock();
+        self._send(data);
+    }
+
+    fn _send(&self, data: u8) {
         let mut timeout: usize = 0xFF;
         while timeout > 0 {
             if self.is_completed_transmitter() {
@@ -90,11 +94,15 @@ impl SerialPortManager {
     ///
     /// [`send`]: #method.send
     pub fn sendstr(&self, s: &str) {
+        if self.port == 0 {
+            return;
+        }
+        let _lock = self.write_lock.lock();
         for c in s.bytes() {
             if c as char == '\n' {
-                self.send('\r' as u8);
+                self._send('\r' as u8);
             }
-            self.send(c);
+            self._send(c);
         }
     }
 
