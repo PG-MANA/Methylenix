@@ -56,12 +56,14 @@ macro_rules! make_device_interrupt_handler {
                 push    r13
                 push    r14
                 push    r15
+                sub     rsp, 512
                 fxsave  [rsp]
                 mov     rbp, rsp":::: "intel","volatile");
             $handler_func();
             llvm_asm!("    
                 mov     rsp, rbp
                 fxrstor [rsp]
+                add     rsp, 512
                 pop     r15
                 pop     r14
                 pop     r13
