@@ -150,12 +150,13 @@ pub fn init_memory_by_multiboot_information(
             &mutex_memory_manager,
         )
         .expect("Cannot alloc memory for Multiboot Information.");
-    for i in 0..multiboot_information.size {
-        unsafe {
-            *((new_mbi_address + MSize::from(i)).to_usize() as *mut u8) =
-                *((multiboot_information.address + i) as *mut u8);
-        }
-    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            multiboot_information.address as *const u8,
+            new_mbi_address.to_usize() as *mut u8,
+            multiboot_information.size,
+        )
+    };
 
     /* free old MultiBootInformation area */
     mutex_memory_manager.lock().unwrap().free_physical_memory(
