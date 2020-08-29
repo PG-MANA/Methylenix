@@ -10,7 +10,7 @@ use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 use crate::kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
@@ -93,40 +93,35 @@ pub fn init_memory_by_multiboot_information(
     /* set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
     virtual_memory_manager.init(true, &mut physical_memory_manager);
-
     for section in multiboot_information.elf_info.clone() {
         if !section.should_allocate() || section.align_size() != PAGE_SIZE {
             continue;
         }
+        assert_eq!(!PAGE_MASK & section.addr(), 0);
+        let aligned_size = ((section.size() + section.addr() - 1) & PAGE_MASK) + PAGE_SIZE;
         let permission = MemoryPermissionFlags::new(
             true,
             section.should_writable(),
             section.should_excusable(),
             false,
         );
-        let aligned_start_address = PAddress::from(section.addr() & PAGE_MASK);
-        let aligned_size = MSize::from(
-            ((section.size() + (section.addr() - aligned_start_address.to_usize()) - 1)
-                & PAGE_MASK)
-                + PAGE_SIZE,
-        );
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
         match virtual_memory_manager.map_address(
-            aligned_start_address,
-            Some(aligned_start_address.to_direct_mapped_v_address()),
-            aligned_size,
+            PAddress::from(section.addr()),
+            Some(VAddress::from(section.addr())),
+            aligned_size.into(),
             permission,
             MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             &mut physical_memory_manager,
         ) {
             Ok(address) => {
-                if address == aligned_start_address.to_direct_mapped_v_address() {
+                if address == section.addr().into() {
                     continue;
                 }
                 pr_err!(
                     "Virtual Address is different from Physical Address.\nV:{:#X} P:{:#X}",
                     address.to_usize(),
-                    aligned_start_address.to_usize()
+                    section.addr()
                 );
             }
             Err(e) => {

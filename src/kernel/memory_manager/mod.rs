@@ -92,7 +92,7 @@ impl MemoryManager {
     ) -> Result<VAddress, MemoryError> {
         /* ADD: lazy allocation */
         /* return physically continuous 2 ^ order pages memory. */
-        let size = order.to_offset();
+        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT.into()) {
             match self.virtual_memory_manager.alloc_address(
@@ -122,7 +122,7 @@ impl MemoryManager {
     ) -> Result<VAddress, MemoryError> {
         /* THINK: rename*/
         /* vmalloc */
-        let size = order.to_offset();
+        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
         if size <= MSize::from(PAGE_SIZE) {
             return self.alloc_pages(order, permission);
         }

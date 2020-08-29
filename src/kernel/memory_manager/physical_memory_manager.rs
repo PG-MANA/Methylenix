@@ -455,10 +455,22 @@ impl PhysicalMemoryManager {
         if address.is_zero() {
             (PAddress::new(0), size)
         } else {
+            /* THINKING: Better algorithm */
             let align_size = align_order.to_offset().to_usize();
             let mask = !(align_size - 1);
-            let aligned_address = (address.to_usize() - 1) & mask + align_size;
-            let aligned_available_size = size.to_usize() - (aligned_address - address.to_usize());
+            let mut aligned_address = ((address.to_usize() - 1) & mask) + align_size;
+            let mut aligned_available_size = if aligned_address >= address.to_usize() {
+                size.to_usize() - (aligned_address - address.to_usize())
+            } else {
+                size.to_usize() + (address.to_usize() - aligned_address)
+            };
+            while aligned_address < address.to_usize() {
+                if aligned_available_size < align_size {
+                    return (aligned_address.into(), 0.into());
+                }
+                aligned_address += align_size;
+                aligned_available_size -= align_size;
+            }
             (
                 PAddress::new(aligned_address),
                 MSize::new(aligned_available_size),

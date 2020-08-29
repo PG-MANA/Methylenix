@@ -3,7 +3,7 @@
  * This manager is the frontend of memory allocation for structs and small size areas.
  */
 
-use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, VAddress};
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
@@ -30,7 +30,7 @@ impl KernelMemoryAllocManager {
     }
 
     pub fn init(&mut self, m_manager: &mut MemoryManager) -> bool {
-        match m_manager.alloc_pages(1.into(), MemoryPermissionFlags::data()) {
+        match m_manager.alloc_pages(0.into(), MemoryPermissionFlags::data()) {
             Ok(pool_address) => {
                 self.alloc_manager
                     .set_memory_entry_pool(pool_address.to_usize(), PAGE_SIZE);
@@ -40,7 +40,7 @@ impl KernelMemoryAllocManager {
                 return false;
             }
         };
-        match m_manager.alloc_pages(1.into(), MemoryPermissionFlags::data()) {
+        match m_manager.alloc_pages(0.into(), MemoryPermissionFlags::data()) {
             Ok(address) => unsafe {
                 self.used_memory_list.write(
                     &mut *(address.to_usize()
@@ -71,9 +71,10 @@ impl KernelMemoryAllocManager {
         }
         if size >= PAGE_SIZE.into() {
             let mut locked_m_manager = m_manager.lock().unwrap();
-            return match locked_m_manager
-                .alloc_pages(size.to_order(None), MemoryPermissionFlags::data())
-            {
+            return match locked_m_manager.alloc_pages(
+                (size >> MSize::from(PAGE_SHIFT)).to_order(None),
+                MemoryPermissionFlags::data(),
+            ) {
                 Ok(address) => {
                     let aligned_size =
                         MSize::from(((size - MSize::from(1)) & PAGE_MASK) + PAGE_SIZE);
@@ -129,11 +130,10 @@ impl KernelMemoryAllocManager {
             return self.kmalloc(size, align_order, m_manager);
         }
 
-        match m_manager
-            .lock()
-            .unwrap()
-            .alloc_nonlinear_pages(size.to_order(None), MemoryPermissionFlags::data())
-        {
+        match m_manager.lock().unwrap().alloc_nonlinear_pages(
+            (size >> MSize::from(PAGE_SHIFT)).to_order(None),
+            MemoryPermissionFlags::data(),
+        ) {
             Ok(address) => {
                 if self.add_entry_to_used_list(address, size) {
                     Some(address)

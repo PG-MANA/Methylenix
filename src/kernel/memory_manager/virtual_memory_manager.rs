@@ -309,8 +309,9 @@ impl VirtualMemoryManager {
             return Err(MemoryError::SizeNotAligned);
         }
         let vm_start_address = if self.check_usable_address_range(
-            physical_address.to_usize().into(),
-            physical_address.to_usize().into(),
+            physical_address.to_direct_mapped_v_address(),
+            size.to_end_address(physical_address)
+                .to_direct_mapped_v_address(),
         ) {
             VAddress::from(physical_address.to_usize())
         } else if let Some(address) = self.find_usable_memory_area(size) {
