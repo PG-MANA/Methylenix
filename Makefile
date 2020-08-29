@@ -8,6 +8,7 @@ ifeq ($(strip $(TARGET_ARCH)),)
     TARGET_ARCH = x86_64
 endif
 RUST_TARGET = $(TARGET_ARCH)-unknown-none
+RUST_TARGET_JSON = config/$(TARGET_ARCH)/$(RUST_TARGET).json
 
 ##ディレクトリ
 SRC = src/
@@ -71,6 +72,6 @@ kernel.elf : $(BOOT_SYS_LIST)
 	$(LD) -o $(MAKE_BINDIR)kernel.elf $(BOOT_SYS_LIST)
 
 $(RUST_OBJ) :  .FORCE
-	$(CARGO) xbuild --release --target $(RUST_TARGET_FILE_FOLDER) $(RUST_TARGET)
+	$(CARGO) xbuild --release --target $(RUST_TARGET_JSON)
 
 .FORCE:
