@@ -49,8 +49,7 @@ impl ContextData {
     /// Check if the size of Registers was changed.
     /// if you changed, you must review assembly code like context_switch and fix this function.
     const fn check_struct_size() {
-        use core::mem;
-        if mem::size_of::<Registers>() != 23 * mem::size_of::<usize>() {
+        if core::mem::size_of::<Registers>() != 23 * core::mem::size_of::<usize>() {
             panic!("GeneralRegisters was changed.\nYou must check task_switch function.");
         }
     }

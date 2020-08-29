@@ -5,7 +5,7 @@
 //! All functions are unsafe, please be careful.  
 //!
 
-use arch::target_arch::context::context_data::ContextData;
+use crate::arch::target_arch::context::context_data::ContextData;
 
 #[inline(always)]
 pub unsafe fn sti() {

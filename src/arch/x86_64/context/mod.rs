@@ -8,9 +8,8 @@
 pub mod context_data;
 
 use self::context_data::ContextData;
-use arch::target_arch::device::cpu;
 
-use core::mem;
+use crate::arch::target_arch::device::cpu;
 
 /// This manager contains system/user stack/code segment pointer.
 pub struct ContextManager {
@@ -69,7 +68,7 @@ impl ContextManager {
     /// This is used when OS starts task management system.
     /// ContextData must be aligned by 64bit
     pub unsafe fn jump_to_context(&self, context: &mut ContextData) {
-        assert_eq!(mem::align_of_val(context), 64);
+        assert_eq!(core::mem::align_of_val(context), 64);
         cpu::run_task(context as *mut _);
     }
 
@@ -82,8 +81,8 @@ impl ContextManager {
         old_context: &mut ContextData,
         next_context: &mut ContextData,
     ) {
-        assert_eq!(mem::align_of_val(old_context), 64);
-        assert_eq!(mem::align_of_val(next_context), 64);
+        assert_eq!(core::mem::align_of_val(old_context), 64);
+        assert_eq!(core::mem::align_of_val(next_context), 64);
         cpu::task_switch(next_context as *mut _, old_context as *mut _);
     }
 }

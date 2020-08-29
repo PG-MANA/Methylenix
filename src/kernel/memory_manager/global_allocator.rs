@@ -3,12 +3,12 @@
  * allocator for core::alloc::GlobalAlloc
  */
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 
-use arch::target_arch::paging::PAGE_SHIFT;
+use crate::arch::target_arch::paging::PAGE_SHIFT;
 
+use crate::kernel::memory_manager::data_type::Address;
 use core::alloc::{GlobalAlloc, Layout};
-use kernel::memory_manager::data_type::Address;
 
 pub struct GlobalAllocator;
 

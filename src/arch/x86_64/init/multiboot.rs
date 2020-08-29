@@ -5,17 +5,19 @@
 
 use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
-use arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
-use kernel::drivers::multiboot::MultiBootInformation;
-use kernel::graphic_manager::font::FontType;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, MSize, PAddress};
-use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
-use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
-use kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags, SystemMemoryManager};
-use kernel::sync::spin_lock::Mutex;
+use crate::kernel::drivers::multiboot::MultiBootInformation;
+use crate::kernel::graphic_manager::font::FontType;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress};
+use crate::kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
+use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
+use crate::kernel::memory_manager::{
+    MemoryOptionFlags, MemoryPermissionFlags, SystemMemoryManager,
+};
+use crate::kernel::sync::spin_lock::Mutex;
 
 use core::mem;
 

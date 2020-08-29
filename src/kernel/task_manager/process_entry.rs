@@ -5,9 +5,9 @@
 
 use super::{TaskSignal, TaskStatus, ThreadEntry};
 
-use kernel::memory_manager::MemoryManager;
-use kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::memory_manager::MemoryManager;
+use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::ptr::NonNull;
 

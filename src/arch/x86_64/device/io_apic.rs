@@ -6,11 +6,11 @@
 //! It is used to set redirect to each cpu.
 //!
 
-use arch::target_arch::paging::PAGE_SIZE;
+use crate::arch::target_arch::paging::PAGE_SIZE;
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, VAddress};
-use kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct IoApicManager {
     base_address: VAddress,

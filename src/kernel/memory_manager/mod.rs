@@ -15,9 +15,9 @@ use self::data_type::{Address, MOrder, MSize, PAddress, VAddress};
 use self::physical_memory_manager::PhysicalMemoryManager;
 use self::virtual_memory_manager::VirtualMemoryManager;
 
-use arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
-use kernel::sync::spin_lock::Mutex;
+use crate::kernel::sync::spin_lock::Mutex;
 
 pub struct MemoryManager {
     physical_memory_manager: &'static Mutex<PhysicalMemoryManager>,

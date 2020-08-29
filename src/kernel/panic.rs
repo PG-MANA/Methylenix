@@ -2,9 +2,9 @@
  * Panic Handler
  */
 
-use arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::cpu;
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 
 use core::panic;
 

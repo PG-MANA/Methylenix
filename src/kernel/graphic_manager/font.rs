@@ -8,7 +8,7 @@ pub mod pff2;
 
 use self::pff2::Pff2FontManager;
 
-use kernel::memory_manager::data_type::VAddress;
+use crate::kernel::memory_manager::data_type::VAddress;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct BitmapFontData {

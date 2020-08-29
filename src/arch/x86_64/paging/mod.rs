@@ -18,11 +18,11 @@ use self::pml4e::{PML4E, PML4_MAX_ENTRY};
 use self::pte::{PTE, PT_MAX_ENTRY};
 use self::PagingError::MemoryCacheRanOut;
 
-use arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::cpu;
 
-//use kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use kernel::memory_manager::data_type::Address;
-use kernel::memory_manager::{
+//use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use crate::kernel::memory_manager::data_type::Address;
+use crate::kernel::memory_manager::{
     data_type::MSize, data_type::PAddress, data_type::VAddress, pool_allocator::PoolAllocator,
     MemoryPermissionFlags,
 };

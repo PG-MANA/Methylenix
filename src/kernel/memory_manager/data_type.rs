@@ -3,7 +3,7 @@
  * basic data type for Memory Manager
  */
 
-use arch::target_arch::paging::PAGE_SHIFT;
+use crate::arch::target_arch::paging::PAGE_SHIFT;
 
 use core::convert::{From, Into};
 use core::iter::Step;

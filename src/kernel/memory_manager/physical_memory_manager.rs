@@ -4,9 +4,9 @@
  */
 /*WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている*/
 
-use arch::target_arch::paging::PAGE_SHIFT;
+use crate::arch::target_arch::paging::PAGE_SHIFT;
 
-use kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress};
+use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress};
 
 use core::mem;
 
