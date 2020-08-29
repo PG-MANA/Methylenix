@@ -20,8 +20,8 @@ pub struct ContextManager {
 }
 
 impl ContextManager {
-    pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x1000;
-    pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x400;
+    pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x4000;
+    pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x1000;
     pub const STACK_ALIGN_ORDER: usize = 6; /*size = 2^6 = 64*/
 
     /// Create Context Manager with invalid data.
