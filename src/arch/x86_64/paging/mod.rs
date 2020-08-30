@@ -596,8 +596,8 @@ impl PageManager {
         let mut permission = (false /* writable */, false /* no_execute */);
         let mut omitted = false;
         let mut last_address = (
-            0usize, /* virtual address */
-            0usize, /* physical address */
+            VAddress::from(0), /* virtual address */
+            PAddress::from(0), /* physical address */
         );
 
         let pml4_table = unsafe { &*(self.pml4.to_usize() as *const [PML4E; PML4_MAX_ENTRY]) };
@@ -615,18 +615,22 @@ impl PageManager {
                 if pdpte.is_huge() {
                     let linear_address = VAddress::from(0x40000000 * pdpte_count);
 
-                    if last_address.0 + 0x40000000 == linear_address.to_usize()
-                        && last_address.1 + 0x40000000 == pdpte.get_address().unwrap().to_usize()
+                    if last_address.0 + MSize::from(0x40000000) == linear_address
+                        && last_address.1 + MSize::from(0x40000000) == pdpte.get_address().unwrap()
                         && permission.0 == pdpte.is_writable()
                         && permission.1 == pdpte.is_no_execute()
                     {
-                        last_address.0 += 0x40000000;
-                        last_address.1 += 0x40000000;
+                        last_address.0 = linear_address;
+                        last_address.1 = pdpte.get_address().unwrap();
                         omitted = true;
                         continue;
                     }
                     if omitted {
-                        kprintln!(" ~{:#X}: {:#X}", last_address.0, last_address.1);
+                        kprintln!(
+                            " ~{:#X}: {:#X}",
+                            last_address.0.to_usize(),
+                            last_address.1.to_usize()
+                        );
                         omitted = false;
                     }
                     kprintln!(
@@ -640,8 +644,8 @@ impl PageManager {
                     if end.is_some() && linear_address >= end.unwrap() {
                         return;
                     }
-                    last_address.0 = linear_address.to_usize();
-                    last_address.1 = pdpte.get_address().unwrap().to_usize();
+                    last_address.0 = linear_address;
+                    last_address.1 = pdpte.get_address().unwrap();
                     permission = (pdpte.is_writable(), pdpte.is_no_execute());
                     continue;
                 }
@@ -656,18 +660,22 @@ impl PageManager {
                         let linear_address =
                             VAddress::from(0x40000000 * pdpte_count + 0x200000 * pde_count);
 
-                        if last_address.0 + 0x200000 == linear_address.to_usize()
-                            && last_address.1 + 0x200000 == pdpte.get_address().unwrap().to_usize()
-                            && permission.0 == pdpte.is_writable()
-                            && permission.1 == pdpte.is_no_execute()
+                        if last_address.0 + MSize::from(0x200000) == linear_address
+                            && last_address.1 + MSize::from(0x200000) == pde.get_address().unwrap()
+                            && permission.0 == pde.is_writable()
+                            && permission.1 == pde.is_no_execute()
                         {
-                            last_address.0 += 0x200000;
-                            last_address.1 += 0x200000;
+                            last_address.0 = linear_address;
+                            last_address.1 = pde.get_address().unwrap();
                             omitted = true;
                             continue;
                         }
                         if omitted {
-                            kprintln!(" ~{:#X}: {:#X}", last_address.0, last_address.1);
+                            kprintln!(
+                                " ~{:#X}: {:#X}",
+                                last_address.0.to_usize(),
+                                last_address.1.to_usize()
+                            );
                             omitted = false;
                         }
                         kprintln!(
@@ -681,9 +689,9 @@ impl PageManager {
                         if end.is_some() && linear_address >= end.unwrap() {
                             return;
                         }
-                        last_address.0 = linear_address.to_usize();
-                        last_address.1 = pdpte.get_address().unwrap().to_usize();
-                        permission = (pdpte.is_writable(), pdpte.is_no_execute());
+                        last_address.0 = linear_address;
+                        last_address.1 = pde.get_address().unwrap();
+                        permission = (pde.is_writable(), pde.is_no_execute());
                         continue;
                     }
                     let pt = unsafe {
@@ -696,18 +704,22 @@ impl PageManager {
                         let linear_address = VAddress::from(
                             0x40000000 * pdpte_count + 0x200000 * pde_count + 0x1000 * pte_count,
                         );
-                        if last_address.0 + 0x1000 == linear_address.to_usize()
-                            && last_address.1 + 0x1000 == pdpte.get_address().unwrap().to_usize()
-                            && permission.0 == pdpte.is_writable()
-                            && permission.1 == pdpte.is_no_execute()
+                        if last_address.0 + MSize::from(0x1000) == linear_address
+                            && last_address.1 + MSize::from(0x1000) == pte.get_address().unwrap()
+                            && permission.0 == pte.is_writable()
+                            && permission.1 == pte.is_no_execute()
                         {
-                            last_address.0 += 0x1000;
-                            last_address.1 += 0x1000;
+                            last_address.0 = linear_address;
+                            last_address.1 = pte.get_address().unwrap();
                             omitted = true;
                             continue;
                         }
                         if omitted {
-                            kprintln!(" ~{:#X}: {:#X}", last_address.0, last_address.1);
+                            kprintln!(
+                                " ~ {:#X}: {:#X}",
+                                last_address.0.to_usize(),
+                                last_address.1.to_usize()
+                            );
                             omitted = false;
                         }
                         kprintln!(
@@ -721,9 +733,9 @@ impl PageManager {
                         if end.is_some() && linear_address >= end.unwrap() {
                             return;
                         }
-                        last_address.0 = linear_address.to_usize();
-                        last_address.1 = pdpte.get_address().unwrap().to_usize();
-                        permission = (pdpte.is_writable(), pdpte.is_no_execute());
+                        last_address.0 = linear_address;
+                        last_address.1 = pte.get_address().unwrap();
+                        permission = (pte.is_writable(), pte.is_no_execute());
                     }
                 }
             }
