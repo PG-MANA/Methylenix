@@ -44,10 +44,11 @@ pub extern "C" fn multiboot_main(
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
     /* Graphic & TTY 初期化（Panicが起きたときの表示のため) */
-    let mut graphic_manager = GraphicManager::new();
-    graphic_manager.init(&multiboot_information.framebuffer_info);
-    graphic_manager.clear_screen();
-    get_kernel_manager_cluster().graphic_manager = graphic_manager;
+    get_kernel_manager_cluster().graphic_manager = GraphicManager::new();
+    get_kernel_manager_cluster()
+        .graphic_manager
+        .init(&multiboot_information.framebuffer_info);
+    get_kernel_manager_cluster().graphic_manager.clear_screen();
     get_kernel_manager_cluster().kernel_tty_manager = TtyManager::new();
     get_kernel_manager_cluster()
         .kernel_tty_manager
