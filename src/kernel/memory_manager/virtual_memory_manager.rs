@@ -1131,6 +1131,7 @@ impl VirtualMemoryManager {
             if next.is_none() {
                 break;
             }
+            kprintln!(""); // \n
             entry = next.unwrap();
         }
         kprintln!("----Page Manager----");
