@@ -6,7 +6,7 @@
 use super::PagingEntry;
 use super::PAGE_MASK;
 
-use crate::kernel::memory_manager::data_type::{Address, PAddress};
+use crate::kernel::memory_manager::data_type::PAddress;
 
 pub const PML4_MAX_ENTRY: usize = 512;
 
