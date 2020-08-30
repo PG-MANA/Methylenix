@@ -98,7 +98,7 @@ pub fn init_memory_by_multiboot_information(
             continue;
         }
         assert_eq!(!PAGE_MASK & section.addr(), 0);
-        let aligned_size = ((section.size() + section.addr() - 1) & PAGE_MASK) + PAGE_SIZE;
+        let aligned_size = ((section.size() - 1) & PAGE_MASK) + PAGE_SIZE;
         let permission = MemoryPermissionFlags::new(
             true,
             section.should_writable(),
