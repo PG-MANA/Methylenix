@@ -1079,14 +1079,53 @@ impl VirtualMemoryManager {
             let last_p_index = MIndex::from_offset(
                 entry.get_vm_end_address() - entry.get_vm_start_address() + entry.get_offset(),
             ) + MIndex::from(1);
+
+            let mut omitted = false;
+            let mut last_is_not_found = false;
+            let mut last_address = PAddress::from(0);
+
             for i in first_p_index..last_p_index {
                 if let Some(p) = entry.get_object().get_vm_page(i) {
+                    if last_is_not_found {
+                        kprintln!("...\n - {} Not Found", i.to_usize() - 1);
+                        last_is_not_found = false;
+                    }
+                    if last_address + MSize::from(PAGE_SIZE) == p.get_physical_address()
+                        && p.get_physical_address().to_usize() != PAGE_SIZE
+                    {
+                        omitted = true;
+                        last_address += MSize::from(PAGE_SIZE);
+                        continue;
+                    } else if omitted {
+                        kprintln!(
+                            "...\n - {} Physical Address:{:#X}",
+                            i.to_usize() - 1,
+                            last_address.to_usize()
+                        );
+                        omitted = false;
+                    }
                     kprintln!(
-                        " -{} Physical Address:{:#X}",
+                        " - {} Physical Address:{:#X}",
                         i.to_usize(),
                         p.get_physical_address().to_usize()
                     );
+                    last_address = p.get_physical_address()
+                } else {
+                    if !last_is_not_found {
+                        kprintln!(" - {} Not Found", i.to_usize());
+                        last_is_not_found = true;
+                        last_address = PAddress::from(0);
+                    }
                 }
+            }
+            if last_is_not_found {
+                kprintln!("...\n - {} Not Found(fin)", last_p_index.to_usize() - 1);
+            } else if omitted {
+                kprintln!(
+                    "...\n - {} Physical Address:{:#X} (fin)",
+                    last_p_index.to_usize() - 1,
+                    last_address.to_usize()
+                );
             }
             let next = entry.get_next_entry();
             if next.is_none() {
