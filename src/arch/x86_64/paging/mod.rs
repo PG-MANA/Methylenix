@@ -138,8 +138,8 @@ impl PageManager {
 
         let pml4_table = unsafe { &mut *(self.pml4.to_usize() as *mut [PML4E; PML4_MAX_ENTRY]) };
 
-        let number_of_pml4e = (linear_address.to_usize() >> (4 * 3) + 9 * 3) & (0x1FF);
-        let number_of_pdpte = (linear_address.to_usize() >> (4 * 3) + 9 * 2) & (0x1FF);
+        let number_of_pml4e = (linear_address.to_usize() >> ((4 * 3) + 9 * 3)) & (0x1FF);
+        let number_of_pdpte = (linear_address.to_usize() >> ((4 * 3) + 9 * 2)) & (0x1FF);
 
         if !pml4_table[number_of_pml4e].is_address_set() {
             if !should_create_entry {
@@ -184,7 +184,7 @@ impl PageManager {
         should_create_entry: bool,
         pdpte: Option<&'static mut PDPTE>,
     ) -> Result<&'static mut PDE, PagingError> {
-        let number_of_pde = (linear_address.to_usize() >> (4 * 3) + 9 * 1) & (0x1FF);
+        let number_of_pde = (linear_address.to_usize() >> ((4 * 3) + 9 * 1)) & (0x1FF);
 
         let pdpte = pdpte.unwrap_or(self.get_target_pdpte(
             cache_memory_list,
@@ -229,7 +229,7 @@ impl PageManager {
         should_create_entry: bool,
         pde: Option<&'static mut PDE>,
     ) -> Result<&'static mut PTE, PagingError> {
-        let number_of_pte = (linear_address.to_usize() >> (4 * 3) + 9 * 0) & (0x1FF);
+        let number_of_pte = (linear_address.to_usize() >> ((4 * 3) + 9 * 0)) & (0x1FF);
 
         let pde = pde.unwrap_or(self.get_target_pde(
             cache_memory_list,
@@ -368,11 +368,13 @@ impl PageManager {
         while processed_size <= size {
             let processing_linear_address = linear_address + processed_size;
             let processing_physical_address = physical_address + processed_size;
-            let number_of_pde = (processing_linear_address.to_usize() >> (4 * 3) + 9 * 1) & (0x1FF);
-            let number_of_pte = (processing_linear_address.to_usize() >> (4 * 3) + 9 * 0) & (0x1FF);
+            let number_of_pde =
+                (processing_linear_address.to_usize() >> ((4 * 3) + 9 * 1)) & (0x1FF);
+            let number_of_pte =
+                (processing_linear_address.to_usize() >> ((4 * 3) + 9 * 0)) & (0x1FF);
 
-            if number_of_pte == 0
-                && number_of_pde == 0
+            if number_of_pde == 0
+                && number_of_pte == 0
                 && (size - processed_size) >= MSize::from(1024 * 1024 * 1024)
             {
                 /* try to apply 1GB paging */
