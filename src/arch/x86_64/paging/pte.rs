@@ -116,8 +116,8 @@ impl PagingEntry for PTE {
     }
 
     fn set_address(&mut self, address: PAddress) -> bool {
-        if (address.to_usize() & !PAGE_MASK) == 0 {
-            self.set_bit((0x000FFFFF_FFFFF000 & address.to_usize()) as u64, true);
+        if (address & !PAGE_MASK) == 0 {
+            self.set_bit((address & 0x000FFFFF_FFFFF000) as u64, true);
             self.set_present(true);
             true
         } else {

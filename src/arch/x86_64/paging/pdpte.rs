@@ -137,11 +137,11 @@ impl PagingEntry for PDPTE {
     }
 
     fn set_address(&mut self, address: PAddress) -> bool {
-        if (address.to_usize() & !PAGE_MASK) == 0 {
+        if (address & !PAGE_MASK) == 0 {
             if self.is_huge() {
-                self.set_bit((0x000FFFFF_FFF00000 & address.to_usize()) as u64, true);
+                self.set_bit((address & 0x000FFFFF_FFF00000) as u64, true);
             } else {
-                self.set_bit((0x000FFFFF_FFFFF000 & address.to_usize()) as u64, true);
+                self.set_bit((address & 0x000FFFFF_FFFFF000) as u64, true);
             }
             self.set_address_set(true);
             true
