@@ -120,9 +120,10 @@ impl FrameBufferManager {
                 unsafe {
                     copy(
                         (self.frame_buffer_address
-                            + (from_y + y) * self.frame_buffer_width
-                            + from_x) as *mut u32,
-                        (self.frame_buffer_address + (to_y + y) * self.frame_buffer_width + to_x)
+                            + ((from_y + y) * self.frame_buffer_width + from_x) * 4)
+                            as *mut u32,
+                        (self.frame_buffer_address
+                            + ((to_y + y) * self.frame_buffer_width + to_x) * 4)
                             as *mut u32,
                         size_x,
                     )
