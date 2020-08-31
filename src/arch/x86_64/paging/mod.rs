@@ -2,7 +2,7 @@
 //! Paging Manager
 //!
 //! This modules treat the paging system of x86_64.
-//! Currently this module can handle 4K and 2M paging.
+//! Currently this module can handle 4K, 2M, and 1G paging.
 //!
 //! This does not handle memory status(which process using what memory area).
 //! This is the back-end of VirtualMemoryManager.
@@ -60,6 +60,7 @@ pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0x00007FFF_FFFFFFFF;
 #[derive(Clone)]
 pub struct PageManager {
     pml4: PAddress,
+    is_1gb_paging_supported: bool,
 }
 
 /// Paging Error enum
@@ -106,6 +107,7 @@ impl PageManager {
     pub const fn new() -> PageManager {
         PageManager {
             pml4: PAddress::new(0),
+            is_1gb_paging_supported: false,
         }
     }
 
@@ -119,6 +121,16 @@ impl PageManager {
             [u8; PAGE_SIZE_USIZE], /* Memory Allocator for PAGE_SIZE bytes(u8 => 1 byte) */
         >,
     ) -> Result<(), PagingError> {
+        self.is_1gb_paging_supported = {
+            let mut eax: u32 = 0x80000001;
+            let mut ebx: u32 = 0;
+            let mut ecx: u32 = 0;
+            let mut edx: u32 = 0;
+            unsafe {
+                cpu::cpuid(&mut eax, &mut ebx, &mut ecx, &mut edx);
+            }
+            (edx & (1 << 26)) != 0
+        };
         let pml4_address = Self::get_address_from_cache(cache_memory_list)?;
         self.pml4 = pml4_address.into();
         let pml4_table =
@@ -390,6 +402,7 @@ impl PageManager {
             if number_of_pde == 0
                 && number_of_pte == 0
                 && (size - processed_size) >= MSize::from(1024 * 1024 * 1024)
+                && self.is_1gb_paging_supported
             {
                 /* try to apply 1GB paging */
                 let pdpte = self.get_target_pdpte(
