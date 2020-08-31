@@ -22,7 +22,7 @@ use super::{MemoryOptionFlags, MemoryPermissionFlags};
 
 use crate::arch::target_arch::paging::{PageManager, PagingError};
 use crate::arch::target_arch::paging::{
-    MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGING_CACHE_LENGTH,
+    MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE, PAGING_CACHE_LENGTH,
 };
 
 use crate::kernel::ptr_linked_list::PtrLinkedList;
@@ -34,7 +34,7 @@ pub struct VirtualMemoryManager {
     vm_map_entry_pool: PoolAllocator<VirtualMemoryEntry>,
     /*vm_object_pool: PoolAllocator<VirtualMemoryObject>,*/
     vm_page_pool: PoolAllocator<VirtualMemoryPage>,
-    reserved_memory_list: PoolAllocator<[u8; PAGE_SIZE]>,
+    reserved_memory_list: PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
     direct_mapped_area: Option<DirectMappedArea>, /* think algorithm */
 }
 
@@ -44,9 +44,9 @@ struct DirectMappedArea {
 }
 
 impl VirtualMemoryManager {
-    const VM_MAP_ENTRY_POOL_SIZE: usize = PAGE_SIZE * 8;
+    const VM_MAP_ENTRY_POOL_SIZE: usize = PAGE_SIZE_USIZE * 8;
     /*const VM_OBJECT_POOL_SIZE: usize = PAGE_SIZE * 8;*/
-    const VM_PAGE_POOL_SIZE: usize = PAGE_SIZE * 128;
+    const VM_PAGE_POOL_SIZE: usize = PAGE_SIZE_USIZE * 128;
 
     pub const fn new() -> Self {
         Self {
@@ -73,11 +73,11 @@ impl VirtualMemoryManager {
             [0.into(); PAGING_CACHE_LENGTH];
         for i in 0..PAGING_CACHE_LENGTH {
             let cache_address = pm_manager
-                .alloc(PAGE_SIZE.into(), PAGE_SHIFT.into())
+                .alloc(PAGE_SIZE, PAGE_SHIFT.into())
                 .expect("Cannot alloc memory for paging cache");
             reserved_memory_list[i] = cache_address;
             self.reserved_memory_list
-                .free(unsafe { &mut *(cache_address.to_usize() as *mut [u8; PAGE_SIZE]) });
+                .free(unsafe { &mut *(cache_address.to_usize() as *mut [u8; PAGE_SIZE_USIZE]) });
         }
 
         /* set up page_manager */
@@ -94,7 +94,7 @@ impl VirtualMemoryManager {
             let cache_address = reserved_memory_list[i];
             let mut entry = VirtualMemoryEntry::new(
                 cache_address.to_direct_mapped_v_address(),
-                MSize::from(PAGE_SIZE).to_end_address(cache_address.to_direct_mapped_v_address()),
+                PAGE_SIZE.to_end_address(cache_address.to_direct_mapped_v_address()),
                 MemoryPermissionFlags::data(),
                 MemoryOptionFlags::new(MemoryOptionFlags::WIRED),
             );
@@ -103,7 +103,7 @@ impl VirtualMemoryManager {
                     &mut entry,
                     cache_address,
                     cache_address.to_direct_mapped_v_address(),
-                    PAGE_SIZE.into(),
+                    PAGE_SIZE,
                     pm_manager,
                 )
                 .is_err()
@@ -373,7 +373,7 @@ impl VirtualMemoryManager {
             );
             return Err(MemoryError::AddressNotAligned);
         } else if vm_map_entry.get_vm_start_address() > vm_address
-            || vm_map_entry.get_vm_end_address() < MSize::from(PAGE_SIZE).to_end_address(vm_address)
+            || vm_map_entry.get_vm_end_address() < PAGE_SIZE.to_end_address(vm_address)
         {
             pr_err!("Virtual Address is out of vm_map_entry.");
             return Err(MemoryError::InvalidVirtualAddress);
@@ -383,7 +383,7 @@ impl VirtualMemoryManager {
             vm_map_entry,
             physical_address,
             vm_address,
-            PAGE_SIZE.into(),
+            PAGE_SIZE,
             pm_manager,
         )
     }
@@ -588,7 +588,7 @@ impl VirtualMemoryManager {
                     .get_memory_option_flags()
                     .do_not_free_phy_addr()
                 {
-                    pm_manager.free(p.get_physical_address(), PAGE_SIZE.into(), false);
+                    pm_manager.free(p.get_physical_address(), PAGE_SIZE, false);
                 }
                 self.vm_page_pool.free(p);
             }
@@ -684,10 +684,7 @@ impl VirtualMemoryManager {
         _pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(vm_map_entry.get_vm_start_address() <= virtual_address);
-        assert!(
-            vm_map_entry.get_vm_end_address()
-                >= MSize::from(PAGE_SIZE).to_end_address(virtual_address)
-        );
+        assert!(vm_map_entry.get_vm_end_address() >= PAGE_SIZE.to_end_address(virtual_address));
         let p_index = MIndex::from_offset(virtual_address - vm_map_entry.get_vm_start_address());
         let vm_page = self
             .vm_page_pool
@@ -719,7 +716,7 @@ impl VirtualMemoryManager {
                 }
                 Err(PagingError::MemoryCacheRanOut) => {
                     for _ in 0..PAGING_CACHE_LENGTH {
-                        match self.alloc_from_direct_map(PAGE_SIZE.into(), pm_manager) {
+                        match self.alloc_from_direct_map(PAGE_SIZE, pm_manager) {
                             Ok(address) => self
                                 .reserved_memory_list
                                 .free_ptr(address.to_usize() as *mut _),
@@ -757,7 +754,7 @@ impl VirtualMemoryManager {
                 }
                 Err(PagingError::MemoryCacheRanOut) => {
                     for _ in 0..PAGING_CACHE_LENGTH {
-                        match self.alloc_from_direct_map(PAGE_SIZE.into(), pm_manager) {
+                        match self.alloc_from_direct_map(PAGE_SIZE, pm_manager) {
                             Ok(address) => self
                                 .reserved_memory_list
                                 .free_ptr(address.to_usize() as *mut _),
@@ -784,14 +781,12 @@ impl VirtualMemoryManager {
             &mut self.reserved_memory_list,
             false,
         ) {
-            Ok(()) => {
-                return Ok(());
-            }
+            Ok(()) => Ok(()),
             Err(e) => {
                 pr_err!("Cannot unassociate memory Err:{:?}", e);
-                return Err(MemoryError::PagingError);
+                Err(MemoryError::PagingError)
             }
-        };
+        }
     }
 
     fn try_expand_size(
@@ -817,9 +812,7 @@ impl VirtualMemoryManager {
                 return false;
             }
         } else {
-            if new_size.to_end_address(target_entry.get_vm_start_address())
-                >= VAddress::from(MAX_VIRTUAL_ADDRESS)
-            {
+            if new_size.to_end_address(target_entry.get_vm_start_address()) >= MAX_VIRTUAL_ADDRESS {
                 return false;
             }
         }
@@ -838,7 +831,7 @@ impl VirtualMemoryManager {
             .get_vm_page(old_last_p_index)
             .unwrap()
             .get_physical_address()
-            + MSize::from(PAGE_SIZE);
+            + PAGE_SIZE;
 
         target_entry
             .set_vm_end_address(new_size.to_end_address(target_entry.get_vm_start_address()));
@@ -848,7 +841,7 @@ impl VirtualMemoryManager {
                 target_entry,
                 not_associated_physical_address + i.to_offset(),
                 not_associated_virtual_address + i.to_offset(),
-                MSize::from(PAGE_SIZE),
+                PAGE_SIZE,
                 pm_manager,
             ) {
                 pr_err!("{:?}", s);
@@ -950,7 +943,7 @@ impl VirtualMemoryManager {
             .as_mut()
             .unwrap()
             .allocator
-            .alloc(PAGE_SIZE.into(), PAGE_SHIFT.into());
+            .alloc(PAGE_SIZE, PAGE_SHIFT.into());
         if allocated_address.is_none() {
             pr_err!("Cannot alloc from direct map.");
             return Err(MemoryError::AllocPhysicalAddressFailed);
@@ -1046,9 +1039,7 @@ impl VirtualMemoryManager {
                 }
             }
             if e.get_next_entry().is_none() {
-                return if e.get_vm_end_address() + MSize::from(1) + size
-                    >= VAddress::from(MAX_VIRTUAL_ADDRESS)
-                {
+                return if e.get_vm_end_address() + MSize::from(1) + size >= MAX_VIRTUAL_ADDRESS {
                     None
                 } else {
                     Some(e.get_vm_end_address() + MSize::from(1))
@@ -1090,11 +1081,11 @@ impl VirtualMemoryManager {
                         kprintln!("...\n - {} Not Found", i.to_usize() - 1);
                         last_is_not_found = false;
                     }
-                    if last_address + MSize::from(PAGE_SIZE) == p.get_physical_address()
-                        && p.get_physical_address().to_usize() != PAGE_SIZE
+                    if last_address + PAGE_SIZE == p.get_physical_address()
+                        && p.get_physical_address().to_usize() != PAGE_SIZE_USIZE
                     {
                         omitted = true;
-                        last_address += MSize::from(PAGE_SIZE);
+                        last_address += PAGE_SIZE;
                         continue;
                     } else if omitted {
                         kprintln!(

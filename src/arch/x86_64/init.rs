@@ -5,12 +5,13 @@
 //! This module is called by boot function.
 
 pub mod multiboot;
+
 use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
-use crate::arch::target_arch::paging::PAGE_SIZE;
+use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
 
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -19,7 +20,7 @@ use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::TaskManager;
 
 /// Memory Areas for PhysicalMemoryManager
-static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE * 2] = [0; PAGE_SIZE * 2];
+static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; PAGE_SIZE_USIZE * 2];
 
 /// Init TaskManager
 ///

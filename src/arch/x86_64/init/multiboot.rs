@@ -5,12 +5,12 @@
 
 use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
-use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress, VAddress};
 use crate::kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
@@ -65,7 +65,7 @@ pub fn init_memory_by_multiboot_information(
     }
     /* reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
-        if section.should_allocate() && section.align_size() == PAGE_SIZE {
+        if section.should_allocate() && section.align_size() == PAGE_SIZE_USIZE {
             physical_memory_manager.reserve_memory(
                 section.addr().into(),
                 section.size().into(),
@@ -94,11 +94,11 @@ pub fn init_memory_by_multiboot_information(
     let mut virtual_memory_manager = VirtualMemoryManager::new();
     virtual_memory_manager.init(true, &mut physical_memory_manager);
     for section in multiboot_information.elf_info.clone() {
-        if !section.should_allocate() || section.align_size() != PAGE_SIZE {
+        if !section.should_allocate() || section.align_size() != PAGE_SIZE_USIZE {
             continue;
         }
         assert_eq!(!PAGE_MASK & section.addr(), 0);
-        let aligned_size = ((section.size() - 1) & PAGE_MASK) + PAGE_SIZE;
+        let aligned_size = MSize::from((section.size() - 1) & PAGE_MASK) + PAGE_SIZE;
         let permission = MemoryPermissionFlags::new(
             true,
             section.should_writable(),
@@ -109,7 +109,7 @@ pub fn init_memory_by_multiboot_information(
         match virtual_memory_manager.map_address(
             PAddress::from(section.addr()),
             Some(VAddress::from(section.addr())),
-            aligned_size.into(),
+            aligned_size,
             permission,
             MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             &mut physical_memory_manager,
@@ -146,7 +146,7 @@ pub fn init_memory_by_multiboot_information(
     let new_mbi_address = kernel_memory_alloc_manager
         .kmalloc(
             multiboot_information.size.into(),
-            3.into(),
+            MOrder::new(3),
             &mutex_memory_manager,
         )
         .expect("Cannot alloc memory for Multiboot Information.");

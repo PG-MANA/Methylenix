@@ -21,22 +21,31 @@ use self::PagingError::MemoryCacheRanOut;
 use crate::arch::target_arch::device::cpu;
 
 //use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use crate::kernel::memory_manager::data_type::Address;
 use crate::kernel::memory_manager::{
-    data_type::MSize, data_type::PAddress, data_type::VAddress, pool_allocator::PoolAllocator,
-    MemoryPermissionFlags,
+    data_type::Address, data_type::MSize, data_type::PAddress, data_type::VAddress,
+    pool_allocator::PoolAllocator, MemoryPermissionFlags,
 };
 
-/// Default Page Size, the mainly using 4KiB paging.
-pub const PAGE_SIZE: usize = 0x1000;
-/// PAGE_SIZE = 1 << PAGE_SHIFT
+/// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
+pub const PAGE_SIZE: MSize = MSize::from(PAGE_SIZE_USIZE);
+
+/// Default Page Size, the mainly using 4KiB paging.(Type = usize)
+pub const PAGE_SIZE_USIZE: usize = 0x1000;
+
+/// PAGE_SIZE = 1 << PAGE_SHIFT(Type = usize)
 pub const PAGE_SHIFT: usize = 12;
+
 /// if !PAGE_MASK & address !=0 => address is not page aligned.
 pub const PAGE_MASK: usize = 0xFFFFFFFF_FFFFF000;
+
 /// Default page cache size for paging
 pub const PAGING_CACHE_LENGTH: usize = 64;
-/// Max virtual address of x86_64
-pub const MAX_VIRTUAL_ADDRESS: usize = 0x00007FFF_FFFFFFFF;
+
+/// Max virtual address of x86_64(Type = VAddress)
+pub const MAX_VIRTUAL_ADDRESS: VAddress = VAddress::new(MAX_VIRTUAL_ADDRESS_USIZE);
+
+/// Max virtual address of x86_64(Type = usize)
+pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0x00007FFF_FFFFFFFF;
 
 /// PageManager
 ///
@@ -102,7 +111,7 @@ impl PageManager {
     pub fn init(
         &mut self,
         cache_memory_list: &mut PoolAllocator<
-            [u8; PAGE_SIZE], /* Memory Allocator for PAGE_SIZE bytes(u8 => 1 byte) */
+            [u8; PAGE_SIZE_USIZE], /* Memory Allocator for PAGE_SIZE bytes(u8 => 1 byte) */
         >,
     ) -> Result<(), PagingError> {
         let pml4_address = Self::get_address_from_cache(cache_memory_list)?;
@@ -127,7 +136,7 @@ impl PageManager {
     /// or return PagingError::EntryIsNotFound.
     fn get_target_pdpte(
         &mut self,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
         linear_address: VAddress,
         should_set_present: bool,
         should_create_entry: bool,
@@ -178,7 +187,7 @@ impl PageManager {
     /// [`get_target_pdpte`]: #method.get_target_pdpte
     fn get_target_pde(
         &mut self,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
         linear_address: VAddress,
         should_set_present: bool,
         should_create_entry: bool,
@@ -223,7 +232,7 @@ impl PageManager {
     /// [`get_target_pde`]: #method.get_target_pde
     fn get_target_pte(
         &mut self,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
         linear_address: VAddress,
         should_set_present: bool,
         should_create_entry: bool,
@@ -262,7 +271,7 @@ impl PageManager {
     /// or return PagingError::EntryIsNotFound.
     fn get_target_paging_entry(
         &mut self,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
         linear_address: VAddress,
         should_set_present: bool,
         should_create_entry: bool,
@@ -309,7 +318,7 @@ impl PageManager {
     /// [`associate_area`]: #method.associate_area
     pub fn associate_address(
         &mut self,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
         physical_address: PAddress,
         linear_address: VAddress,
         permission: MemoryPermissionFlags,
@@ -342,7 +351,7 @@ impl PageManager {
     /// [`associate_address`]: #method.associate_address
     pub fn associate_area(
         &mut self,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
         physical_address: PAddress,
         linear_address: VAddress,
         size: MSize,
@@ -355,7 +364,7 @@ impl PageManager {
         } else if (size.to_usize() & !PAGE_MASK) != 0 {
             return Err(PagingError::SizeIsNotAligned);
         }
-        if size.to_usize() == PAGE_SIZE {
+        if size == PAGE_SIZE {
             return self.associate_address(
                 cache_memory_list,
                 physical_address,
@@ -437,7 +446,7 @@ impl PageManager {
     /// If linear address is not valid, this will return PagingError::EntryIsNotFound.
     pub fn change_memory_permission(
         &mut self,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
         linear_address: VAddress,
         permission: MemoryPermissionFlags,
     ) -> Result<(), PagingError> {
@@ -466,7 +475,7 @@ impl PageManager {
     pub fn unassociate_address(
         &mut self,
         linear_address: VAddress,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
         entry_may_be_deleted: bool,
     ) -> Result<(), PagingError> {
         match self.get_target_paging_entry(cache_memory_list, linear_address, false, false) {
@@ -491,7 +500,7 @@ impl PageManager {
     pub fn cleanup_page_table(
         &mut self,
         linear_address: VAddress,
-        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
     ) -> Result<(), PagingError> {
         let number_of_pml4e = (linear_address.to_usize() >> (4 * 3) + 9 * 3) & (0x1FF);
         let number_of_pdpe = (linear_address.to_usize() >> (4 * 3) + 9 * 2) & (0x1FF);
@@ -559,7 +568,7 @@ impl PageManager {
     /// This is the wrapper.
     /// the page is direct mapped.
     fn get_address_from_cache(
-        allocator: &mut PoolAllocator<[u8; PAGE_SIZE]>,
+        allocator: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
     ) -> Result<usize, PagingError> {
         if let Ok(a) = allocator.alloc_ptr() {
             Ok(a as usize)

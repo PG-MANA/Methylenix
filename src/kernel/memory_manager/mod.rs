@@ -123,7 +123,7 @@ impl MemoryManager {
         /* THINK: rename*/
         /* vmalloc */
         let size = order.to_offset() << MSize::from(PAGE_SHIFT);
-        if size <= MSize::from(PAGE_SIZE) {
+        if size <= PAGE_SIZE {
             return self.alloc_pages(order, permission);
         }
         let pm_manager = self.physical_memory_manager.try_lock();
@@ -139,7 +139,7 @@ impl MemoryManager {
         )?;
         let vm_start_address = entry.get_vm_start_address();
         for i in 0.into()..size.to_index() {
-            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE.into(), PAGE_SHIFT.into()) {
+            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, PAGE_SHIFT.into()) {
                 if let Err(e) = self
                     .virtual_memory_manager
                     .insert_physical_page_into_vm_map_entry(
@@ -299,10 +299,10 @@ impl MemoryManager {
         } else {
             (
                 (address.to_usize() & PAGE_MASK).into(),
-                (((size.to_usize() + (address.to_usize() - (address.to_usize() & PAGE_MASK)) - 1)
-                    & PAGE_MASK)
-                    + PAGE_SIZE)
-                    .into(),
+                MSize::new(
+                    (size.to_usize() + (address.to_usize() - (address.to_usize() & PAGE_MASK)) - 1)
+                        & PAGE_MASK,
+                ) + PAGE_SIZE,
             )
         }
     }

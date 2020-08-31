@@ -39,7 +39,7 @@ impl IoApicManager {
             .unwrap()
             .mmap_dev(
                 0xfec00000.into(),
-                PAGE_SIZE.into(), /* is it ok?*/
+                PAGE_SIZE, /* is it ok?*/
                 MemoryPermissionFlags::data(),
             ) {
             Ok(address) => {
