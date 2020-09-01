@@ -5,17 +5,17 @@
  * All members of manager must be Mutex.
  */
 
-use arch::target_arch::device::serial_port::SerialPortManager;
-use arch::target_arch::interrupt::InterruptManager;
+use crate::arch::target_arch::device::serial_port::SerialPortManager;
+use crate::arch::target_arch::interrupt::InterruptManager;
 
-use kernel::drivers::efi::EfiManager;
-use kernel::graphic_manager::GraphicManager;
-use kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
-use kernel::memory_manager::{MemoryManager, SystemMemoryManager};
-use kernel::task_manager::TaskManager;
-use kernel::tty::TtyManager;
+use crate::kernel::drivers::efi::EfiManager;
+use crate::kernel::graphic_manager::GraphicManager;
+use crate::kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
+use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
+use crate::kernel::task_manager::TaskManager;
+use crate::kernel::tty::TtyManager;
 
-use kernel::sync::spin_lock::Mutex;
+use crate::kernel::sync::spin_lock::Mutex;
 
 use core::mem::MaybeUninit;
 

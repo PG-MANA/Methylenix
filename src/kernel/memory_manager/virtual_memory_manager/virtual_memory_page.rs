@@ -3,11 +3,11 @@
  * structure for mapping virtual address to physical address
  */
 
-use kernel::memory_manager::data_type::{MIndex, PAddress};
-use kernel::memory_manager::MemoryOptionFlags;
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::memory_manager::data_type::{MIndex, PAddress};
+use crate::kernel::memory_manager::MemoryOptionFlags;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
-use kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 
 pub struct VirtualMemoryPage {
     lock: SpinLockFlag,

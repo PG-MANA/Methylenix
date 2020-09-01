@@ -6,9 +6,9 @@ use super::table::bgrt::BgrtManager;
 use super::table::fadt::FadtManager;
 use super::INITIAL_MMAP_SIZE;
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::data_type::{Address, PAddress, VAddress};
-use kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
+use crate::kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct XsdtManager {
     base_address: VAddress,

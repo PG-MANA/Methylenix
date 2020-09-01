@@ -5,10 +5,10 @@
 
 use super::{ProcessEntry, TaskStatus};
 
-use arch::target_arch::context::context_data::ContextData;
+use crate::arch::target_arch::context::context_data::ContextData;
 
-use kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::ptr::NonNull;
 

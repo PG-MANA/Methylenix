@@ -2,9 +2,9 @@
  * TTY Manager
  */
 
-use kernel::fifo::FIFO;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::fifo::FIFO;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -27,8 +27,8 @@ impl TtyManager {
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
-            input_queue: FIFO::new(&0),
-            output_queue: FIFO::new(&0),
+            input_queue: FIFO::new(0),
+            output_queue: FIFO::new(0),
             output_driver: None,
         }
     }

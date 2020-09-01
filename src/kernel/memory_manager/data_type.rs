@@ -3,7 +3,7 @@
  * basic data type for Memory Manager
  */
 
-use arch::target_arch::paging::PAGE_SHIFT;
+use crate::arch::target_arch::paging::PAGE_SHIFT;
 
 use core::convert::{From, Into};
 use core::iter::Step;
@@ -284,8 +284,7 @@ impl MSize {
     }
 
     pub fn to_order(&self, max: Option<MOrder>) -> MOrder {
-        use core::usize;
-        MOrder::from_offset(*self, max.unwrap_or(MOrder::new(usize::MAX)))
+        MOrder::from_offset(*self, max.unwrap_or(MOrder::new(core::usize::MAX)))
     }
 }
 

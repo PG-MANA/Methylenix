@@ -1,8 +1,11 @@
-/*
- * x86_64 Specific Instruction
- */
+//!
+//! x86_64 Specific Instruction
+//!
+//! This module is the collection of inline assembly functions.
+//! All functions are unsafe, please be careful.  
+//!
 
-use arch::target_arch::context::context_data::ContextData;
+use crate::arch::target_arch::context::context_data::ContextData;
 
 #[inline(always)]
 pub unsafe fn sti() {
@@ -25,21 +28,24 @@ pub unsafe fn hlt() {
 }
 
 #[inline(always)]
-pub unsafe fn out_byte(addr: u16, data: u8) {
-    llvm_asm!("outb %al, %dx"::"{dx}"(addr), "{al}"(data)::"volatile");
+pub unsafe fn out_byte(address: u16, data: u8) {
+    llvm_asm!("outb %al, %dx"::"{dx}"(address), "{al}"(data)::"volatile");
 }
 
 #[inline(always)]
 pub unsafe fn in_byte(port: u16) -> u8 {
-    let result: u8;
+    let mut result: u8;
     llvm_asm!("in %dx, %al":"={al}"(result):"{dx}"(port)::"volatile");
     result
 }
 
+/// Operate "in" twice.
+///
+/// This function is useful when you treat device returning 16bit data with 8bit register.
 #[inline(always)]
 pub unsafe fn in_byte_twice(port: u16) -> (u8 /*first*/, u8 /*second*/) {
-    let r1: u8;
-    let r2: u8;
+    let mut r1: u8;
+    let mut r2: u8;
     llvm_asm!("in  %dx, %al
                mov %al, %bl
                in  %dx, %al":"={bl}"(r1),"={al}"(r2):"{dx}"(port)::"volatile");
@@ -48,7 +54,7 @@ pub unsafe fn in_byte_twice(port: u16) -> (u8 /*first*/, u8 /*second*/) {
 
 #[inline(always)]
 pub unsafe fn in_dword(port: u16) -> u32 {
-    let result: u32;
+    let mut result: u32;
     llvm_asm!("in %dx, %eax":"={eax}"(result):"{dx}"(port)::"volatile");
     result
 }
@@ -60,8 +66,8 @@ pub unsafe fn lidt(idtr: usize) {
 
 #[inline(always)]
 pub unsafe fn rdmsr(ecx: u32) -> u64 {
-    let edx: u32;
-    let eax: u32;
+    let mut edx: u32;
+    let mut eax: u32;
     llvm_asm!("rdmsr":"={edx}"(edx), "={eax}"(eax):"{ecx}"(ecx)::"volatile");
     (edx as u64) << 32 | eax as u64
 }
@@ -73,6 +79,10 @@ pub unsafe fn wrmsr(ecx: u32, data: u64) {
     llvm_asm!("wrmsr"::"{edx}"(edx), "{eax}"(eax),"{ecx}"(ecx)::"volatile");
 }
 
+/// Operate "cpuid".
+///
+/// eax and ecx are used as selector, so you must set before calling this function.
+/// The result will set into each argument.
 #[inline(always)]
 pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) {
     llvm_asm!("cpuid":"={eax}"(*eax), "={ebx}"(*ebx), "={ecx}"(*ecx), "={edx}"(*edx):
@@ -81,7 +91,7 @@ pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) 
 
 #[inline(always)]
 pub unsafe fn get_cr0() -> u64 {
-    let rax: u64;
+    let mut rax: u64;
     llvm_asm!("movq %cr0, %rax":"={rax}"(rax):::"volatile");
     rax
 }
@@ -116,10 +126,25 @@ pub unsafe fn set_cr4(cr4: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn invlpg(addr: usize) {
-    llvm_asm!("invlpg (%rdi)"::"{rdi}"(addr):::"volatile");
+pub unsafe fn invlpg(address: usize) {
+    llvm_asm!("invlpg (%rdi)"::"{rdi}"(address):::"volatile");
 }
 
+pub unsafe fn enable_sse() {
+    let mut cr0 = get_cr0();
+    cr0 &= !(1 << 2); /* clear EM */
+    cr0 |= 1 << 1; /* set MP */
+    set_cr0(cr0);
+    let mut cr4 = get_cr4();
+    cr4 |= (1 << 10) | (1 << 9); /*set OSFXSR and OSXMMEXCPT*/
+    set_cr4(cr4);
+}
+
+/// Run ContextData.
+///
+/// This function is called from ContextManager.
+/// Set all registers from context_data and jump context_data.rip.
+/// **This function never return.**
 #[naked]
 pub unsafe fn run_task(context_data_address: *mut ContextData) {
     llvm_asm!("
@@ -161,6 +186,10 @@ pub unsafe fn run_task(context_data_address: *mut ContextData) {
                 "::"{rdi}"(context_data_address)::"intel", "volatile");
 }
 
+/// Save current process into now_context_data and run next_context_data.
+///
+/// This function is called by ContextManager.
+/// This function does not return until another process switches to now_context_data.
 #[naked]
 pub unsafe fn task_switch(
     next_context_data_address: *mut ContextData,

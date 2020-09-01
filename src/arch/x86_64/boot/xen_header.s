@@ -6,7 +6,7 @@
 
 .extern boot_from_xen
 
-/* cannot use ELFNOTE macro because this source is included by global_asm! */
+/* Cannot use ELFNOTE macro because this source is included by global_asm! */
 /* https://xenbits.xen.org/docs/4.10-testing/misc/pvh.html */
 .equ XEN_ELFNOTE_XEN_VERSION, 5
 .equ XEN_ELFNOTE_GUEST_OS, 6

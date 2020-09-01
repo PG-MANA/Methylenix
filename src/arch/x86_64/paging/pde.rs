@@ -1,15 +1,16 @@
-/*
- * Page Directory Entry
- */
+//!
+//! Page Directory Entry
+//!
+//! See PageManager for the detail.
 
 use super::PagingEntry;
 use super::PAGE_MASK;
 
-use kernel::memory_manager::data_type::{Address, PAddress};
+use crate::kernel::memory_manager::data_type::PAddress;
 
 pub const PD_MAX_ENTRY: usize = 512;
 
-/* PDEの53bit目はPTがセットされているかどうかの確認に利用している。 */
+/* 53th bit(1 << 52) of PDE is used to check if the address is valid. */
 
 pub struct PDE {
     flags: u64,
@@ -136,11 +137,11 @@ impl PagingEntry for PDE {
     }
 
     fn set_address(&mut self, address: PAddress) -> bool {
-        if (address.to_usize() & !PAGE_MASK) == 0 {
+        if (address & !PAGE_MASK) == 0 {
             if self.is_huge() {
-                self.set_bit((0x000FFFFF_FFFF0000 & address.to_usize()) as u64, true);
+                self.set_bit((address & 0x000FFFFF_FFFF0000) as u64, true);
             } else {
-                self.set_bit((0x000FFFFF_FFFFF000 & address.to_usize()) as u64, true);
+                self.set_bit((address & 0x000FFFFF_FFFFF000) as u64, true);
             }
             self.set_address_set(true);
             true

@@ -6,7 +6,7 @@
 use super::font_cache::FontCache;
 use super::BitmapFontData;
 
-use kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
 
 pub struct Pff2FontManager {
     base_address: usize,

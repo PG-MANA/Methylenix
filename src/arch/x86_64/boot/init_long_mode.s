@@ -1,5 +1,5 @@
 /*
- * setup cpu to long mode
+ * Setup code to enter x86_64 mode
  */
 
 .code32
@@ -13,15 +13,15 @@
 .section .text
 
 init_long_mode:
-  /* check if cpu supports x86_64 */
-  /* http://wiki.osdev.org/setting_up_long_mode#detection_of_cpuid */
+  /* Check if cpu supports x86_64 */
+  /* https://wiki.osdev.org/setting_up_long_mode#detection_of_cpuid */
   mov  $0xff, %al
   out  %al, $0x21
   nop
   out  %al, $0xa1
   cli
 
-  /* write TSS segment information */
+  /* Write TSS segment information */
   mov   $tss, %eax
   mov   $tss_descriptor_adress, %ebp
   mov   %ax, 2(%ebp)
@@ -31,16 +31,16 @@ init_long_mode:
   pushfd
   pop   %eax
   mov   %eax, %ecx
-  xor   $(1 << 21), %eax        /* xor ID flag */
+  xor   $(1 << 21), %eax        /* Xor ID flag and push to check if extra cpuid is supported */
   push  %eax
   popfd
   pushfd
   pop   %eax
   push  %ecx
-  popfd                         /* restore */
+  popfd                         /* Restore original eflags */
   xor   %ecx, %eax
   jz    cpuid_not_supported
-  mov   $0x80000000, %eax       /* is extra cpuid supported? */
+  mov   $0x80000000, %eax       /* Is extra cpuid supported? */
   cpuid
   cmp   $0x80000001, %eax
   jb    only_x86
@@ -51,55 +51,31 @@ init_long_mode:
   jz    only_x86
 
   /* Paging */
-  /* is 1GB paging supported? */
-  /*test  $(1 << 26), %edx
-  jz    init_normal_paging */
-  jmp   init_normal_paging
-
-init_4level_paging:
-  xor   %ecx,  %ecx             /* counter */
-
-pdpte_setup:
-  /* Intel SDM chapter 4.5 LEVEL4-PAGING */
-  /* 1-GByte Paging */
-  /* PML4->PDP */
-
-  mov   $0x100000, %eax         /* ページ一つが管理する区域(1GB) */
-  mul   %ecx                    /* eax = eax * ecx */
-  or    $0b10000011, %eax       /* Present + R/W + Huge(PDPTでHugeを立てると1GB単位) */
-  mov   %eax, pdpt(,%ecx, 8)
-  inc   %ecx
-  cmp   $4, %ecx
-  jne   pdpte_setup
-  jmp   pml4_setup
-
-init_normal_paging:
-  xor   %ecx,  %ecx
-
-pde_setup:
   /* 2-MByte Paging */
   /* PML4->PDP->PD */
-  mov   $0x200000, %eax         /* ページ一つが管理する区域(2MB) */
-  mul   %ecx                    /* eax = eax * ecx */
-  or    $0b10000011, %eax       /* Present + R/W + Huge(PDPTでHugeを立てると1GB単位) */
-  mov   %eax, pd(,%ecx, 8)      /* 64bitごとの配置 */
+  /* Direct map 0 ~ 4GiB */
+  xor   %ecx,  %ecx
+pde_setup:
+  mov   $0x200000, %eax         /* eax = 2MB(direct mapping) */
+  mul   %ecx                    /* eax = eax * ecx(0..2048) */
+  or    $0b10000011, %eax       /* Present + R/W + Huge */
+  mov   %eax, pd(,%ecx, 8)      /* pd[ecx * 8] = eax (higher 32bit is zero) */
   inc   %ecx
   cmp   $2048, %ecx
   jne   pde_setup               /* ecx != 512 * 4 */
 
   xor   %ecx, %ecx
-
-pdpte_setup_2mb:
-  mov   $4096, %eax
+pdpte_setup:
+  mov   $4096, %eax             /* eax = 4KiB(size of page directory) */
   mul   %ecx
   add   $pd, %eax               /* eax = 4096 * ecx + pd(edx) */
   or    $0b11, %eax             /* Present + R/W */
-  mov   %eax, pdpt(,%ecx, 8)
+  mov   %eax, pdpt(,%ecx, 8)    /* pdpt[ecx * 8] = eax (higher 32bit is zero) */
   inc   %ecx
   cmp   $4, %ecx
-  jne   pdpte_setup_2mb
+  jne   pdpte_setup
 
-pml4_setup:
+/* pml4_setup: */
   mov   $pdpt, %eax
   or    $0b11, %eax             /* Present + R/W */
   mov   %eax, (pml4)
@@ -109,13 +85,13 @@ pml4_setup:
   mov   %eax, %cr3
   mov   %cr4, %eax
   or    $(1 << 5), %eax
-  mov   %eax, %cr4              /* set PAE flag */
+  mov   %eax, %cr4              /* Set PAE flag */
   mov   $0xc0000080, %ecx
-  rdmsr                         /* model-specific register */
+  rdmsr                         /* Model-specific register */
   or    $(1 << 8 | 1 << 11), %eax
-  wrmsr                         /* set LME and NXE flags */
+  wrmsr                         /* Set LME and NXE flags */
   mov   %cr0, %eax
-  or    $(1 << 31 | 1), %eax    /* set PG flag */
+  or    $(1 << 31 | 1), %eax    /* Set PG flag */
   mov   $tss_descriptor, %dx
   lgdt  gdtr0
   mov   %eax, %cr0
@@ -139,7 +115,7 @@ fin:
 .align   4
 
 long_mode_error_str:
-  /* attention: little endian */
+  /* Attention: little endian */
   /* 0x4f: back-color:red, color:white */
   .byte   'E',   0x4f
   .byte   'r',   0x4f
