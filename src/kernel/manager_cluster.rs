@@ -10,7 +10,7 @@ use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::drivers::efi::EfiManager;
 use crate::kernel::graphic_manager::GraphicManager;
-use crate::kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
+use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::tty::TtyManager;
@@ -26,7 +26,7 @@ pub struct KernelManagerCluster {
     pub graphic_manager: GraphicManager,
     pub memory_manager: Mutex<MemoryManager>,
     pub system_memory_manager: SystemMemoryManager,
-    pub kernel_memory_alloc_manager: Mutex<KernelMemoryAllocManager>,
+    pub object_allocator: Mutex<ObjectAllocator>,
     pub interrupt_manager: Mutex<InterruptManager>,
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,

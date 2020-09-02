@@ -41,23 +41,21 @@ pub fn init_task(
     );
 
     let mut kernel_memory_alloc_manager = get_kernel_manager_cluster()
-        .kernel_memory_alloc_manager
+        .object_allocator
         .lock()
         .unwrap();
     let memory_manager = &get_kernel_manager_cluster().memory_manager;
 
     let stack_for_init = kernel_memory_alloc_manager
-        .vmalloc(
+        .alloc(
             ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM.into(),
-            ContextManager::STACK_ALIGN_ORDER.into(),
             memory_manager,
         )
         .unwrap()
         + MSize::from(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
     let stack_for_idle = kernel_memory_alloc_manager
-        .vmalloc(
+        .alloc(
             ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM.into(),
-            ContextManager::STACK_ALIGN_ORDER.into(),
             memory_manager,
         )
         .unwrap()

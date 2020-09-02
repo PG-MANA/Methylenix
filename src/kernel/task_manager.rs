@@ -65,17 +65,13 @@ impl TaskManager {
         let _lock = self.lock.lock();
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
         let mut kernel_memory_allocator = get_kernel_manager_cluster()
-            .kernel_memory_alloc_manager
+            .object_allocator
             .lock()
             .unwrap();
 
         for _i in 0..Self::NUM_OF_INITIAL_PROCESS_ENTRIES {
             let address = kernel_memory_allocator
-                .vmalloc(
-                    mem::size_of::<ProcessEntry>().into(),
-                    ProcessEntry::PROCESS_ENTRY_ALIGN_ORDER.into(),
-                    memory_manager,
-                )
+                .alloc(mem::size_of::<ProcessEntry>().into(), memory_manager)
                 .unwrap();
             self.process_entry_pool
                 .free_ptr(address.to_usize() as *mut ProcessEntry);
@@ -83,11 +79,7 @@ impl TaskManager {
 
         for _i in 0..Self::NUM_OF_INITIAL_THREAD_ENTRIES {
             let address = kernel_memory_allocator
-                .vmalloc(
-                    mem::size_of::<ThreadEntry>().into(),
-                    ThreadEntry::THREAD_ENTRY_ALIGN_ORDER.into(),
-                    memory_manager,
-                )
+                .alloc(mem::size_of::<ThreadEntry>().into(), memory_manager)
                 .unwrap();
             self.thread_entry_pool
                 .free_ptr(address.to_usize() as *mut ThreadEntry);
