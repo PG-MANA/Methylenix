@@ -22,11 +22,17 @@ struct FreeList {
 }
 
 impl<T> PoolAllocator<T> {
-    pub const fn new() -> Self {
+    const SIZE_CHECK_HOOK: () = Self::size_check();
+
+    const fn size_check() {
         if size_of::<T>() < size_of::<FreeList>() {
             panic!("PoolAllocator can process the struct bigger than FreeList only.");
             //static_assert
         }
+    }
+
+    pub const fn new() -> Self {
+        let _c = Self::SIZE_CHECK_HOOK;
         Self {
             linked_count: 0,
             object_size: size_of::<T>(),
