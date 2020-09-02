@@ -120,12 +120,12 @@ impl VgaTextDriver {
         }
         unsafe {
             copy(
-                (self.address + self.width) as *const u16,
+                (self.address + self.width * 2) as *const u16,
                 self.address as *mut u16,
                 self.width * (self.height - 1),
             ); /*move each lines to above one.*/
             write_bytes(
-                (self.address + self.width * (self.height - 1)) as *mut u16,
+                (self.address + self.width * (self.height - 1) * 2) as *mut u16,
                 0,
                 self.width,
             ); /* clear the last line */
