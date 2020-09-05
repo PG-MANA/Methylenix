@@ -102,7 +102,7 @@ impl VirtualMemoryEntry {
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
         let old_root = unsafe { list_head.get_first_entry_mut() };
-        list_head.set_first_entry(&mut self.list);
+        list_head.set_first_entry(Some(&mut self.list));
         if let Some(entry) = old_root {
             self.list.setup_to_be_root(&mut entry.list);
         }
@@ -149,8 +149,8 @@ impl VirtualMemoryEntry {
         self.list.insert_before(&mut entry.list);
     }
 
-    pub fn remove_from_list(&mut self) {
-        self.list.remove_from_list();
+    pub fn remove_from_list(&mut self, list: &mut PtrLinkedList<Self>) {
+        self.list.remove_from_list(list);
     }
 
     pub fn adjust_entries(&'static mut self) -> &'static mut Self /*new root*/ {

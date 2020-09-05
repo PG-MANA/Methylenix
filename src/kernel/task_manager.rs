@@ -130,7 +130,7 @@ impl TaskManager {
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
             let should_change_root = running_thread.is_root_of_run_list();
             let next_entry = running_thread.get_next_from_run_list_mut();
-            running_thread.insert_self_to_sleep_queue(&mut self.sleep_list);
+            running_thread.insert_self_to_sleep_queue(&mut self.sleep_list, &mut self.run_list);
             if should_change_root {
                 /*assert!(next_entry.is_some());*/
                 let next_entry = next_entry.unwrap();
@@ -181,7 +181,7 @@ impl TaskManager {
             let e_t_id = e.get_t_id();
             if e_p_id == p_id && e_t_id == t_id {
                 if e.get_task_status() == TaskStatus::Sleeping {
-                    e.wakeup(&mut self.run_list);
+                    e.wakeup(&mut self.run_list, &mut self.sleep_list);
                 }
                 return;
             }

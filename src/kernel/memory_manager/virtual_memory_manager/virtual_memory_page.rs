@@ -76,16 +76,16 @@ impl VirtualMemoryPage {
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
         let old_root = unsafe { list.get_first_entry_mut() };
-        list.set_first_entry(&mut self.list);
+        list.set_first_entry(Some(&mut self.list));
         if let Some(old_root) = old_root {
             self.list.setup_to_be_root(&mut old_root.list);
         }
         /*adjust tree*/
     }
 
-    pub fn remove_from_list(&mut self) {
+    pub fn remove_from_list(&mut self, list_head: &mut PtrLinkedList<Self>) {
         let _lock = self.lock.lock();
-        self.list.remove_from_list();
+        self.list.remove_from_list(list_head);
     }
 
     pub const fn get_p_index(&self) -> MIndex {

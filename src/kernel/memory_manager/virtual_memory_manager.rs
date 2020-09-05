@@ -486,7 +486,7 @@ impl VirtualMemoryManager {
                 .is_err()
             {
                 pr_err!("Cannot associate address.");
-                entry.remove_from_list();
+                entry.remove_from_list(&mut self.vm_map_entry);
                 //for rev_i in (0..i).rev() {
                 /*add: self.unassociate_address() */
                 //}
@@ -508,7 +508,7 @@ impl VirtualMemoryManager {
                     .is_err()
                 {
                     pr_err!("Cannot associate address.");
-                    entry.remove_from_list();
+                    entry.remove_from_list(&mut self.vm_map_entry);
                     //for rev_i in (0..i).rev() {
                     /*add: self.unassociate_address() */
                     //}
@@ -910,7 +910,6 @@ impl VirtualMemoryManager {
             /*p_index最初がマップしているアドレスの最初だと仮定*/
             let option = entry.get_memory_option_flags();
             self._free_address(entry, pm_manager)?;
-            pr_info!("wa");
             self.map_address(
                 physical_address,
                 None,

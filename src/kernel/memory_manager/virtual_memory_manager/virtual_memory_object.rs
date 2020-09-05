@@ -104,7 +104,7 @@ impl VirtualMemoryObject {
             for e in list.iter_mut() {
                 let e = unsafe { &mut *e };
                 if e.get_p_index() == p_index {
-                    e.remove_from_list();
+                    e.remove_from_list(list);
                     return Some(e);
                 } else if e.get_p_index() > p_index {
                     break;
