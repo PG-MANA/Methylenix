@@ -59,19 +59,14 @@ impl<T> PoolAllocator<T> {
 
     pub unsafe fn set_initial_pool(&mut self, pool_address: usize, pool_size: usize) {
         assert_eq!(self.linked_count, 0);
+        self.add_pool(pool_address, pool_size);
+    }
+
+    pub unsafe fn add_pool(&mut self, pool_address: usize, pool_size: usize) {
         let mut address = pool_address;
-        let mut prev_entry = address as *mut FreeList;
-        (*prev_entry).next = None;
-        self.head = Some(prev_entry.clone());
-        self.linked_count = 1;
-        address += self.object_size;
-        for _i in 1..(pool_size / self.object_size) {
-            let entry = address as *mut FreeList;
-            (*entry).next = None;
-            (*prev_entry).next = Some(entry.clone());
-            self.linked_count += 1;
+        for _i in 0..(pool_size / self.object_size) {
+            self.free_ptr(address as *mut T);
             address += self.object_size;
-            prev_entry = entry;
         }
     }
 
@@ -89,7 +84,7 @@ impl<T> PoolAllocator<T> {
         }
         //assert!(self.head.is_some());
         let e = self.head.unwrap().clone();
-        self.head = unsafe { (&mut *e).next };
+        self.head = unsafe { (*e).next };
         self.linked_count -= 1;
         Ok(e as usize as *mut T)
     }
@@ -102,7 +97,7 @@ impl<T> PoolAllocator<T> {
         /*do not use target after free */
         assert!(self.linked_count < core::usize::MAX);
         let e = target as usize as *mut FreeList;
-        unsafe { (&mut *e).next = self.head };
+        unsafe { (*e).next = self.head };
         self.head = Some(e);
         self.linked_count += 1;
     }
