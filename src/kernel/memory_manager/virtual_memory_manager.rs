@@ -593,6 +593,11 @@ impl VirtualMemoryManager {
                 self.vm_page_pool.free(p);
             }
         }
+        assert!(vm_map_entry.get_prev_entry().is_some()); /* not root */
+        vm_map_entry.remove_from_list(&mut self.vm_map_entry);
+        vm_map_entry.set_disabled();
+        self.vm_map_entry_pool.free(vm_map_entry);
+
         Ok(())
     }
 
