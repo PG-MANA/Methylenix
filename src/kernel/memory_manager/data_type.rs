@@ -336,7 +336,11 @@ impl MOrder {
     }
 
     pub const fn to_page_order(&self) -> Self {
-        Self(self.0 - PAGE_SHIFT)
+        if self.0 > PAGE_SHIFT {
+            Self(self.0 - PAGE_SHIFT)
+        } else {
+            Self(0)
+        }
     }
 }
 
