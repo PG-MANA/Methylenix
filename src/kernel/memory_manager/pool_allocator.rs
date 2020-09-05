@@ -38,6 +38,25 @@ impl<T> PoolAllocator<T> {
         }
     }
 
+    pub const fn new_with_align(align: usize) -> Self {
+        let _c = Self::SIZE_CHECK_HOOK;
+        let size = if align < core::mem::size_of::<T>() {
+            core::mem::size_of::<T>()
+        } else {
+            align
+        };
+        Self {
+            linked_count: 0,
+            object_size: size,
+            head: None,
+            phantom: core::marker::PhantomData,
+        }
+    }
+
+    pub const fn get_count(&self) -> usize {
+        self.linked_count
+    }
+
     pub unsafe fn set_initial_pool(&mut self, pool_address: usize, pool_size: usize) {
         assert_eq!(self.linked_count, 0);
         let mut address = pool_address;
