@@ -40,6 +40,12 @@ pub enum TaskStatus {
     Sleeping,
     CanRun,
     Running,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum ProcessStatus {
+    New,
+    Normal,
     Zombie,
 }
 
@@ -93,8 +99,11 @@ impl TaskManager {
         main_thread.init(1, process_entry, 0, 0, context_for_init);
         idle_thread_entry.init(2, process_entry, 0, core::i8::MIN, context_for_idle);
 
-        process_entry.init(1, thread_entry, 0, 0);
-        process_entry.add_thread(idle_thread_entry);
+        process_entry.init_kernel_process(
+            &mut [main_thread, idle_thread_entry],
+            memory_manager as *const _,
+            0,
+        );
 
         main_thread.set_up_to_be_root_of_run_list(&mut self.run_list);
         main_thread.insert_after_of_run_list(idle_thread_entry);
