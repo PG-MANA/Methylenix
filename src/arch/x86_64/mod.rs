@@ -105,7 +105,7 @@ pub extern "C" fn multiboot_main(
     /* Switch to main process */
     get_kernel_manager_cluster()
         .task_manager
-        .execute_init_process()
+        .execute_kernel_process()
     /* Never return to here */
 }
 

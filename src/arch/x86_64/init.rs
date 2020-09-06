@@ -79,7 +79,7 @@ pub fn init_task(
         .init(context_manager);
     get_kernel_manager_cluster()
         .task_manager
-        .create_init_process(context_data_for_init, context_data_for_idle);
+        .create_kernel_process(context_data_for_init, context_data_for_idle);
 }
 
 /// Init InterruptManager

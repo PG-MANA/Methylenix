@@ -178,14 +178,12 @@ impl VirtualMemoryManager {
         /*let vm_object_pool_address = alloc_func(Self::VM_OBJECT_POOL_SIZE, "vm_object", pm_manager);*/
         let vm_page_pool_address = alloc_func(Self::VM_PAGE_POOL_SIZE, "vm_page", pm_manager);
 
-        unsafe {
-            self.vm_map_entry_pool
-                .add_free_area(vm_map_entry_pool_address, Self::VM_MAP_ENTRY_POOL_SIZE);
-            /*self.vm_object_pool
-            .set_initial_pool(vm_object_pool_address, Self::VM_OBJECT_POOL_SIZE);*/
-            self.vm_page_pool
-                .add_free_area(vm_page_pool_address, Self::VM_PAGE_POOL_SIZE);
-        }
+        self.vm_map_entry_pool
+            .add_free_area(vm_map_entry_pool_address, Self::VM_MAP_ENTRY_POOL_SIZE);
+        /*self.vm_object_pool
+        .set_initial_pool(vm_object_pool_address, Self::VM_OBJECT_POOL_SIZE);*/
+        self.vm_page_pool
+            .add_free_area(vm_page_pool_address, Self::VM_PAGE_POOL_SIZE);
 
         map_func(
             self,
@@ -603,7 +601,7 @@ impl VirtualMemoryManager {
     ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
         let entry = self.vm_map_entry_pool.alloc(None)?;
         let entry = entry;
-        unsafe { *entry = source };
+        *entry = source;
         let result = entry as *mut _;
         assert!(entry.get_prev_entry().is_none());
         assert!(entry.get_next_entry().is_none());

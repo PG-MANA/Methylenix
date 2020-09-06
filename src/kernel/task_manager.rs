@@ -78,7 +78,7 @@ impl TaskManager {
         self.context_manager = context_manager;
     }
 
-    pub fn create_init_process(
+    pub fn create_kernel_process(
         &mut self,
         context_for_init: ContextData,
         context_for_idle: ContextData,
@@ -87,32 +87,34 @@ impl TaskManager {
 
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
         let process_entry = self.process_entry_pool.alloc(Some(memory_manager)).unwrap();
-        let thread_entry = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
+        let main_thread = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
         let idle_thread_entry = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
 
-        thread_entry.init(1, process_entry, 0, 0, context_for_init);
+        main_thread.init(1, process_entry, 0, 0, context_for_init);
         idle_thread_entry.init(2, process_entry, 0, core::i8::MIN, context_for_idle);
 
         process_entry.init(1, thread_entry, 0, 0);
         process_entry.add_thread(idle_thread_entry);
 
-        thread_entry.set_up_to_be_root_of_run_list(&mut self.run_list);
-        thread_entry.insert_after_of_run_list(idle_thread_entry);
+        main_thread.set_up_to_be_root_of_run_list(&mut self.run_list);
+        main_thread.insert_after_of_run_list(idle_thread_entry);
     }
 
-    pub fn execute_init_process(&mut self) -> ! {
+    pub fn execute_kernel_process(&mut self) -> ! {
         let _lock = self.lock.lock();
-        let init_thread = unsafe { self.run_list.get_first_entry_mut().unwrap() };
-        assert_eq!(init_thread.get_process().get_pid(), 1);
-        self.running_thread = Some(init_thread);
-        init_thread.set_task_status(TaskStatus::Running);
+        let main_thread = unsafe { self.run_list.get_first_entry_mut().unwrap() };
+        assert_eq!(main_thread.get_process().get_pid(), 0);
+        assert_eq!(main_thread.get_t_id(), 1);
+
+        self.running_thread = Some(main_thread);
+        main_thread.set_task_status(TaskStatus::Running);
         drop(_lock);
         unsafe {
             self.context_manager
-                .jump_to_context(init_thread.get_context())
+                .jump_to_context(main_thread.get_context())
         };
         /* not return here. */
-        panic!("Switching to init process was failed.");
+        panic!("Switching to the kernel process was failed.");
     }
 
     pub fn switch_to_next_thread(&mut self) {
