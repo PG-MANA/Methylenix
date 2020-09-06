@@ -10,8 +10,8 @@ use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SI
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress, VAddress};
-use crate::kernel::memory_manager::kernel_malloc_manager::KernelMemoryAllocManager;
+use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
+use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
 use crate::kernel::memory_manager::{
@@ -138,17 +138,13 @@ pub fn init_memory_by_multiboot_information(
         .create_new_memory_manager(virtual_memory_manager);
 
     /* set up Kernel Memory Alloc Manager */
-    let mut kernel_memory_alloc_manager = KernelMemoryAllocManager::new();
-    kernel_memory_alloc_manager.init(&mut memory_manager);
+    let mut object_allocator = ObjectAllocator::new();
+    object_allocator.init(&mut memory_manager);
 
     /* move Multiboot Information to allocated memory area */
     let mutex_memory_manager = Mutex::new(memory_manager);
-    let new_mbi_address = kernel_memory_alloc_manager
-        .kmalloc(
-            multiboot_information.size.into(),
-            MOrder::new(3),
-            &mutex_memory_manager,
-        )
+    let new_mbi_address = object_allocator
+        .alloc(multiboot_information.size.into(), &mutex_memory_manager)
         .expect("Cannot alloc memory for Multiboot Information.");
     unsafe {
         core::ptr::copy_nonoverlapping(
@@ -168,8 +164,7 @@ pub fn init_memory_by_multiboot_information(
 
     /* store managers to cluster */
     get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
-    get_kernel_manager_cluster().kernel_memory_alloc_manager =
-        Mutex::new(kernel_memory_alloc_manager);
+    get_kernel_manager_cluster().object_allocator = Mutex::new(object_allocator);
     MultiBootInformation::new(new_mbi_address.to_usize(), false)
 }
 

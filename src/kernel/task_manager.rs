@@ -13,12 +13,9 @@ use self::thread_entry::ThreadEntry;
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
+use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
 use crate::kernel::ptr_linked_list::PtrLinkedList;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-
-use crate::kernel::memory_manager::data_type::Address;
-use core::mem;
 
 pub struct TaskManager {
     lock: SpinLockFlag,
@@ -26,8 +23,8 @@ pub struct TaskManager {
     sleep_list: PtrLinkedList<ThreadEntry>,
     running_thread: Option<*mut ThreadEntry>,
     context_manager: ContextManager,
-    process_entry_pool: PoolAllocator<ProcessEntry>,
-    thread_entry_pool: PoolAllocator<ThreadEntry>,
+    process_entry_pool: CacheAllocator<ProcessEntry>,
+    thread_entry_pool: CacheAllocator<ThreadEntry>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -56,41 +53,26 @@ impl TaskManager {
             sleep_list: PtrLinkedList::new(),
             running_thread: None,
             context_manager: ContextManager::new(),
-            process_entry_pool: PoolAllocator::new(),
-            thread_entry_pool: PoolAllocator::new(),
+            process_entry_pool: CacheAllocator::new(ProcessEntry::PROCESS_ENTRY_ALIGN_ORDER),
+            thread_entry_pool: CacheAllocator::new(ThreadEntry::THREAD_ENTRY_ALIGN_ORDER),
         }
     }
 
     pub fn init(&mut self, context_manager: ContextManager) {
         let _lock = self.lock.lock();
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
-        let mut kernel_memory_allocator = get_kernel_manager_cluster()
-            .kernel_memory_alloc_manager
-            .lock()
-            .unwrap();
 
-        for _i in 0..Self::NUM_OF_INITIAL_PROCESS_ENTRIES {
-            let address = kernel_memory_allocator
-                .vmalloc(
-                    mem::size_of::<ProcessEntry>().into(),
-                    ProcessEntry::PROCESS_ENTRY_ALIGN_ORDER.into(),
-                    memory_manager,
-                )
-                .unwrap();
-            self.process_entry_pool
-                .free_ptr(address.to_usize() as *mut ProcessEntry);
+        if let Err(e) = self.process_entry_pool.init(
+            Self::NUM_OF_INITIAL_PROCESS_ENTRIES,
+            &mut memory_manager.lock().unwrap(),
+        ) {
+            pr_err!("Allocating the pool was failed: {:?}", e);
         }
-
-        for _i in 0..Self::NUM_OF_INITIAL_THREAD_ENTRIES {
-            let address = kernel_memory_allocator
-                .vmalloc(
-                    mem::size_of::<ThreadEntry>().into(),
-                    ThreadEntry::THREAD_ENTRY_ALIGN_ORDER.into(),
-                    memory_manager,
-                )
-                .unwrap();
-            self.thread_entry_pool
-                .free_ptr(address.to_usize() as *mut ThreadEntry);
+        if let Err(e) = self.thread_entry_pool.init(
+            Self::NUM_OF_INITIAL_THREAD_ENTRIES,
+            &mut memory_manager.lock().unwrap(),
+        ) {
+            pr_err!("Allocating the pool was failed: {:?}", e);
         }
 
         self.context_manager = context_manager;
@@ -102,13 +84,14 @@ impl TaskManager {
         context_for_idle: ContextData,
     ) {
         let _lock = self.lock.lock();
-        use core::i8;
-        let process_entry = self.process_entry_pool.alloc().unwrap();
-        let thread_entry = self.thread_entry_pool.alloc().unwrap();
-        let idle_thread_entry = self.thread_entry_pool.alloc().unwrap();
+
+        let memory_manager = &get_kernel_manager_cluster().memory_manager;
+        let process_entry = self.process_entry_pool.alloc(Some(memory_manager)).unwrap();
+        let thread_entry = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
+        let idle_thread_entry = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
 
         thread_entry.init(1, process_entry, 0, 0, context_for_init);
-        idle_thread_entry.init(2, process_entry, 0, i8::MIN, context_for_idle);
+        idle_thread_entry.init(2, process_entry, 0, core::i8::MIN, context_for_idle);
 
         process_entry.init(1, thread_entry, 0, 0);
         process_entry.add_thread(idle_thread_entry);
@@ -138,7 +121,7 @@ impl TaskManager {
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
             let should_change_root = running_thread.is_root_of_run_list();
             let next_entry = running_thread.get_next_from_run_list_mut();
-            running_thread.insert_self_to_sleep_queue(&mut self.sleep_list);
+            running_thread.insert_self_to_sleep_queue(&mut self.sleep_list, &mut self.run_list);
             if should_change_root {
                 /*assert!(next_entry.is_some());*/
                 let next_entry = next_entry.unwrap();
@@ -189,7 +172,7 @@ impl TaskManager {
             let e_t_id = e.get_t_id();
             if e_p_id == p_id && e_t_id == t_id {
                 if e.get_task_status() == TaskStatus::Sleeping {
-                    e.wakeup(&mut self.run_list);
+                    e.wakeup(&mut self.run_list, &mut self.sleep_list);
                 }
                 return;
             }

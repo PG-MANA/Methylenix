@@ -334,6 +334,14 @@ impl MOrder {
     pub const fn to_offset(&self) -> MSize {
         MSize(1 << self.0)
     }
+
+    pub const fn to_page_order(&self) -> Self {
+        if self.0 > PAGE_SHIFT {
+            Self(self.0 - PAGE_SHIFT)
+        } else {
+            Self(0)
+        }
+    }
 }
 
 /* MIndex */

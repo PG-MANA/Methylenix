@@ -40,10 +40,10 @@ pub extern "C" fn multiboot_main(
     get_kernel_manager_cluster().serial_port_manager =
         SerialPortManager::new(0x3F8 /* COM1 */); /* For debug */
 
-    /* MultiBootInformation読み込み */
+    /* Load the multiboot information */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
-    /* Graphic & TTY 初期化（Panicが起きたときの表示のため) */
+    /* Init Graphic & TTY (for panic!) */
     get_kernel_manager_cluster().graphic_manager = GraphicManager::new();
     get_kernel_manager_cluster()
         .graphic_manager
@@ -61,7 +61,7 @@ pub extern "C" fn multiboot_main(
         multiboot_information.boot_cmd_line
     );
 
-    /* メモリ管理初期化 */
+    /* Init the memory management system */
     let multiboot_information = init_memory_by_multiboot_information(multiboot_information);
     if !get_kernel_manager_cluster()
         .graphic_manager
@@ -70,10 +70,10 @@ pub extern "C" fn multiboot_main(
         panic!("Cannot map memory for frame buffer");
     }
 
-    /* IDT初期化&割り込み初期化 */
+    /* Init interruption */
     init_interrupt(kernel_code_segment);
 
-    /* シリアルポート初期化 */
+    /* Setup Serial Port */
     get_kernel_manager_cluster().serial_port_manager.init();
 
     /* Setup ACPI */
@@ -93,7 +93,7 @@ pub extern "C" fn multiboot_main(
     /* Set up graphic */
     init_graphic(&multiboot_information);
 
-    /* Set up task system */
+    /* Init the task management system */
     init_task(
         kernel_code_segment,
         user_code_segment,
@@ -114,7 +114,7 @@ pub fn general_protection_exception_handler(e_code: usize) {
 }
 
 fn main_process() -> ! {
-    /* interrupt is enabled */
+    /* Interruption is enabled */
     unsafe {
         LOCAL_APIC_TIMER.start_interruption(
             get_kernel_manager_cluster()
@@ -126,7 +126,7 @@ fn main_process() -> ! {
     }
     pr_info!("All init are done!");
 
-    /* draw boot logo */
+    /* Draw boot logo */
     if unsafe { ACPI_MANAGER.is_some() } {
         draw_boot_logo(unsafe { ACPI_MANAGER.as_ref().unwrap() });
     }
@@ -273,5 +273,8 @@ pub extern "C" fn directboot_main(
 
 #[no_mangle]
 pub extern "C" fn unknown_boot_main() {
-    panic!("Unknown Boot System!");
+    SerialPortManager::new(0x3F8).sendstr("Unknown Boot System!");
+    loop {
+        unsafe { llvm_asm!("hlt") };
+    }
 }

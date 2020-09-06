@@ -6,7 +6,7 @@
 
 pub mod data_type;
 pub mod global_allocator;
-pub mod kernel_malloc_manager;
+pub mod object_allocator;
 pub mod physical_memory_manager;
 pub mod pool_allocator;
 pub mod virtual_memory_manager;
