@@ -5,6 +5,7 @@
 //! The Object allocator is used when the system needs to allocate small object which will be freed soon.
 //!
 
+pub mod cache_allocator;
 mod heap_allocator;
 
 use self::heap_allocator::HeapAllocator;
@@ -12,27 +13,17 @@ use self::heap_allocator::HeapAllocator;
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
-use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
 use crate::kernel::memory_manager::{MemoryError, MemoryManager, MemoryPermissionFlags};
 use crate::kernel::sync::spin_lock::Mutex;
 
-struct CacheAllocator {
-    object_size: usize,
-    heap: usize,
-    align_order: usize,
-    available_count: usize,
-}
-
 pub struct ObjectAllocator {
     heap_allocator: HeapAllocator,
-    cache_allocator: PoolAllocator<CacheAllocator>,
 }
 
 impl ObjectAllocator {
     pub const fn new() -> Self {
         ObjectAllocator {
             heap_allocator: HeapAllocator::new(),
-            cache_allocator: PoolAllocator::new(),
         }
     }
 

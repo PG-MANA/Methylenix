@@ -15,6 +15,7 @@ use self::virtual_memory_entry::VirtualMemoryEntry;
 use self::virtual_memory_page::VirtualMemoryPage;
 
 use super::data_type::{Address, MIndex, MSize, PAddress, VAddress};
+use super::object_allocator::cache_allocator::CacheAllocator;
 use super::physical_memory_manager::PhysicalMemoryManager;
 use super::pool_allocator::PoolAllocator;
 use super::MemoryError;
@@ -31,9 +32,9 @@ pub struct VirtualMemoryManager {
     vm_map_entry: PtrLinkedList<VirtualMemoryEntry>,
     is_system_vm: bool,
     page_manager: PageManager,
-    vm_map_entry_pool: PoolAllocator<VirtualMemoryEntry>,
+    vm_map_entry_pool: CacheAllocator<VirtualMemoryEntry>,
     /*vm_object_pool: PoolAllocator<VirtualMemoryObject>,*/
-    vm_page_pool: PoolAllocator<VirtualMemoryPage>,
+    vm_page_pool: CacheAllocator<VirtualMemoryPage>,
     reserved_memory_list: PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
     direct_mapped_area: Option<DirectMappedArea>, /* think algorithm */
 }
@@ -44,18 +45,18 @@ struct DirectMappedArea {
 }
 
 impl VirtualMemoryManager {
-    const VM_MAP_ENTRY_POOL_SIZE: usize = PAGE_SIZE_USIZE * 8;
+    const VM_MAP_ENTRY_POOL_SIZE: MSize = PAGE_SIZE << MSize::new(3);
     /*const VM_OBJECT_POOL_SIZE: usize = PAGE_SIZE * 8;*/
-    const VM_PAGE_POOL_SIZE: usize = PAGE_SIZE_USIZE * 128;
+    const VM_PAGE_POOL_SIZE: MSize = PAGE_SIZE << MSize::new(7);
 
     pub const fn new() -> Self {
         Self {
             vm_map_entry: PtrLinkedList::new(),
             is_system_vm: false,
             page_manager: PageManager::new(),
-            vm_map_entry_pool: PoolAllocator::new(),
+            vm_map_entry_pool: CacheAllocator::new(0),
             /*vm_object_pool: PoolAllocator::new(),*/
-            vm_page_pool: PoolAllocator::new(),
+            vm_page_pool: CacheAllocator::new(0),
             reserved_memory_list: PoolAllocator::new(),
             direct_mapped_area: None,
         }
@@ -172,24 +173,18 @@ impl VirtualMemoryManager {
             }
         };
 
-        let vm_map_entry_pool_address = alloc_func(
-            Self::VM_MAP_ENTRY_POOL_SIZE.into(),
-            "vm_map_entry",
-            pm_manager,
-        );
+        let vm_map_entry_pool_address =
+            alloc_func(Self::VM_MAP_ENTRY_POOL_SIZE, "vm_map_entry", pm_manager);
         /*let vm_object_pool_address = alloc_func(Self::VM_OBJECT_POOL_SIZE, "vm_object", pm_manager);*/
-        let vm_page_pool_address =
-            alloc_func(Self::VM_PAGE_POOL_SIZE.into(), "vm_page", pm_manager);
+        let vm_page_pool_address = alloc_func(Self::VM_PAGE_POOL_SIZE, "vm_page", pm_manager);
 
         unsafe {
-            self.vm_map_entry_pool.set_initial_pool(
-                vm_map_entry_pool_address.to_usize(),
-                Self::VM_MAP_ENTRY_POOL_SIZE,
-            );
+            self.vm_map_entry_pool
+                .add_free_area(vm_map_entry_pool_address, Self::VM_MAP_ENTRY_POOL_SIZE);
             /*self.vm_object_pool
             .set_initial_pool(vm_object_pool_address, Self::VM_OBJECT_POOL_SIZE);*/
             self.vm_page_pool
-                .set_initial_pool(vm_page_pool_address.to_usize(), Self::VM_PAGE_POOL_SIZE);
+                .add_free_area(vm_page_pool_address, Self::VM_PAGE_POOL_SIZE);
         }
 
         map_func(
@@ -606,15 +601,10 @@ impl VirtualMemoryManager {
         source: VirtualMemoryEntry,
         _pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
-        let entry = self.vm_map_entry_pool.alloc_ptr();
-        if entry.is_err() {
-            /*add: allocate from physical_memory manager*/
-            return Err(MemoryError::InsertEntryFailed);
-        }
-        let entry = entry.unwrap();
+        let entry = self.vm_map_entry_pool.alloc(None)?;
+        let entry = entry;
         unsafe { *entry = source };
-        let result = entry.clone();
-        let entry = unsafe { &mut *(entry) };
+        let result = entry as *mut _;
         assert!(entry.get_prev_entry().is_none());
         assert!(entry.get_next_entry().is_none());
         if self.vm_map_entry.get_first_entry_as_ptr().is_some() {
@@ -693,7 +683,7 @@ impl VirtualMemoryManager {
         let p_index = MIndex::from_offset(virtual_address - vm_map_entry.get_vm_start_address());
         let vm_page = self
             .vm_page_pool
-            .alloc()
+            .alloc(None)
             .expect("Can not alloc  vm_page.(TODO: Alloc from manager)");
         *vm_page = VirtualMemoryPage::new(physical_address, p_index);
         vm_page.set_page_status(vm_map_entry.get_memory_option_flags());
