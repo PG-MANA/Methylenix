@@ -30,42 +30,44 @@ impl ProcessEntry {
     #[allow(dead_code)]
     pub fn init(
         &mut self,
-        process_id: usize,
-        thread: &mut ThreadEntry,
-        parent: *mut ProcessEntry,
+        p_id: usize,
+        parent: *mut Self,
+        threads: &mut [&mut ThreadEntry],
         memory_manager: *const Mutex<MemoryManager>,
         privilege_level: u8,
         priority_level: i8,
     ) {
         self.lock = SpinLockFlag::new();
         let _lock = self.lock.lock();
-        self.p_list = PtrLinkedListNode::new();
-        self.signal = TaskSignal::Normal;
-        self.status = ProcessStatus::New;
-        self.process_id = process_id;
-        self.thread = PtrLinkedList::new();
-        self.single_thread = Some(thread as *mut _);
-        thread.set_process(self as *mut _);
-        self.privilege_level = privilege_level;
-        self.priority_level = priority_level;
-        self.num_of_thread = 1;
-        self.memory_manager = memory_manager;
         self.parent = parent;
+        self._init(
+            p_id,
+            threads,
+            memory_manager,
+            privilege_level,
+            priority_level,
+        );
     }
 
-    pub fn init_kernel_process(
+    pub fn _init(
         &mut self,
+        p_id: usize,
         threads: &mut [&mut ThreadEntry],
         memory_manager: *const Mutex<MemoryManager>,
+        privilege_level: u8,
         priority_level: i8,
     ) {
+        /* assume be locked */
         assert_ne!(threads.len(), 0);
-        self.lock = SpinLockFlag::new();
-        let _lock = self.lock.lock();
         self.p_list = PtrLinkedListNode::new();
         self.signal = TaskSignal::Normal;
         self.status = ProcessStatus::Normal;
-        self.process_id = 0;
+        self.process_id = p_id;
+        self.privilege_level = privilege_level;
+        self.priority_level = priority_level;
+        self.memory_manager = memory_manager;
+        self.num_of_thread = threads.len();
+
         self.thread = PtrLinkedList::new();
         if threads.len() == 1 {
             threads[0].set_process(self as *mut _);
@@ -80,10 +82,17 @@ impl ProcessEntry {
                 threads[i - 1].set_process(self as *mut _);
             }
         }
-        self.privilege_level = 0;
-        self.priority_level = priority_level;
-        self.num_of_thread = threads.len();
-        self.memory_manager = memory_manager;
+    }
+
+    pub fn init_kernel_process(
+        &mut self,
+        threads: &mut [&mut ThreadEntry],
+        memory_manager: *const Mutex<MemoryManager>,
+        priority_level: i8,
+    ) {
+        self.lock = SpinLockFlag::new();
+        let _lock = self.lock.lock();
+        self._init(0, threads, memory_manager, 0, priority_level);
     }
 
     pub const fn get_pid(&self) -> usize {
