@@ -18,6 +18,16 @@ pub unsafe fn cli() {
 }
 
 #[inline(always)]
+pub unsafe fn enable_interrupt() {
+    sti();
+}
+
+#[inline(always)]
+pub unsafe fn disable_interrupt() {
+    cli();
+}
+
+#[inline(always)]
 pub unsafe fn halt() {
     hlt();
 }
@@ -118,6 +128,18 @@ pub unsafe fn get_cr4() -> u64 {
     let mut rax: u64;
     llvm_asm!("movq %cr4, %rax":"={rax}"(rax):::"volatile");
     rax
+}
+
+#[inline(always)]
+pub fn is_interruption_enabled() -> bool {
+    let r_flags: u64;
+    unsafe {
+        llvm_asm!("
+                pushfq
+                pop %rax
+                ":"={rax}"(r_flags):::"volatile")
+    };
+    (r_flags & (1 << 9)) != 0
 }
 
 #[inline(always)]
