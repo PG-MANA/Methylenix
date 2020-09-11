@@ -165,10 +165,10 @@ impl LocalApicTimer {
     /// Before calling it, ensure the interruption is set up.
     /// Currently, this function set 1000ms as the interval, in the future, it will be variable.
     pub fn start_interruption(&mut self, local_apic: &LocalApicManager) -> bool {
-        let _lock = self.lock.lock();
         if self.is_interrupt_enabled || self.frequency == 0 {
             return false;
         }
+        let _lock = self.lock.lock();
         if self.is_deadline_mode_enabled {
             let mut lvt = local_apic.read_apic_register(LocalApicRegisters::LvtTimer);
             lvt &= !(0b1 << 16);
