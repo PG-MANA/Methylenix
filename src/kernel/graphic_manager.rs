@@ -126,7 +126,6 @@ impl GraphicManager {
             } else if c == '\r' {
                 cursor.x = 0;
             } else if c.is_control() {
-                continue;
             } else {
                 let font_data = font_manager.get_font_data(c);
                 if font_data.is_none() {
@@ -141,22 +140,24 @@ impl GraphicManager {
                     cursor.y += font_manager.get_max_font_height();
                 }
                 if frame_buffer_size.1 <= cursor.y + font_data.height as usize {
+                    let scroll_y =
+                        font_manager.get_max_font_height() + cursor.y - frame_buffer_size.1;
                     frame_buffer_manager.scroll(
                         0,
-                        font_manager.get_max_font_height(),
+                        scroll_y,
                         0,
                         0,
                         frame_buffer_size.0,
-                        frame_buffer_size.1 - font_manager.get_max_font_height(),
+                        frame_buffer_size.1 - scroll_y,
                     ); /* scroll */
                     frame_buffer_manager.fill(
                         0,
-                        frame_buffer_size.1 - font_manager.get_max_font_height(),
+                        frame_buffer_size.1 - scroll_y,
                         frame_buffer_size.0,
                         frame_buffer_size.1,
                         0,
                     ); /* erase the last line */
-                    cursor.y -= font_manager.get_max_font_height();
+                    cursor.y -= scroll_y;
                 }
 
                 frame_buffer_manager.write_monochrome_bitmap(
