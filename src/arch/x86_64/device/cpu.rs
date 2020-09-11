@@ -70,6 +70,18 @@ pub unsafe fn in_dword(port: u16) -> u32 {
 }
 
 #[inline(always)]
+pub unsafe fn sgdt(gdtr: &mut u128) {
+    llvm_asm!("sgdt (%rdi)"::"{rdi}"(gdtr as *mut _ as usize as u64));
+}
+
+#[inline(always)]
+pub unsafe fn store_tr() -> u16 {
+    let result: u16;
+    llvm_asm!("str %ax":"={ax}"(result):::"volatile");
+    result
+}
+
+#[inline(always)]
 pub unsafe fn lidt(idtr: usize) {
     llvm_asm!("lidt (%rdi)"::"{rdi}"(idtr));
 }
