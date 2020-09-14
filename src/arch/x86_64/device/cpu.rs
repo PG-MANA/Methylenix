@@ -180,13 +180,9 @@ pub unsafe fn enable_sse() {
 /// Set all registers from context_data and jump context_data.rip.
 /// **This function never return.**
 #[naked]
-pub unsafe fn run_task(context_data_address: *mut ContextData) {
+#[inline(never)]
+pub unsafe fn run_task(context_data_address: *const ContextData) {
     llvm_asm!("
-
-                mov     rax, [rdi + 512 + 8 * 18]
-                add     rax, 8                      // Stack-Alignment(is it OK?)
-                mov     [rdi + 512 + 8 * 18], rax
-
                 fxrstor [rdi]
                 mov     rdx, [rdi + 512 + 8 *  1]
                 mov     rcx, [rdi + 512 + 8 *  2]
@@ -202,17 +198,21 @@ pub unsafe fn run_task(context_data_address: *mut ContextData) {
                 mov     r14, [rdi + 512 + 8 * 13]
                 mov     r15, [rdi + 512 + 8 * 14]
                 mov     rax, [rdi + 512 + 8 * 15]
-                mov     fs, ax
+                mov     ds, ax
                 mov     rax, [rdi + 512 + 8 * 16]
+                mov     fs, ax
+                mov     rax, [rdi + 512 + 8 * 17]
                 mov     gs, ax
+                mov     rax, [rdi + 512 + 8 * 18]
+                mov     es, ax
                 
-                push    [rdi + 512 + 8 * 17] // SS
-                push    [rdi + 512 + 8 * 18] // RSP
-                push    [rdi + 512 + 8 * 19] // RFLAGS
-                push    [rdi + 512 + 8 * 20] // CS
-                push    [rdi + 512 + 8 * 21] // RIP
+                push    [rdi + 512 + 8 * 19] // SS
+                push    [rdi + 512 + 8 * 20] // RSP
+                push    [rdi + 512 + 8 * 21] // RFLAGS
+                push    [rdi + 512 + 8 * 22] // CS
+                push    [rdi + 512 + 8 * 23] // RIP
 
-                mov     rax, [rdi + 512 + 8 * 22]
+                mov     rax, [rdi + 512 + 8 * 24]
                 mov     cr3, rax
                 mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]
@@ -225,8 +225,9 @@ pub unsafe fn run_task(context_data_address: *mut ContextData) {
 /// This function is called by ContextManager.
 /// This function does not return until another process switches to now_context_data.
 #[naked]
+#[inline(never)]
 pub unsafe fn task_switch(
-    next_context_data_address: *mut ContextData,
+    next_context_data_address: *const ContextData,
     now_context_data_address: *mut ContextData,
 ) {
     llvm_asm!("
@@ -246,25 +247,27 @@ pub unsafe fn task_switch(
                 mov     [rsi + 512 + 8 * 12], r13
                 mov     [rsi + 512 + 8 * 13], r14
                 mov     [rsi + 512 + 8 * 14], r15
-                mov     rax, fs
+                mov     rax, ds
                 mov     [rsi + 512 + 8 * 15], rax
-                mov     rax, gs
+                mov     rax, fs
                 mov     [rsi + 512 + 8 * 16], rax
-                mov     rax, ss
+                mov     rax, gs
                 mov     [rsi + 512 + 8 * 17], rax
-                mov     rax, rsp
+                mov     rax, es
                 mov     [rsi + 512 + 8 * 18], rax
+                mov     rax, ss
+                mov     [rsi + 512 + 8 * 19], rax
+                mov     rax, rsp
+                mov     [rsi + 512 + 8 * 20], rax
                 pushfq
                 pop     rax
-                and     ax, 0x022a
-                or      rax, 0x200
-                mov     [rsi + 512 + 8 * 19], rax   // RFLAGS
+                mov     [rsi + 512 + 8 * 21], rax   // RFLAGS
                 mov     rax, cs
-                mov     [rsi + 512 + 8 * 20], rax
-                lea     rax, 1f
-                mov     [rsi + 512 + 8 * 21], rax   // RIP
-                mov     rax, cr3
                 mov     [rsi + 512 + 8 * 22], rax
+                lea     rax, 1f
+                mov     [rsi + 512 + 8 * 23], rax   // RIP
+                mov     rax, cr3
+                mov     [rsi + 512 + 8 * 24], rax
 
                 fxrstor [rdi]
                 mov     rdx, [rdi + 512 + 8 *  1]
@@ -281,17 +284,21 @@ pub unsafe fn task_switch(
                 mov     r14, [rdi + 512 + 8 * 13]
                 mov     r15, [rdi + 512 + 8 * 14]
                 mov     rax, [rdi + 512 + 8 * 15]
-                mov     fs, ax
+                mov     ds, ax
                 mov     rax, [rdi + 512 + 8 * 16]
+                mov     fs, ax
+                mov     rax, [rdi + 512 + 8 * 17]
                 mov     gs, ax
+                mov     rax, [rdi + 512 + 8 * 18]
+                mov     es, ax
                 
-                push    [rdi + 512 + 8 * 17] // SS
-                push    [rdi + 512 + 8 * 18] // RSP
-                push    [rdi + 512 + 8 * 19] // RFLAGS
-                push    [rdi + 512 + 8 * 20] // CS
-                push    [rdi + 512 + 8 * 21] // RIP
+                push    [rdi + 512 + 8 * 19] // SS
+                push    [rdi + 512 + 8 * 20] // RSP
+                push    [rdi + 512 + 8 * 21] // RFLAGS
+                push    [rdi + 512 + 8 * 22] // CS
+                push    [rdi + 512 + 8 * 23] // RIP
 
-                mov     rax, [rdi + 512 + 8 * 22]
+                mov     rax, [rdi + 512 + 8 * 24]
                 mov     cr3, rax
                 mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]

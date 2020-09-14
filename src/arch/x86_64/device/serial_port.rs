@@ -137,10 +137,8 @@ impl SerialPortManager {
     ///
     /// First, this will get data from serial port controller, and push it into FIFO.
     /// Currently, this wakes the main process up.
-    pub fn inthandler24_main() {
-        //handlerをimplで実装することを考え直すべき
-        let m = &mut get_kernel_manager_cluster().serial_port_manager;
-        m.enqueue_key(m.read());
+    #[inline(never)]
+    fn inthandler24_main() {
         if let Ok(interrupt_manager) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
             interrupt_manager.send_eoi();
         }

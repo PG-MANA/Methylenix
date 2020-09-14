@@ -139,7 +139,7 @@ fn main_process() -> ! {
             .dequeue_key()
             .unwrap_or(0);
         if ascii_code != 0 {
-            print!("{}", ascii_code as char);
+            pr_info!("SerialPort: {}", ascii_code as char);
         }
     }
 }
