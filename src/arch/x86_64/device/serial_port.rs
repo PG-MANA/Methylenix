@@ -8,6 +8,7 @@ use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 use crate::kernel::fifo::FIFO;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::task_manager::soft_interrupt::WorkList;
 
 /// SerialPortManager
 ///
@@ -142,7 +143,20 @@ impl SerialPortManager {
         if let Ok(interrupt_manager) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
             interrupt_manager.send_eoi();
         }
-        get_kernel_manager_cluster().task_manager.wakeup(1, 1);
+        let work = WorkList::new(
+            Self::worker,
+            get_kernel_manager_cluster().serial_port_manager.read() as usize,
+        );
+        get_kernel_manager_cluster()
+            .soft_interrupt_manager
+            .add_work(work);
+    }
+
+    fn worker(data: usize) {
+        get_kernel_manager_cluster()
+            .serial_port_manager
+            .enqueue_key(data as u8);
+        get_kernel_manager_cluster().task_manager.wakeup(0, 1);
     }
 
     /// Check if the transmission was completed.

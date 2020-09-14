@@ -5,6 +5,7 @@
  */
 
 mod process_entry;
+pub mod soft_interrupt;
 mod thread_entry;
 
 use self::process_entry::ProcessEntry;

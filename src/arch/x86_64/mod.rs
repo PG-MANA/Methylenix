@@ -15,7 +15,9 @@ use self::device::cpu;
 use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
-use self::init::{init_acpi, init_interrupt, init_task, init_timer};
+use self::init::{
+    init_acpi, init_interrupt, init_interrupt_work_queue_manager, init_task, init_timer,
+};
 
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
@@ -101,6 +103,9 @@ pub extern "C" fn multiboot_main(
         main_process,
         idle,
     );
+
+    /* Setup the interrupt work queue system */
+    init_interrupt_work_queue_manager();
 
     /* Switch to main process */
     get_kernel_manager_cluster()
