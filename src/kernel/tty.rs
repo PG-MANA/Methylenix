@@ -94,7 +94,7 @@ pub fn kernel_print(args: fmt::Arguments) {
         .kernel_tty_manager
         .write_fmt(args);
     if r.is_err() {
-        panic!("Cannot write a string");
+        //panic!("Cannot write a string");
     }
 }
 

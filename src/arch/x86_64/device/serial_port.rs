@@ -8,6 +8,7 @@ use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 use crate::kernel::fifo::FIFO;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::task_manager::soft_interrupt::WorkList;
 
 /// SerialPortManager
 ///
@@ -50,7 +51,7 @@ impl SerialPortManager {
                 .interrupt_manager
                 .lock()
                 .unwrap()
-                .set_device_interrupt_function(inthandler24, Some(4), 0x24, 0);
+                .set_device_interrupt_function(inthandler24, Some(4), None, 0x24, 0);
             let _lock = self.write_lock.lock();
             out_byte(self.port + 1, 0x00); // Off the FIFO of controller
             out_byte(self.port + 3, 0x80); // Enable DLAB
@@ -137,14 +138,25 @@ impl SerialPortManager {
     ///
     /// First, this will get data from serial port controller, and push it into FIFO.
     /// Currently, this wakes the main process up.
-    pub fn inthandler24_main() {
-        //handlerをimplで実装することを考え直すべき
-        let m = &mut get_kernel_manager_cluster().serial_port_manager;
-        m.enqueue_key(m.read());
+    #[inline(never)]
+    fn inthandler24_main() {
         if let Ok(interrupt_manager) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
             interrupt_manager.send_eoi();
         }
-        get_kernel_manager_cluster().task_manager.wakeup(1, 1);
+        let work = WorkList::new(
+            Self::worker,
+            get_kernel_manager_cluster().serial_port_manager.read() as usize,
+        );
+        get_kernel_manager_cluster()
+            .soft_interrupt_manager
+            .add_work(work);
+    }
+
+    fn worker(data: usize) {
+        get_kernel_manager_cluster()
+            .serial_port_manager
+            .enqueue_key(data as u8);
+        get_kernel_manager_cluster().task_manager.wakeup(0, 1);
     }
 
     /// Check if the transmission was completed.

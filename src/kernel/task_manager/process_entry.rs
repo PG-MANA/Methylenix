@@ -22,6 +22,7 @@ pub struct ProcessEntry {
     single_thread: Option<*mut ThreadEntry>,
     privilege_level: u8,
     priority_level: i8,
+    next_thread_id: usize,
 }
 
 impl ProcessEntry {
@@ -67,19 +68,26 @@ impl ProcessEntry {
         self.priority_level = priority_level;
         self.memory_manager = memory_manager;
         self.num_of_thread = threads.len();
+        self.next_thread_id = 1;
 
         self.thread = PtrLinkedList::new();
         if threads.len() == 1 {
             threads[0].set_process(self as *mut _);
+            threads[0].set_t_id(1);
             self.single_thread = Some(threads[0] as *mut _);
+            self.update_next_thread_id();
         } else {
             self.single_thread = None;
             threads[0].set_up_to_be_root_of_p_list(&mut self.thread);
             threads[0].set_process(self as *mut _);
+            threads[0].set_t_id(self.next_thread_id);
+            self.update_next_thread_id();
             for i in 1..threads.len() {
                 let pointer = threads[i] as *mut ThreadEntry;
                 threads[i - 1].insert_after_of_p_list(unsafe { &mut *pointer });
-                threads[i - 1].set_process(self as *mut _);
+                threads[i].set_process(self as *mut _);
+                threads[i].set_t_id(self.next_thread_id);
+                self.update_next_thread_id();
             }
         }
     }
@@ -95,11 +103,33 @@ impl ProcessEntry {
         self._init(0, threads, memory_manager, 0, priority_level);
     }
 
+    fn update_next_thread_id(&mut self) {
+        self.next_thread_id += 1;
+    }
+
     pub const fn get_pid(&self) -> usize {
         self.process_id
     }
 
-    #[allow(dead_code)]
+    pub fn get_thread(&mut self, t_id: usize) -> Option<&mut ThreadEntry> {
+        if let Some(single_thread) = self.single_thread {
+            let s_t = unsafe { &mut *single_thread };
+            if s_t.get_t_id() == t_id {
+                Some(s_t)
+            } else {
+                None
+            }
+        } else {
+            for e in self.thread.iter_mut() {
+                let thread = unsafe { &mut *e };
+                if thread.get_t_id() == t_id {
+                    return Some(thread);
+                }
+            }
+            None
+        }
+    }
+
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) {
         let _lock = self.lock.lock();
         if self.num_of_thread == 0 {
@@ -115,12 +145,12 @@ impl ProcessEntry {
             unsafe { &mut *old_thread }.set_up_to_be_root_of_p_list(&mut self.thread);
             unsafe { &mut *old_thread }.insert_after_of_p_list(thread);
         } else {
-            assert!(self.thread.get_first_entry_as_ptr().is_none());
+            assert!(self.thread.get_first_entry_as_ptr().is_some());
             assert!(self.single_thread.is_none());
-            let old_entry = unsafe { self.thread.get_first_entry_mut().unwrap() };
-            thread.set_up_to_be_root_of_p_list(&mut self.thread);
-            thread.insert_after_of_p_list(old_entry);
+            unsafe { self.thread.get_last_entry_mut().unwrap() }.insert_after_of_p_list(thread)
         }
         thread.set_process(self as *mut _);
+        thread.set_t_id(self.next_thread_id);
+        self.update_next_thread_id();
     }
 }

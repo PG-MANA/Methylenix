@@ -6,15 +6,17 @@
 pub mod idt;
 #[macro_use]
 pub mod handler;
-//mod tss;
+mod tss;
 
 use self::idt::GateDescriptor;
+use self::tss::TssManager;
+
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::memory_manager::{data_type::MSize, MemoryPermissionFlags};
 
 use crate::kernel::memory_manager::data_type::Address;
 use core::mem::{size_of, MaybeUninit};
@@ -28,6 +30,7 @@ pub struct InterruptManager {
     main_selector: u16,
     io_apic: IoApicManager,
     local_apic: LocalApicManager, /* temporary */
+    tss_manager: TssManager,
 }
 
 /// Interruption Number
@@ -53,6 +56,7 @@ impl InterruptManager {
             main_selector: 0,
             io_apic: IoApicManager::new(),
             local_apic: LocalApicManager::new(),
+            tss_manager: TssManager::new(),
         }
     }
 
@@ -81,6 +85,7 @@ impl InterruptManager {
             }
             self.flush();
         }
+        self.tss_manager.load_current_tss();
         self.io_apic.init();
         self.local_apic.init();
         return true;
@@ -134,6 +139,7 @@ impl InterruptManager {
         &mut self,
         function: unsafe fn(),
         irq: Option<u8>,
+        ist: Option<u8>,
         index: u16,
         privilege_level: u8,
     ) -> bool {
@@ -147,7 +153,7 @@ impl InterruptManager {
         unsafe {
             self.set_gate_descriptor(
                 index,
-                GateDescriptor::new(function, self.main_selector, 0, type_attr),
+                GateDescriptor::new(function, self.main_selector, ist.unwrap_or(0), type_attr),
             );
         }
         if let Some(irq) = irq {
@@ -155,6 +161,47 @@ impl InterruptManager {
                 .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
         }
         return true;
+    }
+
+    /// Setup IST(Interrupt Stack Table)
+    ///
+    /// This function allocates stack and set ist into TSS.
+    /// If allocating the stack is failed, this function will panic.
+    /// ist must be bigger than 0 and smaller than 8.
+    pub fn set_ist(&mut self, ist: u8, stack_size: MSize) -> bool {
+        let stack = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .alloc_pages(
+                stack_size.to_order(None).to_page_order(),
+                MemoryPermissionFlags::data(),
+            )
+            .expect("Cannot allocate pages for ist.");
+
+        self.tss_manager
+            .set_ist(ist, (stack + stack_size).to_usize())
+    }
+
+    /// Setup RSP(for privilege level 0~2)
+    ///
+    /// This function allocates stack and set rsp into TSS.
+    /// If allocating the stack is failed, this function will panic.
+    /// rsp must be in the range 0 ~ 2.
+    #[allow(dead_code)]
+    pub fn set_rsp(&mut self, rsp: u8, stack_size: MSize) -> bool {
+        let stack = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .alloc_pages(
+                stack_size.to_order(None).to_page_order(),
+                MemoryPermissionFlags::data(),
+            )
+            .expect("Cannot allocate pages for rsp.");
+
+        self.tss_manager
+            .set_rsp(rsp, (stack + stack_size).to_usize())
     }
 
     /// Send end of interruption to Local APIC.

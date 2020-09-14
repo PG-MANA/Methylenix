@@ -30,7 +30,6 @@ impl ThreadEntry {
 
     pub fn init(
         &mut self,
-        thread_id: usize,
         process: *mut ProcessEntry,
         privilege_level: u8,
         priority_level: i8,
@@ -42,7 +41,7 @@ impl ThreadEntry {
         self.run_list = PtrLinkedListNode::new();
         self.sleep_list = PtrLinkedListNode::new();
         self.status = TaskStatus::New;
-        self.thread_id = thread_id;
+        self.thread_id = 0;
         self.process = NonNull::new(process).unwrap();
         self.context_data = context_data;
         self.privilege_level = privilege_level;
@@ -76,6 +75,14 @@ impl ThreadEntry {
         list_head.set_first_entry(Some(&mut self.run_list));
     }
 
+    pub fn set_up_to_be_root_of_sleep_list(&mut self, list_head: &mut PtrLinkedList<Self>) {
+        let _lock = self.lock.lock();
+        let ptr = self as *mut _;
+        self.sleep_list.set_ptr(ptr);
+        self.sleep_list.terminate_prev_entry();
+        list_head.set_first_entry(Some(&mut self.sleep_list));
+    }
+
     pub fn insert_after_of_run_list(&mut self, entry: &mut Self) {
         let _lock = self.lock.lock();
         if entry.run_list.is_invalid_ptr() {
@@ -85,6 +92,17 @@ impl ThreadEntry {
         let ptr = self as *mut _;
         self.run_list.set_ptr(ptr);
         self.run_list.insert_after(&mut entry.run_list);
+    }
+
+    pub fn insert_after_of_sleep_list(&mut self, entry: &mut Self) {
+        let _lock = self.lock.lock();
+        if entry.sleep_list.is_invalid_ptr() {
+            let ptr = entry as *mut Self;
+            entry.sleep_list.set_ptr(ptr);
+        }
+        let ptr = self as *mut _;
+        self.sleep_list.set_ptr(ptr);
+        self.sleep_list.insert_after(&mut entry.run_list);
     }
 
     pub fn set_process(&mut self, process: *mut ProcessEntry) {
@@ -104,6 +122,11 @@ impl ThreadEntry {
         self.thread_id
     }
 
+    pub fn set_t_id(&mut self, t_id: usize) {
+        let _lock = self.lock.lock();
+        self.thread_id = t_id;
+    }
+
     pub fn set_task_status(&mut self, status: TaskStatus) {
         let _lock = self.lock.lock();
         self._set_task_status(status);
@@ -115,6 +138,12 @@ impl ThreadEntry {
 
     pub fn get_context(&mut self) -> &mut ContextData {
         &mut self.context_data
+    }
+
+    pub fn set_context(&mut self, context: &ContextData) {
+        unsafe {
+            core::ptr::copy(context as *const _, &mut self.context_data as *mut _, 1);
+        }
     }
 
     pub fn get_next_from_run_list_mut(&mut self) -> Option<&'static mut Self> {
@@ -158,17 +187,19 @@ impl ThreadEntry {
     ) {
         let _lock = self.lock.lock();
         assert_eq!(self.status, TaskStatus::Sleeping);
-        let old_first_entry = unsafe { run_queue_head.get_first_entry_mut() };
-        if old_first_entry.is_none() {
+        let ptr = self as *mut _;
+        self.run_list.set_ptr(ptr);
+
+        let old_last_entry = unsafe { run_queue_head.get_last_entry_mut() };
+        if old_last_entry.is_none() {
             self.run_list.terminate_prev_entry();
             run_queue_head.set_first_entry(Some(&mut self.run_list as *mut _));
         } else {
             self.run_list.terminate_prev_entry();
-            old_first_entry
+            old_last_entry
                 .unwrap()
                 .run_list
-                .insert_before(&mut self.run_list);
-            run_queue_head.set_first_entry(Some(&mut self.run_list as *mut _));
+                .insert_after(&mut self.run_list);
         }
         self._set_task_status(TaskStatus::CanRun);
         self.sleep_list.remove_from_list(sleep_queue_head);

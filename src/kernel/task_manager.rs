@@ -5,20 +5,24 @@
  */
 
 mod process_entry;
+pub mod soft_interrupt;
 mod thread_entry;
 
 use self::process_entry::ProcessEntry;
 use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
+use crate::arch::target_arch::device::cpu::is_interruption_enabled;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::MSize;
 use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
 use crate::kernel::ptr_linked_list::PtrLinkedList;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 pub struct TaskManager {
     lock: SpinLockFlag,
+    kernel_process: Option<*mut ProcessEntry>,
     run_list: PtrLinkedList<ThreadEntry>,
     sleep_list: PtrLinkedList<ThreadEntry>,
     running_thread: Option<*mut ThreadEntry>,
@@ -58,6 +62,7 @@ impl TaskManager {
             run_list: PtrLinkedList::new(),
             sleep_list: PtrLinkedList::new(),
             running_thread: None,
+            kernel_process: None,
             context_manager: ContextManager::new(),
             process_entry_pool: CacheAllocator::new(ProcessEntry::PROCESS_ENTRY_ALIGN_ORDER),
             thread_entry_pool: CacheAllocator::new(ThreadEntry::THREAD_ENTRY_ALIGN_ORDER),
@@ -86,7 +91,7 @@ impl TaskManager {
 
     pub fn create_kernel_process(
         &mut self,
-        context_for_init: ContextData,
+        context_for_main: ContextData,
         context_for_idle: ContextData,
     ) {
         let _lock = self.lock.lock();
@@ -96,14 +101,15 @@ impl TaskManager {
         let main_thread = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
         let idle_thread_entry = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
 
-        main_thread.init(1, process_entry, 0, 0, context_for_init);
-        idle_thread_entry.init(2, process_entry, 0, core::i8::MIN, context_for_idle);
+        main_thread.init(process_entry, 0, 0, context_for_main);
+        idle_thread_entry.init(process_entry, 0, core::i8::MIN, context_for_idle);
 
         process_entry.init_kernel_process(
             &mut [main_thread, idle_thread_entry],
             memory_manager as *const _,
             0,
         );
+        self.kernel_process = Some(process_entry as *mut _);
 
         main_thread.set_up_to_be_root_of_run_list(&mut self.run_list);
         main_thread.insert_after_of_run_list(idle_thread_entry);
@@ -151,6 +157,12 @@ impl TaskManager {
                 unsafe { self.run_list.get_first_entry_mut().unwrap() }
             }
         };
+        if running_thread.get_t_id() == next_thread.get_t_id()
+            && running_thread.get_process().get_pid() == next_thread.get_process().get_pid()
+        {
+            pr_info!("Same task.");
+            return;
+        }
         pr_info!(
             "Task Switch[thread_id:{}=>{}]",
             running_thread.get_t_id(),
@@ -162,6 +174,52 @@ impl TaskManager {
         unsafe {
             self.context_manager
                 .switch_context(running_thread.get_context(), next_thread.get_context());
+        }
+    }
+
+    pub fn switch_to_next_thread_without_saving_context(&mut self, current_context: &ContextData) {
+        let _lock = self.lock.lock();
+        let running_thread = unsafe { &mut *self.running_thread.unwrap() };
+        let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
+            let should_change_root = running_thread.is_root_of_run_list();
+            let next_entry = running_thread.get_next_from_run_list_mut();
+            running_thread.insert_self_to_sleep_queue(&mut self.sleep_list, &mut self.run_list);
+            if should_change_root {
+                /*assert!(next_entry.is_some());*/
+                let next_entry = next_entry.unwrap();
+                next_entry.set_up_to_be_root_of_run_list(&mut self.run_list);
+                next_entry
+            } else if let Some(next_entry) = next_entry {
+                next_entry
+            } else {
+                unsafe { self.run_list.get_first_entry_mut().unwrap() }
+            }
+        } else {
+            running_thread.set_task_status(TaskStatus::CanRun);
+            if let Some(t) = running_thread.get_next_from_run_list_mut() {
+                t
+            } else {
+                unsafe { self.run_list.get_first_entry_mut().unwrap() }
+            }
+        };
+        if running_thread.get_t_id() == next_thread.get_t_id()
+            && running_thread.get_process().get_pid() == next_thread.get_process().get_pid()
+        {
+            pr_info!("Same task.");
+            return;
+        }
+        pr_info!(
+            "Task Switch[thread_id:{}=>{}]",
+            running_thread.get_t_id(),
+            next_thread.get_t_id(),
+        );
+        running_thread.set_context(current_context);
+        next_thread.set_task_status(TaskStatus::Running);
+        self.running_thread = Some(next_thread as *mut _);
+        drop(_lock);
+        unsafe {
+            self.context_manager
+                .jump_to_context(next_thread.get_context());
         }
     }
 
@@ -188,10 +246,87 @@ impl TaskManager {
                 return;
             }
         }
-        pr_err!("There is no thread to wakeup.");
+        //pr_err!("There is no thread to wakeup.");
+    }
+
+    fn wakeup_target_thread(&mut self, thread: &mut ThreadEntry) -> bool {
+        if thread.get_task_status() != TaskStatus::Sleeping {
+            return true;
+        }
+        let _lock = if is_interruption_enabled() {
+            if let Ok(l) = self.lock.try_lock() {
+                l
+            } else {
+                return false;
+            }
+        } else {
+            self.lock.lock()
+        };
+        thread.wakeup(&mut self.run_list, &mut self.sleep_list);
+        return true;
     }
 
     pub fn get_context_manager(&self) -> &ContextManager {
         &self.context_manager
+    }
+
+    pub fn add_kernel_thread(
+        &mut self,
+        entry: *const fn() -> !,
+        stack_size: Option<MSize>,
+        priority_level: i8,
+        should_set_into_run_list: bool,
+    ) -> Result<&'static mut ThreadEntry, ()> {
+        if self.kernel_process.is_none() {
+            return Err(());
+        }
+        let original_kernel_context = unsafe { &mut *self.kernel_process.unwrap() }
+            .get_thread(1)
+            .unwrap();
+
+        let kernel_context = self.context_manager.create_kernel_context(
+            entry as usize,
+            stack_size,
+            original_kernel_context.get_context(),
+        );
+        if kernel_context.is_err() {
+            return Err(());
+        }
+        let _lock = self.lock.lock();
+        let thread = self
+            .thread_entry_pool
+            .alloc(Some(&get_kernel_manager_cluster().memory_manager));
+        if thread.is_err() {
+            return Err(());
+        }
+        drop(_lock);
+
+        let thread = thread.unwrap();
+        thread.init(
+            self.kernel_process.unwrap(),
+            0,
+            priority_level,
+            kernel_context.unwrap(),
+        );
+        let _lock = self.lock.lock();
+        unsafe { &mut *self.kernel_process.unwrap() }.add_thread(thread);
+        if should_set_into_run_list {
+            thread.set_task_status(TaskStatus::CanRun);
+            if self.run_list.get_first_entry_as_ptr().is_none() {
+                thread.set_up_to_be_root_of_run_list(&mut self.run_list);
+            } else {
+                unsafe { self.run_list.get_last_entry_mut().unwrap() }
+                    .insert_after_of_run_list(thread);
+            }
+        } else {
+            thread.set_task_status(TaskStatus::Sleeping);
+            if self.sleep_list.get_first_entry_as_ptr().is_none() {
+                thread.set_up_to_be_root_of_sleep_list(&mut self.sleep_list);
+            } else {
+                unsafe { self.sleep_list.get_last_entry_mut().unwrap() }
+                    .insert_after_of_sleep_list(thread);
+            }
+        }
+        Ok(thread)
     }
 }
