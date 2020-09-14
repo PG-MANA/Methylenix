@@ -50,7 +50,7 @@ impl SerialPortManager {
                 .interrupt_manager
                 .lock()
                 .unwrap()
-                .set_device_interrupt_function(inthandler24, Some(4), 0x24, 0);
+                .set_device_interrupt_function(inthandler24, Some(4), None, 0x24, 0);
             let _lock = self.write_lock.lock();
             out_byte(self.port + 1, 0x00); // Off the FIFO of controller
             out_byte(self.port + 3, 0x80); // Enable DLAB

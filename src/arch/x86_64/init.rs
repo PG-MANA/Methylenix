@@ -165,6 +165,13 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         local_apic_timer_handler,
         LocalApicTimer::local_apic_timer_handler
     );
+
+    get_kernel_manager_cluster()
+        .interrupt_manager
+        .lock()
+        .unwrap()
+        .set_ist(1, 0x4000.into());
+
     get_kernel_manager_cluster()
         .interrupt_manager
         .lock()
@@ -172,6 +179,7 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         .set_device_interrupt_function(
             local_apic_timer_handler,
             None,
+            Some(1),
             InterruptionIndex::LocalApicTimer as u16,
             0,
         );
