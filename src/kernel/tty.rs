@@ -50,7 +50,8 @@ impl TtyManager {
         let _lock = if let Ok(l) = self.lock.try_lock() {
             l
         } else {
-            return Err(fmt::Error {});
+            //return Err(fmt::Error {});
+            return Ok(());
         };
         for c in s.bytes().into_iter() {
             if !self.output_queue.enqueue(c) {

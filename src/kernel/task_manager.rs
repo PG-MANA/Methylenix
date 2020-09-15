@@ -133,6 +133,8 @@ impl TaskManager {
     }
 
     pub fn switch_to_next_thread(&mut self) {
+        use crate::arch::target_arch::device::cpu;
+        unsafe { cpu::disable_interrupt() };
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
@@ -160,7 +162,8 @@ impl TaskManager {
         if running_thread.get_t_id() == next_thread.get_t_id()
             && running_thread.get_process().get_pid() == next_thread.get_process().get_pid()
         {
-            pr_info!("Same task.");
+            //pr_info!("Same task.");
+            unsafe { cpu::enable_interrupt() };
             return;
         }
         pr_info!(
@@ -171,6 +174,7 @@ impl TaskManager {
         next_thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(next_thread as *mut _);
         drop(_lock);
+        unsafe { cpu::enable_interrupt() }; //本来はswitch_contextですべき
         unsafe {
             self.context_manager
                 .switch_context(running_thread.get_context(), next_thread.get_context());
@@ -178,6 +182,8 @@ impl TaskManager {
     }
 
     pub fn switch_to_next_thread_without_saving_context(&mut self, current_context: &ContextData) {
+        use crate::arch::target_arch::device::cpu;
+        unsafe { cpu::disable_interrupt() };
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
@@ -205,7 +211,8 @@ impl TaskManager {
         if running_thread.get_t_id() == next_thread.get_t_id()
             && running_thread.get_process().get_pid() == next_thread.get_process().get_pid()
         {
-            pr_info!("Same task.");
+            unsafe { cpu::enable_interrupt() };
+            //pr_info!("Same task.");
             return;
         }
         pr_info!(
@@ -217,6 +224,7 @@ impl TaskManager {
         next_thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(next_thread as *mut _);
         drop(_lock);
+        unsafe { cpu::enable_interrupt() }; //本来はswitch_contextですべき
         unsafe {
             self.context_manager
                 .jump_to_context(next_thread.get_context());

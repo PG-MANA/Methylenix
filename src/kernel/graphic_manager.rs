@@ -180,7 +180,11 @@ impl GraphicManager {
         get_kernel_manager_cluster()
             .serial_port_manager
             .sendstr(string);
-        let _lock = self.lock.lock();
+        let _lock = if let Ok(l) = self.lock.try_lock() {
+            l
+        } else {
+            return true;
+        };
         if self.is_text_mode {
             self.text.lock().unwrap().puts(string)
         } else {

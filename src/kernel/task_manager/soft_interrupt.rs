@@ -90,9 +90,12 @@ impl SoftInterruptManager {
     fn soft_interrupt_d() -> ! {
         let manager = &mut get_kernel_manager_cluster().soft_interrupt_manager;
         loop {
+            use crate::arch::target_arch::device::cpu;
+            unsafe { cpu::disable_interrupt() };
             let _lock = manager.lock.lock();
             if manager.work_queue.get_first_entry_as_ptr().is_none() {
                 drop(_lock);
+                unsafe { cpu::enable_interrupt() };
                 get_kernel_manager_cluster().task_manager.sleep();
                 continue;
             }
@@ -106,10 +109,13 @@ impl SoftInterruptManager {
                 manager.work_queue.set_first_entry(None);
             }
             drop(_lock);
+            unsafe { cpu::enable_interrupt() };
             (work.worker_function)(work.data);
+            unsafe { cpu::disable_interrupt() };
             let _lock = manager.lock.lock();
             manager.work_pool.free(work);
             drop(_lock);
+            unsafe { cpu::enable_interrupt() };
         }
     }
 }
