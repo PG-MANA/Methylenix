@@ -3,10 +3,11 @@
  * allocator for core::alloc::GlobalAlloc
  */
 
-use kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 
-use arch::target_arch::paging::PAGE_SHIFT;
+use crate::arch::target_arch::paging::PAGE_SHIFT;
 
+use crate::kernel::memory_manager::data_type::MSize;
 use core::alloc::{GlobalAlloc, Layout};
 
 pub struct GlobalAllocator;
@@ -29,25 +30,36 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
         assert_eq!(layout.align() >> PAGE_SHIFT, 0);
-        if let Some(address) = get_kernel_manager_cluster()
-            .kernel_memory_alloc_manager
+        match get_kernel_manager_cluster()
+            .object_allocator
             .lock()
             .unwrap()
-            .vmalloc(layout.size(), layout.align(), memory_manager)
+            .alloc(layout_to_size(layout), memory_manager)
         {
-            address as *mut u8
-        } else {
-            panic!("Cannot alloc memory for {:?}", layout);
+            Ok(address) => address.into(),
+            Err(e) => panic!("Cannot alloc memory for {:?}, Error: {:?}", layout, e),
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
         assert_eq!(layout.align() >> PAGE_SHIFT, 0);
-        get_kernel_manager_cluster()
-            .kernel_memory_alloc_manager
+        if let Err(e) = get_kernel_manager_cluster()
+            .object_allocator
             .lock()
             .unwrap()
-            .vfree(ptr as usize, memory_manager)
+            .dealloc(
+                (ptr as usize).into(),
+                layout_to_size(layout),
+                memory_manager,
+            )
+        {
+            pr_err!("{:?}", e);
+        }
     }
+}
+
+#[inline(always)]
+fn layout_to_size(layout: Layout) -> MSize {
+    core::cmp::max(layout.size(), layout.align()).into()
 }

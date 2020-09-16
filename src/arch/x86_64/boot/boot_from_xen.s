@@ -42,7 +42,7 @@ xen_bad_magic:
 .align   4
 
 xen_boot_error_str:
-  /* attention: little endian */
+  /* Attention: little endian */
   /* 0x4f: back-color:red, color:white */
   .byte  'E', 0x4f
   .byte  'r', 0x4f

@@ -8,6 +8,7 @@ ifeq ($(strip $(TARGET_ARCH)),)
     TARGET_ARCH = x86_64
 endif
 RUST_TARGET = $(TARGET_ARCH)-unknown-none
+RUST_TARGET_JSON = config/$(TARGET_ARCH)/$(RUST_TARGET).json
 
 ##ディレクトリ
 SRC = src/
@@ -15,11 +16,11 @@ MAKE_BASEDIR ?= $(shell pwd)/
 MAKE_BINDIR = $(MAKE_BASEDIR)bin/
 MAKE_IMGDIR = $(MAKE_BINDIR)img/
 MAKE_TMPDIR = $(MAKE_BASEDIR)tmp/
-MAKE_OBJDIR = $(MAKE_TMPDIR)obj/
 MAKE_CONGIGDIR =  $(MAKE_BASEDIR)config/$(TARGET_ARCH)/
 
 ##ソフトウェア
-STRIP= strip
+STRIP = strip
+OBJCOPY = objcopy
 MKDIR = mkdir -p
 CP = cp -r
 RM = rm -rf
@@ -44,13 +45,11 @@ export MAKE_OBJDIR
 ##デフォルト動作
 default:
 	$(MAKE) kernel
-	-$(STRIP) $(MAKE_BINDIR)*.elf #できなくてもいい
 
 ##初期化動作
 init:
 	-$(MKDIR) $(MAKE_BINDIR)
 	-$(MKDIR) $(MAKE_TMPDIR)
-	-$(MKDIR) $(MAKE_OBJDIR)
 
 clean:
 	$(RM) $(MAKE_TMPDIR)
@@ -71,8 +70,11 @@ kernel:
 # ファイル生成規則
 kernel.elf : $(BOOT_SYS_LIST)
 	$(LD) -o $(MAKE_BINDIR)kernel.elf $(BOOT_SYS_LIST)
+	-$(OBJCOPY) --only-keep-debug $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel.elf.debug
+	cp $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel_original.elf
+	-$(STRIP) $(MAKE_BINDIR)kernel.elf
 
 $(RUST_OBJ) :  .FORCE
-	$(CARGO) xbuild --release --target $(RUST_TARGET_FILE_FOLDER) $(RUST_TARGET)
+	$(CARGO) xbuild --release --target $(RUST_TARGET_JSON)
 
 .FORCE:

@@ -1,3 +1,8 @@
+//!
+//! Arch-depended device driver
+//!
+//! This module handles low level settings.
+
 pub mod cpu;
 pub mod crt;
 pub mod io_apic;

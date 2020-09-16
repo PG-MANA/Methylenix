@@ -2,9 +2,9 @@
  * ACPI Power Management Timer
  */
 
-use arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::cpu;
 
-use kernel::timer_manager::Timer;
+use crate::kernel::timer_manager::Timer;
 
 pub struct AcpiPmTimer {
     port: usize,

@@ -32,8 +32,12 @@ impl<T> PtrLinkedList<T> {
         Self { head: None }
     }
 
-    pub fn set_first_entry(&mut self, entry: *mut PtrLinkedListNode<T>) {
-        self.head = NonNull::new(entry);
+    pub fn set_first_entry(&mut self, entry: Option<*mut PtrLinkedListNode<T>>) {
+        if entry.is_some() {
+            self.head = NonNull::new(entry.unwrap());
+        } else {
+            self.head = None;
+        }
     }
 
     pub fn get_first_entry_as_ptr(&self) -> Option<*const T> {
@@ -73,6 +77,18 @@ impl<T> PtrLinkedList<T> {
             Some(&mut *e)
         } else {
             None
+        }
+    }
+
+    pub unsafe fn get_last_entry_mut(&mut self) -> Option<&'static mut T> {
+        if self.head.is_none() {
+            None
+        } else {
+            let mut e = self.head.clone().unwrap();
+            while let Some(next) = e.as_mut().next.clone() {
+                e = next;
+            }
+            Some(&mut *e.as_mut().get_ptr()?)
         }
     }
 
@@ -182,12 +198,19 @@ impl<T> PtrLinkedListNode<T> {
         self.prev = None;
     }
 
-    pub fn remove_from_list(&mut self) {
-        if let Some(mut prev) = self.prev {
-            unsafe { prev.as_mut() }.next = self.next;
-        }
+    pub fn remove_from_list(&mut self, list: &mut PtrLinkedList<T>) {
         if let Some(mut next) = self.next {
             unsafe { next.as_mut() }.prev = self.prev;
+        }
+        if let Some(mut prev) = self.prev {
+            unsafe { prev.as_mut() }.next = self.next;
+        } else {
+            /* self is root */
+            if self.next.is_none() {
+                list.set_first_entry(None);
+            } else {
+                list.set_first_entry(Some(self.next.unwrap().as_ptr()));
+            }
         }
         self.prev = None;
         self.next = None;

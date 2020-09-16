@@ -1,14 +1,22 @@
-/*
- * VGA Text Mode Driver
- */
+//!
+//! VGA Text Mode Driver
+//!
+//! VGA text mode is one of the display modes, we can show text by putting ASCII code in the memory.
+//! This mode will be enabled when boot from legacy BIOS. Under the UEFI BIOS, this mode will be unusable.
 
-use arch::target_arch::device::crt;
+use crate::arch::target_arch::device::crt;
 
-use kernel::drivers::multiboot::FrameBufferInfo;
-use kernel::graphic_manager::text_buffer_driver::TextBufferDriver;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::drivers::multiboot::FrameBufferInfo;
+use crate::kernel::graphic_manager::text_buffer_driver::TextBufferDriver;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::Address;
+use crate::kernel::memory_manager::MemoryPermissionFlags;
 
+/// VgaTextDriver
+///
+/// This driver implements TextBufferDriver trait.
+/// the buffer of VGA text mode is \[u16; width * height\]
+/// and each 16bit consists of front/back color code and ASCII code.
 pub struct VgaTextDriver {
     address: usize,
     width: usize,
@@ -16,6 +24,10 @@ pub struct VgaTextDriver {
     cursor: TextCursor,
 }
 
+/// TextCursor
+///
+/// This struct contains which line and character the driver should put data.
+/// Currently, front/back color is invariable but in the future it may be able to change it by control code.
 struct TextCursor {
     pub line: usize,
     pub character: usize,
@@ -38,6 +50,12 @@ impl VgaTextDriver {
         }
     }
 
+    /// Init this driver with the multiboot information.
+    ///
+    /// Multiboot's frame buffer information has current screen's height, width and video ram address.
+    /// if frame_buffer_info.mode != 2 (it means the screen is not text mode), this function will return false.
+    /// after set the member variable, this clear screen.
+    /// Default text front color is bright cyan(0xb) and back color is black(0x0).
     pub fn init_by_multiboot_information(&mut self, frame_buffer_info: &FrameBufferInfo) -> bool {
         if frame_buffer_info.mode != 2 {
             return false;
@@ -50,13 +68,26 @@ impl VgaTextDriver {
         return true;
     }
 
+    /// Delete all text on the screen.
+    ///
+    /// This function deletes all characters from display and set cursor position to zero(top-left).
+    /// If the screen is not text mode, this will do nothing.
     pub fn clear_screen(&mut self) {
+        if self.address == 0 {
+            return;
+        }
         for i in 0..(self.width * self.height) {
             unsafe { *((self.address + i * 2) as *mut u16) = 0 };
         }
         crt::set_cursor_position(0);
     }
 
+    /// Map physical address of video ram to virtual address with write permission.
+    ///
+    /// After enabling memory management system, accessing physical address causes page fault.
+    /// To avoid it, we must call mmap_dev and reset video ram's address.
+    /// This function returns true when mmap_dev is succeeded
+    /// otherwise return false including the situation the screen is not text mode.
     pub fn set_frame_buffer_memory_permission(&mut self) -> bool {
         if self.address != 0 {
             match get_kernel_manager_cluster()
@@ -64,12 +95,12 @@ impl VgaTextDriver {
                 .lock()
                 .unwrap()
                 .mmap_dev(
-                    self.address,
-                    self.width * self.height * 2 as usize,
+                    self.address.into(),
+                    (self.width * self.height * 2 as usize).into(),
                     MemoryPermissionFlags::data(),
                 ) {
                 Ok(address) => {
-                    self.address = address;
+                    self.address = address.to_usize();
                     true
                 }
                 Err(_) => false,
@@ -79,22 +110,33 @@ impl VgaTextDriver {
         }
     }
 
+    /// Delete first line and move the other lines to each above.
+    ///
+    /// If self.address == 0(not set up), this function does nothing.
     fn scroll_line(&mut self) {
-        for i in 0..(self.width * (self.height - 1)) as usize {
-            unsafe {
-                *((self.address + i * 2) as *mut u16) =
-                    *((self.address + (self.width as usize + i) * 2) as *mut u16);
-            }
+        use core::ptr::{copy, write_bytes};
+        if self.address == 0 {
+            return;
         }
-        for i in (self.width * (self.height - 1))..(self.width * self.height) {
-            unsafe {
-                *((self.address + i as usize * 2) as *mut u16) = ' ' as u16;
-            }
-        }
+        unsafe {
+            copy(
+                (self.address + self.width * 2) as *const u16,
+                self.address as *mut u16,
+                self.width * (self.height - 1),
+            ); /*move each lines to above one.*/
+            write_bytes(
+                (self.address + self.width * (self.height - 1) * 2) as *mut u16,
+                0,
+                self.width,
+            ); /* clear the last line */
+        };
         self.cursor.line -= 1;
         self.cursor.character = 0;
+        /* move the cursor by crt */
+        crt::set_cursor_position((self.cursor.line * self.width) as u16);
     }
 
+    /// Put a char to next of last char **without moving the cursor and updating**.
     fn put_char(&self, c: u8) {
         /* For internal use(not moving pointer) */
         let t: u16 = ((self.cursor.back_color & 0x07) << 0x0C) as u16
@@ -118,7 +160,7 @@ impl TextBufferDriver for VgaTextDriver {
                         *((self.address
                             + (self.cursor.line * self.width + self.cursor.character) * 2)
                             as *mut u16) = ' ' as u16;
-                    } //暫定的な目印(カラーコードは0にすることで区別)
+                    } //the mark to return from the next line by backspace
                     self.cursor.character = 0;
                     self.cursor.line += 1;
                 }

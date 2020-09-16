@@ -4,19 +4,18 @@
 
 /* http://git.savannah.gnu.org/cgit/grub.git/tree/doc/multiboot2.h?h=multiboot2 */
 .equ MULTIBOOT_HEADER_MAGIC,                0xe85250d6
-.equ MULTIBOOT_HEADER_ARCH,                 0           /* 4=> mips */
+.equ MULTIBOOT_HEADER_ARCH,                 0           /* 4=> MIPS */
 .equ MULTIBOOT_HEADER_LEN,                  multiboot_end - multiboot_start
 .equ MULTIBOOT_HEADER_CHECKSUM,             -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_ARCH + MULTIBOOT_HEADER_LEN)
-.equ MULTIBOOT_HEADER_FLAG,                 1           /* タグで使うフラグ(1はオプショナルを表す...?) */
-.equ MULTIBOOT_HEADER_TAG_TYPE_END,         0           /* マルチブート用ヘッダー タグ終了 */
-.equ MULTIBOOT_HEADER_TAG_TYPE_CONSOLE,     4           /* EGAテキストモードサポート */
-.equ MULTIBOOT_HEADER_TAG_TYPE_FB,          5           /* フレームバッファ要求タグ */
-.equ MULTIBOOT_HEADER_TAG_TYPE_ALIGN,       6           /* アライメント要求 */
-.equ MULTIBOOT_HEADER_TAG_TYPE_EFI,         7           /* EFI サービスを終了させないようにする */
-.equ MULTIBOOT_HEADER_TAG_TYPE_ENTRY_EFI64, 9           /* EFI64で最初に実行するアドレス */
+.equ MULTIBOOT_HEADER_FLAG,                 1           /* Optional flag */
+.equ MULTIBOOT_HEADER_TAG_TYPE_END,         0           /* Tag end */
+.equ MULTIBOOT_HEADER_TAG_TYPE_CONSOLE,     4           /* Console setting tag */
+.equ MULTIBOOT_HEADER_TAG_TYPE_FB,          5           /* Framebuffer setting tag */
+.equ MULTIBOOT_HEADER_TAG_TYPE_ALIGN,       6           /* Alignment setting tag */
+.equ MULTIBOOT_HEADER_TAG_TYPE_EFI,         7           /* EFI Service setting tag */
+.equ MULTIBOOT_HEADER_TAG_TYPE_ENTRY_EFI64, 9           /* EFI64 entry point setting tag */
 
-/* マルチブート用ヘッダー */
-.section .header.multiboot, "a" /* alloc flag*/
+.section .header.multiboot, "a" /* Alloc flag */
 
 .align 8
 
@@ -29,16 +28,15 @@ multiboot_start:
 multiboot_tags_start:
   .word      MULTIBOOT_HEADER_TAG_TYPE_CONSOLE
   .word      MULTIBOOT_HEADER_FLAG
-  .long      12                         /* size */
+  .long      12                         /* Tag size */
   .long      (1 << 1)                   /* (1 << 1) EGA TEXT Supported */
-  .align   8                            /* タグは8バイト間隔で並ぶ必要がある */
-  /* 自力でフォント描写ができないため現在は無効 */
+  .align   8                            /* Tags are aligned by 8bytes */
   //.word      MULTIBOOT_HEADER_TAG_TYPE_FB
   //.word      MULTIBOOT_HEADER_FLAG      /* flags  */
-  //.long      20                         /* size(このタグのサイズ)(multiboot_tag_framebuffer_end - multiboot_tag_framebuffer)  */
-  //.long      1024                       /* width(1行の文字数) */
-  //.long      768                        /* height(行数) */
-  //.long      32                         /* depth(色深度) */
+  //.long      20                         /* tag size */
+  //.long      1024                       /* width */
+  //.long      768                        /* height */
+  //.long      32                         /* depth */
   //.align   8
   .word      MULTIBOOT_HEADER_TAG_TYPE_ALIGN
   .word      MULTIBOOT_HEADER_FLAG
@@ -46,15 +44,14 @@ multiboot_tags_start:
   .align   8
   //.word      MULTIBOOT_HEADER_TAG_TYPE_EFI
   //.word      MULTIBOOT_HEADER_FLAG
-  //.long      8                          /* size */
+  //.long      8                          /* tag size */
   //.align   8
   //.word      MULTIBOOT_HEADER_TAG_TYPE_ENTRY_EFI64
   //.word      MULTIBOOT_HEADER_FLAG
-  //.long      12                         /* size */
+  //.long      12                         /* tag size */
   //.long      init_efi64                 /* entry point for EFI(x86_64) */
   //.align   8
   .word      MULTIBOOT_HEADER_TAG_TYPE_END
   .word      MULTIBOOT_HEADER_FLAG
-  .long      8                              /* size */
-multiboot_tags_end:
+  .long      8                              /* tag size */
 multiboot_end:

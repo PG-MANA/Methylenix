@@ -6,6 +6,8 @@
 use super::font_cache::FontCache;
 use super::BitmapFontData;
 
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
+
 pub struct Pff2FontManager {
     base_address: usize,
     max_font_width: u16,
@@ -54,9 +56,9 @@ impl Pff2FontManager {
         }
     }
 
-    pub fn load(&mut self, virtual_font_file_address: usize, size: usize) -> bool {
+    pub fn load(&mut self, virtual_font_file_address: VAddress, size: usize) -> bool {
         /* Check the file structure */
-        if unsafe { *(virtual_font_file_address as *const [u8; 12]) }
+        if unsafe { *(virtual_font_file_address.to_usize() as *const [u8; 12]) }
             != [
                 0x46, 0x49, 0x4c, 0x45, 0x00, 0x00, 0x00, 0x04, 0x50, 0x46, 0x46, 0x32,
             ]
@@ -64,19 +66,18 @@ impl Pff2FontManager {
         {
             return false;
         }
-        self.base_address = virtual_font_file_address;
+        self.base_address = virtual_font_file_address.to_usize();
 
         let mut pointer = 12;
 
         while pointer < size {
             use core::{str, u16, u32};
 
-            let section_type = str::from_utf8(unsafe {
-                &*((virtual_font_file_address + pointer) as *const [u8; 4])
-            })
-            .unwrap_or("");
+            let section_type =
+                str::from_utf8(unsafe { &*((self.base_address + pointer) as *const [u8; 4]) })
+                    .unwrap_or("");
             let section_length = u32::from_be_bytes(unsafe {
-                *((virtual_font_file_address + pointer + 4) as *const [u8; 4])
+                *((self.base_address + pointer + 4) as *const [u8; 4])
             }) as usize;
             pointer += 8;
 
@@ -84,35 +85,35 @@ impl Pff2FontManager {
                 "NAME" | "FAMI" | "WEIG" | "SLAN" => {}
                 "PTSZ" => {
                     self.font_point_size = u16::from_be_bytes(unsafe {
-                        *((virtual_font_file_address + pointer) as *const [u8; 2])
+                        *((self.base_address + pointer) as *const [u8; 2])
                     });
                 }
                 "MAXW" => {
                     self.max_font_width = u16::from_be_bytes(unsafe {
-                        *((virtual_font_file_address + pointer) as *const [u8; 2])
+                        *((self.base_address + pointer) as *const [u8; 2])
                     });
                 }
                 "MAXH" => {
                     self.max_font_height = u16::from_be_bytes(unsafe {
-                        *((virtual_font_file_address + pointer) as *const [u8; 2])
+                        *((self.base_address + pointer) as *const [u8; 2])
                     });
                 }
                 "ASCE" => {
                     self.ascent = u16::from_be_bytes(unsafe {
-                        *((virtual_font_file_address + pointer) as *const [u8; 2])
+                        *((self.base_address + pointer) as *const [u8; 2])
                     });
                 }
                 "DESC" => {
                     self.decent = u16::from_be_bytes(unsafe {
-                        *((virtual_font_file_address + pointer) as *const [u8; 2])
+                        *((self.base_address + pointer) as *const [u8; 2])
                     });
                 }
                 "CHIX" => {
-                    self.char_index_address = virtual_font_file_address + pointer;
+                    self.char_index_address = self.base_address + pointer;
                     self.char_index_size = section_length;
                 }
                 "DATA" => {
-                    self.data_address = virtual_font_file_address + pointer;
+                    self.data_address = self.base_address + pointer;
                     self.data_size = section_length;
                     break;
                 }
@@ -177,7 +178,7 @@ impl Pff2FontManager {
             x_offset: i16::from_be_bytes(pff2_font_data.x_offset),
             y_offset: i16::from_be_bytes(pff2_font_data.y_offset),
             device_width: i16::from_be_bytes(pff2_font_data.device_width),
-            bitmap_address: (&(pff2_font_data.bitmap) as *const u8 as usize),
+            bitmap_address: (&(pff2_font_data.bitmap) as *const u8 as usize).into(),
         }
     }
 

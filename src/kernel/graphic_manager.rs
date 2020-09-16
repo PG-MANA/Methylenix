@@ -12,12 +12,13 @@ use self::font::FontType;
 use self::frame_buffer_manager::FrameBufferManager;
 use self::text_buffer_driver::TextBufferDriver;
 
-use arch::target_arch::device::vga_text::VgaTextDriver;
+use crate::arch::target_arch::device::vga_text::VgaTextDriver;
 
-use kernel::drivers::multiboot::FrameBufferInfo;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::sync::spin_lock::{Mutex, SpinLockFlag};
-use kernel::tty::Writer;
+use crate::kernel::drivers::multiboot::FrameBufferInfo;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
+use crate::kernel::tty::Writer;
 
 use core::fmt;
 
@@ -95,7 +96,7 @@ impl GraphicManager {
 
     pub fn load_font(
         &mut self,
-        virtual_font_address: usize,
+        virtual_font_address: VAddress,
         size: usize,
         font_type: FontType,
     ) -> bool {
@@ -125,7 +126,6 @@ impl GraphicManager {
             } else if c == '\r' {
                 cursor.x = 0;
             } else if c.is_control() {
-                continue;
             } else {
                 let font_data = font_manager.get_font_data(c);
                 if font_data.is_none() {
@@ -135,31 +135,33 @@ impl GraphicManager {
                 let font_bottom = font_manager.get_ascent() as isize - font_data.y_offset as isize;
                 let font_top = font_bottom as usize - font_data.height as usize;
                 let font_left = font_data.x_offset as usize;
-                if frame_buffer_size.0 <= font_left + font_data.width as usize {
+                if frame_buffer_size.0 <= cursor.x + font_data.width as usize {
                     cursor.x = 0;
                     cursor.y += font_manager.get_max_font_height();
                 }
                 if frame_buffer_size.1 <= cursor.y + font_data.height as usize {
+                    let scroll_y =
+                        font_manager.get_max_font_height() + cursor.y - frame_buffer_size.1;
                     frame_buffer_manager.scroll(
                         0,
-                        font_manager.get_max_font_height(),
+                        scroll_y,
                         0,
                         0,
                         frame_buffer_size.0,
-                        frame_buffer_size.1 - font_manager.get_max_font_height(),
+                        frame_buffer_size.1 - scroll_y,
                     ); /* scroll */
                     frame_buffer_manager.fill(
                         0,
-                        frame_buffer_size.1 - font_manager.get_max_font_height(),
+                        frame_buffer_size.1 - scroll_y,
                         frame_buffer_size.0,
                         frame_buffer_size.1,
                         0,
                     ); /* erase the last line */
-                    cursor.y -= font_manager.get_max_font_height();
+                    cursor.y -= scroll_y;
                 }
 
                 frame_buffer_manager.write_monochrome_bitmap(
-                    font_data.bitmap_address,
+                    font_data.bitmap_address.to_usize(),
                     font_data.width as usize,
                     font_data.height as usize,
                     cursor.x + font_left,
@@ -178,7 +180,11 @@ impl GraphicManager {
         get_kernel_manager_cluster()
             .serial_port_manager
             .sendstr(string);
-        let _lock = self.lock.lock();
+        let _lock = if let Ok(l) = self.lock.try_lock() {
+            l
+        } else {
+            return true;
+        };
         if self.is_text_mode {
             self.text.lock().unwrap().puts(string)
         } else {

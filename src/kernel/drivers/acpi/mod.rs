@@ -62,7 +62,7 @@ impl AcpiManager {
         //ADD: checksum verification
         self.oem_id = rsdp.oem_id.clone();
         self.enabled = true;
-        return self.xsdt_manager.init(rsdp.xsdt_address as usize);
+        return self.xsdt_manager.init((rsdp.xsdt_address as usize).into());
     }
 
     pub fn get_oem_id(&self) -> Option<[u8; 6]> {

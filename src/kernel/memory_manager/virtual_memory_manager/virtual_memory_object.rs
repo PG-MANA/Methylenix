@@ -4,8 +4,9 @@
  */
 
 use super::virtual_memory_page::VirtualMemoryPage;
-use kernel::ptr_linked_list::PtrLinkedList;
-/*use kernel::sync::spin_lock::Mutex;*/
+use crate::kernel::memory_manager::data_type::MIndex;
+use crate::kernel::ptr_linked_list::PtrLinkedList;
+/*use crate::kernel::sync::spin_lock::Mutex;*/
 
 pub struct VirtualMemoryObject {
     object: VirtualMemoryObjectType,
@@ -33,7 +34,7 @@ impl VirtualMemoryObject {
         matches!(self.object, VirtualMemoryObjectType::None)
     }
 
-    pub fn add_vm_page(&mut self, p_index: usize, vm_page: &'static mut VirtualMemoryPage) {
+    pub fn add_vm_page(&mut self, p_index: MIndex, vm_page: &'static mut VirtualMemoryPage) {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
             if list.get_first_entry_as_ptr().is_none() {
                 assert_eq!(self.linked_page, 0);
@@ -83,7 +84,7 @@ impl VirtualMemoryObject {
         }
     }
 
-    pub fn get_vm_page(&self, p_index: usize) -> Option<&VirtualMemoryPage> {
+    pub fn get_vm_page(&self, p_index: MIndex) -> Option<&VirtualMemoryPage> {
         if let VirtualMemoryObjectType::Page(list) = &self.object {
             for e in list.iter() {
                 let e = unsafe { &*e };
@@ -97,13 +98,13 @@ impl VirtualMemoryObject {
 
     pub fn remove_vm_page(
         &mut self,
-        p_index: usize,
+        p_index: MIndex,
     ) -> Option<&'static mut VirtualMemoryPage /*removed page*/> {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
             for e in list.iter_mut() {
                 let e = unsafe { &mut *e };
                 if e.get_p_index() == p_index {
-                    e.remove_from_list();
+                    e.remove_from_list(list);
                     return Some(e);
                 } else if e.get_p_index() > p_index {
                     break;

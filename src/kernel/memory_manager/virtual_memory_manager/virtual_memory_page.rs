@@ -3,17 +3,18 @@
  * structure for mapping virtual address to physical address
  */
 
-use kernel::memory_manager::MemoryOptionFlags;
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::memory_manager::data_type::{MIndex, PAddress};
+use crate::kernel::memory_manager::MemoryOptionFlags;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
-use kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 
 pub struct VirtualMemoryPage {
     lock: SpinLockFlag,
     list: PtrLinkedListNode<Self>,
     status: PageStatus,
-    p_index: usize,
-    physical_address: usize,
+    p_index: MIndex,
+    physical_address: PAddress,
 }
 
 #[derive(Eq, PartialEq)]
@@ -25,7 +26,7 @@ enum PageStatus {
 }
 
 impl VirtualMemoryPage {
-    pub fn new(physical_address: usize, p_index: usize) -> Self {
+    pub fn new(physical_address: PAddress, p_index: MIndex) -> Self {
         Self {
             lock: SpinLockFlag::new(),
             list: PtrLinkedListNode::new(),
@@ -50,7 +51,7 @@ impl VirtualMemoryPage {
         }
     }
 
-    pub fn insert_after(&mut self, entry: &'static mut Self, p_index /*for entry*/: usize) {
+    pub fn insert_after(&mut self, entry: &'static mut Self, p_index /*for entry*/: MIndex) {
         let _lock = self.lock.lock();
         assert!(self.p_index < p_index);
         if let Some(next) = self.get_next_entry() {
@@ -69,29 +70,29 @@ impl VirtualMemoryPage {
         self.list.insert_after(&mut entry.list);
     }
 
-    pub fn setup_to_be_root(&mut self, p_index: usize, list: &mut PtrLinkedList<Self>) {
+    pub fn setup_to_be_root(&mut self, p_index: MIndex, list: &mut PtrLinkedList<Self>) {
         let _lock = self.lock.lock();
         self.p_index = p_index;
         let ptr = self as *mut Self;
         self.list.set_ptr(ptr);
         let old_root = unsafe { list.get_first_entry_mut() };
-        list.set_first_entry(&mut self.list);
+        list.set_first_entry(Some(&mut self.list));
         if let Some(old_root) = old_root {
             self.list.setup_to_be_root(&mut old_root.list);
         }
         /*adjust tree*/
     }
 
-    pub fn remove_from_list(&mut self) {
+    pub fn remove_from_list(&mut self, list_head: &mut PtrLinkedList<Self>) {
         let _lock = self.lock.lock();
-        self.list.remove_from_list();
+        self.list.remove_from_list(list_head);
     }
 
-    pub const fn get_p_index(&self) -> usize {
+    pub const fn get_p_index(&self) -> MIndex {
         self.p_index
     }
 
-    pub fn set_p_index(&mut self, p_index: usize) {
+    pub fn set_p_index(&mut self, p_index: MIndex) {
         let _lock = self.lock.lock();
         assert!(self.list.get_next_as_ptr().is_none());
         assert!(self.list.get_prev_as_ptr().is_none());
@@ -114,7 +115,7 @@ impl VirtualMemoryPage {
         unsafe { self.list.get_prev_mut() }
     }
 
-    pub const fn get_physical_address(&self) -> usize {
+    pub const fn get_physical_address(&self) -> PAddress {
         self.physical_address
     }
 }

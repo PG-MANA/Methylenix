@@ -7,18 +7,18 @@
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use core::sync::atomic::{fence, AtomicUsize};
 
-pub struct FIFO<T: Copy, const F_SIZE: usize> {
+pub struct FIFO<T: Sized + Copy, const F_SIZE: usize> {
     buf: [T; F_SIZE],
     read_pointer: AtomicUsize,
     write_pointer: AtomicUsize,
     size: usize,
 }
 
-impl<T: Copy, const F_SIZE: usize> FIFO<T, F_SIZE> {
-    pub const fn new(default_value: &T) -> Self {
+impl<T: Sized + Copy, const F_SIZE: usize> FIFO<T, F_SIZE> {
+    pub const fn new(default_value: T) -> Self {
         Self {
             size: F_SIZE,
-            buf: [*default_value; F_SIZE],
+            buf: [default_value; F_SIZE],
             read_pointer: AtomicUsize::new(0),
             write_pointer: AtomicUsize::new(0),
         }

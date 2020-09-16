@@ -2,9 +2,9 @@
  * TTY Manager
  */
 
-use kernel::fifo::FIFO;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::fifo::FIFO;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -27,8 +27,8 @@ impl TtyManager {
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
-            input_queue: FIFO::new(&0),
-            output_queue: FIFO::new(&0),
+            input_queue: FIFO::new(0),
+            output_queue: FIFO::new(0),
             output_driver: None,
         }
     }
@@ -50,7 +50,8 @@ impl TtyManager {
         let _lock = if let Ok(l) = self.lock.try_lock() {
             l
         } else {
-            return Err(fmt::Error {});
+            //return Err(fmt::Error {});
+            return Ok(());
         };
         for c in s.bytes().into_iter() {
             if !self.output_queue.enqueue(c) {
@@ -94,7 +95,7 @@ pub fn kernel_print(args: fmt::Arguments) {
         .kernel_tty_manager
         .write_fmt(args);
     if r.is_err() {
-        panic!("Cannot write a string");
+        //panic!("Cannot write a string");
     }
 }
 

@@ -4,18 +4,20 @@
  * In this memory system, you should not use alloc::*, use only core::*
  */
 
+pub mod data_type;
 pub mod global_allocator;
-pub mod kernel_malloc_manager;
+pub mod object_allocator;
 pub mod physical_memory_manager;
 pub mod pool_allocator;
-/* pub mod reverse_memory_map_manager; */
 pub mod virtual_memory_manager;
 
-use arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
-
+use self::data_type::{Address, MOrder, MSize, PAddress, VAddress};
 use self::physical_memory_manager::PhysicalMemoryManager;
 use self::virtual_memory_manager::VirtualMemoryManager;
-use kernel::sync::spin_lock::Mutex;
+
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
+
+use crate::kernel::sync::spin_lock::Mutex;
 
 pub struct MemoryManager {
     physical_memory_manager: &'static Mutex<PhysicalMemoryManager>,
@@ -85,14 +87,14 @@ impl MemoryManager {
 
     pub fn alloc_pages(
         &mut self,
-        order: usize,
+        order: MOrder,
         permission: MemoryPermissionFlags,
-    ) -> Result<usize, MemoryError> {
+    ) -> Result<VAddress, MemoryError> {
         /* ADD: lazy allocation */
         /* return physically continuous 2 ^ order pages memory. */
-        let size = Self::index_to_offset(1 << order);
+        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
-        if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT) {
+        if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT.into()) {
             match self.virtual_memory_manager.alloc_address(
                 size,
                 physical_address,
@@ -115,12 +117,12 @@ impl MemoryManager {
 
     pub fn alloc_nonlinear_pages(
         &mut self,
-        order: usize,
+        order: MOrder,
         permission: MemoryPermissionFlags,
-    ) -> Result<usize, MemoryError> {
+    ) -> Result<VAddress, MemoryError> {
         /* THINK: rename*/
         /* vmalloc */
-        let size = 2 << order;
+        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
         if size <= PAGE_SIZE {
             return self.alloc_pages(order, permission);
         }
@@ -136,13 +138,13 @@ impl MemoryManager {
             &mut pm_manager,
         )?;
         let vm_start_address = entry.get_vm_start_address();
-        for i in 0..Self::offset_to_index(size) {
-            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, PAGE_SHIFT) {
+        for i in 0.into()..size.to_index() {
+            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, PAGE_SHIFT.into()) {
                 if let Err(e) = self
                     .virtual_memory_manager
                     .insert_physical_page_into_vm_map_entry(
                         entry,
-                        vm_start_address + Self::index_to_offset(i),
+                        vm_start_address + i.to_offset(),
                         physical_address,
                         &mut pm_manager,
                     )
@@ -160,12 +162,12 @@ impl MemoryManager {
         Ok(vm_start_address)
     }
 
-    pub fn free(&mut self, vm_address: usize) -> Result<(), MemoryError> {
+    pub fn free(&mut self, vm_address: VAddress) -> Result<(), MemoryError> {
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
         let aligned_vm_address = vm_address & PAGE_MASK;
         if let Err(e) = self
             .virtual_memory_manager
-            .free_address(aligned_vm_address, &mut pm_manager)
+            .free_address(aligned_vm_address.into(), &mut pm_manager)
         {
             pr_err!("{:?}", e); /* free's error tends to be ignored. */
             Err(e)
@@ -175,7 +177,7 @@ impl MemoryManager {
         /* Freeing Physical Memory will be done by Virtual Memory Manager, if it be needed. */
     }
 
-    pub fn free_physical_memory(&mut self, physical_address: usize, size: usize) -> bool {
+    pub fn free_physical_memory(&mut self, physical_address: PAddress, size: MSize) -> bool {
         /* initializing use only */
         if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
             pm_manager.free(physical_address, size, false)
@@ -186,12 +188,12 @@ impl MemoryManager {
 
     pub fn mmap(
         &mut self,
-        physical_address: usize,
-        size: usize,
+        physical_address: PAddress,
+        size: MSize,
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
         should_reserve_physical_memory: bool,
-    ) -> Result<usize, MemoryError> {
+    ) -> Result<VAddress, MemoryError> {
         /* for some data */
         /* should remake... */
         let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
@@ -203,7 +205,7 @@ impl MemoryManager {
         };
 
         if should_reserve_physical_memory {
-            pm_manager.reserve_memory(aligned_physical_address, size, 0);
+            pm_manager.reserve_memory(aligned_physical_address, size, 0.into());
         }
         let virtual_address = self.virtual_memory_manager.map_address(
             aligned_physical_address,
@@ -213,15 +215,15 @@ impl MemoryManager {
             option,
             &mut pm_manager,
         )?;
-        Ok(virtual_address + physical_address - aligned_physical_address)
+        Ok(virtual_address + (physical_address - aligned_physical_address))
     }
 
     pub fn mmap_dev(
         &mut self,
-        physical_address: usize,
-        size: usize,
+        physical_address: PAddress,
+        size: MSize,
         permission: MemoryPermissionFlags,
-    ) -> Result<usize, MemoryError> {
+    ) -> Result<VAddress, MemoryError> {
         /* for io_map */
         /* should remake... */
         let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
@@ -242,15 +244,15 @@ impl MemoryManager {
             permission,
             &mut pm_manager,
         )?;
-        Ok(virtual_address + physical_address - aligned_physical_address)
+        Ok(virtual_address + (physical_address - aligned_physical_address))
     }
 
     pub fn mremap_dev(
         &mut self,
-        old_virtual_address: usize,
-        _old_size: usize,
-        new_size: usize,
-    ) -> Result<usize, MemoryError> {
+        old_virtual_address: VAddress,
+        _old_size: MSize,
+        new_size: MSize,
+    ) -> Result<VAddress, MemoryError> {
         let (aligned_virtual_address, aligned_new_size) =
             Self::page_align(old_virtual_address, new_size);
 
@@ -290,57 +292,19 @@ impl MemoryManager {
         kprintln!("----Virtual Memory Entries Dump End----");
     }
 
-    #[inline]
-    pub const fn page_align(address: usize, size: usize) -> (usize /*address*/, usize /*size*/) {
-        if size == 0 && (address & PAGE_MASK) == 0 {
-            (address, 0)
+    #[inline] /* want to be const... */
+    pub fn page_align<T: Address>(address: T, size: MSize) -> (T /*address*/, MSize /*size*/) {
+        if size.is_zero() && (address.to_usize() & PAGE_MASK) == 0 {
+            (address, MSize::new(0))
         } else {
             (
-                (address & PAGE_MASK),
-                (((size + (address - (address & PAGE_MASK)) - 1) & PAGE_MASK) + PAGE_SIZE),
+                (address.to_usize() & PAGE_MASK).into(),
+                MSize::new(
+                    (size.to_usize() + (address.to_usize() - (address.to_usize() & PAGE_MASK)) - 1)
+                        & PAGE_MASK,
+                ) + PAGE_SIZE,
             )
         }
-    }
-
-    #[inline]
-    pub const fn size_to_order(size: usize) -> usize {
-        if size <= PAGE_SIZE {
-            return 0;
-        }
-        let mut page_count = (((size - 1) & PAGE_MASK) >> PAGE_SHIFT) + 1;
-        let mut order = if page_count & (page_count - 1) == 0 {
-            0usize
-        } else {
-            1usize
-        };
-        while page_count != 0 {
-            page_count >>= 1;
-            order += 1;
-        }
-        order
-    }
-
-    #[inline]
-    pub const fn offset_to_index(offset: usize) -> usize {
-        offset >> PAGE_SHIFT
-    }
-
-    #[inline]
-    pub const fn index_to_offset(index: usize) -> usize {
-        use core::usize;
-        assert!(index <= Self::offset_to_index(usize::MAX));
-        index << PAGE_SHIFT
-    }
-
-    #[inline]
-    pub const fn address_to_size(start_address: usize, end_address: usize) -> usize {
-        assert!(start_address <= end_address);
-        end_address - start_address + 1
-    }
-
-    #[inline]
-    pub const fn size_to_end_address(start_address: usize, size: usize) -> usize {
-        start_address + size - 1
     }
 }
 

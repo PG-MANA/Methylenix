@@ -5,9 +5,10 @@
  * if you want to use graphic normally, make other system like wayland.
  */
 
-use kernel::drivers::multiboot::FrameBufferInfo;
-use kernel::manager_cluster::get_kernel_manager_cluster;
-use kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::drivers::multiboot::FrameBufferInfo;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::Address;
+use crate::kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct FrameBufferManager {
     frame_buffer_address: usize,
@@ -47,14 +48,15 @@ impl FrameBufferManager {
             .lock()
             .unwrap()
             .mmap_dev(
-                self.frame_buffer_address,
-                self.frame_buffer_width
+                self.frame_buffer_address.into(),
+                (self.frame_buffer_width
                     * self.frame_buffer_height
-                    * (self.frame_buffer_color_depth / 8) as usize,
+                    * (self.frame_buffer_color_depth / 8) as usize)
+                    .into(),
                 MemoryPermissionFlags::data(),
             ) {
             Ok(address) => {
-                self.frame_buffer_address = address;
+                self.frame_buffer_address = address.to_usize();
                 true
             }
             Err(_) => false,
@@ -108,37 +110,38 @@ impl FrameBufferManager {
         size_x: usize,
         size_y: usize,
     ) {
+        use core::ptr::copy;
         assert!(from_x + size_x <= self.frame_buffer_width);
         assert!(from_y + size_y <= self.frame_buffer_height);
         assert!(to_x <= from_x);
         assert!(to_y <= from_y);
         if self.frame_buffer_color_depth == 32 {
             for y in 0..size_y {
-                for x in 0..size_x {
-                    unsafe {
-                        *((self.frame_buffer_address
-                            + ((to_y + y) * self.frame_buffer_width + to_x + x) * 4)
-                            as *mut u32) = *((self.frame_buffer_address
-                            + ((from_y + y) * self.frame_buffer_width + from_x + x) * 4)
-                            as *mut u32)
-                    };
-                }
+                unsafe {
+                    copy(
+                        (self.frame_buffer_address
+                            + ((from_y + y) * self.frame_buffer_width + from_x) * 4)
+                            as *mut u32,
+                        (self.frame_buffer_address
+                            + ((to_y + y) * self.frame_buffer_width + to_x) * 4)
+                            as *mut u32,
+                        size_x,
+                    )
+                };
             }
         } else if self.frame_buffer_color_depth == 24 {
             for y in 0..size_y {
-                for x in 0..size_x {
-                    unsafe {
-                        let color = *((self.frame_buffer_address
-                            + ((from_y + y) * self.frame_buffer_width + from_x + x) * 3)
-                            as *mut u32)
-                            & 0xffffff;
-                        let pixel = (self.frame_buffer_address
-                            + ((to_y + y) * self.frame_buffer_width + to_x + x) * 3)
-                            as *mut u32;
-                        *pixel &= 0x000000ff;
-                        *pixel |= color;
-                    }
-                }
+                unsafe {
+                    copy(
+                        (self.frame_buffer_address
+                            + ((from_y + y) * self.frame_buffer_width + from_x) * 3)
+                            as *mut u8,
+                        (self.frame_buffer_address
+                            + ((to_y + y) * self.frame_buffer_width + to_x) * 3)
+                            as *mut u8,
+                        size_x * 3,
+                    )
+                };
             }
         }
     }
