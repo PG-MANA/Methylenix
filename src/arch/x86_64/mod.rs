@@ -287,6 +287,6 @@ pub extern "C" fn directboot_main(
 pub extern "C" fn unknown_boot_main() {
     SerialPortManager::new(0x3F8).sendstr("Unknown Boot System!");
     loop {
-        unsafe { llvm_asm!("hlt") };
+        unsafe { cpu::halt() };
     }
 }
