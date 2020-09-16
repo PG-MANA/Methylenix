@@ -55,7 +55,8 @@ macro_rules! make_device_interrupt_handler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
         pub unsafe fn $handler_name() {
-            llvm_asm!("
+            asm!(
+                "
                 push    rax
                 push    rbx
                 push    rcx
@@ -73,9 +74,8 @@ macro_rules! make_device_interrupt_handler {
                 push    r15
                 sub     rsp, 512
                 fxsave  [rsp]
-                mov     rbp, rsp":::: "intel","volatile");
-            $handler_func();
-            llvm_asm!("
+                mov     rbp, rsp
+                call    {}
                 mov     rsp, rbp
                 fxrstor [rsp]
                 add     rsp, 512
@@ -94,7 +94,8 @@ macro_rules! make_device_interrupt_handler {
                 pop     rcx
                 pop     rbx
                 pop     rax
-                iretq":::: "intel","volatile");
+                iretq", sym $handler_func
+            );
         }
     };
 }
@@ -114,8 +115,7 @@ macro_rules! make_context_switch_interrupt_handler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
         pub unsafe fn $handler_name() {
-            let r:u64;
-            llvm_asm!("
+            asm!("
                 sub     rsp, (26 + 1) * 8 // +1 is for stack alignment
                 mov     [rsp +  0 * 8] ,rax
                 mov     [rsp +  1 * 8], rdx
@@ -157,9 +157,7 @@ macro_rules! make_context_switch_interrupt_handler {
                 fxsave  [rsp]
                 mov     rbp, rsp
                 mov     rdi, rsp
-                ":"={rdi}"(r)::: "intel","volatile");
-            $handler_func(r);
-            llvm_asm!("
+                call    {}
                 mov     rsp, rbp
                 fxrstor [rsp]
                 add     rsp, 512
@@ -180,7 +178,7 @@ macro_rules! make_context_switch_interrupt_handler {
                 mov     r14, [rsp + 13 * 8]
                 mov     r15, [rsp + 14 * 8] 
                 add     rsp, (26 + 1) * 8
-                iretq":::: "intel","volatile");
+                iretq", sym $handler_func);
         }
     };
 }
@@ -200,7 +198,7 @@ macro_rules! make_error_interrupt_handler {
     ($handler_name: ident, $handler_func: path) => {
         #[naked]
         pub unsafe fn $ handler_name() {
-            llvm_asm!("
+            asm!("
                 push    rdi
                 mov     rdi, [rsp + 8]
                 push    rax
@@ -218,7 +216,7 @@ macro_rules! make_error_interrupt_handler {
                 push    r14
                 push    r15
                 mov     rbp, rsp
-                call    $0
+                call    {}
                 mov     rsp, rbp
                 pop     r15
                 pop     r14
@@ -236,7 +234,7 @@ macro_rules! make_error_interrupt_handler {
                 pop     rax
                 pop     rdi
                 add     rsp, 8
-                iretq"::"X"( $handler_func as  fn (usize))::"intel", "volatile");
+                iretq", sym $handler_func);
         }
     };
 }

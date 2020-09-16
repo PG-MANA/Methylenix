@@ -16,7 +16,6 @@ use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
 use crate::arch::x86_64::context::context_data::ContextData;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize};
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::TaskManager;
 

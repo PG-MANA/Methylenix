@@ -98,7 +98,7 @@ impl InterruptManager {
     unsafe fn flush(&self) {
         let idtr = idt::IDTR {
             limit: InterruptManager::LIMIT_IDT,
-            offset: self.idt.read() as *const _ as u64,
+            offset: self.idt.assume_init_read() as *const _ as u64,
         };
         cpu::lidt(&idtr as *const _ as usize);
     }
@@ -110,7 +110,7 @@ impl InterruptManager {
     /// if index < Self::IDT_MAX, this function does nothing.
     unsafe fn set_gate_descriptor(&mut self, index: u16, descriptor: GateDescriptor) {
         if index < Self::IDT_MAX {
-            self.idt.read()[index as usize] = descriptor;
+            self.idt.assume_init_read()[index as usize] = descriptor;
         }
     }
 

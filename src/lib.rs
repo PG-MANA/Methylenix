@@ -7,7 +7,7 @@
 #![feature(const_trait_impl)]
 #![feature(global_asm)]
 #![feature(lang_items)]
-#![feature(llvm_asm)]
+#![feature(asm)]
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_ref)]
 #![feature(naked_functions)]

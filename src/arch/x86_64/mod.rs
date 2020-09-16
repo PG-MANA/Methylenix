@@ -144,7 +144,14 @@ fn main_process() -> ! {
             .dequeue_key()
             .unwrap_or(0);
         if ascii_code != 0 {
-            pr_info!("SerialPort: {}", ascii_code as char);
+            print!("SerialPort: {}", ascii_code as char);
+            while let Some(c) = get_kernel_manager_cluster()
+                .serial_port_manager
+                .dequeue_key()
+            {
+                print!("{}", c as char);
+            }
+            print!("\n");
         }
     }
 }
@@ -280,6 +287,6 @@ pub extern "C" fn directboot_main(
 pub extern "C" fn unknown_boot_main() {
     SerialPortManager::new(0x3F8).sendstr("Unknown Boot System!");
     loop {
-        unsafe { llvm_asm!("hlt") };
+        unsafe { cpu::halt() };
     }
 }
