@@ -10,6 +10,7 @@
 //! which is invariant.
 //! Except TSC-Deadline mode, we must check frequency of it by PIT or ACPI PM Timer.    
 
+use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu::{cpuid, rdmsr, wrmsr};
 use crate::arch::target_arch::device::local_apic::{LocalApicManager, LocalApicRegisters};
 
@@ -70,13 +71,15 @@ impl LocalApicTimer {
     ///
     /// This function is called when the interrupt occurred.
     /// Currently, this function sends end of interrupt and switches to next thread.
-    pub fn local_apic_timer_handler() {
+    #[inline(never)]
+    pub extern "C" fn local_apic_timer_handler(c: u64) {
         if let Ok(im) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
             im.send_eoi();
         }
+        let context_data = unsafe { &*(c as *const ContextData) };
         get_kernel_manager_cluster()
             .task_manager
-            .switch_to_next_thread();
+            .switch_to_next_thread_without_saving_context(context_data);
     }
 
     /// Enable TSC-Deadline mode.
@@ -165,10 +168,10 @@ impl LocalApicTimer {
     /// Before calling it, ensure the interruption is set up.
     /// Currently, this function set 1000ms as the interval, in the future, it will be variable.
     pub fn start_interruption(&mut self, local_apic: &LocalApicManager) -> bool {
-        let _lock = self.lock.lock();
         if self.is_interrupt_enabled || self.frequency == 0 {
             return false;
         }
+        let _lock = self.lock.lock();
         if self.is_deadline_mode_enabled {
             let mut lvt = local_apic.read_apic_register(LocalApicRegisters::LvtTimer);
             lvt &= !(0b1 << 16);

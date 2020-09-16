@@ -19,7 +19,8 @@ MAKE_TMPDIR = $(MAKE_BASEDIR)tmp/
 MAKE_CONGIGDIR =  $(MAKE_BASEDIR)config/$(TARGET_ARCH)/
 
 ##ソフトウェア
-STRIP= strip
+STRIP = strip
+OBJCOPY = objcopy
 MKDIR = mkdir -p
 CP = cp -r
 RM = rm -rf
@@ -44,7 +45,6 @@ export MAKE_OBJDIR
 ##デフォルト動作
 default:
 	$(MAKE) kernel
-	-$(STRIP) $(MAKE_BINDIR)*.elf #できなくてもいい
 
 ##初期化動作
 init:
@@ -70,6 +70,9 @@ kernel:
 # ファイル生成規則
 kernel.elf : $(BOOT_SYS_LIST)
 	$(LD) -o $(MAKE_BINDIR)kernel.elf $(BOOT_SYS_LIST)
+	-$(OBJCOPY) --only-keep-debug $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel.elf.debug
+	cp $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel_original.elf
+	-$(STRIP) $(MAKE_BINDIR)kernel.elf
 
 $(RUST_OBJ) :  .FORCE
 	$(CARGO) xbuild --release --target $(RUST_TARGET_JSON)

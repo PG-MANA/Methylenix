@@ -80,6 +80,18 @@ impl<T> PtrLinkedList<T> {
         }
     }
 
+    pub unsafe fn get_last_entry_mut(&mut self) -> Option<&'static mut T> {
+        if self.head.is_none() {
+            None
+        } else {
+            let mut e = self.head.clone().unwrap();
+            while let Some(next) = e.as_mut().next.clone() {
+                e = next;
+            }
+            Some(&mut *e.as_mut().get_ptr()?)
+        }
+    }
+
     pub fn iter(&self) -> PtrLinkedListIter<T> {
         PtrLinkedListIter {
             head: self.head,

@@ -13,6 +13,7 @@ use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
 use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
 
+use crate::arch::x86_64::context::context_data::ContextData;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize};
@@ -33,45 +34,19 @@ pub fn init_task(
     idle_task: fn() -> !,
 ) {
     let mut context_manager = ContextManager::new();
-    context_manager.init(
-        system_cs as usize,
-        0, /*is it ok?*/
-        user_cs as usize,
-        user_ss as usize,
-    );
+    context_manager.init(system_cs, 0 /*is it ok?*/, user_cs, user_ss);
 
-    let mut kernel_memory_alloc_manager = get_kernel_manager_cluster()
-        .object_allocator
-        .lock()
-        .unwrap();
-    let memory_manager = &get_kernel_manager_cluster().memory_manager;
+    let create_context = |c: &ContextManager, entry_function: fn() -> !| -> ContextData {
+        match c.create_system_context(entry_function as *const fn() as usize, None, unsafe {
+            cpu::get_cr3()
+        }) {
+            Ok(m) => m,
+            Err(e) => panic!("Cannot create a ContextData: {:?}", e),
+        }
+    };
 
-    let stack_for_init = kernel_memory_alloc_manager
-        .alloc(
-            ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM.into(),
-            memory_manager,
-        )
-        .unwrap()
-        + MSize::from(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
-    let stack_for_idle = kernel_memory_alloc_manager
-        .alloc(
-            ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM.into(),
-            memory_manager,
-        )
-        .unwrap()
-        + MSize::from(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
-    drop(kernel_memory_alloc_manager);
-
-    let context_data_for_init = context_manager.create_system_context(
-        main_process as *const fn() as usize,
-        stack_for_init.to_usize(),
-        unsafe { cpu::get_cr3() },
-    );
-    let context_data_for_idle = context_manager.create_system_context(
-        idle_task as *const fn() as usize,
-        stack_for_idle.to_usize(),
-        unsafe { cpu::get_cr3() },
-    );
+    let context_for_main = create_context(&context_manager, main_process);
+    let context_for_idle = create_context(&context_manager, idle_task);
 
     get_kernel_manager_cluster().task_manager = TaskManager::new();
     get_kernel_manager_cluster()
@@ -79,7 +54,14 @@ pub fn init_task(
         .init(context_manager);
     get_kernel_manager_cluster()
         .task_manager
-        .create_init_process(context_data_for_init, context_data_for_idle);
+        .create_kernel_process(context_for_main, context_for_idle);
+}
+
+/// Init SoftInterrupt
+pub fn init_interrupt_work_queue_manager() {
+    get_kernel_manager_cluster()
+        .soft_interrupt_manager
+        .init(&mut get_kernel_manager_cluster().task_manager);
 }
 
 /// Init InterruptManager
@@ -160,11 +142,19 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         );
         pit.stop_counting();
     }
-    /*setup IDT*/
-    make_device_interrupt_handler!(
+
+    /* setup IDT */
+    make_context_switch_interrupt_handler!(
         local_apic_timer_handler,
         LocalApicTimer::local_apic_timer_handler
     );
+
+    get_kernel_manager_cluster()
+        .interrupt_manager
+        .lock()
+        .unwrap()
+        .set_ist(1, 0x4000.into());
+
     get_kernel_manager_cluster()
         .interrupt_manager
         .lock()
@@ -172,6 +162,7 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         .set_device_interrupt_function(
             local_apic_timer_handler,
             None,
+            Some(1),
             InterruptionIndex::LocalApicTimer as u16,
             0,
         );
