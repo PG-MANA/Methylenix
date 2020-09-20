@@ -12,7 +12,7 @@ use self::process_entry::ProcessEntry;
 use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
-use crate::arch::target_arch::device::cpu::is_interruption_enabled;
+use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::MSize;
@@ -133,8 +133,7 @@ impl TaskManager {
     }
 
     pub fn switch_to_next_thread(&mut self) {
-        use crate::arch::target_arch::device::cpu;
-        unsafe { cpu::disable_interrupt() };
+        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
@@ -163,7 +162,7 @@ impl TaskManager {
             && running_thread.get_process().get_pid() == next_thread.get_process().get_pid()
         {
             //pr_info!("Same task.");
-            unsafe { cpu::enable_interrupt() };
+            InterruptManager::restore_local_irq(interrupt_flag);
             return;
         }
         pr_info!(
@@ -174,7 +173,7 @@ impl TaskManager {
         next_thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(next_thread as *mut _);
         drop(_lock);
-        unsafe { cpu::enable_interrupt() }; //本来はswitch_contextですべき
+        InterruptManager::restore_local_irq(interrupt_flag); //本来はswitch_contextですべき
         unsafe {
             self.context_manager
                 .switch_context(running_thread.get_context(), next_thread.get_context());
@@ -182,8 +181,7 @@ impl TaskManager {
     }
 
     pub fn switch_to_next_thread_without_saving_context(&mut self, current_context: &ContextData) {
-        use crate::arch::target_arch::device::cpu;
-        unsafe { cpu::disable_interrupt() };
+        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
@@ -211,7 +209,7 @@ impl TaskManager {
         if running_thread.get_t_id() == next_thread.get_t_id()
             && running_thread.get_process().get_pid() == next_thread.get_process().get_pid()
         {
-            unsafe { cpu::enable_interrupt() };
+            InterruptManager::restore_local_irq(interrupt_flag);
             //pr_info!("Same task.");
             return;
         }
@@ -224,7 +222,7 @@ impl TaskManager {
         next_thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(next_thread as *mut _);
         drop(_lock);
-        unsafe { cpu::enable_interrupt() }; //本来はswitch_contextですべき
+        InterruptManager::restore_local_irq(interrupt_flag); //本来はswitch_contextですべき
         unsafe {
             self.context_manager
                 .jump_to_context(next_thread.get_context());
@@ -261,16 +259,15 @@ impl TaskManager {
         if thread.get_task_status() != TaskStatus::Sleeping {
             return true;
         }
-        let _lock = if is_interruption_enabled() {
-            if let Ok(l) = self.lock.try_lock() {
-                l
-            } else {
-                return false;
-            }
+        let flag = InterruptManager::save_and_disable_local_irq();
+        let _lock = if let Ok(l) = self.lock.try_lock() {
+            l
         } else {
-            self.lock.lock()
+            InterruptManager::restore_local_irq(flag);
+            return false;
         };
         thread.wakeup(&mut self.run_list, &mut self.sleep_list);
+        InterruptManager::restore_local_irq(flag);
         return true;
     }
 

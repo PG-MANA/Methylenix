@@ -159,6 +159,21 @@ pub fn is_interruption_enabled() -> bool {
 }
 
 #[inline(always)]
+pub unsafe fn get_r_flags()->u64{
+    let r_flags:u64;
+    asm!("  pushfq
+            pop {}", out(reg) r_flags);
+    r_flags
+}
+
+#[inline(always)]
+pub unsafe fn set_r_flags(r_flags: u64){
+    asm!("  push {}
+            popfq", in(reg) r_flags);
+}
+
+
+#[inline(always)]
 pub unsafe fn set_cr4(cr4: u64) {
     asm!("mov cr4, {}", in(reg) cr4);
 }
