@@ -133,54 +133,14 @@ impl TaskManager {
     }
 
     pub fn switch_to_next_thread(&mut self) {
-        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
-        let _lock = self.lock.lock();
-        let running_thread = unsafe { &mut *self.running_thread.unwrap() };
-        let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
-            let should_change_root = running_thread.is_root_of_run_list();
-            let next_entry = running_thread.get_next_from_run_list_mut();
-            running_thread.insert_self_to_sleep_queue(&mut self.sleep_list, &mut self.run_list);
-            if should_change_root {
-                /*assert!(next_entry.is_some());*/
-                let next_entry = next_entry.unwrap();
-                next_entry.set_up_to_be_root_of_run_list(&mut self.run_list);
-                next_entry
-            } else if let Some(next_entry) = next_entry {
-                next_entry
-            } else {
-                unsafe { self.run_list.get_first_entry_mut().unwrap() }
-            }
-        } else {
-            running_thread.set_task_status(TaskStatus::CanRun);
-            if let Some(t) = running_thread.get_next_from_run_list_mut() {
-                t
-            } else {
-                unsafe { self.run_list.get_first_entry_mut().unwrap() }
-            }
-        };
-        if running_thread.get_t_id() == next_thread.get_t_id()
-            && running_thread.get_process().get_pid() == next_thread.get_process().get_pid()
-        {
-            //pr_info!("Same task.");
-            InterruptManager::restore_local_irq(interrupt_flag);
-            return;
-        }
-        pr_info!(
-            "Task Switch[thread_id:{}=>{}]",
-            running_thread.get_t_id(),
-            next_thread.get_t_id(),
-        );
-        next_thread.set_task_status(TaskStatus::Running);
-        self.running_thread = Some(next_thread as *mut _);
-        drop(_lock);
-        InterruptManager::restore_local_irq(interrupt_flag); //本来はswitch_contextですべき
-        unsafe {
-            self.context_manager
-                .switch_context(running_thread.get_context(), next_thread.get_context());
-        }
+        self._switch_to_next_thread(None)
     }
 
     pub fn switch_to_next_thread_without_saving_context(&mut self, current_context: &ContextData) {
+        self._switch_to_next_thread(Some(current_context))
+    }
+
+    fn _switch_to_next_thread(&mut self, current_thread_context: Option<&ContextData>) {
         let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
@@ -206,26 +166,33 @@ impl TaskManager {
                 unsafe { self.run_list.get_first_entry_mut().unwrap() }
             }
         };
+
         if running_thread.get_t_id() == next_thread.get_t_id()
             && running_thread.get_process().get_pid() == next_thread.get_process().get_pid()
         {
+            /* Same Task */
             InterruptManager::restore_local_irq(interrupt_flag);
-            //pr_info!("Same task.");
             return;
-        }
-        pr_info!(
-            "Task Switch[thread_id:{}=>{}]",
-            running_thread.get_t_id(),
-            next_thread.get_t_id(),
-        );
-        running_thread.set_context(current_context);
-        next_thread.set_task_status(TaskStatus::Running);
-        self.running_thread = Some(next_thread as *mut _);
-        drop(_lock);
-        InterruptManager::restore_local_irq(interrupt_flag); //本来はswitch_contextですべき
-        unsafe {
-            self.context_manager
-                .jump_to_context(next_thread.get_context());
+        } else {
+            next_thread.set_task_status(TaskStatus::Running);
+            self.running_thread = Some(next_thread as *mut _);
+
+            if let Some(context) = current_thread_context {
+                running_thread.set_context(context);
+                drop(_lock);
+                InterruptManager::restore_local_irq(interrupt_flag); //本来はswitch_contextですべき
+                unsafe {
+                    self.context_manager
+                        .jump_to_context(next_thread.get_context());
+                }
+            } else {
+                drop(_lock);
+                InterruptManager::restore_local_irq(interrupt_flag); //本来はswitch_contextですべき
+                unsafe {
+                    self.context_manager
+                        .switch_context(running_thread.get_context(), next_thread.get_context());
+                }
+            }
         }
     }
 
@@ -235,7 +202,7 @@ impl TaskManager {
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         running_thread.set_task_status(TaskStatus::Sleeping);
         drop(_lock);
-        self.switch_to_next_thread(); /* running_thread will be linked in sleep_list in this function*/
+        self.switch_to_next_thread(); /* running_thread will be linked in sleep_list in this function */
         /* woke up and return */
     }
 
@@ -333,5 +300,23 @@ impl TaskManager {
             }
         }
         Ok(thread)
+    }
+
+    fn search_process_mut(&mut self, p_id: usize) -> Option<*mut ProcessEntry> {
+        /* Assume locked */
+        assert_ne!(p_id, 0);
+
+        let process = self.kernel_process;
+        if process.is_none() {
+            return None;
+        }
+        let mut process = process.unwrap();
+        while let Some(p) = unsafe { &mut *process }.get_next_process_from_p_list_mut() {
+            if unsafe { &*p }.get_pid() == p_id {
+                return Some(p);
+            }
+            process = p;
+        }
+        None
     }
 }
