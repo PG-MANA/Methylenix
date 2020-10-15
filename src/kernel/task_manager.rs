@@ -5,8 +5,8 @@
  */
 
 mod process_entry;
-pub mod soft_interrupt;
 mod thread_entry;
+pub mod work_queue;
 
 use self::process_entry::ProcessEntry;
 use self::thread_entry::ThreadEntry;

@@ -59,7 +59,7 @@ pub fn init_task(
 /// Init SoftInterrupt
 pub fn init_interrupt_work_queue_manager() {
     get_kernel_manager_cluster()
-        .soft_interrupt_manager
+        .work_queue_manager
         .init(&mut get_kernel_manager_cluster().task_manager);
 }
 

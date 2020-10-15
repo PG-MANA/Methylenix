@@ -12,7 +12,7 @@ use crate::kernel::drivers::efi::EfiManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
-use crate::kernel::task_manager::soft_interrupt::SoftInterruptManager;
+use crate::kernel::task_manager::work_queue::WorkQueueManager;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::tty::TtyManager;
 
