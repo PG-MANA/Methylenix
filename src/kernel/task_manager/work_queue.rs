@@ -1,10 +1,12 @@
 //!
-//! Soft interrupt manager
+//! Work Queue
 //!
-//! This manages delay-interrupt process.
+//! This module manages delay-interrupt process.
 //! The structure may be changed.
 
 use super::TaskManager;
+
+use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
@@ -12,7 +14,7 @@ use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::task_manager::thread_entry::ThreadEntry;
 
-pub struct SoftInterruptManager {
+pub struct WorkQueueManager {
     work_queue: PtrLinkedList<WorkList>,
     lock: SpinLockFlag,
     work_pool: CacheAllocator<WorkList>,
@@ -35,7 +37,7 @@ impl WorkList {
     }
 }
 
-impl SoftInterruptManager {
+impl WorkQueueManager {
     const WORK_POOL_CACHE_ENTRIES: usize = 64;
 
     pub fn init(&mut self, task_manager: &mut TaskManager) {
@@ -52,7 +54,7 @@ impl SoftInterruptManager {
         }
 
         let thread = task_manager
-            .add_kernel_thread(Self::soft_interrupt_d as *const _, None, 0, false)
+            .add_kernel_thread(Self::work_queue_thread as *const _, None, 0, false)
             .expect("Cannot add the soft interrupt daemon.");
         self.daemon_thread = Some(thread as *mut _);
     }
@@ -87,16 +89,16 @@ impl SoftInterruptManager {
             });
     }
 
-    fn soft_interrupt_d() -> ! {
-        let manager = &mut get_kernel_manager_cluster().soft_interrupt_manager;
+    fn work_queue_thread() -> ! {
+        let manager = &mut get_kernel_manager_cluster().work_queue_manager;
         loop {
-            use crate::arch::target_arch::device::cpu;
-            unsafe { cpu::disable_interrupt() };
+            let interrupt_flag = InterruptManager::save_and_disable_local_irq();
             let _lock = manager.lock.lock();
             if manager.work_queue.get_first_entry_as_ptr().is_none() {
                 drop(_lock);
-                unsafe { cpu::enable_interrupt() };
+                InterruptManager::restore_local_irq(interrupt_flag);
                 get_kernel_manager_cluster().task_manager.sleep();
+                /* woke up */
                 continue;
             }
             let work = unsafe { manager.work_queue.get_first_entry_mut().unwrap() };
@@ -108,14 +110,13 @@ impl SoftInterruptManager {
             } else {
                 manager.work_queue.set_first_entry(None);
             }
-            drop(_lock);
-            unsafe { cpu::enable_interrupt() };
-            (work.worker_function)(work.data);
-            unsafe { cpu::disable_interrupt() };
-            let _lock = manager.lock.lock();
+            let work_function = work.worker_function;
+            let work_data = work.data;
             manager.work_pool.free(work);
             drop(_lock);
-            unsafe { cpu::enable_interrupt() };
+            InterruptManager::restore_local_irq(interrupt_flag);
+            // Execute the work function
+            work_function(work_data);
         }
     }
 }

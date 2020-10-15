@@ -21,6 +21,10 @@ use crate::kernel::memory_manager::{data_type::MSize, MemoryPermissionFlags};
 use crate::kernel::memory_manager::data_type::Address;
 use core::mem::{size_of, MaybeUninit};
 
+pub struct StoredIrqData {
+    r_flags: u64,
+}
+
 /// InterruptManager has no SpinLockFlag, When you use this, be careful of Mutex.
 ///
 /// This has io_apic and local_apic handler inner.
@@ -29,7 +33,8 @@ pub struct InterruptManager {
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
     main_selector: u16,
     io_apic: IoApicManager,
-    local_apic: LocalApicManager, /* temporary */
+    local_apic: LocalApicManager,
+    /* temporary */
     tss_manager: TssManager,
 }
 
@@ -202,6 +207,16 @@ impl InterruptManager {
 
         self.tss_manager
             .set_rsp(rsp, (stack + stack_size).to_usize())
+    }
+
+    pub fn save_and_disable_local_irq() -> StoredIrqData {
+        let r_flags = unsafe { cpu::get_r_flags() };
+        unsafe { cpu::disable_interrupt() };
+        StoredIrqData { r_flags }
+    }
+
+    pub fn restore_local_irq(original: StoredIrqData) {
+        unsafe { cpu::set_r_flags(original.r_flags) };
     }
 
     /// Send end of interruption to Local APIC.

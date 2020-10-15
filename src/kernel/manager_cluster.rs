@@ -12,7 +12,7 @@ use crate::kernel::drivers::efi::EfiManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
-use crate::kernel::task_manager::soft_interrupt::SoftInterruptManager;
+use crate::kernel::task_manager::work_queue::WorkQueueManager;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::tty::TtyManager;
 
@@ -32,7 +32,7 @@ pub struct KernelManagerCluster {
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
-    pub soft_interrupt_manager: SoftInterruptManager,
+    pub work_queue_manager: WorkQueueManager,
     pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
                                         //input_manager:
 }

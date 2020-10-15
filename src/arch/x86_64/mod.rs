@@ -136,22 +136,21 @@ fn main_process() -> ! {
         draw_boot_logo(unsafe { ACPI_MANAGER.as_ref().unwrap() });
     }
 
+    kprintln!("Methylenix");
     loop {
         get_kernel_manager_cluster().task_manager.sleep();
-        pr_info!("Main!!");
-        let ascii_code = get_kernel_manager_cluster()
+        while let Some(c) = get_kernel_manager_cluster()
             .serial_port_manager
             .dequeue_key()
-            .unwrap_or(0);
-        if ascii_code != 0 {
-            print!("SerialPort: {}", ascii_code as char);
-            while let Some(c) = get_kernel_manager_cluster()
-                .serial_port_manager
-                .dequeue_key()
-            {
-                print!("{}", c as char);
-            }
-            print!("\n");
+        {
+            print!("{}", c as char);
+        }
+        if get_kernel_manager_cluster()
+            .kernel_tty_manager
+            .flush()
+            .is_err()
+        {
+            pr_err!("Cannot flush text.");
         }
     }
 }

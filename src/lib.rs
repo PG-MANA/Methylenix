@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 #![feature(const_fn)]
+#![feature(const_fn_fn_ptr_basics)]
 #![feature(const_generics)]
 #![feature(const_mut_refs)]
 #![feature(const_panic)]
