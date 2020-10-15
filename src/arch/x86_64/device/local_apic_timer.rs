@@ -184,7 +184,7 @@ impl LocalApicTimer {
             local_apic.write_apic_register(LocalApicRegisters::LvtTimer, lvt);
             local_apic.write_apic_register(
                 LocalApicRegisters::TimerInitialCount,
-                (self.frequency * 1) as u32, //Testing
+                (self.frequency / 100) as u32, // Task switch test(10ms)
             );
             self.reload_value = self.frequency * 1;
         }

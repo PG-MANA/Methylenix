@@ -32,7 +32,7 @@ pub struct KernelManagerCluster {
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
-    pub soft_interrupt_manager: SoftInterruptManager,
+    pub work_queue_manager: WorkQueueManager,
     pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
                                         //input_manager:
 }
