@@ -67,6 +67,18 @@ impl TtyManager {
         Ok(())
     }
 
+    pub fn flush(&mut self) -> fmt::Result {
+        let _lock = if let Ok(l) = self.lock.try_lock() {
+            l
+        } else {
+            return Err(fmt::Error {});
+        };
+        if self.output_driver.is_none() {
+            return Err(fmt::Error {});
+        }
+        self._flush()
+    }
+
     fn _flush(&mut self) -> fmt::Result {
         /* assume output_driver is some and locked */
         let mut buffer: [u8; Self::DEFAULT_OUTPUT_BUFFER_SIZE] =

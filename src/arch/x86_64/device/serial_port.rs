@@ -8,7 +8,7 @@ use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 use crate::kernel::fifo::FIFO;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-use crate::kernel::task_manager::soft_interrupt::WorkList;
+use crate::kernel::task_manager::work_queue::WorkList;
 
 /// SerialPortManager
 ///
@@ -148,7 +148,7 @@ impl SerialPortManager {
             get_kernel_manager_cluster().serial_port_manager.read() as usize,
         );
         get_kernel_manager_cluster()
-            .soft_interrupt_manager
+            .work_queue_manager
             .add_work(work);
     }
 

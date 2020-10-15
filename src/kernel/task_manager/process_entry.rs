@@ -153,4 +153,8 @@ impl ProcessEntry {
         thread.set_t_id(self.next_thread_id);
         self.update_next_thread_id();
     }
+
+    pub fn get_next_process_from_p_list_mut(&mut self) -> Option<*mut Self> {
+        self.p_list.get_next_mut_as_ptr()
+    }
 }
