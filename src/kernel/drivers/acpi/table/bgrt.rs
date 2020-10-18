@@ -32,7 +32,7 @@ pub struct BgrtManager {
 }
 
 impl BgrtManager {
-    pub const BGRT_SIGNATURE: [u8; 4] = ['B' as u8, 'G' as u8, 'R' as u8, 'T' as u8];
+    pub const SIGNATURE: [u8; 4] = ['B' as u8, 'G' as u8, 'R' as u8, 'T' as u8];
 
     pub const fn new() -> Self {
         Self {

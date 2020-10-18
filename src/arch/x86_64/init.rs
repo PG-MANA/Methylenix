@@ -167,3 +167,23 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         );
     local_apic_timer
 }
+
+/// Init APs
+///
+/// This function will setup multiple processors by using ACPI
+/// This is in the development
+pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
+    let num_of_cores = acpi_manager
+        .get_xsdt_manager()
+        .get_madt_manager()
+        .search_the_number_of_local_apic()
+        .unwrap_or(1);
+    pr_info!(
+        "Found {} core{}",
+        num_of_cores,
+        if num_of_cores != 1 { "s" } else { "" }
+    );
+    if num_of_cores <= 1 {
+        return;
+    }
+}

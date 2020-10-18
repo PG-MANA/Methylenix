@@ -16,7 +16,8 @@ use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::{
-    init_acpi, init_interrupt, init_interrupt_work_queue_manager, init_task, init_timer,
+    init_acpi, init_interrupt, init_interrupt_work_queue_manager, init_multiple_processors_ap,
+    init_task, init_timer,
 };
 
 use crate::kernel::drivers::acpi::AcpiManager;
@@ -106,6 +107,11 @@ pub extern "C" fn multiboot_main(
 
     /* Setup the interrupt work queue system */
     init_interrupt_work_queue_manager();
+
+    /* Setup APs if the processor is multicore-processor */
+    if let Some(acpi) = unsafe { ACPI_MANAGER.as_ref() } {
+        init_multiple_processors_ap(acpi);
+    }
 
     /* Switch to main process */
     get_kernel_manager_cluster()
