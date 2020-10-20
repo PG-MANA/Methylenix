@@ -63,25 +63,38 @@ impl MadtManager {
         }
     }
 
-    pub fn search_the_number_of_local_apic(&self) -> Option<usize> {
+    /// Find the Local APIC ID list
+    ///
+    /// This function will search the Local APIC ID from the Interrupt Controller Structures.
+    /// Each Local APIC ID will be stored in list_to_store and this function will return the number of cores.
+    /// If the size of list_to_store is smaller than the number of cores,
+    /// this function sets Local APIC ID the size of list_to_store, and return.
+    /// Currently, this cannot find more than 256 cores.
+    pub fn find_apic_id_list(&self, list_to_store: &mut [u8]) -> usize {
         if !self.enabled {
-            return None;
+            return 0;
         }
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
         let length = madt.length as usize - core::mem::size_of::<MADT>();
         let base_address = self.base_address.to_usize() + core::mem::size_of::<MADT>();
         let mut pointer = 0;
-        let mut num_of_processors = 0;
-
+        let mut list_pointer = 0;
         while length > pointer {
             let record_type = unsafe { *((base_address + pointer) as *const u8) };
             let record_length = unsafe { *((base_address + pointer + 1) as *const u8) };
             match record_type {
-                0 => num_of_processors += 1,
+                0 => {
+                    if list_pointer >= list_to_store.len() {
+                        return list_pointer;
+                    }
+                    list_to_store[list_pointer] =
+                        unsafe { *((base_address + pointer + 3) as *const u8) };
+                    list_pointer += 1;
+                }
                 _ => {}
             };
             pointer += record_length as usize;
         }
-        Some(num_of_processors)
+        return list_pointer;
     }
 }

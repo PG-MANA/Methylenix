@@ -6,18 +6,20 @@
 
 pub mod multiboot;
 
+use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
-use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
+use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 
-use crate::arch::x86_64::context::context_data::ContextData;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, MSize};
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::TaskManager;
+use crate::kernel::timer_manager::Timer;
 
 /// Memory Areas for PhysicalMemoryManager
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; PAGE_SIZE_USIZE * 2];
@@ -173,17 +175,95 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
 /// This function will setup multiple processors by using ACPI
 /// This is in the development
 pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
+    let mut apic_id_list: [u8; 0xFF] = [0; 0xFF];
     let num_of_cores = acpi_manager
         .get_xsdt_manager()
         .get_madt_manager()
-        .search_the_number_of_local_apic()
-        .unwrap_or(1);
+        .find_apic_id_list(&mut apic_id_list);
+
     pr_info!(
-        "Found {} core{}",
+        "Found {} CPU{}",
         num_of_cores,
         if num_of_cores != 1 { "s" } else { "" }
     );
     if num_of_cores <= 1 {
         return;
+    }
+
+    extern "C" {
+        fn ap_entry();
+        fn ap_entry_end();
+        static mut ap_os_stack_address: u64;
+    }
+
+    let ap_entry_address = ap_entry as *const fn() as usize;
+    let ap_entry_end_address = ap_entry_end as *const fn() as usize;
+
+    //Testing
+    let bsp_apic_id = get_kernel_manager_cluster()
+        .interrupt_manager
+        .lock()
+        .unwrap()
+        .get_local_apic_manager()
+        .get_apic_id();
+
+    for i in 0..num_of_cores {
+        let apic_id = apic_id_list[i] as u32;
+        if apic_id == bsp_apic_id {
+            continue;
+        }
+
+        let boot_address = 0usize; /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
+        let vector = ((boot_address >> PAGE_SHIFT) & 0xff) as u8;
+        let stack_size = MSize::new(0x8000);
+        let stack = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .alloc_physical_memory(stack_size.to_order(None))
+            .unwrap();
+
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                ap_entry_address as *const u8,
+                boot_address as *mut u8,
+                ap_entry_end_address - ap_entry_address,
+            )
+        };
+        pr_info!("Stack Address: {:X}", (stack + stack_size).to_usize());
+        /* write initial stack address */
+        unsafe {
+            *(((&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address + boot_address)
+                as *mut u64) = (stack + stack_size).to_usize() as u64
+        };
+
+        let interrupt_manager = get_kernel_manager_cluster()
+            .interrupt_manager
+            .lock()
+            .unwrap();
+        interrupt_manager
+            .get_local_apic_manager()
+            .send_interrupt_command(apic_id, 0b101 /*INIT*/, 0);
+
+        /* wait 10 millisecond for the AP */
+        acpi_manager
+            .get_xsdt_manager()
+            .get_fadt_manager()
+            .get_acpi_pm_timer()
+            .unwrap()
+            .busy_wait_ms(10);
+
+        interrupt_manager
+            .get_local_apic_manager()
+            .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
+        acpi_manager
+            .get_xsdt_manager()
+            .get_fadt_manager()
+            .get_acpi_pm_timer()
+            .unwrap()
+            .busy_wait_us(200);
+        interrupt_manager
+            .get_local_apic_manager()
+            .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
     }
 }

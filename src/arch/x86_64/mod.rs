@@ -295,3 +295,11 @@ pub extern "C" fn unknown_boot_main() {
         unsafe { cpu::halt() };
     }
 }
+
+#[no_mangle]
+pub extern "C" fn ap_boot_main() {
+    pr_info!("New CPU is launched!");
+    loop {
+        unsafe { cpu::halt() };
+    }
+}
