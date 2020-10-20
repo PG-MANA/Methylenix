@@ -92,10 +92,8 @@ pdpte_setup:
   wrmsr                         /* Set LME and NXE flags */
   mov   %cr0, %eax
   or    $(1 << 31 | 1), %eax    /* Set PG flag */
-  mov   $tss_descriptor, %dx
   lgdt  gdtr0
   mov   %eax, %cr0
-  ltr   %dx
   ljmp $main_code_segment_descriptor, $init_x86_64
 
 
