@@ -16,45 +16,33 @@
 /* (ap_entry ~ ap_entry_end) will be copied */
 .code16
 ap_entry:
+    /* CS register has the offset to access the opcodes by "cs:ip(address = cs * 16 + ip)" */
     cli
-    /* CS seems set page number provided by SIPI */
+    /* Calculate the relocation base address from CS */
     mov     %cs, %ax
-    mov     %ax, %ds
-    mov     %ax, %ss
-    xor     %ebx, %ebx /* EBX = 0 */
-    mov     %bx, %ax
-    shl     $12, %ebx /* EBX is base address */
-    /* Enable A20M# pin */
-    /* Intel 64 and IA-32 Architectures Software Developer’s Manual Volume 3
-       8.7.13.4 External Signal Compatibility
-       Newer Intel 64 processor may not have A20M# pin.
-    */
-    mov     $0, %ax
-    in      $0x92, %al
-    or      $0x02, %al
-    out     %al, $0x92
+    mov     %ax, %ds                            /* All data access uses ds:offset */
+    xor     %ebx, %ebx                          /* EBX = 0 */
+    mov     %ax, %bx
+    shl     $4, %ebx                            /* EBX <<=4 ( EBX *= 16 ) */
 
     /* Set jump address into ljmpl */
-    mov    $(ljmpl_32_address - ap_entry), %eax
-    add     %ebx, (%ebx, %eax) /* add base */
+    add     %ebx, ljmpl_32_address - ap_entry   /* add base address */
 
     /* Set GDT address into gdtr */
-    mov     $(gdtr_32bit - ap_entry), %eax
-    add     %ebx, 2(%ebx, %eax)
+    add     %ebx, gdtr_32bit - ap_entry + 2
 
-    add     %ebx, %eax
-    lgdt    (%eax)
+    lgdt    (gdtr_32bit - ap_entry)
 
     mov     %cr0, %eax
-    and     $0x7fffffff, %eax /* disable paging */
-    or      $0x00000001, %eax /* enable 32bit protect mode */
+    and     $0x7fffffff, %eax                   /* disable paging */
+    or      $0x00000001, %eax                   /* enable 32bit protect mode */
     mov     %eax, %cr0
 
     /* Long JMP */
-    .byte 0x66, 0xea                        /* opcode and 32bit address prefix(?) */
+    .byte 0x66, 0xea                            /* opcode and 32bit address prefix(?) */
 ljmpl_32_address:
-    .long (ap_init_long_mode - ap_entry)    /* offset (base will be added before) */
-    .word gdt_32bit_code_segment_descriptor /* code segment */
+    .long (ap_init_long_mode - ap_entry)        /* offset (base will be added before) */
+    .word gdt_32bit_code_segment_descriptor     /* code segment */
 
 
 .code32
@@ -64,7 +52,7 @@ ap_init_long_mode:
 
     /* Set jump address into ljmpl */
     mov    $(ljmpl_64_address - ap_entry), %eax
-    add     %ebx, (%ebx, %eax) /* add base address */
+    add     %ebx, (%ebx, %eax)          /* add base address */
 
     mov     $pml4, %eax
     mov     %eax, %cr3
@@ -98,10 +86,10 @@ ap_init_x86_64:
     /* TODO: Set 64bit TSS */
     /* Set stack */
     mov     $(ap_os_stack_address - ap_entry), %eax
-    add     %ebx, %eax      /* EBX has base address */
+    add     %ebx, %eax                  /* EBX has base address */
     mov     (%eax), %rsp
     lea     ap_boot_main, %rax
-    jmp    *%rax            /* "*" means absolute jmp */
+    jmp    *%rax                        /* "*" means absolute jmp */
 
 
 .align  16
