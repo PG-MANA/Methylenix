@@ -21,6 +21,8 @@ use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::Timer;
 
+use core::sync::atomic::AtomicBool;
+
 /// Memory Areas for PhysicalMemoryManager
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; PAGE_SIZE_USIZE * 2];
 
@@ -170,6 +172,8 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
     local_apic_timer
 }
 
+pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
+
 /// Init APs
 ///
 /// This function will setup multiple processors by using ACPI
@@ -207,7 +211,7 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
         .get_local_apic_manager()
         .get_apic_id();
 
-    for i in 0..num_of_cores {
+    'ap_init_loop: for i in 0..num_of_cores {
         let apic_id = apic_id_list[i] as u32;
         if apic_id == bsp_apic_id {
             continue;
@@ -236,7 +240,13 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
             *(((&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address + boot_address)
                 as *mut u64) = (stack + stack_size).to_usize() as u64
         };
+        AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
 
+        let acpi_pm_timer = acpi_manager
+            .get_xsdt_manager()
+            .get_fadt_manager()
+            .get_acpi_pm_timer()
+            .unwrap();
         let interrupt_manager = get_kernel_manager_cluster()
             .interrupt_manager
             .lock()
@@ -246,24 +256,24 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
             .send_interrupt_command(apic_id, 0b101 /*INIT*/, 0);
 
         /* wait 10 millisecond for the AP */
-        acpi_manager
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_acpi_pm_timer()
-            .unwrap()
-            .busy_wait_ms(10);
+        acpi_pm_timer.busy_wait_ms(10);
 
         interrupt_manager
             .get_local_apic_manager()
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
-        acpi_manager
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_acpi_pm_timer()
-            .unwrap()
-            .busy_wait_us(200);
+        acpi_pm_timer.busy_wait_us(200);
+
         interrupt_manager
             .get_local_apic_manager()
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
+        for _wait in 0..5000
+        /*wait 5s*/
+        {
+            if AP_BOOT_COMPLETE_FLAG.load(core::sync::atomic::Ordering::Relaxed) {
+                continue 'ap_init_loop;
+            }
+            acpi_pm_timer.busy_wait_ms(1);
+        }
+        panic!("Cannot init CPU(APIC ID: {})", apic_id);
     }
 }

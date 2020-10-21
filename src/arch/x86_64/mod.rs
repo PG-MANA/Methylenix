@@ -298,7 +298,10 @@ pub extern "C" fn unknown_boot_main() {
 
 #[no_mangle]
 pub extern "C" fn ap_boot_main() {
-    pr_info!("New CPU is launched!");
+    unsafe { cpu::enable_sse() };
+    SerialPortManager::new(0x3F8).sendstr("New CPU is launched!\n");
+    use init::AP_BOOT_COMPLETE_FLAG;
+    AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
     loop {
         unsafe { cpu::halt() };
     }
