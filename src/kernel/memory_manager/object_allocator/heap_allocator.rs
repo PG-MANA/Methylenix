@@ -3,7 +3,7 @@
 //!
 
 use crate::arch::x86_64::paging::PAGE_SIZE_USIZE;
-use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize, VAddress};
 use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
 use crate::kernel::memory_manager::{MemoryError, MemoryManager, MemoryPermissionFlags};
 use crate::kernel::sync::spin_lock::Mutex;
@@ -30,32 +30,38 @@ impl HeapAllocator {
     }
 
     pub fn init(&mut self, memory_manager: &mut MemoryManager) -> Result<(), MemoryError> {
-        let address = memory_manager.alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+        let address =
+            memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
         unsafe {
             self.slab_128
                 .set_initial_pool(address.to_usize(), PAGE_SIZE_USIZE)
         };
-        let address = memory_manager.alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+        let address =
+            memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
         unsafe {
             self.slab_256
                 .set_initial_pool(address.to_usize(), PAGE_SIZE_USIZE)
         };
-        let address = memory_manager.alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+        let address =
+            memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
         unsafe {
             self.slab_512
                 .set_initial_pool(address.to_usize(), PAGE_SIZE_USIZE)
         };
-        let address = memory_manager.alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+        let address =
+            memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
         unsafe {
             self.slab_1024
                 .set_initial_pool(address.to_usize(), PAGE_SIZE_USIZE)
         };
-        let address = memory_manager.alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+        let address =
+            memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
         unsafe {
             self.slab_2048
                 .set_initial_pool(address.to_usize(), PAGE_SIZE_USIZE)
         };
-        let address = memory_manager.alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+        let address =
+            memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
         unsafe {
             self.slab_4096
                 .set_initial_pool(address.to_usize(), PAGE_SIZE_USIZE)
@@ -75,7 +81,7 @@ impl HeapAllocator {
                     let address = memory_manager
                         .lock()
                         .unwrap()
-                        .alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+                        .alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
                     for i in 1..(PAGE_SIZE_USIZE >> 7/* PAGE_SIZE / 128 */) {
                         self.slab_128
                             .free_ptr((address.to_usize() + (i << 7)) as *mut _);
@@ -90,7 +96,7 @@ impl HeapAllocator {
                     let address = memory_manager
                         .lock()
                         .unwrap()
-                        .alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+                        .alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
                     for i in 1..(PAGE_SIZE_USIZE >> 8/* PAGE_SIZE / 256 */) {
                         self.slab_256
                             .free_ptr((address.to_usize() + (i << 8)) as *mut _);
@@ -105,7 +111,7 @@ impl HeapAllocator {
                     let address = memory_manager
                         .lock()
                         .unwrap()
-                        .alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+                        .alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
                     for i in 1..(PAGE_SIZE_USIZE >> 9/* PAGE_SIZE / 512 */) {
                         self.slab_512
                             .free_ptr((address.to_usize() + (i << 9)) as *mut _);
@@ -120,7 +126,7 @@ impl HeapAllocator {
                     let address = memory_manager
                         .lock()
                         .unwrap()
-                        .alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+                        .alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
                     for i in 1..(PAGE_SIZE_USIZE >> 10/* PAGE_SIZE / 512 */) {
                         self.slab_1024
                             .free_ptr((address.to_usize() + (i << 10)) as *mut _);
@@ -135,7 +141,7 @@ impl HeapAllocator {
                     let address = memory_manager
                         .lock()
                         .unwrap()
-                        .alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+                        .alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
                     for i in 1..(PAGE_SIZE_USIZE >> 11/* PAGE_SIZE / 2048 */) {
                         self.slab_2048
                             .free_ptr((address.to_usize() + (i << 11)) as *mut _);
@@ -150,7 +156,7 @@ impl HeapAllocator {
                     let address = memory_manager
                         .lock()
                         .unwrap()
-                        .alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+                        .alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
                     for i in 1..(PAGE_SIZE_USIZE >> 12/* PAGE_SIZE / 128 */) {
                         self.slab_4096
                             .free_ptr((address.to_usize() + (i << 12)) as *mut _);

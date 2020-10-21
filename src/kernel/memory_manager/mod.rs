@@ -11,7 +11,7 @@ pub mod physical_memory_manager;
 pub mod pool_allocator;
 pub mod virtual_memory_manager;
 
-use self::data_type::{Address, MOrder, MSize, PAddress, VAddress};
+use self::data_type::{Address, MPageOrder, MSize, PAddress, VAddress};
 use self::physical_memory_manager::PhysicalMemoryManager;
 use self::virtual_memory_manager::VirtualMemoryManager;
 
@@ -87,12 +87,12 @@ impl MemoryManager {
 
     pub fn alloc_pages(
         &mut self,
-        order: MOrder,
+        order: MPageOrder,
         permission: MemoryPermissionFlags,
     ) -> Result<VAddress, MemoryError> {
         /* ADD: lazy allocation */
         /* return physically continuous 2 ^ order pages memory. */
-        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
+        let size = order.to_offset();
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT.into()) {
             match self.virtual_memory_manager.alloc_address(
@@ -117,12 +117,12 @@ impl MemoryManager {
 
     pub fn alloc_nonlinear_pages(
         &mut self,
-        order: MOrder,
+        order: MPageOrder,
         permission: MemoryPermissionFlags,
     ) -> Result<VAddress, MemoryError> {
         /* THINK: rename*/
         /* vmalloc */
-        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
+        let size = order.to_offset();
         if size <= PAGE_SIZE {
             return self.alloc_pages(order, permission);
         }
@@ -164,11 +164,11 @@ impl MemoryManager {
 
     pub fn alloc_with_option(
         &mut self,
-        order: MOrder,
+        order: MPageOrder,
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
     ) -> Result<VAddress, MemoryError> {
-        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
+        let size = order.to_offset();
 
         if option.is_direct_mapped() && permission.execute() == false {
             let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
@@ -194,10 +194,10 @@ impl MemoryManager {
         /* Freeing Physical Memory will be done by Virtual Memory Manager, if it be needed. */
     }
 
-    pub fn alloc_physical_memory(&mut self, order: MOrder) -> Result<PAddress, MemoryError> {
+    pub fn alloc_physical_memory(&mut self, order: MPageOrder) -> Result<PAddress, MemoryError> {
         /* initializing use only */
         /* returned memory area is not mapped, if you want to access, you must map. */
-        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
+        let size = order.to_offset();
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT.into()) {
             Ok(physical_address)
