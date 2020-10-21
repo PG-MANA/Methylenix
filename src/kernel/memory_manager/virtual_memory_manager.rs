@@ -920,7 +920,7 @@ impl VirtualMemoryManager {
         }
     }
 
-    fn alloc_from_direct_map(
+    pub fn alloc_from_direct_map(
         &mut self,
         size: MSize,
         pm_manager: &mut PhysicalMemoryManager,

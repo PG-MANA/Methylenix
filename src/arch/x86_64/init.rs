@@ -17,6 +17,7 @@ use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::Timer;
@@ -232,7 +233,11 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
             .memory_manager
             .lock()
             .unwrap()
-            .alloc_physical_memory(stack_size.to_order(None))
+            .alloc_with_option(
+                stack_size.to_order(None).to_page_order(),
+                MemoryPermissionFlags::data(),
+                MemoryOptionFlags::new(MemoryOptionFlags::DIRECT_MAP),
+            )
             .unwrap();
 
         unsafe {

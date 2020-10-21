@@ -162,6 +162,23 @@ impl MemoryManager {
         Ok(vm_start_address)
     }
 
+    pub fn alloc_with_option(
+        &mut self,
+        order: MOrder,
+        permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
+    ) -> Result<VAddress, MemoryError> {
+        let size = order.to_offset() << MSize::from(PAGE_SHIFT);
+
+        if option.is_direct_mapped() && permission.execute() == false {
+            let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
+            return self
+                .virtual_memory_manager
+                .alloc_from_direct_map(size, &mut physical_memory_manager);
+        }
+        unimplemented!()
+    }
+
     pub fn free(&mut self, vm_address: VAddress) -> Result<(), MemoryError> {
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
         let aligned_vm_address = vm_address & PAGE_MASK;
