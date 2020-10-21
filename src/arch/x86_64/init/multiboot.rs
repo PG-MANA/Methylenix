@@ -141,7 +141,7 @@ pub fn init_memory_by_multiboot_information(
             Some(VAddress::new(0)),
             PAGE_SIZE,
             MemoryPermissionFlags::data(),
-            MemoryOptionFlags::new((MemoryOptionFlags::NORMAL)),
+            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
             &mut physical_memory_manager,
         )
         .expect("Cannot associate memory for boot code of AP.");

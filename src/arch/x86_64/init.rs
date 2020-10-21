@@ -184,6 +184,7 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
         .get_xsdt_manager()
         .get_madt_manager()
         .find_apic_id_list(&mut apic_id_list);
+    let boot_address = 0usize; /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
 
     pr_info!(
         "Found {} CPU{}",
@@ -191,6 +192,14 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
         if num_of_cores != 1 { "s" } else { "" }
     );
     if num_of_cores <= 1 {
+        if let Err(e) = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .free(boot_address.into())
+        {
+            pr_err!("Cannot free boot_address: {:?}", e);
+        }
         return;
     }
 
@@ -217,7 +226,6 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
             continue;
         }
 
-        let boot_address = 0usize; /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
         let vector = ((boot_address >> PAGE_SHIFT) & 0xff) as u8;
         let stack_size = MSize::new(0x8000);
         let stack = get_kernel_manager_cluster()
@@ -275,5 +283,15 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
             acpi_pm_timer.busy_wait_ms(1);
         }
         panic!("Cannot init CPU(APIC ID: {})", apic_id);
+    }
+
+    /* free boot_address */
+    if let Err(e) = get_kernel_manager_cluster()
+        .memory_manager
+        .lock()
+        .unwrap()
+        .free(boot_address.into())
+    {
+        pr_err!("Cannot free boot_address: {:?}", e);
     }
 }
