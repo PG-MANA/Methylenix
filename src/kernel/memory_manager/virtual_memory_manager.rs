@@ -939,7 +939,7 @@ impl VirtualMemoryManager {
             .as_mut()
             .unwrap()
             .allocator
-            .alloc(PAGE_SIZE, PAGE_SHIFT.into());
+            .alloc(size, PAGE_SHIFT.into());
         if allocated_address.is_none() {
             pr_err!("Cannot alloc from direct map.");
             return Err(MemoryError::AllocPhysicalAddressFailed);
