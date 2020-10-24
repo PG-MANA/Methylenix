@@ -93,7 +93,11 @@ impl LocalApicManager {
                 cpu::wrmsr(Self::MSR_INDEX, local_apic_msr | Self::XAPIC_ENABLED_MASK);
             }
         }
-        self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
+        if self.is_x2apic_enabled {
+            self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
+        } else {
+            self.apic_id = (self.read_apic_register(LocalApicRegisters::ApicId) >> 24) & 0xff;
+        }
         self.write_apic_register(
             LocalApicRegisters::SIR,
             self.read_apic_register(LocalApicRegisters::SIR) | 0x100,
