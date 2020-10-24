@@ -247,7 +247,6 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
                 ap_entry_end_address - ap_entry_address,
             )
         };
-        pr_info!("Stack Address: {:X}", (stack + stack_size).to_usize());
         /* write initial stack address */
         unsafe {
             *(((&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address + boot_address)
@@ -279,6 +278,7 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
         interrupt_manager
             .get_local_apic_manager()
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
+        drop(interrupt_manager);
         for _wait in 0..5000
         /*wait 5s*/
         {

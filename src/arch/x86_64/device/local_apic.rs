@@ -110,6 +110,43 @@ impl LocalApicManager {
         return true;
     }
 
+    /// Init LocalApicManager by other LocalApicManager
+    ///
+    /// This function will be used when the application processor sets up with this manager of BSP.
+    pub fn init_from_other_manager(&mut self, manager: &Self) -> bool {
+        let local_apic_msr = unsafe { cpu::rdmsr(Self::MSR_INDEX) };
+        if manager.is_x2apic_enabled {
+            unsafe {
+                cpu::wrmsr(
+                    Self::MSR_INDEX,
+                    local_apic_msr | Self::X2APIC_ENABLED_MASK | Self::XAPIC_ENABLED_MASK,
+                );
+            }
+            self.is_x2apic_enabled = true;
+        } else {
+            unsafe {
+                cpu::wrmsr(Self::MSR_INDEX, local_apic_msr | Self::XAPIC_ENABLED_MASK);
+            }
+            self.base_address = manager.base_address;
+        }
+        if self.is_x2apic_enabled {
+            self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
+        } else {
+            self.apic_id = (self.read_apic_register(LocalApicRegisters::ApicId) >> 24) & 0xff;
+        }
+        self.write_apic_register(
+            LocalApicRegisters::SIR,
+            self.read_apic_register(LocalApicRegisters::SIR) | 0x100,
+        );
+        pr_info!(
+            "APIC ID:{}(x2APIC:{})",
+            self.apic_id,
+            self.is_x2apic_enabled
+        );
+        return true;
+    }
+
+    /// Get current CPU's APIC ID
     pub fn get_apic_id(&self) -> u32 {
         self.apic_id
     }

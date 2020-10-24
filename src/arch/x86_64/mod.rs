@@ -12,6 +12,7 @@ mod init;
 pub mod paging;
 
 use self::device::cpu;
+use self::device::local_apic::LocalApicManager;
 use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
@@ -299,9 +300,21 @@ pub extern "C" fn unknown_boot_main() {
 #[no_mangle]
 pub extern "C" fn ap_boot_main() {
     unsafe { cpu::enable_sse() };
-    SerialPortManager::new(0x3F8).sendstr("New CPU is launched!\n");
-    use init::AP_BOOT_COMPLETE_FLAG;
-    AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
+    get_kernel_manager_cluster()
+        .memory_manager
+        .lock()
+        .unwrap()
+        .set_paging_table();
+    let mut local_apic_manager = LocalApicManager::new();
+    local_apic_manager.init_from_other_manager(
+        get_kernel_manager_cluster()
+            .interrupt_manager
+            .lock()
+            .unwrap()
+            .get_local_apic_manager(),
+    );
+    init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
+
     loop {
         unsafe { cpu::halt() };
     }
