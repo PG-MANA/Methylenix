@@ -237,7 +237,7 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 mov     rax, [rdi + 512 + 8 * 16]
                 mov     fs, ax
                 mov     rax, [rdi + 512 + 8 * 17]
-                mov     gs, ax
+                //mov     gs, ax
                 mov     rax, [rdi + 512 + 8 * 18]
                 mov     es, ax
                 
@@ -291,7 +291,7 @@ pub unsafe extern "C" fn task_switch(
                 mov     rax, fs
                 mov     [rsi + 512 + 8 * 16], rax
                 mov     rax, gs
-                mov     [rsi + 512 + 8 * 17], rax
+                //mov     [rsi + 512 + 8 * 17], rax
                 mov     rax, es
                 mov     [rsi + 512 + 8 * 18], rax
                 mov     rax, ss
@@ -327,7 +327,7 @@ pub unsafe extern "C" fn task_switch(
                 mov     rax, [rdi + 512 + 8 * 16]
                 mov     fs, ax
                 mov     rax, [rdi + 512 + 8 * 17]
-                mov     gs, ax // swapgs???
+                //mov     gs, ax // swapgs???
                 mov     rax, [rdi + 512 + 8 * 18]
                 mov     es, ax
                 
