@@ -192,6 +192,21 @@ pub unsafe fn enable_sse() {
     set_cr4(cr4);
 }
 
+pub unsafe fn get_cpu_base_address() -> usize {
+    let result: usize;
+    asm!("mov {}, gs:0",out(reg) result);
+    result
+}
+
+pub unsafe fn set_gs_and_kernel_gs_base(address: u64) {
+    use core::sync::atomic::{fence, Ordering};
+    wrmsr(0xC0000102, address);
+    asm!("swapgs");
+    fence(Ordering::Acquire); //Spector?
+    wrmsr(0xC0000102, address);
+    fence(Ordering::Release);
+}
+
 /// Run ContextData.
 ///
 /// This function is called from ContextManager.
@@ -312,7 +327,7 @@ pub unsafe extern "C" fn task_switch(
                 mov     rax, [rdi + 512 + 8 * 16]
                 mov     fs, ax
                 mov     rax, [rdi + 512 + 8 * 17]
-                mov     gs, ax
+                mov     gs, ax // swapgs???
                 mov     rax, [rdi + 512 + 8 * 18]
                 mov     es, ax
                 

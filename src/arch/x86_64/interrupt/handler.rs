@@ -74,9 +74,19 @@ macro_rules! make_device_interrupt_handler {
                 push    r15
                 sub     rsp, 512
                 fxsave  [rsp]
+                mov     rax, cs
+                cmp     [rsp + 8 * 15 + 512 + 8], rax 
+                je      1f
+                swapgs
+              1:
                 mov     rbp, rsp
                 call    {}
                 mov     rsp, rbp
+                mov     rax, cs
+                cmp     [rsp + 8 * 15 + 512 + 8], rax 
+                je      2f
+                swapgs
+              2:
                 fxrstor [rsp]
                 add     rsp, 512
                 pop     r15
@@ -155,10 +165,20 @@ macro_rules! make_context_switch_interrupt_handler {
                 mov     [rsp + 24 * 8], rax
                 sub     rsp, 512
                 fxsave  [rsp]
+                mov     rax, cs
+                cmp     [rsp + 22 * 8], rax
+                je      1f
+                swapgs
+            1:
                 mov     rbp, rsp
                 mov     rdi, rsp
                 call    {}
                 mov     rsp, rbp
+                mov     rax, cs
+                cmp     [rsp + 22 * 8], rax
+                je      2f
+                swapgs
+            2:
                 fxrstor [rsp]
                 add     rsp, 512
                 // Ignore CR3, RIP, CS, RFLAGS, RSP, DS, SS, GS, ES, FS
@@ -215,9 +235,19 @@ macro_rules! make_error_interrupt_handler {
                 push    r13
                 push    r14
                 push    r15
+                mov     rax, cs
+                cmp     [rsp + 8 * 15 + 512 + 8], rax 
+                je      1f
+                swapgs
+              1:
                 mov     rbp, rsp
                 call    {}
                 mov     rsp, rbp
+                mov     rax, cs
+                cmp     [rsp + 8 * 15 + 512 + 8], rax 
+                je      2f
+                swapgs
+              2:
                 pop     r15
                 pop     r14
                 pop     r13

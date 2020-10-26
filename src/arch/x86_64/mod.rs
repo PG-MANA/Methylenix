@@ -24,7 +24,7 @@ use self::init::{
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_kernel_manager_cluster, CpuManagerCluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize};
 
 use crate::kernel::memory_manager::MemoryPermissionFlags;
@@ -32,6 +32,10 @@ use crate::kernel::tty::TtyManager;
 
 static mut LOCAL_APIC_TIMER: LocalApicTimer = LocalApicTimer::new();
 static mut ACPI_MANAGER: Option<AcpiManager> = None;
+
+pub struct ArchDependedCpuManagerCluster {
+    pub self_pointer: usize,
+}
 
 #[no_mangle]
 pub extern "C" fn multiboot_main(
@@ -126,7 +130,7 @@ pub fn general_protection_exception_handler(e_code: usize) {
 }
 
 fn main_process() -> ! {
-    /* Interruption is enabled */
+    /* Interrupt is enabled */
     unsafe {
         LOCAL_APIC_TIMER.start_interruption(
             get_kernel_manager_cluster()
@@ -313,6 +317,31 @@ pub extern "C" fn ap_boot_main() {
             .unwrap()
             .get_local_apic_manager(),
     );
+    let cpu_manager_address = get_kernel_manager_cluster()
+        .object_allocator
+        .lock()
+        .unwrap()
+        .alloc(
+            core::mem::size_of::<CpuManagerCluster>().into(),
+            &get_kernel_manager_cluster().memory_manager,
+        )
+        .unwrap();
+    /*  "mov rax, gs:0" is same as "let rax = *(gs as *const u64)".
+        we cannot load gs.base by "lea rax, [gs:0]" because lea cannot use gs register in x86_64.
+        On general kernel, the per-CPU's data struct has a member pointing itself and accesses it.
+    */
+
+    let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
+    cpu_manager.arch_depend_data.self_pointer = cpu_manager_address.to_usize(); /* self pointer */
+
+    unsafe {
+        cpu::set_gs_and_kernel_gs_base(
+            &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
+        )
+    };
+
+    cpu_manager.cpu_id = local_apic_manager.get_apic_id() as usize;
+
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
 
     loop {

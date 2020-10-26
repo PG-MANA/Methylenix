@@ -7,11 +7,13 @@
 
 use crate::arch::target_arch::device::serial_port::SerialPortManager;
 use crate::arch::target_arch::interrupt::InterruptManager;
+use crate::arch::target_arch::ArchDependedCpuManagerCluster;
 
 use crate::kernel::drivers::efi::EfiManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
+use crate::kernel::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::task_manager::work_queue::WorkQueueManager;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::tty::TtyManager;
@@ -41,4 +43,22 @@ pub struct KernelManagerCluster {
 pub fn get_kernel_manager_cluster() -> &'static mut KernelManagerCluster {
     /* You must assign new struct before use the structs!! */
     unsafe { STATIC_KERNEL_MANAGER_CLUSTER.assume_init_mut() }
+}
+
+pub struct CpuManagerCluster {
+    pub cpu_id: usize,
+    pub next_cluster: PtrLinkedListNode<Self>,
+    pub interrupt_manager: Mutex<InterruptManager>,
+    pub work_queue_manager: WorkQueueManager,
+    pub object_allocator: Mutex<ObjectAllocator>,
+    pub arch_depend_data: ArchDependedCpuManagerCluster,
+}
+
+#[inline(always)]
+pub fn get_cpu_manager_cluster() -> &'static mut CpuManagerCluster {
+    /* You must assign new struct before use the structs!! */
+    unsafe {
+        &mut *(crate::arch::target_arch::device::cpu::get_cpu_base_address()
+            as *mut CpuManagerCluster)
+    }
 }
