@@ -93,11 +93,7 @@ impl LocalApicManager {
                 cpu::wrmsr(Self::MSR_INDEX, local_apic_msr | Self::XAPIC_ENABLED_MASK);
             }
         }
-        if self.is_x2apic_enabled {
-            self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
-        } else {
-            self.apic_id = (self.read_apic_register(LocalApicRegisters::ApicId) >> 24) & 0xff;
-        }
+        self.store_apic_id();
         self.write_apic_register(
             LocalApicRegisters::SIR,
             self.read_apic_register(LocalApicRegisters::SIR) | 0x100,
@@ -129,11 +125,7 @@ impl LocalApicManager {
             }
             self.base_address = manager.base_address;
         }
-        if self.is_x2apic_enabled {
-            self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
-        } else {
-            self.apic_id = (self.read_apic_register(LocalApicRegisters::ApicId) >> 24) & 0xff;
-        }
+        self.store_apic_id();
         self.write_apic_register(
             LocalApicRegisters::SIR,
             self.read_apic_register(LocalApicRegisters::SIR) | 0x100,
@@ -149,6 +141,15 @@ impl LocalApicManager {
     /// Get current CPU's APIC ID
     pub fn get_apic_id(&self) -> u32 {
         self.apic_id
+    }
+
+    /// Get current CPU's APIC ID from register and store it.
+    fn store_apic_id(&mut self) {
+        self.apic_id = if self.is_x2apic_enabled {
+            self.read_apic_register(LocalApicRegisters::ApicId)
+        } else {
+            (self.read_apic_register(LocalApicRegisters::ApicId) >> 24) & 0xff
+        };
     }
 
     /// Send end of interruption to Local APIC.
