@@ -15,7 +15,7 @@ use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 
 use crate::kernel::drivers::acpi::AcpiManager;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_kernel_manager_cluster, CpuManagerCluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize};
 use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 use crate::kernel::sync::spin_lock::Mutex;
@@ -192,6 +192,31 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
         num_of_cores,
         if num_of_cores != 1 { "s" } else { "" }
     );
+
+    //Set up per-CPU data for BSP
+    let cpu_manager_address = get_kernel_manager_cluster()
+        .object_allocator
+        .lock()
+        .unwrap()
+        .alloc(
+            core::mem::size_of::<CpuManagerCluster>().into(),
+            &get_kernel_manager_cluster().memory_manager,
+        )
+        .unwrap();
+    let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
+    cpu_manager.arch_depend_data.self_pointer = cpu_manager_address.to_usize(); /* self pointer */
+    cpu_manager.cpu_id = get_kernel_manager_cluster()
+        .interrupt_manager
+        .lock()
+        .unwrap()
+        .get_local_apic_manager()
+        .get_apic_id() as usize;
+    unsafe {
+        cpu::set_gs_and_kernel_gs_base(
+            &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
+        )
+    };
+
     if num_of_cores <= 1 {
         if let Err(e) = get_kernel_manager_cluster()
             .memory_manager
