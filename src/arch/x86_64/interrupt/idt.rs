@@ -32,7 +32,7 @@ pub struct GateDescriptor {
 }
 
 #[repr(C, packed)]
-pub struct IDTR {
+pub struct DescriptorTableRegister {
     pub limit: u16,
     pub offset: u64,
 }

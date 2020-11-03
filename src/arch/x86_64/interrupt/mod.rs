@@ -101,7 +101,7 @@ impl InterruptManager {
     /// This function sets the address of IDT into CPU.
     /// Unless you change the address of IDT, you don't have to call it.
     unsafe fn flush(&self) {
-        let idtr = idt::IDTR {
+        let idtr = idt::DescriptorTableRegister {
             limit: InterruptManager::LIMIT_IDT,
             offset: self.idt.assume_init_read() as *const _ as u64,
         };
