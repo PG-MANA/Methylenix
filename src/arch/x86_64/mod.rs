@@ -20,14 +20,15 @@ use self::init::{
     init_acpi, init_interrupt, init_interrupt_work_queue_manager, init_multiple_processors_ap,
     init_task, init_timer,
 };
+use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_kernel_manager_cluster, CpuManagerCluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize};
-
 use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
 
 static mut LOCAL_APIC_TIMER: LocalApicTimer = LocalApicTimer::new();
@@ -341,6 +342,15 @@ pub extern "C" fn ap_boot_main() {
     };
 
     cpu_manager.cpu_id = local_apic_manager.get_apic_id() as usize;
+
+    cpu_manager.interrupt_manager = Mutex::new(InterruptManager::new());
+    extern "C" {
+        pub static gdt: u8;
+    }
+    GateDescriptor::fork_gdt_from_other_and_create_tss_and_set(
+        unsafe { &gdt as *const _ as usize },
+        32,
+    );
 
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
 

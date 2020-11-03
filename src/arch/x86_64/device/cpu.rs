@@ -76,10 +76,20 @@ pub unsafe fn sgdt(gdtr: &mut u128) {
 }
 
 #[inline(always)]
+pub unsafe fn lgdt(gdtr: &u128) {
+    asm!("lgdt [{}]", in(reg) (gdtr as *const _ as usize));
+}
+
+#[inline(always)]
 pub unsafe fn store_tr() -> u16 {
     let result: u16;
     asm!("str ax", out("ax") result);
     result
+}
+
+#[inline(always)]
+pub unsafe fn load_tr(index: u16) {
+    asm!("ltr ax", in("ax") index);
 }
 
 #[inline(always)]
