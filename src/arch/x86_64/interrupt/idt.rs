@@ -77,12 +77,13 @@ impl GateDescriptor {
                 new_gdt_address.to_usize() as *mut u8,
                 copy_size as usize,
             );
-            /*Set TSS Address */
+
+            /*Set TSS Descriptor */
             *((new_gdt_address.to_usize() + copy_size as usize) as *mut u128) = 110
-                | ((tss_address.to_usize() & 0xff) << 16) as u128
-                | ((tss_address.to_usize() as u128 & 0xf00) >> 16) << 32
+                | ((tss_address.to_usize() & 0xffff) << 16) as u128
+                | (((tss_address.to_usize() >> 16) & 0xff) << 32) as u128
                 | 0b10001001 << 40
-                | ((tss_address.to_usize() as u128 & 0xf000) >> 24) << 56
+                | (((tss_address.to_usize() >> 24) & 0xff) << 56) as u128
                 | (tss_address.to_usize() as u128 >> 32) << 64;
             /* Zeroed TSS */
             core::ptr::write_bytes(tss_address.to_usize() as *mut u8, 0, 104);
