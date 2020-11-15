@@ -175,6 +175,32 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
 
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 
+/// Allocate CpuManager and set self pointer
+pub fn setup_cpu_manager_cluster() -> &'static mut CpuManagerCluster {
+    let cpu_manager_address = get_kernel_manager_cluster()
+        .object_allocator
+        .lock()
+        .unwrap()
+        .alloc(
+            core::mem::size_of::<CpuManagerCluster>().into(),
+            &get_kernel_manager_cluster().memory_manager,
+        )
+        .unwrap();
+    let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
+    /*
+        "mov rax, gs:0" is same as "let rax = *(gs as *const u64)".
+        we cannot load gs.base by "lea rax, [gs:0]" because lea cannot use gs register in x86_64.
+        On general kernel, the per-CPU's data struct has a member pointing itself and accesses it.
+    */
+    cpu_manager.arch_depend_data.self_pointer = cpu_manager_address.to_usize();
+    unsafe {
+        cpu::set_gs_and_kernel_gs_base(
+            &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
+        )
+    };
+    cpu_manager
+}
+
 /// Init APs
 ///
 /// This function will setup multiple processors by using ACPI
@@ -194,28 +220,13 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
     );
 
     //Set up per-CPU data for BSP
-    let cpu_manager_address = get_kernel_manager_cluster()
-        .object_allocator
-        .lock()
-        .unwrap()
-        .alloc(
-            core::mem::size_of::<CpuManagerCluster>().into(),
-            &get_kernel_manager_cluster().memory_manager,
-        )
-        .unwrap();
-    let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
-    cpu_manager.arch_depend_data.self_pointer = cpu_manager_address.to_usize(); /* self pointer */
+    let cpu_manager = setup_cpu_manager_cluster();
     cpu_manager.cpu_id = get_kernel_manager_cluster()
         .interrupt_manager
         .lock()
         .unwrap()
         .get_local_apic_manager()
         .get_apic_id() as usize;
-    unsafe {
-        cpu::set_gs_and_kernel_gs_base(
-            &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
-        )
-    };
 
     if num_of_cores <= 1 {
         if let Err(e) = get_kernel_manager_cluster()
