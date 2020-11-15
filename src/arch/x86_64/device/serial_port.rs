@@ -48,6 +48,7 @@ impl SerialPortManager {
         unsafe {
             make_device_interrupt_handler!(inthandler24, SerialPortManager::inthandler24_main);
             get_kernel_manager_cluster()
+                .boot_strap_cpu_manager
                 .interrupt_manager
                 .lock()
                 .unwrap()
@@ -140,7 +141,11 @@ impl SerialPortManager {
     /// Currently, this wakes the main process up.
     #[inline(never)]
     fn inthandler24_main() {
-        if let Ok(interrupt_manager) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
+        if let Ok(interrupt_manager) = get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
+            .interrupt_manager
+            .try_lock()
+        {
             interrupt_manager.send_eoi();
         }
         let work = WorkList::new(

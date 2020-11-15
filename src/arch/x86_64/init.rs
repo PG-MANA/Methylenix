@@ -16,8 +16,9 @@ use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{get_kernel_manager_cluster, CpuManagerCluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
+use crate::kernel::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::Timer;
@@ -75,7 +76,9 @@ pub fn init_interrupt(kernel_selector: u16) {
     pic::disable_8259_pic();
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
-    get_kernel_manager_cluster().interrupt_manager = Mutex::new(interrupt_manager);
+    get_kernel_manager_cluster()
+        .boot_strap_cpu_manager
+        .interrupt_manager = Mutex::new(interrupt_manager);
 }
 
 ///Init AcpiManager
@@ -109,6 +112,7 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
     if local_apic_timer.enable_deadline_mode(
         InterruptionIndex::LocalApicTimer as u16,
         get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
             .interrupt_manager
             .lock()
             .unwrap()
@@ -125,6 +129,7 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         local_apic_timer.set_up_interruption(
             InterruptionIndex::LocalApicTimer as u16,
             get_kernel_manager_cluster()
+                .boot_strap_cpu_manager
                 .interrupt_manager
                 .lock()
                 .unwrap()
@@ -138,6 +143,7 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         local_apic_timer.set_up_interruption(
             InterruptionIndex::LocalApicTimer as u16,
             get_kernel_manager_cluster()
+                .boot_strap_cpu_manager
                 .interrupt_manager
                 .lock()
                 .unwrap()
@@ -154,12 +160,14 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
     );
 
     get_kernel_manager_cluster()
+        .boot_strap_cpu_manager
         .interrupt_manager
         .lock()
         .unwrap()
         .set_ist(1, 0x4000.into());
 
     get_kernel_manager_cluster()
+        .boot_strap_cpu_manager
         .interrupt_manager
         .lock()
         .unwrap()
@@ -176,16 +184,20 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// Allocate CpuManager and set self pointer
-pub fn setup_cpu_manager_cluster() -> &'static mut CpuManagerCluster {
-    let cpu_manager_address = get_kernel_manager_cluster()
-        .object_allocator
-        .lock()
-        .unwrap()
-        .alloc(
-            core::mem::size_of::<CpuManagerCluster>().into(),
-            &get_kernel_manager_cluster().memory_manager,
-        )
-        .unwrap();
+pub fn setup_cpu_manager_cluster(
+    cpu_manager_address: Option<VAddress>,
+) -> &'static mut CpuManagerCluster {
+    let cpu_manager_address = cpu_manager_address.unwrap_or(
+        get_kernel_manager_cluster()
+            .object_allocator
+            .lock()
+            .unwrap()
+            .alloc(
+                core::mem::size_of::<CpuManagerCluster>().into(),
+                &get_kernel_manager_cluster().memory_manager,
+            )
+            .unwrap(),
+    );
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
     /*
         "mov rax, gs:0" is same as "let rax = *(gs as *const u64)".
@@ -197,6 +209,12 @@ pub fn setup_cpu_manager_cluster() -> &'static mut CpuManagerCluster {
         cpu::set_gs_and_kernel_gs_base(
             &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
         )
+    };
+    cpu_manager.list = PtrLinkedListNode::new();
+    unsafe {
+        cpu_manager
+            .list
+            .set_ptr_from_usize(cpu_manager_address.to_usize())
     };
     cpu_manager
 }
@@ -220,8 +238,11 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
     );
 
     //Set up per-CPU data for BSP
-    let cpu_manager = setup_cpu_manager_cluster();
+    let bsp_cpu_manager_address =
+        VAddress::new(&(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize);
+    let cpu_manager = setup_cpu_manager_cluster(Some(bsp_cpu_manager_address));
     cpu_manager.cpu_id = get_kernel_manager_cluster()
+        .boot_strap_cpu_manager
         .interrupt_manager
         .lock()
         .unwrap()
@@ -251,6 +272,7 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
 
     //Testing
     let bsp_apic_id = get_kernel_manager_cluster()
+        .boot_strap_cpu_manager
         .interrupt_manager
         .lock()
         .unwrap()
@@ -296,6 +318,7 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
             .get_acpi_pm_timer()
             .unwrap();
         let interrupt_manager = get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
             .interrupt_manager
             .lock()
             .unwrap();

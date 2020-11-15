@@ -73,7 +73,11 @@ impl LocalApicTimer {
     /// Currently, this function sends end of interrupt and switches to next thread.
     #[inline(never)]
     pub extern "C" fn local_apic_timer_handler(c: u64) {
-        if let Ok(im) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
+        if let Ok(im) = get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
+            .interrupt_manager
+            .try_lock()
+        {
             im.send_eoi();
         }
         let context_data = unsafe { &*(c as *const ContextData) };

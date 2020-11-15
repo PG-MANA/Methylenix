@@ -135,6 +135,7 @@ fn main_process() -> ! {
     unsafe {
         LOCAL_APIC_TIMER.start_interruption(
             get_kernel_manager_cluster()
+                .boot_strap_cpu_manager
                 .interrupt_manager
                 .lock()
                 .unwrap()
@@ -321,6 +322,7 @@ pub extern "C" fn ap_boot_main() {
     let mut local_apic_manager = LocalApicManager::new();
     local_apic_manager.init_from_other_manager(
         get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
             .interrupt_manager
             .lock()
             .unwrap()
@@ -328,8 +330,16 @@ pub extern "C" fn ap_boot_main() {
     );
 
     /* Set up CPU Manager, it contains individual data of CPU */
-    let cpu_manager = setup_cpu_manager_cluster();
+    let cpu_manager = setup_cpu_manager_cluster(None);
     cpu_manager.cpu_id = local_apic_manager.get_apic_id() as usize;
+    let mut cpu_manager_list = &mut get_kernel_manager_cluster().boot_strap_cpu_manager.list;
+    loop {
+        if cpu_manager_list.get_next_as_ptr().is_none() {
+            cpu_manager_list.insert_after(&mut cpu_manager.list);
+            break;
+        }
+        cpu_manager_list = &mut unsafe { cpu_manager_list.get_next_mut() }.unwrap().list;
+    }
 
     /* Copy GDT from BSP and create own TSS */
     let gdt_address = unsafe { &gdt as *const _ as usize };

@@ -30,13 +30,13 @@ pub struct KernelManagerCluster {
     pub memory_manager: Mutex<MemoryManager>,
     pub system_memory_manager: SystemMemoryManager,
     pub object_allocator: Mutex<ObjectAllocator>,
-    pub interrupt_manager: Mutex<InterruptManager>,
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
     pub work_queue_manager: WorkQueueManager,
     pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
-                                        //input_manager:
+    //input_manager:
+    pub boot_strap_cpu_manager: CpuManagerCluster,
 }
 
 #[inline(always)]
@@ -47,7 +47,7 @@ pub fn get_kernel_manager_cluster() -> &'static mut KernelManagerCluster {
 
 pub struct CpuManagerCluster {
     pub cpu_id: usize,
-    pub next_cluster: PtrLinkedListNode<Self>,
+    pub list: PtrLinkedListNode<Self>,
     pub interrupt_manager: Mutex<InterruptManager>,
     pub work_queue_manager: WorkQueueManager,
     pub object_allocator: Mutex<ObjectAllocator>,
