@@ -8,7 +8,7 @@
 .global init_long_mode, fin
 .extern init_x86_64
 .extern main_code_segment_descriptor, tss_descriptor, gdtr0 /* at common.asm */
-.extern tss_descriptor_adress, tss, pd, pdpt, pml4
+.extern tss_descriptor_address, tss, pd, pdpt, pml4
 
 .section .text
 
@@ -23,7 +23,7 @@ init_long_mode:
 
   /* Write TSS segment information */
   mov   $tss, %eax
-  mov   $tss_descriptor_adress, %ebp
+  mov   $tss_descriptor_address, %ebp
   mov   %ax, 2(%ebp)
   shr   $16, %eax
   mov   %al, 4(%ebp)

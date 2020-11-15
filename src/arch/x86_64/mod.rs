@@ -304,12 +304,20 @@ pub extern "C" fn unknown_boot_main() {
 
 #[no_mangle]
 pub extern "C" fn ap_boot_main() {
+    // Extern Assembly Symbols
+    extern "C" {
+        pub static gdt: u64; /* boot/common.s */
+        pub static tss_descriptor_address: u64; /* boot/common.s */
+    }
     unsafe { cpu::enable_sse() };
+
+    // Apply kernel paging table
     get_kernel_manager_cluster()
         .memory_manager
         .lock()
         .unwrap()
         .set_paging_table();
+
     let mut local_apic_manager = LocalApicManager::new();
     local_apic_manager.init_from_other_manager(
         get_kernel_manager_cluster()
@@ -318,6 +326,8 @@ pub extern "C" fn ap_boot_main() {
             .unwrap()
             .get_local_apic_manager(),
     );
+
+    /* Set up CPU Manager, it contains individual data of CPU */
     let cpu_manager_address = get_kernel_manager_cluster()
         .object_allocator
         .lock()
@@ -327,30 +337,27 @@ pub extern "C" fn ap_boot_main() {
             &get_kernel_manager_cluster().memory_manager,
         )
         .unwrap();
-    /*  "mov rax, gs:0" is same as "let rax = *(gs as *const u64)".
+    let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
+    /*
+        "mov rax, gs:0" is same as "let rax = *(gs as *const u64)".
         we cannot load gs.base by "lea rax, [gs:0]" because lea cannot use gs register in x86_64.
         On general kernel, the per-CPU's data struct has a member pointing itself and accesses it.
     */
-
-    let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
-    cpu_manager.arch_depend_data.self_pointer = cpu_manager_address.to_usize(); /* self pointer */
-
+    cpu_manager.arch_depend_data.self_pointer = cpu_manager_address.to_usize();
     unsafe {
         cpu::set_gs_and_kernel_gs_base(
             &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
         )
     };
-
     cpu_manager.cpu_id = local_apic_manager.get_apic_id() as usize;
 
+    /* Copy GDT from BSP and create own TSS */
+    let gdt_address = unsafe { &gdt as *const _ as usize };
+    GateDescriptor::fork_gdt_from_other_and_create_tss_and_set(gdt_address, unsafe {
+        &tss_descriptor_address as *const _ as usize - gdt_address
+    } as u16);
+
     cpu_manager.interrupt_manager = Mutex::new(InterruptManager::new());
-    extern "C" {
-        pub static gdt: u8;
-    }
-    GateDescriptor::fork_gdt_from_other_and_create_tss_and_set(
-        unsafe { &gdt as *const _ as usize },
-        32,
-    );
 
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
 
