@@ -232,6 +232,14 @@ impl InterruptManager {
         &self.local_apic
     }
 
+    /// Return the reference of LocalApicManager.
+    ///
+    /// Currently, this manager contains LocalApicManager.
+    /// If this structure is changed, this function will be deleted.
+    pub fn get_local_apic_manager_mut(&mut self) -> &mut LocalApicManager {
+        &mut self.local_apic
+    }
+
     /// Dummy handler to init IDT
     ///
     /// This function does nothing.

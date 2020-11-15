@@ -12,7 +12,6 @@ mod init;
 pub mod paging;
 
 use self::device::cpu;
-use self::device::local_apic::LocalApicManager;
 use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
@@ -27,6 +26,7 @@ use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::MemoryPermissionFlags;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
@@ -319,27 +319,22 @@ pub extern "C" fn ap_boot_main() {
         .unwrap()
         .set_paging_table();
 
-    let mut local_apic_manager = LocalApicManager::new();
-    local_apic_manager.init_from_other_manager(
-        get_kernel_manager_cluster()
-            .boot_strap_cpu_manager
-            .interrupt_manager
-            .lock()
-            .unwrap()
-            .get_local_apic_manager(),
-    );
-
     /* Set up CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
-    cpu_manager.cpu_id = local_apic_manager.get_apic_id() as usize;
     let mut cpu_manager_list = &mut get_kernel_manager_cluster().boot_strap_cpu_manager.list;
     loop {
         if cpu_manager_list.get_next_as_ptr().is_none() {
             cpu_manager_list.insert_after(&mut cpu_manager.list);
+            drop(cpu_manager_list);
             break;
         }
         cpu_manager_list = &mut unsafe { cpu_manager_list.get_next_mut() }.unwrap().list;
     }
+
+    /* Setup memory management system */
+    let mut object_allocator = ObjectAllocator::new();
+    object_allocator.init(&mut get_kernel_manager_cluster().memory_manager.lock().unwrap());
+    cpu_manager.object_allocator = Mutex::new(object_allocator);
 
     /* Copy GDT from BSP and create own TSS */
     let gdt_address = unsafe { &gdt as *const _ as usize };
@@ -347,8 +342,23 @@ pub extern "C" fn ap_boot_main() {
         &tss_descriptor_address as *const _ as usize - gdt_address
     } as u16);
 
-    cpu_manager.interrupt_manager = Mutex::new(InterruptManager::new());
+    /* Setup interrupt and LocalApic */
+    let mut interrupt_manager = InterruptManager::new();
+    interrupt_manager
+        .get_local_apic_manager_mut()
+        .init_from_other_manager(
+            get_kernel_manager_cluster()
+                .boot_strap_cpu_manager
+                .interrupt_manager
+                .lock()
+                .unwrap()
+                .get_local_apic_manager(),
+        );
+    /*TODO: setup tss_manager, io_apic_manager and main_selector */
+    cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
+    cpu_manager.interrupt_manager = Mutex::new(interrupt_manager);
 
+    /* Tell BSP completing of init */
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
 
     loop {

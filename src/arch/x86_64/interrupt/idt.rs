@@ -5,7 +5,7 @@
 //! This is usually used by InterruptManager.
 use crate::arch::target_arch::device::cpu;
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize};
 
 /// GateDescriptor
@@ -55,10 +55,7 @@ impl GateDescriptor {
     }
 
     pub fn fork_gdt_from_other_and_create_tss_and_set(original_gdt: usize, copy_size: u16) {
-        let mut object_allocator = get_kernel_manager_cluster()
-            .object_allocator
-            .lock()
-            .unwrap();
+        let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
 
         let new_gdt_address = object_allocator

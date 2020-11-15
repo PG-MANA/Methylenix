@@ -29,7 +29,7 @@ pub struct KernelManagerCluster {
     pub graphic_manager: GraphicManager,
     pub memory_manager: Mutex<MemoryManager>,
     pub system_memory_manager: SystemMemoryManager,
-    pub object_allocator: Mutex<ObjectAllocator>,
+    pub object_allocator: Mutex<ObjectAllocator>, /* delete soon... */
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
