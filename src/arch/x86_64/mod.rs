@@ -12,6 +12,7 @@ mod init;
 pub mod paging;
 
 use self::device::cpu;
+use self::device::io_apic::IoApicManager;
 use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
@@ -24,18 +25,20 @@ use self::interrupt::{idt::GateDescriptor, InterruptManager};
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::MemoryPermissionFlags;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
 
-static mut LOCAL_APIC_TIMER: LocalApicTimer = LocalApicTimer::new();
-static mut ACPI_MANAGER: Option<AcpiManager> = None;
-
 pub struct ArchDependedCpuManagerCluster {
+    pub local_apic_timer: LocalApicTimer,
     pub self_pointer: usize,
+}
+
+pub struct ArchDependedKernelManagerCluster {
+    pub io_apic_manager: Mutex<IoApicManager>,
 }
 
 #[no_mangle]
@@ -91,16 +94,22 @@ pub extern "C" fn multiboot_main(
     get_kernel_manager_cluster().serial_port_manager.init();
 
     /* Setup ACPI */
+    let mut acpi_manager = AcpiManager::new();
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
-        unsafe { ACPI_MANAGER = init_acpi(rsdp_address) };
+        if let Some(a) = init_acpi(rsdp_address) {
+            acpi_manager = a;
+        } else {
+            pr_warn!("Failed initializing ACPI.");
+        }
     } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
         pr_warn!("ACPI 1.0 is not supported.");
     } else {
         pr_warn!("ACPI is not available.");
     }
+    get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
 
     /* Init Local APIC Timer*/
-    unsafe { LOCAL_APIC_TIMER = init_timer(ACPI_MANAGER.as_ref()) };
+    get_cpu_manager_cluster().arch_depend_data.local_apic_timer = init_timer();
 
     /* Set up graphic */
     init_graphic(&multiboot_information);
@@ -118,9 +127,7 @@ pub extern "C" fn multiboot_main(
     init_interrupt_work_queue_manager();
 
     /* Setup APs if the processor is multicore-processor */
-    if let Some(acpi) = unsafe { ACPI_MANAGER.as_ref() } {
-        init_multiple_processors_ap(acpi);
-    }
+    init_multiple_processors_ap();
 
     /* Switch to main process */
     get_kernel_manager_cluster()
@@ -135,9 +142,12 @@ pub fn general_protection_exception_handler(e_code: usize) {
 
 fn main_process() -> ! {
     /* Interrupt is enabled */
-    unsafe {
-        /* TODO: adjust for multicore */
-        LOCAL_APIC_TIMER.start_interruption(
+
+    /* TODO: adjust for multicore */
+    get_cpu_manager_cluster()
+        .arch_depend_data
+        .local_apic_timer
+        .start_interruption(
             get_kernel_manager_cluster()
                 .boot_strap_cpu_manager
                 .interrupt_manager
@@ -145,13 +155,10 @@ fn main_process() -> ! {
                 .unwrap()
                 .get_local_apic_manager(),
         );
-    }
     pr_info!("All init are done!");
 
     /* Draw boot logo */
-    if unsafe { ACPI_MANAGER.is_some() } {
-        draw_boot_logo(unsafe { ACPI_MANAGER.as_ref().unwrap() });
-    }
+    draw_boot_logo();
 
     kprintln!("Methylenix");
     loop {
@@ -180,7 +187,7 @@ fn idle() -> ! {
     }
 }
 
-fn draw_boot_logo(acpi_manager: &AcpiManager) {
+fn draw_boot_logo() {
     let free_mapped_address = |address: usize| {
         if let Err(e) = get_kernel_manager_cluster()
             .memory_manager
@@ -191,6 +198,7 @@ fn draw_boot_logo(acpi_manager: &AcpiManager) {
             pr_err!("Freeing the bitmap data of BGRT was failed: {:?}", e);
         }
     };
+    let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
 
     let boot_logo_physical_address = acpi_manager
         .get_xsdt_manager()
@@ -200,6 +208,7 @@ fn draw_boot_logo(acpi_manager: &AcpiManager) {
         .get_xsdt_manager()
         .get_bgrt_manager()
         .get_image_offset();
+    drop(acpi_manager);
     if boot_logo_physical_address.is_none() || boot_logo_offset.is_none() {
         pr_info!("ACPI does not have the BGRT information.");
         return;

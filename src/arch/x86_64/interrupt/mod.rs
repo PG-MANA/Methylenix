@@ -12,7 +12,6 @@ use self::idt::GateDescriptor;
 use self::tss::TssManager;
 
 use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -32,9 +31,7 @@ pub struct StoredIrqData {
 pub struct InterruptManager {
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
     main_selector: u16,
-    io_apic: IoApicManager,
     local_apic: LocalApicManager,
-    /* temporary */
     tss_manager: TssManager,
 }
 
@@ -59,7 +56,6 @@ impl InterruptManager {
         InterruptManager {
             idt: MaybeUninit::uninit(),
             main_selector: 0,
-            io_apic: IoApicManager::new(),
             local_apic: LocalApicManager::new(),
             tss_manager: TssManager::new(),
         }
@@ -91,7 +87,6 @@ impl InterruptManager {
             self.flush();
         }
         self.tss_manager.load_current_tss();
-        self.io_apic.init();
         self.local_apic.init();
         return true;
     }
@@ -162,7 +157,11 @@ impl InterruptManager {
             );
         }
         if let Some(irq) = irq {
-            self.io_apic
+            get_kernel_manager_cluster()
+                .arch_depend_data
+                .io_apic_manager
+                .lock()
+                .unwrap()
                 .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
         }
         return true;

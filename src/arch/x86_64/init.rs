@@ -8,6 +8,7 @@ pub mod multiboot;
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::context::ContextManager;
+use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
@@ -76,11 +77,18 @@ pub fn init_interrupt_work_queue_manager() {
 /// This function disables 8259 PIC and init InterruptManager
 pub fn init_interrupt(kernel_selector: u16) {
     pic::disable_8259_pic();
+
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
     get_kernel_manager_cluster()
         .boot_strap_cpu_manager
         .interrupt_manager = Mutex::new(interrupt_manager);
+
+    let mut io_apic_manager = IoApicManager::new();
+    io_apic_manager.init();
+    get_kernel_manager_cluster()
+        .arch_depend_data
+        .io_apic_manager = Mutex::new(io_apic_manager);
 }
 
 ///Init AcpiManager
@@ -106,7 +114,7 @@ pub fn init_acpi(rsdp_ptr: usize) -> Option<AcpiManager> {
 /// Otherwise, this will calculate the frequency of the Local APIC Timer with ACPI PM Timer or
 /// PIT.(ACPI PM Timer is prioritized.)
 /// After that, this registers the timer to InterruptManager.
-pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
+pub fn init_timer() -> LocalApicTimer {
     /* This function assumes that interrupt is not enabled */
     /* This function does not enable interrupt */
     let mut local_apic_timer = LocalApicTimer::new();
@@ -120,8 +128,10 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
             .get_local_apic_manager(),
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
-    } else if let Some(pm_timer) = acpi_manager
-        .unwrap_or(&AcpiManager::new())
+    } else if let Some(pm_timer) = get_kernel_manager_cluster()
+        .acpi_manager
+        .lock()
+        .unwrap()
         .get_xsdt_manager()
         .get_fadt_manager()
         .get_acpi_pm_timer()
@@ -221,19 +231,16 @@ pub fn setup_cpu_manager_cluster(
 ///
 /// This function will setup multiple processors by using ACPI
 /// This is in the development
-pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
+pub fn init_multiple_processors_ap() {
     let mut apic_id_list: [u8; 0xFF] = [0; 0xFF];
-    let num_of_cores = acpi_manager
+    let num_of_cores = get_kernel_manager_cluster()
+        .acpi_manager
+        .lock()
+        .unwrap()
         .get_xsdt_manager()
         .get_madt_manager()
         .find_apic_id_list(&mut apic_id_list);
     let boot_address = 0usize; /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
-
-    pr_info!(
-        "Found {} CPU{}",
-        num_of_cores,
-        if num_of_cores != 1 { "s" } else { "" }
-    );
 
     //Set up per-CPU data for BSP
     let mut cpu_manager = get_cpu_manager_cluster();
@@ -256,6 +263,8 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
         }
         return;
     }
+
+    pr_info!("Found {} CPUs", num_of_cores,);
 
     extern "C" {
         fn ap_entry();
@@ -308,7 +317,10 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
         };
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
 
-        let acpi_pm_timer = acpi_manager
+        let acpi_pm_timer = get_kernel_manager_cluster()
+            .acpi_manager
+            .lock()
+            .unwrap()
             .get_xsdt_manager()
             .get_fadt_manager()
             .get_acpi_pm_timer()
