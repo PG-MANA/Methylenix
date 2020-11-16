@@ -15,7 +15,9 @@ use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 
 use crate::kernel::drivers::acpi::AcpiManager;
-use crate::kernel::manager_cluster::{get_kernel_manager_cluster, CpuManagerCluster};
+use crate::kernel::manager_cluster::{
+    get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
+};
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 use crate::kernel::ptr_linked_list::PtrLinkedListNode;
@@ -187,7 +189,7 @@ pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 pub fn setup_cpu_manager_cluster(
     cpu_manager_address: Option<VAddress>,
 ) -> &'static mut CpuManagerCluster {
-    let cpu_manager_address = cpu_manager_address.unwrap_or(
+    let cpu_manager_address = cpu_manager_address.unwrap_or_else(|| {
         get_kernel_manager_cluster()
             .object_allocator
             .lock()
@@ -196,8 +198,8 @@ pub fn setup_cpu_manager_cluster(
                 core::mem::size_of::<CpuManagerCluster>().into(),
                 &get_kernel_manager_cluster().memory_manager,
             )
-            .unwrap(),
-    );
+            .unwrap()
+    });
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
     /*
         "mov rax, gs:0" is same as "let rax = *(gs as *const u64)".
@@ -238,9 +240,7 @@ pub fn init_multiple_processors_ap(acpi_manager: &AcpiManager) {
     );
 
     //Set up per-CPU data for BSP
-    let bsp_cpu_manager_address =
-        VAddress::new(&(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize);
-    let cpu_manager = setup_cpu_manager_cluster(Some(bsp_cpu_manager_address));
+    let mut cpu_manager = get_cpu_manager_cluster();
     cpu_manager.cpu_id = get_kernel_manager_cluster()
         .boot_strap_cpu_manager
         .interrupt_manager

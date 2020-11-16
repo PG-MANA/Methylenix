@@ -209,12 +209,8 @@ pub unsafe fn get_cpu_base_address() -> usize {
 }
 
 pub unsafe fn set_gs_and_kernel_gs_base(address: u64) {
-    use core::sync::atomic::{fence, Ordering};
+    wrmsr(0xC0000101, address);
     wrmsr(0xC0000102, address);
-    asm!("swapgs");
-    fence(Ordering::Acquire); //Spector?
-    wrmsr(0xC0000102, address);
-    fence(Ordering::Release);
 }
 
 /// Run ContextData.

@@ -25,7 +25,7 @@ use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::MemoryPermissionFlags;
 use crate::kernel::sync::spin_lock::Mutex;
@@ -51,6 +51,11 @@ pub extern "C" fn multiboot_main(
 
     /* Load the multiboot information */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
+
+    /* Setup BSP CPU Manager Cluster */
+    setup_cpu_manager_cluster(Some(VAddress::new(
+        &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
+    )));
 
     /* Init Graphic & TTY (for panic!) */
     get_kernel_manager_cluster().graphic_manager = GraphicManager::new();
