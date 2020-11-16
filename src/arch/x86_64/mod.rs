@@ -357,19 +357,15 @@ pub extern "C" fn ap_boot_main() {
         &tss_descriptor_address as *const _ as usize - gdt_address
     } as u16);
 
-    /* Setup interrupt and LocalApic */
+    /* Setup InterruptManager(including LocalApicManager) */
     let mut interrupt_manager = InterruptManager::new();
-    interrupt_manager
-        .get_local_apic_manager_mut()
-        .init_from_other_manager(
-            get_kernel_manager_cluster()
-                .boot_strap_cpu_manager
-                .interrupt_manager
-                .lock()
-                .unwrap()
-                .get_local_apic_manager(),
-        );
-    /*TODO: setup tss_manager, io_apic_manager and main_selector */
+    interrupt_manager.init_ap(
+        &mut get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
+            .interrupt_manager
+            .lock()
+            .unwrap(),
+    );
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
     cpu_manager.interrupt_manager = Mutex::new(interrupt_manager);
 
