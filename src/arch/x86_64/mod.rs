@@ -263,11 +263,13 @@ fn draw_boot_logo(acpi_manager: &AcpiManager) {
         return;
     }
 
-    pr_info!(
-        "BGRT: {:#X} is remapped at {:#X}",
-        boot_logo_address,
-        result.unwrap().to_usize(),
-    );
+    if boot_logo_address != result.unwrap().to_usize() {
+        pr_info!(
+            "BGRT: {:#X} is remapped at {:#X}",
+            boot_logo_address,
+            result.unwrap().to_usize(),
+        );
+    }
     let boot_logo_address = result.unwrap();
 
     get_kernel_manager_cluster().graphic_manager.write_bitmap(
