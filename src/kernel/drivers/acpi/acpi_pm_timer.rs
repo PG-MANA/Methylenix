@@ -40,12 +40,10 @@ impl Timer for AcpiPmTimer {
     fn get_difference(&self, earlier: usize, later: usize) -> usize {
         if earlier <= later {
             later - earlier
+        } else if self.is_32_bit_counter {
+            later + (0xffffffff - earlier)
         } else {
-            if self.is_32_bit_counter {
-                later + (0xffffffff - earlier)
-            } else {
-                later + (0xffffff - earlier)
-            }
+            later + (0xffffff - earlier)
         }
     }
 
@@ -54,16 +52,14 @@ impl Timer for AcpiPmTimer {
 
         if self.is_32_bit_counter {
             result
-        } else {
-            if overflow == false {
-                if result <= 0xffffff {
-                    result
-                } else {
-                    result - 0xffffff
-                }
+        } else if overflow == false {
+            if result <= 0xffffff {
+                result
             } else {
-                result + (0xffffffff - 0xffffff)
+                result - 0xffffff
             }
+        } else {
+            result + (0xffffffff - 0xffffff)
         }
     }
 

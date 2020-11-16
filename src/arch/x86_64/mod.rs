@@ -93,12 +93,10 @@ pub extern "C" fn multiboot_main(
     /* Setup ACPI */
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
         unsafe { ACPI_MANAGER = init_acpi(rsdp_address) };
+    } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
+        pr_warn!("ACPI 1.0 is not supported.");
     } else {
-        if multiboot_information.old_acpi_rsdp_ptr.is_some() {
-            pr_warn!("ACPI 1.0 is not supported.");
-        } else {
-            pr_warn!("ACPI is not available.");
-        }
+        pr_warn!("ACPI is not available.");
     }
 
     /* Init Local APIC Timer*/

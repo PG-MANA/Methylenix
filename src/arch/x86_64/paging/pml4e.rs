@@ -121,7 +121,7 @@ impl PagingEntry for PML4E {
 
     fn get_address(&self) -> Option<PAddress> {
         if self.is_address_set() {
-            Some(((self.flags & 0x000FFFFF_FFFFF000) as usize).into())
+            Some(((self.flags & 0x000F_FFFF_FFFF_F000) as usize).into())
         } else {
             None
         }
@@ -129,7 +129,7 @@ impl PagingEntry for PML4E {
 
     fn set_address(&mut self, address: PAddress) -> bool {
         if (address & !PAGE_MASK) == 0 {
-            self.set_bit((address & 0x000FFFFF_FFFFF000) as u64, true);
+            self.set_bit((address & 0x000F_FFFF_FFFF_F000) as u64, true);
             self.set_address_set(true);
             true
         } else {
