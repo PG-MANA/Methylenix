@@ -113,8 +113,7 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
     local_apic_timer.init();
     if local_apic_timer.enable_deadline_mode(
         InterruptionIndex::LocalApicTimer as u16,
-        get_kernel_manager_cluster()
-            .boot_strap_cpu_manager
+        get_cpu_manager_cluster()
             .interrupt_manager
             .lock()
             .unwrap()
@@ -130,8 +129,7 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
         local_apic_timer.set_up_interruption(
             InterruptionIndex::LocalApicTimer as u16,
-            get_kernel_manager_cluster()
-                .boot_strap_cpu_manager
+            get_cpu_manager_cluster()
                 .interrupt_manager
                 .lock()
                 .unwrap()
@@ -144,8 +142,7 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         pit.init();
         local_apic_timer.set_up_interruption(
             InterruptionIndex::LocalApicTimer as u16,
-            get_kernel_manager_cluster()
-                .boot_strap_cpu_manager
+            get_cpu_manager_cluster()
                 .interrupt_manager
                 .lock()
                 .unwrap()
@@ -161,15 +158,13 @@ pub fn init_timer(acpi_manager: Option<&AcpiManager>) -> LocalApicTimer {
         LocalApicTimer::local_apic_timer_handler
     );
 
-    get_kernel_manager_cluster()
-        .boot_strap_cpu_manager
+    get_cpu_manager_cluster()
         .interrupt_manager
         .lock()
         .unwrap()
         .set_ist(1, 0x4000.into());
 
-    get_kernel_manager_cluster()
-        .boot_strap_cpu_manager
+    get_cpu_manager_cluster()
         .interrupt_manager
         .lock()
         .unwrap()
@@ -191,6 +186,7 @@ pub fn setup_cpu_manager_cluster(
 ) -> &'static mut CpuManagerCluster {
     let cpu_manager_address = cpu_manager_address.unwrap_or_else(|| {
         get_kernel_manager_cluster()
+            .boot_strap_cpu_manager /* Allocate from BSP Object Manager */
             .object_allocator
             .lock()
             .unwrap()

@@ -9,7 +9,7 @@ use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SI
 
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
@@ -180,7 +180,7 @@ pub fn init_memory_by_multiboot_information(
 
     /* store managers to cluster */
     get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
-    get_kernel_manager_cluster().object_allocator = Mutex::new(object_allocator);
+    get_cpu_manager_cluster().object_allocator = Mutex::new(object_allocator);
     MultiBootInformation::new(new_mbi_address.to_usize(), false)
 }
 

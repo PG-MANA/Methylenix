@@ -136,6 +136,7 @@ pub fn general_protection_exception_handler(e_code: usize) {
 fn main_process() -> ! {
     /* Interrupt is enabled */
     unsafe {
+        /* TODO: adjust for multicore */
         LOCAL_APIC_TIMER.start_interruption(
             get_kernel_manager_cluster()
                 .boot_strap_cpu_manager
