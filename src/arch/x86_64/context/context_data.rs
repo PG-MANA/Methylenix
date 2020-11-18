@@ -31,6 +31,7 @@ struct Registers {
     ds: u64,
     fs: u64,
     gs: u64,
+    /*gs_base: u64 */
     es: u64,
     ss: u64,
     rsp: u64,

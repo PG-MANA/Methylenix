@@ -16,10 +16,7 @@ use self::device::io_apic::IoApicManager;
 use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
-use self::init::{
-    init_acpi, init_interrupt, init_interrupt_work_queue_manager, init_multiple_processors_ap,
-    init_task, init_timer, setup_cpu_manager_cluster,
-};
+use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
 use crate::kernel::drivers::acpi::AcpiManager;
@@ -87,7 +84,7 @@ pub extern "C" fn multiboot_main(
         panic!("Cannot map memory for frame buffer");
     }
 
-    /* Init interruption */
+    /* Init interrupt */
     init_interrupt(kernel_code_segment);
 
     /* Setup Serial Port */
@@ -130,9 +127,7 @@ pub extern "C" fn multiboot_main(
     init_multiple_processors_ap();
 
     /* Switch to main process */
-    get_kernel_manager_cluster()
-        .task_manager
-        .execute_kernel_process()
+    get_cpu_manager_cluster().run_queue_manager.start()
     /* Never return to here */
 }
 
@@ -143,7 +138,6 @@ pub fn general_protection_exception_handler(e_code: usize) {
 fn main_process() -> ! {
     /* Interrupt is enabled */
 
-    /* TODO: adjust for multicore */
     get_cpu_manager_cluster()
         .arch_depend_data
         .local_apic_timer
@@ -162,7 +156,7 @@ fn main_process() -> ! {
 
     kprintln!("Methylenix");
     loop {
-        get_kernel_manager_cluster().task_manager.sleep();
+        get_cpu_manager_cluster().run_queue_manager.sleep();
         while let Some(c) = get_kernel_manager_cluster()
             .serial_port_manager
             .dequeue_key()
@@ -182,7 +176,7 @@ fn main_process() -> ! {
 fn idle() -> ! {
     loop {
         unsafe {
-            cpu::halt();
+            cpu::idle();
         }
     }
 }
@@ -368,6 +362,10 @@ pub extern "C" fn ap_boot_main() {
     );
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
     cpu_manager.interrupt_manager = Mutex::new(interrupt_manager);
+
+    cpu_manager.arch_depend_data.local_apic_timer = init_timer();
+    init_task_ap(idle);
+    init_interrupt_work_queue_manager();
 
     /* Tell BSP completing of init */
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);

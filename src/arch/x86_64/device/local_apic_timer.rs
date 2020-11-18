@@ -14,7 +14,7 @@ use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu::{cpuid, rdmsr, wrmsr};
 use crate::arch::target_arch::device::local_apic::{LocalApicManager, LocalApicRegisters};
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::timer_manager::Timer;
 
@@ -81,8 +81,8 @@ impl LocalApicTimer {
             im.send_eoi();
         }
         let context_data = unsafe { &*(c as *const ContextData) };
-        get_kernel_manager_cluster()
-            .task_manager
+        get_cpu_manager_cluster()
+            .run_queue_manager
             .switch_to_next_thread_without_saving_context(context_data);
     }
 

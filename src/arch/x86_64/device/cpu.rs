@@ -33,6 +33,11 @@ pub unsafe fn halt() {
 }
 
 #[inline(always)]
+pub unsafe fn idle() {
+    asm!("sti\nhlt");
+}
+
+#[inline(always)]
 pub unsafe fn hlt() {
     asm!("hlt");
 }

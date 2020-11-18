@@ -15,6 +15,7 @@ use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
 use crate::kernel::ptr_linked_list::PtrLinkedListNode;
+use crate::kernel::task_manager::run_queue_manager::RunQueueManager;
 use crate::kernel::task_manager::work_queue::WorkQueueManager;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::tty::TtyManager;
@@ -33,7 +34,6 @@ pub struct KernelManagerCluster {
     pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
-    pub work_queue_manager: WorkQueueManager,
     pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
     //input_manager:
     pub acpi_manager: Mutex<AcpiManager>,
@@ -53,6 +53,7 @@ pub struct CpuManagerCluster {
     pub interrupt_manager: Mutex<InterruptManager>,
     pub work_queue_manager: WorkQueueManager,
     pub object_allocator: Mutex<ObjectAllocator>,
+    pub run_queue_manager: RunQueueManager,
     pub arch_depend_data: ArchDependedCpuManagerCluster,
 }
 

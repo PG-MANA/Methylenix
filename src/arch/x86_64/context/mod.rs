@@ -10,7 +10,7 @@ pub mod context_data;
 use self::context_data::ContextData;
 
 use crate::arch::target_arch::device::cpu;
-use crate::arch::x86_64::paging::PAGE_MASK;
+use crate::arch::target_arch::paging::PAGE_MASK;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize};
 use crate::kernel::memory_manager::MemoryError;

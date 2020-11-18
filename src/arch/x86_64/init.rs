@@ -23,6 +23,7 @@ use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 use crate::kernel::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::sync::spin_lock::Mutex;
+use crate::kernel::task_manager::run_queue_manager::RunQueueManager;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::Timer;
 
@@ -65,9 +66,19 @@ pub fn init_task(
         .create_kernel_process(context_for_main, context_for_idle);
 }
 
+/// Init application processor's TaskManager
+///
+///
+pub fn init_task_ap(idle_task: fn() -> !) {
+    get_cpu_manager_cluster().run_queue_manager = RunQueueManager::new();
+    get_cpu_manager_cluster()
+        .run_queue_manager
+        .init(idle_task as *const fn() -> !);
+}
+
 /// Init SoftInterrupt
 pub fn init_interrupt_work_queue_manager() {
-    get_kernel_manager_cluster()
+    get_cpu_manager_cluster()
         .work_queue_manager
         .init(&mut get_kernel_manager_cluster().task_manager);
 }

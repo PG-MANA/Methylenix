@@ -8,11 +8,12 @@ use super::TaskManager;
 
 use crate::arch::target_arch::interrupt::InterruptManager;
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
 use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::task_manager::thread_entry::ThreadEntry;
+use crate::kernel::task_manager::TaskStatus;
 
 pub struct WorkQueueManager {
     work_queue: PtrLinkedList<WorkList>,
@@ -54,7 +55,7 @@ impl WorkQueueManager {
         }
 
         let thread = task_manager
-            .add_kernel_thread(Self::work_queue_thread as *const _, None, 0, false)
+            .create_kernel_thread(Self::work_queue_thread as *const _, None, 0)
             .expect("Cannot add the soft interrupt daemon.");
         self.daemon_thread = Some(thread as *mut _);
     }
@@ -72,6 +73,7 @@ impl WorkQueueManager {
 
         let ptr = work as *mut _;
         work.list.set_ptr(ptr);
+        let irq_data = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         if let Some(last_entry) = unsafe { self.work_queue.get_last_entry_mut() } {
             let ptr = work as *mut _;
@@ -80,24 +82,26 @@ impl WorkQueueManager {
         } else {
             self.work_queue.set_first_entry(Some(&mut work.list));
         }
-        get_kernel_manager_cluster()
-            .task_manager
-            .wakeup_target_thread(unsafe {
-                &mut *self
-                    .daemon_thread
-                    .expect("Cannot run the soft interrupt daemon.")
-            });
+        let worker_thread = unsafe { &mut *(self.daemon_thread.unwrap()) };
+        if worker_thread.get_task_status() == TaskStatus::Sleeping
+            || worker_thread.get_task_status() == TaskStatus::New
+        {
+            let run_queue_manager = &mut get_cpu_manager_cluster().run_queue_manager;
+            run_queue_manager.add_thread(worker_thread);
+        }
+        drop(_lock);
+        InterruptManager::restore_local_irq(irq_data);
     }
 
     fn work_queue_thread() -> ! {
-        let manager = &mut get_kernel_manager_cluster().work_queue_manager;
+        let manager = &mut get_cpu_manager_cluster().work_queue_manager;
         loop {
             let interrupt_flag = InterruptManager::save_and_disable_local_irq();
             let _lock = manager.lock.lock();
             if manager.work_queue.get_first_entry_as_ptr().is_none() {
                 drop(_lock);
                 InterruptManager::restore_local_irq(interrupt_flag);
-                get_kernel_manager_cluster().task_manager.sleep();
+                get_cpu_manager_cluster().run_queue_manager.sleep();
                 /* woke up */
                 continue;
             }
