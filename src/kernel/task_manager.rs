@@ -1,8 +1,8 @@
-/*
- * Task Manager
- * This manager is the frontend of task management system.
- * Task management system has two struct, arch-independent and depend on arch.
- */
+//!
+//! Task Manager
+//!
+//! This manager is the frontend of task management system.
+//! Task management system has two struct, arch-independent and depend on arch.
 
 mod process_entry;
 pub mod run_queue_manager;

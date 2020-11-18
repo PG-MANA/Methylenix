@@ -45,9 +45,12 @@ pub extern "C" fn multiboot_main(
     user_code_segment: u16,
     user_data_segment: u16,
 ) -> ! {
+    /* Enable fxsave and fxrstor */
     unsafe { cpu::enable_sse() };
+
+    /* Set SerialPortManager(send only) for early debug */
     get_kernel_manager_cluster().serial_port_manager =
-        SerialPortManager::new(0x3F8 /* COM1 */); /* For debug */
+        SerialPortManager::new(0x3F8 /* COM1 */);
 
     /* Load the multiboot information */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
@@ -314,21 +317,21 @@ pub extern "C" fn unknown_boot_main() {
 
 #[no_mangle]
 pub extern "C" fn ap_boot_main() {
-    // Extern Assembly Symbols
+    /* Extern Assembly Symbols */
     extern "C" {
         pub static gdt: u64; /* boot/common.s */
         pub static tss_descriptor_address: u64; /* boot/common.s */
     }
     unsafe { cpu::enable_sse() };
 
-    // Apply kernel paging table
+    /* Apply kernel paging table */
     get_kernel_manager_cluster()
         .memory_manager
         .lock()
         .unwrap()
         .set_paging_table();
 
-    /* Set up CPU Manager, it contains individual data of CPU */
+    /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
     let mut cpu_manager_list = &mut get_kernel_manager_cluster().boot_strap_cpu_manager.list;
     loop {

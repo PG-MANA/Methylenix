@@ -1,7 +1,7 @@
 //!
 //! Init codes
 //!
-//! this module including init codes for device, memory, and task system.
+//! This module including init codes for device, memory, and task system.
 //! This module is called by boot function.
 
 pub mod multiboot;
@@ -243,6 +243,7 @@ pub fn setup_cpu_manager_cluster(
 /// This function will setup multiple processors by using ACPI
 /// This is in the development
 pub fn init_multiple_processors_ap() {
+    /* Get available Local APIC IDs from ACPI(each ID is 8bit, therefore we setup over 0xFF cores.) */
     let mut apic_id_list: [u8; 0xFF] = [0; 0xFF];
     let num_of_cores = get_kernel_manager_cluster()
         .acpi_manager
@@ -251,17 +252,18 @@ pub fn init_multiple_processors_ap() {
         .get_xsdt_manager()
         .get_madt_manager()
         .find_apic_id_list(&mut apic_id_list);
-    let boot_address = 0usize; /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
+    /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
+    let boot_address = 0usize;
 
-    //Set up per-CPU data for BSP
+    /* Set BSP Local APIC ID into cpu_manager */
     let mut cpu_manager = get_cpu_manager_cluster();
-    cpu_manager.cpu_id = get_kernel_manager_cluster()
-        .boot_strap_cpu_manager
+    let bsp_apic_id = get_cpu_manager_cluster()
         .interrupt_manager
         .lock()
         .unwrap()
         .get_local_apic_manager()
-        .get_apic_id() as usize;
+        .get_apic_id();
+    cpu_manager.cpu_id = bsp_apic_id as usize;
 
     if num_of_cores <= 1 {
         if let Err(e) = get_kernel_manager_cluster()
@@ -275,25 +277,17 @@ pub fn init_multiple_processors_ap() {
         return;
     }
 
-    pr_info!("Found {} CPUs", num_of_cores,);
-
+    /* Extern Assembly Symbols */
     extern "C" {
+        /* boot/boot_ap.s */
         fn ap_entry();
         fn ap_entry_end();
         static mut ap_os_stack_address: u64;
     }
-
     let ap_entry_address = ap_entry as *const fn() as usize;
     let ap_entry_end_address = ap_entry_end as *const fn() as usize;
 
-    //Testing
-    let bsp_apic_id = get_kernel_manager_cluster()
-        .boot_strap_cpu_manager
-        .interrupt_manager
-        .lock()
-        .unwrap()
-        .get_local_apic_manager()
-        .get_apic_id();
+    pr_info!("Found {} CPUs", num_of_cores,);
 
     'ap_init_loop: for i in 0..num_of_cores {
         let apic_id = apic_id_list[i] as u32;
@@ -321,7 +315,7 @@ pub fn init_multiple_processors_ap() {
                 ap_entry_end_address - ap_entry_address,
             )
         };
-        /* write initial stack address */
+        /* Write initial stack address */
         unsafe {
             *(((&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address + boot_address)
                 as *mut u64) = (stack + stack_size).to_usize() as u64
@@ -345,7 +339,7 @@ pub fn init_multiple_processors_ap() {
             .get_local_apic_manager()
             .send_interrupt_command(apic_id, 0b101 /*INIT*/, 0);
 
-        /* wait 10 millisecond for the AP */
+        /* Wait 10 millisecond for the AP */
         acpi_pm_timer.busy_wait_ms(10);
 
         interrupt_manager
@@ -358,7 +352,7 @@ pub fn init_multiple_processors_ap() {
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
         drop(interrupt_manager);
         for _wait in 0..5000
-        /*wait 5s*/
+        /* Wait 5s for AP init */
         {
             if AP_BOOT_COMPLETE_FLAG.load(core::sync::atomic::Ordering::Relaxed) {
                 continue 'ap_init_loop;
@@ -368,7 +362,7 @@ pub fn init_multiple_processors_ap() {
         panic!("Cannot init CPU(APIC ID: {})", apic_id);
     }
 
-    /* free boot_address */
+    /* Free boot_address */
     if let Err(e) = get_kernel_manager_cluster()
         .memory_manager
         .lock()
