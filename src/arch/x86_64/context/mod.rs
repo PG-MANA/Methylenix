@@ -21,6 +21,7 @@ pub struct ContextManager {
     system_cs: u16,
     user_ss: u16,
     user_cs: u16,
+    system_page_table_address: usize,
 }
 
 impl ContextManager {
@@ -37,15 +38,24 @@ impl ContextManager {
             system_ss: 0,
             user_cs: 0,
             user_ss: 0,
+            system_page_table_address: 0,
         }
     }
 
     /// Init Context Manager with system code/stack segment and user code/stack segment.
-    pub fn init(&mut self, system_cs: u16, system_ss: u16, user_cs: u16, user_ss: u16) {
+    pub fn init(
+        &mut self,
+        system_cs: u16,
+        system_ss: u16,
+        user_cs: u16,
+        user_ss: u16,
+        system_page_table_address: usize,
+    ) {
         self.system_cs = system_cs;
         self.system_ss = system_ss;
         self.user_ss = user_ss;
         self.user_cs = user_cs;
+        self.system_page_table_address = system_page_table_address;
     }
 
     /// Create system context data
@@ -55,7 +65,6 @@ impl ContextManager {
         &self,
         entry_address: usize,
         stack_size: Option<MSize>,
-        pml4_address: usize,
     ) -> Result<ContextData, MemoryError> {
         let stack_size = stack_size.unwrap_or(MSize::new(Self::DEFAULT_STACK_SIZE_OF_SYSTEM));
         if (stack_size & !PAGE_MASK) != 0 {
@@ -73,25 +82,8 @@ impl ContextManager {
             (stack_address + stack_size).to_usize() - 8, /* For SystemV ABI Stack Alignment */
             self.system_cs as u64,
             self.system_ss as u64,
-            pml4_address,
+            self.system_page_table_address,
         ))
-    }
-
-    /// Create system context data
-    ///
-    /// This function makes a context data with kernel code/stack segment.
-    /// Returned context shares paging table with kernel_context.
-    pub fn create_kernel_context(
-        &self,
-        entry_address: usize,
-        stack_size: Option<MSize>,
-        kernel_context: &ContextData,
-    ) -> Result<ContextData, MemoryError> {
-        self.create_system_context(
-            entry_address,
-            stack_size,
-            kernel_context.get_paging_table_address(),
-        )
     }
 
     /// Jump to specific context data.

@@ -66,9 +66,19 @@ impl TaskManager {
         }
     }
 
-    pub fn init(&mut self, context_manager: ContextManager) {
+    /// Init TaskManager
+    ///
+    /// This function setups memory pools and create kernel process.
+    /// The kernel process has one thread created with main_context.
+    /// The return value is the created thread.
+    pub fn init(
+        &mut self,
+        context_manager: ContextManager,
+        main_context: ContextData,
+    ) -> &'static mut ThreadEntry {
         let _lock = self.lock.lock();
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
+        self.context_manager = context_manager;
 
         if let Err(e) = self.process_entry_pool.init(
             Self::NUM_OF_INITIAL_PROCESS_ENTRIES,
@@ -83,9 +93,20 @@ impl TaskManager {
             pr_err!("Allocating the pool was failed: {:?}", e);
         }
 
-        self.context_manager = context_manager;
+        /* Create the kernel process and thread */
+        let kernel_process = self.process_entry_pool.alloc(Some(memory_manager)).unwrap();
+        let main_thread = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
+        main_thread.init(kernel_process, 0, 0, main_context);
+        kernel_process.init_kernel_process(&mut [main_thread], memory_manager as *const _, 0);
+        self.kernel_process = Some(kernel_process);
+        main_thread
     }
 
+    /// Create Kernel Process(pid: 0)
+    ///
+    /// This function creates kernel process and two threads(main and idle).
+    /// They will be set into current CPU's RunQueueManager.
+    /// This should be called by the boot strap processor.
     pub fn create_kernel_process(
         &mut self,
         context_for_main: ContextData,
@@ -177,15 +198,9 @@ impl TaskManager {
             return Err(());
         }
         let _lock = self.lock.lock();
-        let original_kernel_context = unsafe { &mut *self.kernel_process.unwrap() }
-            .get_thread(1)
-            .unwrap();
-
-        let kernel_context = self.context_manager.create_kernel_context(
-            entry as usize,
-            stack_size,
-            original_kernel_context.get_context(),
-        );
+        let kernel_context = self
+            .context_manager
+            .create_system_context(entry as usize, stack_size);
         if kernel_context.is_err() {
             return Err(());
         }

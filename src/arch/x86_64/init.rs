@@ -43,27 +43,39 @@ pub fn init_task(
     idle_task: fn() -> !,
 ) {
     let mut context_manager = ContextManager::new();
-    context_manager.init(system_cs, 0 /*is it ok?*/, user_cs, user_ss);
+    context_manager.init(
+        system_cs,
+        0, /*is it ok?*/
+        user_cs,
+        user_ss,
+        unsafe { cpu::get_cr3() },
+    );
 
     let create_context = |c: &ContextManager, entry_function: fn() -> !| -> ContextData {
-        match c.create_system_context(entry_function as *const fn() as usize, None, unsafe {
-            cpu::get_cr3()
-        }) {
+        match c.create_system_context(entry_function as *const fn() as usize, None) {
             Ok(m) => m,
             Err(e) => panic!("Cannot create a ContextData: {:?}", e),
         }
     };
-
     let context_for_main = create_context(&context_manager, main_process);
-    let context_for_idle = create_context(&context_manager, idle_task);
 
+    get_cpu_manager_cluster().run_queue_manager = RunQueueManager::new();
+    get_cpu_manager_cluster().run_queue_manager.init();
     get_kernel_manager_cluster().task_manager = TaskManager::new();
-    get_kernel_manager_cluster()
+    let main_thread = get_kernel_manager_cluster()
         .task_manager
-        .init(context_manager);
-    get_kernel_manager_cluster()
+        .init(context_manager, context_for_main);
+    let idle_thread = get_kernel_manager_cluster()
         .task_manager
-        .create_kernel_process(context_for_main, context_for_idle);
+        .create_kernel_thread(idle_task as *const fn() -> !, None, i8::MIN)
+        .unwrap();
+
+    get_cpu_manager_cluster()
+        .run_queue_manager
+        .add_thread(main_thread);
+    get_cpu_manager_cluster()
+        .run_queue_manager
+        .add_thread(idle_thread);
 }
 
 /// Init application processor's TaskManager
@@ -71,9 +83,14 @@ pub fn init_task(
 ///
 pub fn init_task_ap(idle_task: fn() -> !) {
     get_cpu_manager_cluster().run_queue_manager = RunQueueManager::new();
+    get_cpu_manager_cluster().run_queue_manager.init();
+    let idle_thread = get_kernel_manager_cluster()
+        .task_manager
+        .create_kernel_thread(idle_task as *const fn() -> !, None, i8::MIN)
+        .unwrap();
     get_cpu_manager_cluster()
         .run_queue_manager
-        .init(idle_task as *const fn() -> !);
+        .add_thread(idle_thread);
 }
 
 /// Init SoftInterrupt

@@ -28,18 +28,17 @@ impl RunQueueManager {
         }
     }
 
-    pub fn init(&mut self, idle_function: *const fn() -> !) {
-        let _lock = self.lock.lock();
-        let idle_thread = get_kernel_manager_cluster()
-            .task_manager
-            .create_kernel_thread(idle_function, None, i8::MIN)
-            .expect("Cannot create idle thread.");
-        idle_thread.set_up_to_be_root_of_run_list(&mut self.run_list);
+    pub fn init(&mut self) {
+        /* Currently, do nothing */
     }
 
     pub fn start(&mut self) -> ! {
         let _lock = self.lock.lock();
-        let thread = unsafe { self.run_list.get_first_entry_mut().unwrap() };
+        let thread = unsafe {
+            self.run_list
+                .get_first_entry_mut()
+                .expect("There is no thread to start!")
+        };
 
         thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(thread);

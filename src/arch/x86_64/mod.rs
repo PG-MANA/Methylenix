@@ -337,7 +337,6 @@ pub extern "C" fn ap_boot_main() {
     loop {
         if cpu_manager_list.get_next_as_ptr().is_none() {
             cpu_manager_list.insert_after(&mut cpu_manager.list);
-            drop(cpu_manager_list);
             break;
         }
         cpu_manager_list = &mut unsafe { cpu_manager_list.get_next_mut() }.unwrap().list;
