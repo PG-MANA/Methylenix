@@ -198,28 +198,30 @@ impl TaskManager {
             return Err(());
         }
         let _lock = self.lock.lock();
-        let kernel_context = self
+        let context = match self
             .context_manager
-            .create_system_context(entry as usize, stack_size);
-        if kernel_context.is_err() {
-            return Err(());
-        }
+            .create_system_context(entry as usize, stack_size)
+        {
+            Ok(c) => c,
+            Err(e) => {
+                pr_err!("Cannot create context data:{:?}", e);
+                return Err(());
+            }
+        };
 
-        let thread = self
+        let thread = match self
             .thread_entry_pool
-            .alloc(Some(&get_kernel_manager_cluster().memory_manager));
-        if thread.is_err() {
-            return Err(());
-        }
+            .alloc(Some(&get_kernel_manager_cluster().memory_manager))
+        {
+            Ok(t) => t,
+            Err(e) => {
+                pr_err!("Cannot create thread entry:{:?}", e);
+                return Err(());
+            }
+        };
         drop(_lock);
 
-        let thread = thread.unwrap();
-        thread.init(
-            self.kernel_process.unwrap(),
-            0,
-            priority_level,
-            kernel_context.unwrap(),
-        );
+        thread.init(self.kernel_process.unwrap(), 0, priority_level, context);
         thread.set_task_status(TaskStatus::New);
         let _lock = self.lock.lock();
         unsafe { &mut *self.kernel_process.unwrap() }.add_thread(thread);

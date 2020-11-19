@@ -69,7 +69,6 @@ pub fn init_task(
         .task_manager
         .create_kernel_thread(idle_task as *const fn() -> !, None, i8::MIN)
         .unwrap();
-
     get_cpu_manager_cluster()
         .run_queue_manager
         .add_thread(main_thread);
@@ -260,7 +259,7 @@ pub fn setup_cpu_manager_cluster(
 /// This function will setup multiple processors by using ACPI
 /// This is in the development
 pub fn init_multiple_processors_ap() {
-    /* Get available Local APIC IDs from ACPI(each ID is 8bit, therefore we setup over 0xFF cores.) */
+    /* Get available Local APIC IDs from ACPI(each ID is 8bit, therefore we cannot setup over 0xFF cores.) */
     let mut apic_id_list: [u8; 0xFF] = [0; 0xFF];
     let num_of_cores = get_kernel_manager_cluster()
         .acpi_manager
