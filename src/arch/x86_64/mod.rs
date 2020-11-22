@@ -45,8 +45,11 @@ pub extern "C" fn multiboot_main(
     user_code_segment: u16,
     user_data_segment: u16,
 ) -> ! {
-    /* Enable fxsave and fxrstor */
-    unsafe { cpu::enable_sse() };
+    /* Enable fxsave and fxrstor and fs/gs_base   */
+    unsafe {
+        cpu::enable_sse();
+        cpu::enable_fs_gs_base();
+    }
 
     /* Set SerialPortManager(send only) for early debug */
     get_kernel_manager_cluster().serial_port_manager =
@@ -324,7 +327,10 @@ pub extern "C" fn ap_boot_main() -> ! {
         pub static gdt: u64; /* boot/common.s */
         pub static tss_descriptor_address: u64; /* boot/common.s */
     }
-    unsafe { cpu::enable_sse() };
+    unsafe {
+        cpu::enable_sse();
+        cpu::enable_fs_gs_base();
+    }
 
     /* Apply kernel paging table */
     get_kernel_manager_cluster()

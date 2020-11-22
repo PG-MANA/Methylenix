@@ -13,56 +13,57 @@ pub struct ContextData {
 #[repr(C, packed)]
 #[derive(Default)]
 struct Registers {
-    rax: u64,
-    rdx: u64,
-    rcx: u64,
-    rbx: u64,
-    rbp: u64,
-    rsi: u64,
-    rdi: u64,
-    r8: u64,
-    r9: u64,
-    r10: u64,
-    r11: u64,
-    r12: u64,
-    r13: u64,
-    r14: u64,
-    r15: u64,
-    ds: u64,
-    fs: u64,
-    gs: u64,
-    /*gs_base: u64 */
-    es: u64,
-    ss: u64,
-    rsp: u64,
-    rflags: u64,
-    cs: u64,
-    rip: u64,
-    cr3: u64,
+    rax: u64,     /* +  0 */
+    rdx: u64,     /* +  1 */
+    rcx: u64,     /* +  2 */
+    rbx: u64,     /* +  3 */
+    rbp: u64,     /* +  4 */
+    rsi: u64,     /* +  5 */
+    rdi: u64,     /* +  6 */
+    r8: u64,      /* +  7 */
+    r9: u64,      /* +  8 */
+    r10: u64,     /* +  9 */
+    r11: u64,     /* + 10 */
+    r12: u64,     /* + 11 */
+    r13: u64,     /* + 12 */
+    r14: u64,     /* + 13 */
+    r15: u64,     /* + 14 */
+    ds: u64,      /* + 15 */
+    fs: u64,      /* + 16 */
+    fs_base: u64, /* + 17 */
+    gs: u64,      /* + 18 */
+    gs_base: u64, /* + 19 */
+    es: u64,      /* + 20 */
+    ss: u64,      /* + 21 */
+    rsp: u64,     /* + 22 */
+    rflags: u64,  /* + 23 */
+    cs: u64,      /* + 24 */
+    rip: u64,     /* + 25 */
+    cr3: u64,     /* + 26 */
     padding: u64,
 }
 
 impl ContextData {
-    /// This const val is used to const assert.
-    /// Size is zero and read in Self::new()
-    const STATIC_ASSERT_OF_REGISTERS: () = Self::check_struct_size();
+    /// This const value is the number of Registers' members.
+    /// This is also used to const assert.
+    pub const NUM_OF_REGISTERS: usize = Self::check_registers_size();
 
     /// Operate const assert(static_assert)
     ///
     /// This function will eval while compiling.
     /// Check if the size of Registers was changed.
     /// if you changed, you must review assembly code like context_switch and fix this function.
-    const fn check_struct_size() {
-        if core::mem::size_of::<Registers>() != 26 * core::mem::size_of::<u64>() {
+    const fn check_registers_size() -> usize {
+        if core::mem::size_of::<Registers>() != 28 * core::mem::size_of::<u64>() {
             panic!("GeneralRegisters was changed.\nYou must check task_switch function and interrupt handler.");
         } else if (core::mem::size_of::<Registers>() / core::mem::size_of::<u64>()) & 1 != 0 {
             panic!("GeneralRegisters is not 16byte aligned.");
         }
+        core::mem::size_of::<Registers>() / core::mem::size_of::<u64>()
     }
 
     /// Create ContextData by setting all registers to zero.
     pub fn new() -> Self {
-        let _assert_check = Self::STATIC_ASSERT_OF_REGISTERS; /* to evaluate const assert */
         Self {
             registers: Registers::default(),
             fx_save: [0; 512],
