@@ -134,7 +134,7 @@ pub extern "C" fn multiboot_main(
     /* Never return to here */
 }
 
-pub fn general_protection_exception_handler(e_code: usize) {
+pub fn general_protection_exception_handler(e_code: usize) -> ! {
     panic!("General Protection Exception \nError Code:0x{:X}", e_code);
 }
 
@@ -296,19 +296,21 @@ pub extern "C" fn directboot_main(
     _kernel_code_segment: u16, /* Current segment is 8 */
     _user_code_segment: u16,
     _user_data_segment: u16,
-) {
+) -> ! {
+    get_kernel_manager_cluster().serial_port_manager =
+        SerialPortManager::new(0x3F8 /* COM1 */);
     get_kernel_manager_cluster()
         .serial_port_manager
-        .sendstr("boot success\r\n");
+        .sendstr("Booted from DirectBoot\n");
     loop {
         unsafe {
-            cpu::hlt();
+            cpu::halt();
         }
     }
 }
 
 #[no_mangle]
-pub extern "C" fn unknown_boot_main() {
+pub extern "C" fn unknown_boot_main() -> ! {
     SerialPortManager::new(0x3F8).sendstr("Unknown Boot System!");
     loop {
         unsafe { cpu::halt() };
@@ -316,7 +318,7 @@ pub extern "C" fn unknown_boot_main() {
 }
 
 #[no_mangle]
-pub extern "C" fn ap_boot_main() {
+pub extern "C" fn ap_boot_main() -> ! {
     /* Extern Assembly Symbols */
     extern "C" {
         pub static gdt: u64; /* boot/common.s */
@@ -372,7 +374,5 @@ pub extern "C" fn ap_boot_main() {
     /* Tell BSP completing of init */
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
 
-    loop {
-        unsafe { cpu::halt() };
-    }
+    cpu_manager.run_queue_manager.start()
 }
