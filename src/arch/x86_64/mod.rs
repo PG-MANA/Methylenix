@@ -383,6 +383,17 @@ pub extern "C" fn ap_boot_main() -> ! {
 fn ap_idle() -> ! {
     /* Tell BSP completing of init */
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
+    /*get_cpu_manager_cluster()
+    .arch_depend_data
+    .local_apic_timer
+    .start_interruption(
+        get_cpu_manager_cluster()
+            .interrupt_manager
+            .lock()
+            .unwrap()
+            .get_local_apic_manager(),
+    );*/
+    /* For debug, suspend task_switch temporary */
     loop {
         unsafe {
             cpu::idle();
