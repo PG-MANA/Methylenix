@@ -67,7 +67,11 @@ pub fn init_task(
         .init(context_manager, context_for_main);
     let idle_thread = get_kernel_manager_cluster()
         .task_manager
-        .create_kernel_thread(idle_task as *const fn() -> !, None, i8::MIN)
+        .create_kernel_thread(
+            idle_task as *const fn() -> !,
+            Some(MSize::new(0x1000)),
+            i8::MIN,
+        )
         .unwrap();
     get_cpu_manager_cluster()
         .run_queue_manager
@@ -85,7 +89,11 @@ pub fn init_task_ap(idle_task: fn() -> !) {
     get_cpu_manager_cluster().run_queue_manager.init();
     let idle_thread = get_kernel_manager_cluster()
         .task_manager
-        .create_kernel_thread(idle_task as *const fn() -> !, None, i8::MIN)
+        .create_kernel_thread(
+            idle_task as *const fn() -> !,
+            Some(MSize::new(0x1000)),
+            i8::MIN,
+        )
         .unwrap();
     get_cpu_manager_cluster()
         .run_queue_manager
