@@ -368,11 +368,18 @@ pub extern "C" fn ap_boot_main() -> ! {
     cpu_manager.interrupt_manager = Mutex::new(interrupt_manager);
 
     cpu_manager.arch_depend_data.local_apic_timer = init_timer();
-    init_task_ap(idle);
+    init_task_ap(ap_idle);
     init_interrupt_work_queue_manager();
+    /* Switch to ap_idle task with own stack */
+    cpu_manager.run_queue_manager.start()
+}
 
+fn ap_idle() -> ! {
     /* Tell BSP completing of init */
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
-
-    cpu_manager.run_queue_manager.start()
+    loop {
+        unsafe {
+            cpu::idle();
+        }
+    }
 }

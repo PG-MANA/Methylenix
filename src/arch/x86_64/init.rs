@@ -293,6 +293,8 @@ pub fn init_multiple_processors_ap() {
         return;
     }
 
+    pr_info!("Found {} CPUs", num_of_cores,);
+
     /* Extern Assembly Symbols */
     extern "C" {
         /* boot/boot_ap.s */
@@ -303,7 +305,41 @@ pub fn init_multiple_processors_ap() {
     let ap_entry_address = ap_entry as *const fn() as usize;
     let ap_entry_end_address = ap_entry_end as *const fn() as usize;
 
-    pr_info!("Found {} CPUs", num_of_cores,);
+    /* Copy boot code for application processors */
+    let vector = ((boot_address >> PAGE_SHIFT) & 0xff) as u8;
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            ap_entry_address as *const u8,
+            boot_address as *mut u8,
+            ap_entry_end_address - ap_entry_address,
+        )
+    };
+
+    /* Allocate and set temporary stack */
+    let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
+    let stack = get_kernel_manager_cluster()
+        .memory_manager
+        .lock()
+        .unwrap()
+        .alloc_with_option(
+            stack_size.to_order(None).to_page_order(),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::new(MemoryOptionFlags::DIRECT_MAP),
+        )
+        .unwrap();
+    unsafe {
+        *(((&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address + boot_address)
+            as *mut u64) = (stack + stack_size).to_usize() as u64
+    };
+
+    let timer = get_kernel_manager_cluster()
+        .acpi_manager
+        .lock()
+        .unwrap()
+        .get_xsdt_manager()
+        .get_fadt_manager()
+        .get_acpi_pm_timer()
+        .unwrap();
 
     'ap_init_loop: for i in 0..num_of_cores {
         let apic_id = apic_id_list[i] as u32;
@@ -311,41 +347,8 @@ pub fn init_multiple_processors_ap() {
             continue;
         }
 
-        let vector = ((boot_address >> PAGE_SHIFT) & 0xff) as u8;
-        let stack_size = MSize::new(0x8000);
-        let stack = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .alloc_with_option(
-                stack_size.to_order(None).to_page_order(),
-                MemoryPermissionFlags::data(),
-                MemoryOptionFlags::new(MemoryOptionFlags::DIRECT_MAP),
-            )
-            .unwrap();
-
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                ap_entry_address as *const u8,
-                boot_address as *mut u8,
-                ap_entry_end_address - ap_entry_address,
-            )
-        };
-        /* Write initial stack address */
-        unsafe {
-            *(((&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address + boot_address)
-                as *mut u64) = (stack + stack_size).to_usize() as u64
-        };
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
 
-        let acpi_pm_timer = get_kernel_manager_cluster()
-            .acpi_manager
-            .lock()
-            .unwrap()
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_acpi_pm_timer()
-            .unwrap();
         let interrupt_manager = get_kernel_manager_cluster()
             .boot_strap_cpu_manager
             .interrupt_manager
@@ -356,12 +359,12 @@ pub fn init_multiple_processors_ap() {
             .send_interrupt_command(apic_id, 0b101 /*INIT*/, 0);
 
         /* Wait 10 millisecond for the AP */
-        acpi_pm_timer.busy_wait_ms(10);
+        timer.busy_wait_ms(10);
 
         interrupt_manager
             .get_local_apic_manager()
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
-        acpi_pm_timer.busy_wait_us(200);
+        timer.busy_wait_us(200);
 
         interrupt_manager
             .get_local_apic_manager()
@@ -373,7 +376,7 @@ pub fn init_multiple_processors_ap() {
             if AP_BOOT_COMPLETE_FLAG.load(core::sync::atomic::Ordering::Relaxed) {
                 continue 'ap_init_loop;
             }
-            acpi_pm_timer.busy_wait_ms(1);
+            timer.busy_wait_ms(1);
         }
         panic!("Cannot init CPU(APIC ID: {})", apic_id);
     }
@@ -386,5 +389,15 @@ pub fn init_multiple_processors_ap() {
         .free(boot_address.into())
     {
         pr_err!("Cannot free boot_address: {:?}", e);
+    }
+
+    /* Free temporary stack */
+    if let Err(e) = get_kernel_manager_cluster()
+        .memory_manager
+        .lock()
+        .unwrap()
+        .free(stack)
+    {
+        pr_err!("Cannot free temporary stack: {:?}", e);
     }
 }
