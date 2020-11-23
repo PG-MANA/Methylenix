@@ -3,7 +3,6 @@
  */
 
 .equ IO_MAP_SIZE,           0xffff
-.equ INITIAL_STACK_SIZE,    0x100
 .equ OS_STACK_SIZE,         0x8000
 
 .global initial_stack, INITIAL_STACK_SIZE, os_stack, OS_STACK_SIZE, gdt, gdtr0
@@ -24,9 +23,6 @@
 
 /* OS STACK */
 .comm os_stack, OS_STACK_SIZE, 0x1000
-
-/* INITAL STACK (This stack is used until jump to the rust code.) */
-.comm initial_stack, INITIAL_STACK_SIZE, 0x1000
 
 .section .data
 
