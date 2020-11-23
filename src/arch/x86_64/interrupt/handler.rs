@@ -74,9 +74,19 @@ macro_rules! make_device_interrupt_handler {
                 push    r15
                 sub     rsp, 512
                 fxsave  [rsp]
+                mov     rax, cs
+                cmp     [rsp + 8 * 15 + 512 + 8], rax 
+                je      1f
+                swapgs
+              1:
                 mov     rbp, rsp
                 call    {}
                 mov     rsp, rbp
+                mov     rax, cs
+                cmp     [rsp + 8 * 15 + 512 + 8], rax 
+                je      2f
+                swapgs
+              2:
                 fxrstor [rsp]
                 add     rsp, 512
                 pop     r15
@@ -116,7 +126,7 @@ macro_rules! make_context_switch_interrupt_handler {
         #[naked]
         pub unsafe fn $handler_name() {
             asm!("
-                sub     rsp, (26 + 1) * 8 // +1 is for stack alignment
+                sub     rsp, ({1} + 1) * 8 // +1 is for stack alignment
                 mov     [rsp +  0 * 8] ,rax
                 mov     [rsp +  1 * 8], rdx
                 mov     [rsp +  2 * 8], rcx
@@ -137,28 +147,42 @@ macro_rules! make_context_switch_interrupt_handler {
                 mov     [rsp + 15 * 8], rax            
                 mov     ax, fs
                 mov     [rsp + 16 * 8], rax
-                mov     ax, gs
+                rdfsbase rax
                 mov     [rsp + 17 * 8], rax
-                mov     ax, es
+                mov     ax, gs
                 mov     [rsp + 18 * 8], rax
-                mov     ax, ss
+                rdgsbase rax
                 mov     [rsp + 19 * 8], rax
-                mov     rax, [rsp + (3 + (26 + 1)) * 8]   // RSP
+                mov     ax, es
                 mov     [rsp + 20 * 8], rax
-                mov     rax, [rsp + (2 + (26 + 1)) * 8]   // RFLAGS
+                mov     ax, ss
                 mov     [rsp + 21 * 8], rax
-                mov     rax, [rsp + (1 + (26 + 1)) * 8]   // CS
+                mov     rax, [rsp + (3 + ({1} + 1)) * 8]   // RSP
                 mov     [rsp + 22 * 8], rax
-                mov     rax, [rsp + (0 + (26 + 1)) * 8]   // RIP
+                mov     rax, [rsp + (2 + ({1} + 1)) * 8]   // RFLAGS
                 mov     [rsp + 23 * 8], rax
-                mov     rax, cr3
+                mov     rax, [rsp + (1 + ({1} + 1)) * 8]   // CS
                 mov     [rsp + 24 * 8], rax
+                mov     rax, [rsp + (0 + ({1} + 1)) * 8]   // RIP
+                mov     [rsp + 25 * 8], rax
+                mov     rax, cr3
+                mov     [rsp + 26 * 8], rax
                 sub     rsp, 512
                 fxsave  [rsp]
+                mov     rax, cs
+                cmp     [rsp + 512 +  ({1} + 1) * 8 + 8], rax
+                je      1f
+                swapgs
+            1:
                 mov     rbp, rsp
                 mov     rdi, rsp
-                call    {}
+                call    {0}
                 mov     rsp, rbp
+                mov     rax, cs
+                cmp     [rsp + 512 +  ({1} + 1) * 8 + 8], rax
+                je      2f
+                swapgs
+            2:
                 fxrstor [rsp]
                 add     rsp, 512
                 // Ignore CR3, RIP, CS, RFLAGS, RSP, DS, SS, GS, ES, FS
@@ -177,8 +201,9 @@ macro_rules! make_context_switch_interrupt_handler {
                 mov     r13, [rsp + 12 * 8]
                 mov     r14, [rsp + 13 * 8]
                 mov     r15, [rsp + 14 * 8] 
-                add     rsp, (26 + 1) * 8
-                iretq", sym $handler_func);
+                add     rsp, ({1} + 1) * 8
+                iretq", sym $handler_func,
+                const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS);
         }
     };
 }
@@ -215,9 +240,19 @@ macro_rules! make_error_interrupt_handler {
                 push    r13
                 push    r14
                 push    r15
+                mov     rax, cs
+                cmp     [rsp + 8 * 15 + 512 + 8], rax 
+                je      1f
+                swapgs
+              1:
                 mov     rbp, rsp
                 call    {}
                 mov     rsp, rbp
+                mov     rax, cs
+                cmp     [rsp + 8 * 15 + 512 + 8], rax 
+                je      2f
+                swapgs
+              2:
                 pop     r15
                 pop     r14
                 pop     r13

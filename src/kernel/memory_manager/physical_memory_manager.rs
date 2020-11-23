@@ -532,12 +532,10 @@ impl MemoryEntry {
             } else {
                 previous.unset_next_entry();
             }
+        } else if let Some(next) = self.get_next_entry() {
+            next.unset_prev_entry();
         } else {
-            if let Some(next) = self.get_next_entry() {
-                next.unset_prev_entry();
-            } else {
-                pr_warn!("Not chained entry was deleted.");
-            }
+            pr_warn!("Not chained entry was deleted.");
         }
     }
 
@@ -606,7 +604,7 @@ impl MemoryEntry {
     pub fn chain_after_me(&mut self, entry: &mut Self) {
         self.next = Some(entry as *mut Self as usize);
         unsafe {
-            (&mut *(entry as *mut Self)).previous = Some(self as *mut Self as usize);
+            (*(entry as *mut Self)).previous = Some(self as *mut Self as usize);
         }
     }
 

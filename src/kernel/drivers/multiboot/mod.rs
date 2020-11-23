@@ -95,7 +95,7 @@ impl MultiBootInformation {
         let mut tag = address + 8;
 
         loop {
-            let tag_type: u32 = unsafe { (&*(tag as *const MultibootTag)).s_type };
+            let tag_type: u32 = unsafe { (*(tag as *const MultibootTag)).s_type };
             match tag_type {
                 MultiBootInformation::TAG_TYPE_END => {
                     break;
@@ -113,8 +113,8 @@ impl MultiBootInformation {
                     use core::{slice, str};
                     mbi.boot_cmd_line = str::from_utf8(unsafe {
                         slice::from_raw_parts(
-                            &*((tag + 8) as *const u8),
-                            (&*(tag as *const MultibootTag)).size as usize - 8 - 1, /*\0*/
+                            (tag + 8) as *const u8,
+                            (*(tag as *const MultibootTag)).size as usize - 8 - 1, /*\0*/
                         )
                     })
                     .unwrap_or("");
@@ -123,8 +123,8 @@ impl MultiBootInformation {
                     use core::{slice, str};
                     mbi.boot_loader_name = str::from_utf8(unsafe {
                         slice::from_raw_parts(
-                            &*((tag + 8) as *const u8),
-                            (&*(tag as *const MultibootTag)).size as usize - 8 - 1, /*\0*/
+                            (tag + 8) as *const u8,
+                            (*(tag as *const MultibootTag)).size as usize - 8 - 1, /*\0*/
                         )
                     })
                     .unwrap_or("");
@@ -134,7 +134,7 @@ impl MultiBootInformation {
                 }
                 MultiBootInformation::TAG_TYPE_EFI64 => {
                     mbi.efi_table_pointer =
-                        Some(unsafe { (&*(tag as *const EfiSystemTableInformation)).address });
+                        Some(unsafe { (*(tag as *const EfiSystemTableInformation)).address });
                 }
                 MultiBootInformation::TAG_TYPE_ELF_SECTIONS => {
                     mbi.elf_info = ElfInfo::new(unsafe { &*(tag as *const _) });
@@ -163,7 +163,7 @@ impl MultiBootInformation {
                     }
                 }
             }
-            tag += ((unsafe { (&*(tag as *const MultibootTag)).size } as usize) + 7) & !7;
+            tag += ((unsafe { (*(tag as *const MultibootTag)).size } as usize) + 7) & !7;
         }
         return mbi;
     }

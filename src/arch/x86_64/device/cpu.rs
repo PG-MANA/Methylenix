@@ -33,6 +33,11 @@ pub unsafe fn halt() {
 }
 
 #[inline(always)]
+pub unsafe fn idle() {
+    asm!("sti\nhlt");
+}
+
+#[inline(always)]
 pub unsafe fn hlt() {
     asm!("hlt");
 }
@@ -76,10 +81,20 @@ pub unsafe fn sgdt(gdtr: &mut u128) {
 }
 
 #[inline(always)]
+pub unsafe fn lgdt(gdtr: &u128) {
+    asm!("lgdt [{}]", in(reg) (gdtr as *const _ as usize));
+}
+
+#[inline(always)]
 pub unsafe fn store_tr() -> u16 {
     let result: u16;
     asm!("str ax", out("ax") result);
     result
+}
+
+#[inline(always)]
+pub unsafe fn load_tr(index: u16) {
+    asm!("ltr ax", in("ax") index);
 }
 
 #[inline(always)]
@@ -159,19 +174,18 @@ pub fn is_interruption_enabled() -> bool {
 }
 
 #[inline(always)]
-pub unsafe fn get_r_flags()->u64{
-    let r_flags:u64;
+pub unsafe fn get_r_flags() -> u64 {
+    let r_flags: u64;
     asm!("  pushfq
             pop {}", out(reg) r_flags);
     r_flags
 }
 
 #[inline(always)]
-pub unsafe fn set_r_flags(r_flags: u64){
+pub unsafe fn set_r_flags(r_flags: u64) {
     asm!("  push {}
             popfq", in(reg) r_flags);
 }
-
 
 #[inline(always)]
 pub unsafe fn set_cr4(cr4: u64) {
@@ -185,12 +199,29 @@ pub unsafe fn invlpg(address: usize) {
 
 pub unsafe fn enable_sse() {
     let mut cr0 = get_cr0();
-    cr0 &= !(1 << 2); /* clear EM */
-    cr0 |= 1 << 1; /* set MP */
+    cr0 &= !(1 << 2); /* Clear EM */
+    cr0 |= 1 << 1; /* Set MP */
     set_cr0(cr0);
     let mut cr4 = get_cr4();
-    cr4 |= (1 << 10) | (1 << 9); /*set OSFXSR and OSXMMEXCPT*/
+    cr4 |= (1 << 10) | (1 << 9); /* Set OSFXSR and OSXMMEXCPT */
     set_cr4(cr4);
+}
+
+pub unsafe fn enable_fs_gs_base() {
+    let mut cr4 = get_cr4();
+    cr4 |= 1 << 16; /* Set FSGSBASE */
+    set_cr4(cr4);
+}
+
+pub unsafe fn get_cpu_base_address() -> usize {
+    let result: usize;
+    asm!("mov {}, gs:0",out(reg) result);
+    result
+}
+
+pub unsafe fn set_gs_and_kernel_gs_base(address: u64) {
+    wrmsr(0xC0000101, address);
+    wrmsr(0xC0000102, address);
 }
 
 /// Run ContextData.
@@ -204,7 +235,30 @@ pub unsafe fn enable_sse() {
 pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
     asm!(
         "
+                cli
                 fxrstor [rdi]
+                mov     rax, [rdi + 512 + 8 * 15]
+                mov     ds, ax
+                mov     rax, [rdi + 512 + 8 * 16]
+                cmp     ax, 0
+                je      1f
+                mov     fs, ax
+1:
+                mov     rax, [rdi + 512 + 8 * 17]
+                wrfsbase    rax
+                mov     rax, [rdi + 512 + 8 * 18]
+                cmp     ax,  0
+                je      2f
+                mov     gs, ax
+2:
+                mov     rax, [rdi + 512 + 8 * 19]
+                mov     rcx, 0xC0000102 /* write swap_gs_base */
+                mov     rdx, rax
+                shr     rdx, 32
+                wrmsr
+                mov     rax, [rdi + 512 + 8 * 20]
+                mov     es, ax
+
                 mov     rdx, [rdi + 512 + 8 *  1]
                 mov     rcx, [rdi + 512 + 8 *  2]
                 mov     rbx, [rdi + 512 + 8 *  3]
@@ -217,23 +271,20 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 mov     r12, [rdi + 512 + 8 * 11]
                 mov     r13, [rdi + 512 + 8 * 12]
                 mov     r14, [rdi + 512 + 8 * 13]
-                mov     r15, [rdi + 512 + 8 * 14]
-                mov     rax, [rdi + 512 + 8 * 15]
-                mov     ds, ax
-                mov     rax, [rdi + 512 + 8 * 16]
-                mov     fs, ax
-                mov     rax, [rdi + 512 + 8 * 17]
-                mov     gs, ax
-                mov     rax, [rdi + 512 + 8 * 18]
-                mov     es, ax
-                
-                push    [rdi + 512 + 8 * 19] // SS
-                push    [rdi + 512 + 8 * 20] // RSP
-                push    [rdi + 512 + 8 * 21] // RFLAGS
-                push    [rdi + 512 + 8 * 22] // CS
-                push    [rdi + 512 + 8 * 23] // RIP
+                mov     r15, [rdi + 512 + 8 * 14]                
 
-                mov     rax, [rdi + 512 + 8 * 24]
+                push    [rdi + 512 + 8 * 21] // SS
+                push    [rdi + 512 + 8 * 22] // RSP
+                push    [rdi + 512 + 8 * 23] // RFLAGS
+                push    [rdi + 512 + 8 * 24] // CS
+                push    [rdi + 512 + 8 * 25] // RIP
+
+                mov     rax, cs
+                cmp     [rdi + 512 + 8 * 24], rax // Compare current CS and next CS
+                je      3f
+                swapgs
+3:
+                mov     rax, [rdi + 512 + 8 * 26]
                 mov     cr3, rax
                 mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]
@@ -276,59 +327,35 @@ pub unsafe extern "C" fn task_switch(
                 mov     [rsi + 512 + 8 * 15], rax
                 mov     rax, fs
                 mov     [rsi + 512 + 8 * 16], rax
-                mov     rax, gs
+                rdfsbase    rax
                 mov     [rsi + 512 + 8 * 17], rax
-                mov     rax, es
+                mov     rax, gs
                 mov     [rsi + 512 + 8 * 18], rax
-                mov     rax, ss
+                mov     rcx, 0xC0000102 /* read swap_gs_base */
+                xor     rax, rax
+                rdmsr
+                shl     rdx, 32
+                or      rax, rdx
                 mov     [rsi + 512 + 8 * 19], rax
-                mov     rax, rsp
+                
+                mov     rax, es
                 mov     [rsi + 512 + 8 * 20], rax
+                mov     rax, ss
+                mov     [rsi + 512 + 8 * 21], rax
+                mov     rax, rsp
+                mov     [rsi + 512 + 8 * 22], rax
                 pushfq
                 pop     rax
-                mov     [rsi + 512 + 8 * 21], rax   // RFLAGS
+                mov     [rsi + 512 + 8 * 23], rax   // RFLAGS
                 mov     rax, cs
-                mov     [rsi + 512 + 8 * 22], rax
-                lea     rax, 1f
-                mov     [rsi + 512 + 8 * 23], rax   // RIP
-                mov     rax, cr3
                 mov     [rsi + 512 + 8 * 24], rax
+                lea     rax, 1f
+                mov     [rsi + 512 + 8 * 25], rax   // RIP
+                mov     rax, cr3
+                mov     [rsi + 512 + 8 * 26], rax
 
-                fxrstor [rdi]
-                mov     rdx, [rdi + 512 + 8 *  1]
-                mov     rcx, [rdi + 512 + 8 *  2]
-                mov     rbx, [rdi + 512 + 8 *  3]
-                mov     rbp, [rdi + 512 + 8 *  4]
-                mov     rsi, [rdi + 512 + 8 *  5]
-                mov     r8,  [rdi + 512 + 8 *  7]
-                mov     r9,  [rdi + 512 + 8 *  8]
-                mov     r10, [rdi + 512 + 8 *  9]
-                mov     r11, [rdi + 512 + 8 * 10]
-                mov     r12, [rdi + 512 + 8 * 11]
-                mov     r13, [rdi + 512 + 8 * 12]
-                mov     r14, [rdi + 512 + 8 * 13]
-                mov     r15, [rdi + 512 + 8 * 14]
-                mov     rax, [rdi + 512 + 8 * 15]
-                mov     ds, ax
-                mov     rax, [rdi + 512 + 8 * 16]
-                mov     fs, ax
-                mov     rax, [rdi + 512 + 8 * 17]
-                mov     gs, ax
-                mov     rax, [rdi + 512 + 8 * 18]
-                mov     es, ax
-                
-                push    [rdi + 512 + 8 * 19] // SS
-                push    [rdi + 512 + 8 * 20] // RSP
-                push    [rdi + 512 + 8 * 21] // RFLAGS
-                push    [rdi + 512 + 8 * 22] // CS
-                push    [rdi + 512 + 8 * 23] // RIP
-
-                mov     rax, [rdi + 512 + 8 * 24]
-                mov     cr3, rax
-                mov     rax, [rdi + 512]
-                mov     rdi, [rdi + 512 + 8 *  6]
-                iretq
+                jmp     {}
                 1:
-                "
+                ", sym run_task
     );
 }

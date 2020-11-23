@@ -6,7 +6,7 @@
 
 use crate::arch::x86_64::paging::PAGE_SIZE_USIZE;
 
-use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MOrder, MPageOrder, MSize, VAddress};
 use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
 use crate::kernel::memory_manager::{MemoryError, MemoryManager, MemoryPermissionFlags};
 use crate::kernel::sync::spin_lock::Mutex;
@@ -30,7 +30,7 @@ impl<T> CacheAllocator<T> {
         memory_manager: &mut MemoryManager,
     ) -> Result<(), MemoryError> {
         self.cache_threshold = least_cache_entries;
-        let page = memory_manager.alloc_pages(MOrder::new(0), MemoryPermissionFlags::data())?;
+        let page = memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
         unsafe {
             self.allocator
                 .set_initial_pool(page.to_usize(), PAGE_SIZE_USIZE)

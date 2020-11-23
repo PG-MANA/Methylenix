@@ -19,11 +19,28 @@ pub trait Timer {
     /*fn get_interval_ms(&self) -> usize;*/
     #[inline(always)]
     fn busy_wait_ms(&self, ms: usize) {
+        let start = self.get_count();
         let difference = self.get_frequency_hz() * ms / 1000;
         if difference > self.get_max_counter_value() {
             panic!("Cannot count more than max_counter_value");
         }
+
+        let end = self.get_ending_count_value(start, difference);
+        if self.is_count_up_timer() {
+            while self.get_count() < end {}
+        } else {
+            while self.get_count() > end {}
+        }
+    }
+    #[inline(always)]
+    fn busy_wait_us(&self, us: usize) {
         let start = self.get_count();
+        let difference = self.get_frequency_hz() * us / 1000000;
+        if difference > self.get_max_counter_value() {
+            panic!("Cannot count more than max_counter_value");
+        } else if difference == 0 {
+            panic!("Cannot count less than the resolution");
+        }
         let end = self.get_ending_count_value(start, difference);
         if self.is_count_up_timer() {
             while self.get_count() < end {}

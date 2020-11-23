@@ -6,7 +6,7 @@
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 
 use crate::kernel::fifo::FIFO;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::task_manager::work_queue::WorkList;
 
@@ -48,6 +48,7 @@ impl SerialPortManager {
         unsafe {
             make_device_interrupt_handler!(inthandler24, SerialPortManager::inthandler24_main);
             get_kernel_manager_cluster()
+                .boot_strap_cpu_manager
                 .interrupt_manager
                 .lock()
                 .unwrap()
@@ -140,16 +141,18 @@ impl SerialPortManager {
     /// Currently, this wakes the main process up.
     #[inline(never)]
     fn inthandler24_main() {
-        if let Ok(interrupt_manager) = get_kernel_manager_cluster().interrupt_manager.try_lock() {
+        if let Ok(interrupt_manager) = get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
+            .interrupt_manager
+            .try_lock()
+        {
             interrupt_manager.send_eoi();
         }
         let work = WorkList::new(
             Self::worker,
             get_kernel_manager_cluster().serial_port_manager.read() as usize,
         );
-        get_kernel_manager_cluster()
-            .work_queue_manager
-            .add_work(work);
+        get_cpu_manager_cluster().work_queue_manager.add_work(work);
     }
 
     fn worker(data: usize) {

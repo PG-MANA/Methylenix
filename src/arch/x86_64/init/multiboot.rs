@@ -9,7 +9,7 @@ use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SI
 
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
@@ -79,6 +79,10 @@ pub fn init_memory_by_multiboot_information(
         multiboot_information.size.into(),
         0.into(),
     );
+
+    /* TEMP: allocate boot code area for multicore */
+    assert!(physical_memory_manager.reserve_memory(0.into(), PAGE_SIZE, 0.into()));
+
     /* reserve Multiboot modules area */
     for e in multiboot_information.modules.iter() {
         if e.start_address != 0 && e.end_address != 0 {
@@ -130,6 +134,18 @@ pub fn init_memory_by_multiboot_information(
         };
         panic!("Cannot map virtual memory correctly.");
     }
+    /* TEMP: associate boot code area for multicore */
+    virtual_memory_manager
+        .map_address(
+            PAddress::new(0),
+            Some(VAddress::new(0)),
+            PAGE_SIZE,
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            &mut physical_memory_manager,
+        )
+        .expect("Cannot associate memory for boot code of AP.");
+
     /* set up Memory Manager */
     get_kernel_manager_cluster().system_memory_manager =
         SystemMemoryManager::new(physical_memory_manager);
@@ -164,7 +180,7 @@ pub fn init_memory_by_multiboot_information(
 
     /* store managers to cluster */
     get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
-    get_kernel_manager_cluster().object_allocator = Mutex::new(object_allocator);
+    get_cpu_manager_cluster().object_allocator = Mutex::new(object_allocator);
     MultiBootInformation::new(new_mbi_address.to_usize(), false)
 }
 

@@ -200,15 +200,13 @@ impl Pff2FontManager {
         }
         if c.is_ascii() {
             Some(self.font_cache.get_cached_ascii_font_data(c))
+        } else if let Some(f) = self.font_cache.get_cached_normal_font_data(c) {
+            Some(f)
+        } else if let Some(f) = self.find_uni_code_data(c) {
+            self.font_cache.add_normal_font_cache(c, f.clone());
+            Some(f)
         } else {
-            if let Some(f) = self.font_cache.get_cached_normal_font_data(c) {
-                Some(f)
-            } else if let Some(f) = self.find_uni_code_data(c) {
-                self.font_cache.add_normal_font_cache(c, f.clone());
-                Some(f)
-            } else {
-                None
-            }
+            None
         }
     }
 

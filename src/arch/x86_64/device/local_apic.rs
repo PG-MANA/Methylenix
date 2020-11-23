@@ -21,6 +21,7 @@ pub enum LocalApicRegisters {
     ApicId = 0x02,
     EOI = 0x0b,
     SIR = 0x0f,
+    ICR = 0x30,
     LvtTimer = 0x32,
     TimerInitialCount = 0x38,
     TimerCurrentCount = 0x39,
@@ -92,7 +93,7 @@ impl LocalApicManager {
                 cpu::wrmsr(Self::MSR_INDEX, local_apic_msr | Self::XAPIC_ENABLED_MASK);
             }
         }
-        self.apic_id = self.read_apic_register(LocalApicRegisters::ApicId);
+        self.store_apic_id();
         self.write_apic_register(
             LocalApicRegisters::SIR,
             self.read_apic_register(LocalApicRegisters::SIR) | 0x100,
@@ -105,13 +106,72 @@ impl LocalApicManager {
         return true;
     }
 
+    /// Init LocalApicManager by other LocalApicManager
+    ///
+    /// This function will be used when the application processor sets up with this manager of BSP.
+    pub fn init_from_other_manager(&mut self, manager: &Self) -> bool {
+        let local_apic_msr = unsafe { cpu::rdmsr(Self::MSR_INDEX) };
+        if manager.is_x2apic_enabled {
+            unsafe {
+                cpu::wrmsr(
+                    Self::MSR_INDEX,
+                    local_apic_msr | Self::X2APIC_ENABLED_MASK | Self::XAPIC_ENABLED_MASK,
+                );
+            }
+            self.is_x2apic_enabled = true;
+        } else {
+            unsafe {
+                cpu::wrmsr(Self::MSR_INDEX, local_apic_msr | Self::XAPIC_ENABLED_MASK);
+            }
+            self.base_address = manager.base_address;
+        }
+        self.store_apic_id();
+        self.write_apic_register(
+            LocalApicRegisters::SIR,
+            self.read_apic_register(LocalApicRegisters::SIR) | 0x100,
+        );
+        pr_info!(
+            "APIC ID:{}(x2APIC:{})",
+            self.apic_id,
+            self.is_x2apic_enabled
+        );
+        return true;
+    }
+
+    /// Get current CPU's APIC ID
     pub fn get_apic_id(&self) -> u32 {
         self.apic_id
+    }
+
+    /// Get current CPU's APIC ID from register and store it.
+    fn store_apic_id(&mut self) {
+        self.apic_id = if self.is_x2apic_enabled {
+            self.read_apic_register(LocalApicRegisters::ApicId)
+        } else {
+            (self.read_apic_register(LocalApicRegisters::ApicId) >> 24) & 0xff
+        };
     }
 
     /// Send end of interruption to Local APIC.
     pub fn send_eoi(&self) {
         self.write_apic_register(LocalApicRegisters::EOI, 0);
+    }
+
+    /// Send the interrupt command (ICR)
+    ///
+    /// See Intel 64 and IA-32 Architectures Software Developer’s Manual Volume 3
+    /// 10.6.1 Interrupt Command Register (ICR) The interrupt command register (ICR)
+    /// 10.12.9 ICR Operation in x2APIC Mode
+    pub fn send_interrupt_command(&self, destination: u32, delivery_mode: u8, vector: u8) {
+        assert!(delivery_mode < 8);
+        let mut data: u64 = (1 << 14) | ((delivery_mode as u64) << 8) | (vector as u64);
+        if self.is_x2apic_enabled {
+            data |= (destination as u64) << 32;
+        } else {
+            assert!(destination <= 0xff);
+            data |= (destination as u64) << 56;
+        }
+        self.write_apic_register_64(LocalApicRegisters::ICR, data);
     }
 
     /// Read Local APIC registers.
@@ -125,6 +185,27 @@ impl LocalApicManager {
                 core::ptr::read_volatile(
                     (self.base_address.to_usize() + (index as usize) * 0x10) as *const u32,
                 )
+            }
+        }
+    }
+
+    /// Read 64bit data from Local APIC registers.
+    ///
+    /// If x2APIC is enabled, this function will read MSR, otherwise it will read lower 32bit from index
+    /// And read higer 32bit from index + 1
+    #[allow(dead_code)]
+    pub fn read_apic_register_64(&self, index: LocalApicRegisters) -> u64 {
+        if self.is_x2apic_enabled {
+            unsafe { cpu::rdmsr(LocalApicManager::X2APIC_MSR_INDEX + (index as u32)) }
+        } else {
+            unsafe {
+                let lower = core::ptr::read_volatile(
+                    (self.base_address.to_usize() + (index as usize) * 0x10) as *const u32,
+                );
+                let higher = core::ptr::read_volatile(
+                    (self.base_address.to_usize() + (index as usize + 1) * 0x10) as *const u32,
+                );
+                (lower as u64) | ((higher as u64) << 32)
             }
         }
     }
@@ -145,6 +226,31 @@ impl LocalApicManager {
                 core::ptr::write_volatile(
                     (self.base_address.to_usize() + (index as usize) * 0x10) as *mut u32,
                     data,
+                );
+            }
+        }
+    }
+
+    /// Write 64bit data into Local APIC registers.
+    ///
+    /// If x2APIC is enabled, this function will write into MSR.
+    /// If APIC is enabled, this will write divided data by high 32bit and 32bit low. .
+    pub fn write_apic_register_64(&self, index: LocalApicRegisters, data: u64) {
+        if self.is_x2apic_enabled {
+            unsafe {
+                cpu::wrmsr(LocalApicManager::X2APIC_MSR_INDEX + (index as u32), data);
+            }
+        } else {
+            unsafe {
+                let high = (data >> 32) as u32;
+                let low = data as u32;
+                core::ptr::write_volatile(
+                    (self.base_address.to_usize() + (index as usize + 1) * 0x10) as *mut u32,
+                    high,
+                );
+                core::ptr::write_volatile(
+                    (self.base_address.to_usize() + (index as usize) * 0x10) as *mut u32,
+                    low,
                 );
             }
         }

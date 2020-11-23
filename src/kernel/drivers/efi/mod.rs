@@ -18,11 +18,11 @@ impl EfiManager {
     pub fn new(address: usize) -> EfiManager {
         let table_manager = EfiTableManager::new(address);
         let output_manager =
-            EfiTextOutputManager::new(table_manager.get_efi_systemtable().console_output_protocol);
+            EfiTextOutputManager::new(table_manager.get_efi_system_table().console_output_protocol);
         EfiManager {
             is_valid: true,
-            table_manager: table_manager,
-            output_manager: output_manager,
+            table_manager,
+            output_manager,
         }
     }
 

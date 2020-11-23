@@ -135,7 +135,6 @@ impl ProcessEntry {
         if self.num_of_thread == 0 {
             assert!(self.thread.get_first_entry_as_ptr().is_none());
             assert!(self.single_thread.is_none());
-            self.num_of_thread = 1;
             self.single_thread = Some(thread as *mut _);
         } else if self.num_of_thread == 1 {
             assert!(self.thread.get_first_entry_as_ptr().is_none());
@@ -152,6 +151,7 @@ impl ProcessEntry {
         thread.set_process(self as *mut _);
         thread.set_t_id(self.next_thread_id);
         self.update_next_thread_id();
+        self.num_of_thread += 1;
     }
 
     pub fn get_next_process_from_p_list_mut(&mut self) -> Option<*mut Self> {

@@ -7,9 +7,9 @@
 .equ TSS_STACK_SIZE,        0x100
 .equ OS_STACK_SIZE,         0x8000
 
-.global initial_stack, INITIAL_STACK_SIZE, os_stack, OS_STACK_SIZE, gdtr0
+.global initial_stack, INITIAL_STACK_SIZE, os_stack, OS_STACK_SIZE, gdt, gdtr0
 .global main_code_segment_descriptor, user_code_segment_descriptor, user_data_segment_descriptor
-.global tss_descriptor,tss_descriptor_adress, tss
+.global tss_descriptor, tss_descriptor_address, tss
 .global pd, pdpt, pml4
 
 .section .bss
@@ -50,8 +50,8 @@ gdt:
 .equ user_data_segment_descriptor, . - gdt
     .quad    (1 << 41) | (1 << 44) | (3 << 45) | (1 << 47)| (1 << 53)
 
-tss_descriptor_adress:
-.equ  tss_descriptor, tss_descriptor_adress - gdt
+tss_descriptor_address:
+.equ  tss_descriptor, tss_descriptor_address - gdt
     .word    (tss_end - tss) & 0xffff   /* Limit(Low) */
     .word    0                          /* Base(Low) */
     .byte    0                          /* Base(middle) */
