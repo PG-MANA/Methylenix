@@ -7,7 +7,7 @@
 
 .global boot_from_xen, BOOT_FROM_DIRECTBOOT_MARK
 .extern init_long_mode, fin                 /* at init_long_mode */
-.extern initial_stack, INITIAL_STACK_SIZE   /* at common */
+.extern OS_STACK_SIZE, os_stack             /* at common */
 
 .equ XEN_START_INFO_MAGIC, 0x336ec578       /* strat info magic code */
 .equ BOOT_FROM_DIRECTBOOT_MARK, 2
@@ -16,7 +16,7 @@
 .align 4
 
 boot_from_xen:
-  mov   $(initial_stack + INITIAL_STACK_SIZE), %esp
+  mov   $(os_stack + OS_STACK_SIZE), %esp
 
   /* init eflags */
   push  $0
