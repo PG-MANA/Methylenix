@@ -3,7 +3,7 @@
  * allocator for core::alloc::GlobalAlloc
  */
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
@@ -30,7 +30,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
         assert_eq!(layout.align() >> PAGE_SHIFT, 0);
-        match get_kernel_manager_cluster()
+        match get_cpu_manager_cluster()
             .object_allocator
             .lock()
             .unwrap()
@@ -44,7 +44,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
         assert_eq!(layout.align() >> PAGE_SHIFT, 0);
-        if let Err(e) = get_kernel_manager_cluster()
+        if let Err(e) = get_cpu_manager_cluster()
             .object_allocator
             .lock()
             .unwrap()

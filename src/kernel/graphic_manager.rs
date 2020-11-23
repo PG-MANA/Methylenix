@@ -187,12 +187,10 @@ impl GraphicManager {
         };
         if self.is_text_mode {
             self.text.lock().unwrap().puts(string)
+        } else if self.is_font_loaded {
+            self.draw_string(string).is_ok()
         } else {
-            if self.is_font_loaded {
-                self.draw_string(string).is_ok()
-            } else {
-                true
-            }
+            true
         }
     }
 

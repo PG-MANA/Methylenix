@@ -4,3 +4,4 @@
 
 pub mod bgrt;
 pub mod fadt;
+pub mod madt;

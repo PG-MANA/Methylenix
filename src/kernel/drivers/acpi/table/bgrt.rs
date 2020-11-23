@@ -20,7 +20,7 @@ struct BGRT {
     creator_revision: [u8; 4],
     version: u16,
     status: u8,
-    imapge_type: u8,
+    image_type: u8,
     image_address: u64,
     image_offset_y: u32,
     image_offset_x: u32,
@@ -32,7 +32,7 @@ pub struct BgrtManager {
 }
 
 impl BgrtManager {
-    pub const BGRT_SIGNATURE: [u8; 4] = ['B' as u8, 'G' as u8, 'R' as u8, 'T' as u8];
+    pub const SIGNATURE: [u8; 4] = ['B' as u8, 'G' as u8, 'R' as u8, 'T' as u8];
 
     pub const fn new() -> Self {
         Self {
@@ -66,7 +66,7 @@ impl BgrtManager {
     pub fn get_bitmap_physical_address(&self) -> Option<PAddress> {
         if self.enabled {
             let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
-            if bgrt.imapge_type == 0 {
+            if bgrt.image_type == 0 {
                 return Some((bgrt.image_address as usize).into());
             }
         }

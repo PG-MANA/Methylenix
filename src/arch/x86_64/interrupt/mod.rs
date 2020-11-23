@@ -12,7 +12,6 @@ use self::idt::GateDescriptor;
 use self::tss::TssManager;
 
 use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -32,9 +31,7 @@ pub struct StoredIrqData {
 pub struct InterruptManager {
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
     main_selector: u16,
-    io_apic: IoApicManager,
     local_apic: LocalApicManager,
-    /* temporary */
     tss_manager: TssManager,
 }
 
@@ -59,20 +56,12 @@ impl InterruptManager {
         InterruptManager {
             idt: MaybeUninit::uninit(),
             main_selector: 0,
-            io_apic: IoApicManager::new(),
             local_apic: LocalApicManager::new(),
             tss_manager: TssManager::new(),
         }
     }
 
-    /// Init this manager.
-    ///
-    /// This function alloc page from memory manager and
-    /// fills all of IDT converted from the allocated page with a invalid handler.
-    /// After that, this also init IoApicManager and LocalApicManager.
-    ///
-    /// Currently, this function always returns true.
-    pub fn init(&mut self, selector: u16) -> bool {
+    fn alloc_and_init_idt(&mut self) {
         self.idt.write(unsafe {
             &mut *(get_kernel_manager_cluster()
                 .memory_manager
@@ -82,17 +71,44 @@ impl InterruptManager {
                 .expect("Cannot alloc memory for interrupt manager.")
                 .to_usize() as *mut [_; Self::IDT_MAX as usize])
         });
-        self.main_selector = selector;
-
         unsafe {
             for i in 0..Self::IDT_MAX {
                 self.set_gate_descriptor(i, GateDescriptor::new(Self::dummy_handler, 0, 0, 0));
             }
             self.flush();
         }
+    }
+
+    /// Init this manager.
+    ///
+    /// This function alloc page from memory manager and
+    /// fills all of IDT converted from the allocated page with a invalid handler.
+    /// After that, this also init LocalApicManager.
+    ///
+    /// Currently, this function always returns true.
+    pub fn init(&mut self, selector: u16) -> bool {
+        self.main_selector = selector;
+        self.alloc_and_init_idt();
         self.tss_manager.load_current_tss();
-        self.io_apic.init();
         self.local_apic.init();
+        return true;
+    }
+
+    /// Init this manager by copying some data from given manager.
+    ///
+    /// This function alloc page from memory manager and
+    /// fills all of IDT converted from the allocated page with a invalid handler.
+    /// After that, this also init LocalApicManager.
+    /// This will be used to init the application processors.
+    /// GDT and TSS Descriptor must be valid.
+    ///
+    /// Currently, this function always returns true.
+    pub fn init_ap(&mut self, original: &Self) -> bool {
+        self.main_selector = original.main_selector;
+        self.alloc_and_init_idt();
+        self.tss_manager.load_current_tss();
+        self.local_apic
+            .init_from_other_manager(original.get_local_apic_manager());
         return true;
     }
 
@@ -101,7 +117,7 @@ impl InterruptManager {
     /// This function sets the address of IDT into CPU.
     /// Unless you change the address of IDT, you don't have to call it.
     unsafe fn flush(&self) {
-        let idtr = idt::IDTR {
+        let idtr = idt::DescriptorTableRegister {
             limit: InterruptManager::LIMIT_IDT,
             offset: self.idt.assume_init_read() as *const _ as u64,
         };
@@ -162,7 +178,11 @@ impl InterruptManager {
             );
         }
         if let Some(irq) = irq {
-            self.io_apic
+            get_kernel_manager_cluster()
+                .arch_depend_data
+                .io_apic_manager
+                .lock()
+                .unwrap()
                 .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
         }
         return true;

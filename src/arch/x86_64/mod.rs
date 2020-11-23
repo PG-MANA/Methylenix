@@ -12,24 +12,31 @@ mod init;
 pub mod paging;
 
 use self::device::cpu;
+use self::device::io_apic::IoApicManager;
 use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
-use self::init::{
-    init_acpi, init_interrupt, init_interrupt_work_queue_manager, init_task, init_timer,
-};
+use self::init::*;
+use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize};
-
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
 
-static mut LOCAL_APIC_TIMER: LocalApicTimer = LocalApicTimer::new();
-static mut ACPI_MANAGER: Option<AcpiManager> = None;
+pub struct ArchDependedCpuManagerCluster {
+    pub local_apic_timer: LocalApicTimer,
+    pub self_pointer: usize,
+}
+
+pub struct ArchDependedKernelManagerCluster {
+    pub io_apic_manager: Mutex<IoApicManager>,
+}
 
 #[no_mangle]
 pub extern "C" fn multiboot_main(
@@ -38,12 +45,23 @@ pub extern "C" fn multiboot_main(
     user_code_segment: u16,
     user_data_segment: u16,
 ) -> ! {
-    unsafe { cpu::enable_sse() };
+    /* Enable fxsave and fxrstor and fs/gs_base   */
+    unsafe {
+        cpu::enable_sse();
+        cpu::enable_fs_gs_base();
+    }
+
+    /* Set SerialPortManager(send only) for early debug */
     get_kernel_manager_cluster().serial_port_manager =
-        SerialPortManager::new(0x3F8 /* COM1 */); /* For debug */
+        SerialPortManager::new(0x3F8 /* COM1 */);
 
     /* Load the multiboot information */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
+
+    /* Setup BSP CPU Manager Cluster */
+    setup_cpu_manager_cluster(Some(VAddress::new(
+        &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
+    )));
 
     /* Init Graphic & TTY (for panic!) */
     get_kernel_manager_cluster().graphic_manager = GraphicManager::new();
@@ -72,25 +90,29 @@ pub extern "C" fn multiboot_main(
         panic!("Cannot map memory for frame buffer");
     }
 
-    /* Init interruption */
+    /* Init interrupt */
     init_interrupt(kernel_code_segment);
 
     /* Setup Serial Port */
     get_kernel_manager_cluster().serial_port_manager.init();
 
     /* Setup ACPI */
+    let mut acpi_manager = AcpiManager::new();
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
-        unsafe { ACPI_MANAGER = init_acpi(rsdp_address) };
-    } else {
-        if multiboot_information.old_acpi_rsdp_ptr.is_some() {
-            pr_warn!("ACPI 1.0 is not supported.");
+        if let Some(a) = init_acpi(rsdp_address) {
+            acpi_manager = a;
         } else {
-            pr_warn!("ACPI is not available.");
+            pr_warn!("Failed initializing ACPI.");
         }
+    } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
+        pr_warn!("ACPI 1.0 is not supported.");
+    } else {
+        pr_warn!("ACPI is not available.");
     }
+    get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
 
     /* Init Local APIC Timer*/
-    unsafe { LOCAL_APIC_TIMER = init_timer(ACPI_MANAGER.as_ref()) };
+    get_cpu_manager_cluster().arch_depend_data.local_apic_timer = init_timer();
 
     /* Set up graphic */
     init_graphic(&multiboot_information);
@@ -107,38 +129,40 @@ pub extern "C" fn multiboot_main(
     /* Setup the interrupt work queue system */
     init_interrupt_work_queue_manager();
 
+    /* Setup APs if the processor is multicore-processor */
+    init_multiple_processors_ap();
+
     /* Switch to main process */
-    get_kernel_manager_cluster()
-        .task_manager
-        .execute_kernel_process()
+    get_cpu_manager_cluster().run_queue_manager.start()
     /* Never return to here */
 }
 
-pub fn general_protection_exception_handler(e_code: usize) {
+pub fn general_protection_exception_handler(e_code: usize) -> ! {
     panic!("General Protection Exception \nError Code:0x{:X}", e_code);
 }
 
 fn main_process() -> ! {
-    /* Interruption is enabled */
-    unsafe {
-        LOCAL_APIC_TIMER.start_interruption(
+    /* Interrupt is enabled */
+
+    get_cpu_manager_cluster()
+        .arch_depend_data
+        .local_apic_timer
+        .start_interruption(
             get_kernel_manager_cluster()
+                .boot_strap_cpu_manager
                 .interrupt_manager
                 .lock()
                 .unwrap()
                 .get_local_apic_manager(),
         );
-    }
     pr_info!("All init are done!");
 
     /* Draw boot logo */
-    if unsafe { ACPI_MANAGER.is_some() } {
-        draw_boot_logo(unsafe { ACPI_MANAGER.as_ref().unwrap() });
-    }
+    draw_boot_logo();
 
     kprintln!("Methylenix");
     loop {
-        get_kernel_manager_cluster().task_manager.sleep();
+        get_cpu_manager_cluster().run_queue_manager.sleep();
         while let Some(c) = get_kernel_manager_cluster()
             .serial_port_manager
             .dequeue_key()
@@ -158,12 +182,12 @@ fn main_process() -> ! {
 fn idle() -> ! {
     loop {
         unsafe {
-            cpu::halt();
+            cpu::idle();
         }
     }
 }
 
-fn draw_boot_logo(acpi_manager: &AcpiManager) {
+fn draw_boot_logo() {
     let free_mapped_address = |address: usize| {
         if let Err(e) = get_kernel_manager_cluster()
             .memory_manager
@@ -174,6 +198,7 @@ fn draw_boot_logo(acpi_manager: &AcpiManager) {
             pr_err!("Freeing the bitmap data of BGRT was failed: {:?}", e);
         }
     };
+    let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
 
     let boot_logo_physical_address = acpi_manager
         .get_xsdt_manager()
@@ -183,6 +208,7 @@ fn draw_boot_logo(acpi_manager: &AcpiManager) {
         .get_xsdt_manager()
         .get_bgrt_manager()
         .get_image_offset();
+    drop(acpi_manager);
     if boot_logo_physical_address.is_none() || boot_logo_offset.is_none() {
         pr_info!("ACPI does not have the BGRT information.");
         return;
@@ -246,11 +272,13 @@ fn draw_boot_logo(acpi_manager: &AcpiManager) {
         return;
     }
 
-    pr_info!(
-        "BGRT: {:#X} is remapped at {:#X}",
-        boot_logo_address,
-        result.unwrap().to_usize(),
-    );
+    if boot_logo_address != result.unwrap().to_usize() {
+        pr_info!(
+            "BGRT: {:#X} is remapped at {:#X}",
+            boot_logo_address,
+            result.unwrap().to_usize(),
+        );
+    }
     let boot_logo_address = result.unwrap();
 
     get_kernel_manager_cluster().graphic_manager.write_bitmap(
@@ -271,21 +299,104 @@ pub extern "C" fn directboot_main(
     _kernel_code_segment: u16, /* Current segment is 8 */
     _user_code_segment: u16,
     _user_data_segment: u16,
-) {
+) -> ! {
+    get_kernel_manager_cluster().serial_port_manager =
+        SerialPortManager::new(0x3F8 /* COM1 */);
     get_kernel_manager_cluster()
         .serial_port_manager
-        .sendstr("boot success\r\n");
+        .sendstr("Booted from DirectBoot\n");
     loop {
         unsafe {
-            cpu::hlt();
+            cpu::halt();
         }
     }
 }
 
 #[no_mangle]
-pub extern "C" fn unknown_boot_main() {
+pub extern "C" fn unknown_boot_main() -> ! {
     SerialPortManager::new(0x3F8).sendstr("Unknown Boot System!");
     loop {
         unsafe { cpu::halt() };
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ap_boot_main() -> ! {
+    /* Extern Assembly Symbols */
+    extern "C" {
+        pub static gdt: u64; /* boot/common.s */
+        pub static tss_descriptor_address: u64; /* boot/common.s */
+    }
+    unsafe {
+        cpu::enable_sse();
+        cpu::enable_fs_gs_base();
+    }
+
+    /* Apply kernel paging table */
+    get_kernel_manager_cluster()
+        .memory_manager
+        .lock()
+        .unwrap()
+        .set_paging_table();
+
+    /* Setup CPU Manager, it contains individual data of CPU */
+    let cpu_manager = setup_cpu_manager_cluster(None);
+    let mut cpu_manager_list = &mut get_kernel_manager_cluster().boot_strap_cpu_manager.list;
+    loop {
+        if cpu_manager_list.get_next_as_ptr().is_none() {
+            cpu_manager_list.insert_after(&mut cpu_manager.list);
+            break;
+        }
+        cpu_manager_list = &mut unsafe { cpu_manager_list.get_next_mut() }.unwrap().list;
+    }
+
+    /* Setup memory management system */
+    let mut object_allocator = ObjectAllocator::new();
+    object_allocator.init(&mut get_kernel_manager_cluster().memory_manager.lock().unwrap());
+    cpu_manager.object_allocator = Mutex::new(object_allocator);
+
+    /* Copy GDT from BSP and create own TSS */
+    let gdt_address = unsafe { &gdt as *const _ as usize };
+    GateDescriptor::fork_gdt_from_other_and_create_tss_and_set(gdt_address, unsafe {
+        &tss_descriptor_address as *const _ as usize - gdt_address
+    } as u16);
+
+    /* Setup InterruptManager(including LocalApicManager) */
+    let mut interrupt_manager = InterruptManager::new();
+    interrupt_manager.init_ap(
+        &mut get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
+            .interrupt_manager
+            .lock()
+            .unwrap(),
+    );
+    cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
+    cpu_manager.interrupt_manager = Mutex::new(interrupt_manager);
+
+    cpu_manager.arch_depend_data.local_apic_timer = init_timer();
+    init_task_ap(ap_idle);
+    init_interrupt_work_queue_manager();
+    /* Switch to ap_idle task with own stack */
+    cpu_manager.run_queue_manager.start()
+}
+
+fn ap_idle() -> ! {
+    /* Tell BSP completing of init */
+    init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
+    /*get_cpu_manager_cluster()
+    .arch_depend_data
+    .local_apic_timer
+    .start_interruption(
+        get_cpu_manager_cluster()
+            .interrupt_manager
+            .lock()
+            .unwrap()
+            .get_local_apic_manager(),
+    );*/
+    /* For debug, suspend task_switch temporary */
+    loop {
+        unsafe {
+            cpu::idle();
+        }
     }
 }

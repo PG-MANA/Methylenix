@@ -44,8 +44,8 @@ impl<T: ?Sized> RwLock<T> {
     }
 
     pub fn try_read(&self) -> Result<RwLockReadGuard<'_, T>, ()> {
-        if !self.write_locked.load(Ordering::Relaxed) {
-            if self
+        if !self.write_locked.load(Ordering::Relaxed)
+            && self
                 .readers
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
                     if x == usize::max_value() {
@@ -55,12 +55,11 @@ impl<T: ?Sized> RwLock<T> {
                     }
                 })
                 .is_ok()
-            {
-                return Ok(RwLockReadGuard {
-                    readers: &self.readers,
-                    data: unsafe { &*self.data.get() },
-                });
-            }
+        {
+            return Ok(RwLockReadGuard {
+                readers: &self.readers,
+                data: unsafe { &*self.data.get() },
+            });
         }
         return Err(());
     }

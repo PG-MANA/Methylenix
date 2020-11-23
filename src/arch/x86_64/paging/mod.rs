@@ -41,7 +41,7 @@ pub const PAGE_SIZE_USIZE: usize = 0x1000;
 pub const PAGE_SHIFT: usize = 12;
 
 /// if !PAGE_MASK & address !=0 => address is not page aligned.
-pub const PAGE_MASK: usize = 0xFFFFFFFF_FFFFF000;
+pub const PAGE_MASK: usize = 0xFFFF_FFFF_FFFF_F000;
 
 /// Default page cache size for paging
 pub const PAGING_CACHE_LENGTH: usize = 64;
@@ -50,7 +50,7 @@ pub const PAGING_CACHE_LENGTH: usize = 64;
 pub const MAX_VIRTUAL_ADDRESS: VAddress = VAddress::new(MAX_VIRTUAL_ADDRESS_USIZE);
 
 /// Max virtual address of x86_64(Type = usize)
-pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0x00007FFF_FFFFFFFF;
+pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0x0000_7FFF_FFFF_FFFF;
 
 /// PageManager
 ///
@@ -520,9 +520,9 @@ impl PageManager {
         virtual_address: VAddress,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
     ) -> Result<(), PagingError> {
-        let number_of_pml4e = (virtual_address.to_usize() >> (4 * 3) + 9 * 3) & (0x1FF);
-        let number_of_pdpe = (virtual_address.to_usize() >> (4 * 3) + 9 * 2) & (0x1FF);
-        let number_of_pde = (virtual_address.to_usize() >> (4 * 3) + 9 * 1) & (0x1FF);
+        let number_of_pml4e = (virtual_address.to_usize() >> ((4 * 3) + 9 * 3)) & (0x1FF);
+        let number_of_pdpe = (virtual_address.to_usize() >> ((4 * 3) + 9 * 2)) & (0x1FF);
+        let number_of_pde = (virtual_address.to_usize() >> ((4 * 3) + 9 * 1)) & (0x1FF);
         let pml4e = &mut unsafe { &mut *(self.pml4.to_usize() as *mut [PML4E; PML4_MAX_ENTRY]) }
             [number_of_pml4e];
         if !pml4e.is_address_set() {
@@ -532,40 +532,37 @@ impl PageManager {
         let pdpte = &mut unsafe {
             &mut *(pml4e.get_address().unwrap().to_usize() as *mut [PDPTE; PDPT_MAX_ENTRY])
         }[number_of_pdpe];
-        if pdpte.is_present() {
-            if !pdpte.is_huge() {
-                let pde = &mut unsafe {
-                    &mut *(pdpte.get_address().unwrap().to_usize() as *mut [PDE; PD_MAX_ENTRY])
-                }[number_of_pde];
-                if pde.is_present() {
-                    /* Try to free PT */
-                    if !pde.is_huge() {
-                        for e in unsafe {
-                            &*(pde.get_address().unwrap().to_usize() as *const [PTE; PT_MAX_ENTRY])
-                        }
-                        .iter()
-                        {
-                            if e.is_present() {
-                                return Ok(());
-                            }
-                        }
-                        cache_memory_list.free_ptr(pde.get_address().unwrap().to_usize() as *mut _); /* free PT */
-                        pde.set_present(false);
+        if pdpte.is_present() && !pdpte.is_huge() {
+            let pde = &mut unsafe {
+                &mut *(pdpte.get_address().unwrap().to_usize() as *mut [PDE; PD_MAX_ENTRY])
+            }[number_of_pde];
+            if pde.is_present() {
+                /* Try to free PT */
+                if !pde.is_huge() {
+                    for e in unsafe {
+                        &*(pde.get_address().unwrap().to_usize() as *const [PTE; PT_MAX_ENTRY])
                     }
-                }
-                /* Try to free PD */
-                for e in unsafe {
-                    &*(pdpte.get_address().unwrap().to_usize() as *const [PDE; PD_MAX_ENTRY])
-                }
-                .iter()
-                {
-                    if e.is_present() {
-                        return Ok(());
+                    .iter()
+                    {
+                        if e.is_present() {
+                            return Ok(());
+                        }
                     }
+                    cache_memory_list.free_ptr(pde.get_address().unwrap().to_usize() as *mut _); /* free PT */
+                    pde.set_present(false);
                 }
-                cache_memory_list.free_ptr(pdpte.get_address().unwrap().to_usize() as *mut _); /* free PD */
-                pdpte.set_present(false);
             }
+            /* Try to free PD */
+            for e in
+                unsafe { &*(pdpte.get_address().unwrap().to_usize() as *const [PDE; PD_MAX_ENTRY]) }
+                    .iter()
+            {
+                if e.is_present() {
+                    return Ok(());
+                }
+            }
+            cache_memory_list.free_ptr(pdpte.get_address().unwrap().to_usize() as *mut _); /* free PD */
+            pdpte.set_present(false);
         }
         /* Try to free PDPT */
         for e in

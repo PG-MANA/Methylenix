@@ -404,7 +404,7 @@ impl VirtualMemoryManager {
                     )
                     .is_err()
                 {
-                    panic!("Cannot associate address (TODO: unassociation)");
+                    panic!("Cannot associate address (TODO: disassociation)");
                 }
             }
         }
@@ -586,8 +586,12 @@ impl VirtualMemoryManager {
                 self.vm_page_pool.free(p);
             }
         }
-        assert!(vm_map_entry.get_prev_entry().is_some()); /* not root */
         vm_map_entry.remove_from_list(&mut self.vm_map_entry);
+        if let Some(root) = unsafe { self.vm_map_entry.get_first_entry_mut() } {
+            self.vm_map_entry.set_first_entry(None);
+            root.adjust_entries()
+                .set_up_to_be_root(&mut self.vm_map_entry);
+        }
         vm_map_entry.set_disabled();
         self.vm_map_entry_pool.free(vm_map_entry);
 
@@ -608,18 +612,16 @@ impl VirtualMemoryManager {
         if self.vm_map_entry.get_first_entry_as_ptr().is_some() {
             if let Some(prev_entry) = self.find_previous_entry_mut(entry.get_vm_start_address()) {
                 prev_entry.insert_after(entry);
+            } else if entry.get_vm_end_address()
+                < unsafe { self.vm_map_entry.get_first_entry() }
+                    .unwrap()
+                    .get_vm_start_address()
+            {
+                entry.set_up_to_be_root(&mut self.vm_map_entry);
+            //pr_info!("Root was changed.");
             } else {
-                if entry.get_vm_end_address()
-                    < unsafe { self.vm_map_entry.get_first_entry() }
-                        .unwrap()
-                        .get_vm_start_address()
-                {
-                    entry.set_up_to_be_root(&mut self.vm_map_entry);
-                //pr_info!("Root was changed.");
-                } else {
-                    pr_err!("Cannot insert Virtual Memory Entry.");
-                    return Err(MemoryError::InsertEntryFailed);
-                }
+                pr_err!("Cannot insert Virtual Memory Entry.");
+                return Err(MemoryError::InsertEntryFailed);
             }
             //self.vm_map_entry = Some(root.adjust_entries());
             Ok(unsafe { &mut *result })
@@ -804,10 +806,10 @@ impl VirtualMemoryManager {
             {
                 return false;
             }
-        } else {
-            if new_size.to_end_address(target_entry.get_vm_start_address()) >= MAX_VIRTUAL_ADDRESS {
-                return false;
-            }
+        } else if new_size.to_end_address(target_entry.get_vm_start_address())
+            >= MAX_VIRTUAL_ADDRESS
+        {
+            return false;
         }
 
         let old_size = MSize::from_address(
@@ -916,7 +918,7 @@ impl VirtualMemoryManager {
         }
     }
 
-    fn alloc_from_direct_map(
+    pub fn alloc_from_direct_map(
         &mut self,
         size: MSize,
         pm_manager: &mut PhysicalMemoryManager,
@@ -935,7 +937,7 @@ impl VirtualMemoryManager {
             .as_mut()
             .unwrap()
             .allocator
-            .alloc(PAGE_SIZE, PAGE_SHIFT.into());
+            .alloc(size, PAGE_SHIFT.into());
         if allocated_address.is_none() {
             pr_err!("Cannot alloc from direct map.");
             return Err(MemoryError::AllocPhysicalAddressFailed);
@@ -1093,12 +1095,10 @@ impl VirtualMemoryManager {
                         p.get_physical_address().to_usize()
                     );
                     last_address = p.get_physical_address()
-                } else {
-                    if !last_is_not_found {
-                        kprintln!(" - {} Not Found", i.to_usize());
-                        last_is_not_found = true;
-                        last_address = PAddress::from(0);
-                    }
+                } else if !last_is_not_found {
+                    kprintln!(" - {} Not Found", i.to_usize());
+                    last_is_not_found = true;
+                    last_address = PAddress::from(0);
                 }
             }
             if last_is_not_found {

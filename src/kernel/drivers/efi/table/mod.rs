@@ -98,7 +98,7 @@ impl EfiTableManager {
         }
     }
 
-    pub fn get_efi_systemtable(&self) -> &'static EfiSystemTable {
+    pub fn get_efi_system_table(&self) -> &'static EfiSystemTable {
         //unsafe { (*self.address).clone() } //Getter作るのめんどくさかった
         unsafe { &*self.address }
     }

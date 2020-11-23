@@ -7,7 +7,7 @@
 
 .global init_x86_64
 .extern boot_main
-.extern main_code_segment_descriptor, user_code_segment_descriptor, user_data_segment_descriptor
+.extern main_code_segment_descriptor, user_code_segment_descriptor, tss_descriptor, user_data_segment_descriptor
 .extern BOOT_FROM_MULTIBOOT_MARK, BOOT_FROM_DIRECTBOOT_MARK
 .extern OS_STACK_SIZE, os_stack
 
@@ -21,6 +21,10 @@ init_x86_64:
   mov   %ax, %ds
   mov   %ax, %fs
   mov   %ax, %gs
+  /* Set 64bit TSS */
+  mov   $tss_descriptor, %ax
+  ltr   %ax
+
   pop   %rdi                /* Pass bootinformation */
   mov   $main_code_segment_descriptor, %rsi
   mov   $user_code_segment_descriptor, %rdx

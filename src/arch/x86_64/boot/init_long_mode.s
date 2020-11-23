@@ -8,7 +8,7 @@
 .global init_long_mode, fin
 .extern init_x86_64
 .extern main_code_segment_descriptor, tss_descriptor, gdtr0 /* at common.asm */
-.extern tss_descriptor_adress, tss, pd, pdpt, pml4
+.extern tss_descriptor_address, tss, pd, pdpt, pml4
 
 .section .text
 
@@ -23,7 +23,7 @@ init_long_mode:
 
   /* Write TSS segment information */
   mov   $tss, %eax
-  mov   $tss_descriptor_adress, %ebp
+  mov   $tss_descriptor_address, %ebp
   mov   %ax, 2(%ebp)
   shr   $16, %eax
   mov   %al, 4(%ebp)
@@ -92,10 +92,8 @@ pdpte_setup:
   wrmsr                         /* Set LME and NXE flags */
   mov   %cr0, %eax
   or    $(1 << 31 | 1), %eax    /* Set PG flag */
-  mov   $tss_descriptor, %dx
   lgdt  gdtr0
   mov   %eax, %cr0
-  ltr   %dx
   ljmp $main_code_segment_descriptor, $init_x86_64
 
 

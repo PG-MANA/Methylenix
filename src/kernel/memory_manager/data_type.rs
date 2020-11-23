@@ -25,6 +25,9 @@ pub type MOffset = MSize;
 pub struct MOrder(usize);
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub struct MPageOrder(usize);
+
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct MIndex(usize);
 
 pub trait Address:
@@ -335,12 +338,40 @@ impl MOrder {
         MSize(1 << self.0)
     }
 
-    pub const fn to_page_order(&self) -> Self {
+    pub const fn to_page_order(&self) -> MPageOrder {
         if self.0 > PAGE_SHIFT {
-            Self(self.0 - PAGE_SHIFT)
+            MPageOrder::new(self.0 - PAGE_SHIFT)
         } else {
-            Self(0)
+            MPageOrder::new(0)
         }
+    }
+}
+
+/* MPageOrder */
+into_and_from_usize!(MPageOrder);
+impl MPageOrder {
+    pub const fn new(o: usize) -> Self {
+        Self(o)
+    }
+
+    pub const fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub const fn to_usize(&self) -> usize {
+        self.0
+    }
+
+    pub fn from_offset(size: MSize, max: MPageOrder) -> Self {
+        MOrder::from_offset(size, max.to_order()).to_page_order()
+    }
+
+    pub const fn to_offset(&self) -> MSize {
+        self.to_order().to_offset()
+    }
+
+    pub const fn to_order(&self) -> MOrder {
+        MOrder::new(self.0 + PAGE_SHIFT)
     }
 }
 
