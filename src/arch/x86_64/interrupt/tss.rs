@@ -4,10 +4,14 @@
 //! Control TSS.
 //! This struct is not used, but in the future, it may be used to set up ist.
 
-/*
-const IO_MAP_SIZE: usize = 0xFFFF;
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
-#[repr(packed)]
+use core::mem::size_of;
+
+const IO_MAP_SIZE: usize = (0xFFFF / 8) + 1;
+
+#[allow(dead_code)]
+#[repr(C, packed)]
 struct TSS {
     reserved_1: u32,
     rsp0_l: u32,
@@ -18,8 +22,6 @@ struct TSS {
     rsp2_u: u32,
     reserved_2: u32,
     reserved_3: u32,
-    ist_0_l: u32,
-    ist_0_u: u32,
     ist_1_l: u32,
     ist_1_u: u32,
     ist_2_l: u32,
@@ -36,19 +38,36 @@ struct TSS {
     ist_7_u: u32,
     reserved_4: u32,
     reserved_5: u32,
-    res_and_iomap: u32,
-    //I/O Permission flag (0:Allow, 1:Forbid)
-    io_permission_map: [u8; IO_MAP_SIZE / 8],
+    reserved_6: u16,
+    io_map_base: u16,
+    /* I/O Permission flag (0:Allow, 1:Forbid) */
+    io_permission_map: [u8; IO_MAP_SIZE],
 }
-*/
 
 pub struct TssManager {
     tss: usize,
 }
 
 impl TssManager {
+    pub const SIZE_OF_TSS: MSize = MSize::new(size_of::<TSS>());
+
     pub const fn new() -> Self {
         Self { tss: 0 }
+    }
+
+    pub fn init_tss(tss_address: VAddress) {
+        let tss_address = tss_address.to_usize();
+        let mut tss = unsafe { &mut *(tss_address as *mut TSS) };
+
+        unsafe {
+            core::ptr::write_bytes(
+                tss_address as *mut u8,
+                0,
+                Self::SIZE_OF_TSS.to_usize() - IO_MAP_SIZE,
+            )
+        };
+        tss.io_map_base = ((&tss.io_permission_map as *const u8 as usize) - tss_address) as u16;
+        tss.io_permission_map = [0xff; IO_MAP_SIZE];
     }
 
     pub fn load_current_tss(&mut self) {
