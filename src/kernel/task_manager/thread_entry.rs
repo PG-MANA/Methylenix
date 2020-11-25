@@ -14,7 +14,7 @@ use core::ptr::NonNull;
 
 pub struct ThreadEntry {
     lock: SpinLockFlag,
-    p_list: PtrLinkedListNode<Self>, /* All thread in process */
+    t_list: PtrLinkedListNode<Self>, /* All thread in process */
     run_list: PtrLinkedListNode<Self>,
     sleep_list: PtrLinkedListNode<Self>,
     status: TaskStatus,
@@ -37,7 +37,7 @@ impl ThreadEntry {
     ) {
         self.lock = SpinLockFlag::new();
         let _lock = self.lock.lock();
-        self.p_list = PtrLinkedListNode::new();
+        self.t_list = PtrLinkedListNode::new();
         self.run_list = PtrLinkedListNode::new();
         self.sleep_list = PtrLinkedListNode::new();
         self.status = TaskStatus::New;
@@ -51,20 +51,20 @@ impl ThreadEntry {
     pub fn set_up_to_be_root_of_p_list(&mut self, list_head: &mut PtrLinkedList<Self>) {
         let _lock = self.lock.lock();
         let ptr = self as *mut _;
-        self.p_list.set_ptr(ptr);
-        self.p_list.terminate_prev_entry();
-        list_head.set_first_entry(Some(&mut self.p_list));
+        self.t_list.set_ptr(ptr);
+        self.t_list.terminate_prev_entry();
+        list_head.set_first_entry(Some(&mut self.t_list));
     }
 
     pub fn insert_after_of_p_list(&mut self, entry: &mut Self) {
         let _lock = self.lock.lock();
-        if entry.p_list.is_invalid_ptr() {
+        if entry.t_list.is_invalid_ptr() {
             let ptr = entry as *mut Self;
-            entry.p_list.set_ptr(ptr);
+            entry.t_list.set_ptr(ptr);
         }
         let ptr = self as *mut _;
-        self.p_list.set_ptr(ptr);
-        self.p_list.insert_after(&mut entry.p_list);
+        self.t_list.set_ptr(ptr);
+        self.t_list.insert_after(&mut entry.t_list);
     }
 
     pub fn set_up_to_be_root_of_run_list(&mut self, list_head: &mut PtrLinkedList<Self>) {

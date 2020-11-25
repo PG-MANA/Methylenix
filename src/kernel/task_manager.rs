@@ -7,6 +7,7 @@
 mod process_entry;
 pub mod run_queue_manager;
 mod thread_entry;
+pub mod wait_queue;
 pub mod work_queue;
 
 use self::process_entry::ProcessEntry;

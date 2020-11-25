@@ -1,7 +1,7 @@
-/*
- * Task Manager Process Entry
- * This entry contains at least one thread entry
- */
+//!
+//! Task Manager Process Entry
+//!
+//! This entry contains at least one thread entry
 
 use super::{ProcessStatus, TaskSignal, ThreadEntry};
 
@@ -17,6 +17,8 @@ pub struct ProcessEntry {
     memory_manager: *const Mutex<MemoryManager>,
     process_id: usize,
     parent: *mut ProcessEntry, /* kernel process has invalid pointer */
+    children: PtrLinkedList<ThreadEntry>,
+    siblings: PtrLinkedListNode<Self>,
     thread: PtrLinkedList<ThreadEntry>,
     num_of_thread: usize,
     single_thread: Option<*mut ThreadEntry>,
@@ -69,6 +71,8 @@ impl ProcessEntry {
         self.memory_manager = memory_manager;
         self.num_of_thread = threads.len();
         self.next_thread_id = 1;
+        self.children = PtrLinkedList::new();
+        self.siblings = PtrLinkedListNode::new();
 
         self.thread = PtrLinkedList::new();
         if threads.len() == 1 {
