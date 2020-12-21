@@ -42,7 +42,12 @@ impl GateDescriptor {
     /// Create Gate Descriptor
     ///
     /// the detail is above.
-    pub fn new(offset: unsafe fn(), selector: u16, ist: u8, type_attr: u8) -> GateDescriptor {
+    pub fn new(
+        offset: unsafe extern "C" fn(),
+        selector: u16,
+        ist: u8,
+        type_attr: u8,
+    ) -> GateDescriptor {
         let c = offset as *const unsafe fn() as usize;
         GateDescriptor {
             offset_low: (c & 0xffff) as u16,

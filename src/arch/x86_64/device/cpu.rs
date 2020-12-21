@@ -289,7 +289,8 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]
                 iretq
-                "
+                ",
+        options(noreturn)
     );
 }
 
