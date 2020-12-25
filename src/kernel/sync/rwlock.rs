@@ -76,7 +76,8 @@ impl<T: ?Sized> RwLock<T> {
     pub fn try_write(&self) -> Result<RwLockWriteGuard<'_, T>, ()> {
         if self
             .write_locked
-            .compare_and_swap(false, true, Ordering::Relaxed)
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
         {
             if self.readers.load(Ordering::Relaxed) != 0 {
                 self.write_locked.store(false, Ordering::Relaxed);

@@ -43,8 +43,13 @@ impl SpinLockFlag {
     pub fn try_lock(&self) -> Result<SpinLockFlagHolder, ()> {
         if self
             .flag
-            .compare_and_swap(false, true, atomic::Ordering::Relaxed)
-            == false
+            .compare_exchange(
+                false,
+                true,
+                atomic::Ordering::Relaxed,
+                atomic::Ordering::Relaxed,
+            )
+            .is_ok()
         {
             Ok(SpinLockFlagHolder {
                 flag: &self.flag as *const _ as usize,

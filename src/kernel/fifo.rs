@@ -36,8 +36,8 @@ impl<T: Sized + Copy, const F_SIZE: usize> FIFO<T, F_SIZE> {
             }
             if self
                 .write_pointer
-                .compare_and_swap(write_pointer, next_write_pointer, Acquire)
-                == write_pointer
+                .compare_exchange(write_pointer, next_write_pointer, Acquire, Relaxed)
+                .is_ok()
             /*This operation has ABA problem.. but usually buffer_full occurs first and it is rare.*/
             {
                 self.buf[write_pointer] = v;
@@ -60,8 +60,8 @@ impl<T: Sized + Copy, const F_SIZE: usize> FIFO<T, F_SIZE> {
             }
             if self
                 .read_pointer
-                .compare_and_swap(read_pointer, next_read_pointer, Acquire)
-                == read_pointer
+                .compare_exchange(read_pointer, next_read_pointer, Acquire, Relaxed)
+                .is_ok()
             {
                 let result = self.buf[read_pointer];
                 fence(Release); /* may be needless */
