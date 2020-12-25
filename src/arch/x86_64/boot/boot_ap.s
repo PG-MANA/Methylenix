@@ -83,7 +83,6 @@ ap_init_x86_64:
     mov     %ax, %ds
     mov     %ax, %fs
     mov     %ax, %gs
-    /* TODO: Set 64bit TSS */
     /* Set stack */
     mov     $(ap_os_stack_address - ap_entry), %eax
     add     %ebx, %eax                  /* EBX has base address */

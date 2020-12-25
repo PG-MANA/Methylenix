@@ -299,7 +299,6 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
 /// This function is called by ContextManager.
 /// This function does not return until another process switches to now_context_data.
 /// This function assume 1st argument is passed by "rdi" and 2nd is passed by "rsi".
-#[naked]
 #[inline(never)]
 #[allow(unused_variables)]
 pub unsafe extern "C" fn task_switch(
