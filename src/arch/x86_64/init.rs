@@ -267,15 +267,14 @@ pub fn setup_cpu_manager_cluster(
 /// This function will setup multiple processors by using ACPI
 /// This is in the development
 pub fn init_multiple_processors_ap() {
-    /* Get available Local APIC IDs from ACPI(each ID is 8bit, therefore we cannot setup over 0xFF cores.) */
-    let mut apic_id_list: [u8; 0xFF] = [0; 0xFF];
-    let num_of_cores = get_kernel_manager_cluster()
+    /* Get available Local APIC IDs from ACPI */
+    let apic_id_list_iter = get_kernel_manager_cluster()
         .acpi_manager
         .lock()
         .unwrap()
         .get_xsdt_manager()
         .get_madt_manager()
-        .find_apic_id_list(&mut apic_id_list);
+        .find_apic_id_list();
     /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
     let boot_address = 0usize;
 
@@ -288,20 +287,6 @@ pub fn init_multiple_processors_ap() {
         .get_local_apic_manager()
         .get_apic_id();
     cpu_manager.cpu_id = bsp_apic_id as usize;
-
-    if num_of_cores <= 1 {
-        if let Err(e) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .free(boot_address.into())
-        {
-            pr_err!("Cannot free boot_address: {:?}", e);
-        }
-        return;
-    }
-
-    pr_info!("Found {} CPUs", num_of_cores,);
 
     /* Extern Assembly Symbols */
     extern "C" {
@@ -349,8 +334,9 @@ pub fn init_multiple_processors_ap() {
         .get_acpi_pm_timer()
         .unwrap();
 
-    'ap_init_loop: for i in 0..num_of_cores {
-        let apic_id = apic_id_list[i] as u32;
+    let mut num_of_cpu = 0usize;
+    'ap_init_loop: for apic_id in apic_id_list_iter {
+        num_of_cpu += 1;
         if apic_id == bsp_apic_id {
             continue;
         }
@@ -407,5 +393,9 @@ pub fn init_multiple_processors_ap() {
         .free(stack)
     {
         pr_err!("Cannot free temporary stack: {:?}", e);
+    }
+
+    if num_of_cpu != 1 {
+        pr_info!("Found {} CPUs", num_of_cpu);
     }
 }

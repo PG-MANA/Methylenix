@@ -28,6 +28,12 @@ pub struct MadtManager {
     enabled: bool,
 }
 
+pub struct LocalApicIdIter {
+    base_address: VAddress,
+    pointer: MSize,
+    length: MSize,
+}
+
 impl MadtManager {
     pub const SIGNATURE: [u8; 4] = ['A' as u8, 'P' as u8, 'I' as u8, 'C' as u8];
 
@@ -66,35 +72,46 @@ impl MadtManager {
     /// Find the Local APIC ID list
     ///
     /// This function will search the Local APIC ID from the Interrupt Controller Structures.
-    /// Each Local APIC ID will be stored in list_to_store and this function will return the number of cores.
-    /// If the size of list_to_store is smaller than the number of cores,
-    /// this function sets Local APIC ID the size of list_to_store, and return.
-    /// Currently, this cannot find more than 256 cores.
-    pub fn find_apic_id_list(&self, list_to_store: &mut [u8]) -> usize {
+    /// Each Local APIC ID will be returned by  LocalApicIdIter.
+    pub fn find_apic_id_list(&self) -> LocalApicIdIter {
         if !self.enabled {
-            return 0;
+            return LocalApicIdIter {
+                base_address: VAddress::new(0),
+                pointer: MSize::new(0),
+                length: MSize::new(0),
+            };
         }
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
         let length = madt.length as usize - core::mem::size_of::<MADT>();
-        let base_address = self.base_address.to_usize() + core::mem::size_of::<MADT>();
-        let mut pointer = 0;
-        let mut list_pointer = 0;
-        while length > pointer {
-            let record_type = unsafe { *((base_address + pointer) as *const u8) };
-            let record_length = unsafe { *((base_address + pointer + 1) as *const u8) };
-            match record_type {
-                0 => {
-                    if list_pointer >= list_to_store.len() {
-                        return list_pointer;
-                    }
-                    list_to_store[list_pointer] =
-                        unsafe { *((base_address + pointer + 3) as *const u8) };
-                    list_pointer += 1;
-                }
-                _ => {}
-            };
-            pointer += record_length as usize;
+        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+
+        return LocalApicIdIter {
+            base_address,
+            pointer: MSize::new(0),
+            length: MSize::new(length),
+        };
+    }
+}
+
+impl Iterator for LocalApicIdIter {
+    type Item = u32;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pointer >= self.length {
+            return None;
         }
-        return list_pointer;
+        let record_type = unsafe { *((self.base_address + self.pointer).to_usize() as *const u8) };
+        let record_length =
+            unsafe { *(((self.base_address + self.pointer).to_usize() + 1) as *const u8) };
+        self.pointer += MSize::new(record_length as usize);
+        match record_type {
+            0 => Some(
+                unsafe { *(((self.base_address + self.pointer).to_usize() + 3) as *const u8) }
+                    as u32,
+            ),
+            9 => Some(unsafe {
+                *(((self.base_address + self.pointer).to_usize() + 4) as *const u32)
+            }),
+            _ => self.next(),
+        }
     }
 }
