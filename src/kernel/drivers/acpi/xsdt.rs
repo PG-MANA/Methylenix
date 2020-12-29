@@ -114,10 +114,9 @@ impl XsdtManager {
                     //
                 }
             };
-            use core::str;
             pr_info!(
                 "{}",
-                str::from_utf8(unsafe { &*(v_address.to_usize() as *const [u8; 4]) })
+                core::str::from_utf8(unsafe { &*(v_address.to_usize() as *const [u8; 4]) })
                     .unwrap_or("----")
             );
             count += 1;

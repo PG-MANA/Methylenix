@@ -2,7 +2,6 @@
 #![feature(alloc_error_handler)]
 #![feature(const_fn)]
 #![feature(const_fn_fn_ptr_basics)]
-#![feature(min_const_generics)]
 #![feature(const_mut_refs)]
 #![feature(const_panic)]
 #![feature(const_trait_impl)]

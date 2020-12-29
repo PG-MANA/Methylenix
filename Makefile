@@ -71,7 +71,7 @@ kernel:
 kernel.elf : $(BOOT_SYS_LIST)
 	$(LD) -o $(MAKE_BINDIR)kernel.elf $(BOOT_SYS_LIST)
 	-$(OBJCOPY) --only-keep-debug $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel.elf.debug
-	cp $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel_original.elf
+	$(CP) $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel_original.elf
 	-$(STRIP) $(MAKE_BINDIR)kernel.elf
 
 $(RUST_OBJ) :  .FORCE

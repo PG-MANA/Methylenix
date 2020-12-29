@@ -30,7 +30,7 @@ pub fn panic(info: &panic::PanicInfo) -> ! {
 
     loop {
         unsafe {
-            cpu::hlt();
+            cpu::halt();
         }
     }
 }

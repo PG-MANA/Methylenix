@@ -51,7 +51,7 @@ impl FrameBufferManager {
                 self.frame_buffer_address.into(),
                 (self.frame_buffer_width
                     * self.frame_buffer_height
-                    * (self.frame_buffer_color_depth / 8) as usize)
+                    * (self.frame_buffer_color_depth >> 3/* /8 */) as usize)
                     .into(),
                 MemoryPermissionFlags::data(),
             ) {
@@ -160,7 +160,7 @@ impl FrameBufferManager {
         assert_ne!(self.frame_buffer_height, 0);
         assert_ne!(self.frame_buffer_width, 0);
 
-        let screen_depth_byte = self.frame_buffer_color_depth as usize / 8;
+        let screen_depth_byte = self.frame_buffer_color_depth as usize >> 3;
         let bitmap_aligned_bitmap_width_pointer = if is_not_aligned_data {
             size_x
         } else {
