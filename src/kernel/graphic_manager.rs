@@ -117,7 +117,7 @@ impl GraphicManager {
         let mut cursor = self.cursor.lock().unwrap();
         let mut font_manager = self.font.lock().unwrap();
         let mut frame_buffer_manager = self.graphic.lock().unwrap();
-        let frame_buffer_size = frame_buffer_manager.get_framer_buffer_size();
+        let frame_buffer_size = frame_buffer_manager.get_frame_buffer_size();
 
         for c in s.chars().into_iter() {
             if c == '\n' {
@@ -194,8 +194,8 @@ impl GraphicManager {
         }
     }
 
-    pub fn get_framer_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
-        self.graphic.lock().unwrap().get_framer_buffer_size()
+    pub fn get_frame_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
+        self.graphic.lock().unwrap().get_frame_buffer_size()
     }
 
     pub fn fill(&mut self, start_x: usize, start_y: usize, end_x: usize, end_y: usize, color: u32) {

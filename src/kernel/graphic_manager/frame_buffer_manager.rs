@@ -63,7 +63,7 @@ impl FrameBufferManager {
         }
     }
 
-    pub const fn get_framer_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
+    pub const fn get_frame_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
         (self.frame_buffer_width, self.frame_buffer_height)
     }
 
