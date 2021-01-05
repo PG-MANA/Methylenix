@@ -47,7 +47,7 @@ impl MadtManager {
     pub fn init(&mut self, madt_vm_address: VAddress) -> bool {
         /* madt_vm_address must be accessible */
         let madt = unsafe { &*(madt_vm_address.to_usize() as *const MADT) };
-        if madt.revision != 4 {
+        if madt.revision > 4 {
             pr_err!("Not supported MADT version: {}", madt.revision);
         }
         if let Ok(a) = get_kernel_manager_cluster()

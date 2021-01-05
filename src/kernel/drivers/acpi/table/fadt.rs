@@ -43,7 +43,7 @@ impl FadtManager {
     pub fn init(&mut self, fadt_vm_address: VAddress) -> bool {
         /* bgrt_vm_address must be accessible */
         let fadt = unsafe { &*(fadt_vm_address.to_usize() as *const FADT) };
-        if fadt.major_version != 1 {
+        if fadt.major_version > 6 {
             pr_err!("Not supported FADT version:{}", fadt.major_version);
         }
         let fadt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
