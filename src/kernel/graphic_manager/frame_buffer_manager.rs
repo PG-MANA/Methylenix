@@ -161,45 +161,61 @@ impl FrameBufferManager {
         assert_ne!(self.frame_buffer_width, 0);
 
         let screen_depth_byte = self.frame_buffer_color_depth as usize >> 3;
-        let bitmap_aligned_bitmap_width_pointer = if is_not_aligned_data {
-            size_x
-        } else {
-            (size_x & !3) + 4
-        };
-        let color = [back_color, front_color];
-
-        let get_bit = |x: usize, y: usize| -> usize {
-            let offset = y * bitmap_aligned_bitmap_width_pointer + x;
-            unsafe {
-                (((*((buffer + offset / 8) as *const u8)) >> (7 - (offset & 0b111))) & 1) as usize
-            }
-        };
+        let bitmap_padding = if is_not_aligned_data { 0 } else { size_x & 7 };
+        let mut bitmap_pointer = buffer;
+        let mut bitmap_mask = 0x80;
+        let mut buffer_pointer = self.frame_buffer_address
+            + (offset_y * self.frame_buffer_width + offset_x) * screen_depth_byte;
 
         if self.frame_buffer_color_depth == 32 {
-            for height_pointer in (0..size_y).rev() {
-                for width_pointer in 0..size_x {
+            for _ in 0..size_y {
+                for _ in 0..size_x {
                     unsafe {
-                        *((self.frame_buffer_address
-                            + ((height_pointer + offset_y) * self.frame_buffer_width
-                                + offset_x
-                                + width_pointer)
-                                * screen_depth_byte) as *mut u32) =
-                            color[get_bit(width_pointer, height_pointer)];
+                        *(buffer_pointer as *mut u32) =
+                            if (*(bitmap_pointer as *const u8) & bitmap_mask) != 0 {
+                                front_color
+                            } else {
+                                back_color
+                            }
                     };
+                    buffer_pointer += screen_depth_byte;
+                    bitmap_mask >>= 1;
+                    if bitmap_mask == 0 {
+                        bitmap_pointer += 1;
+                        bitmap_mask = 0x80;
+                    }
+                }
+                buffer_pointer += (self.frame_buffer_width - size_x) * screen_depth_byte;
+                if !is_not_aligned_data {
+                    /* This may have a bag... */
+                    bitmap_pointer += bitmap_padding;
+                    bitmap_mask = 0x80;
                 }
             }
         } else {
-            for height_pointer in (0..size_y).rev() {
-                for width_pointer in 0..size_x {
+            for _ in 0..size_y {
+                for _ in 0..size_x {
+                    let dot = buffer_pointer as *mut u32;
                     unsafe {
-                        let dot = (self.frame_buffer_address
-                            + ((height_pointer + offset_y) * self.frame_buffer_width
-                                + offset_x
-                                + width_pointer)
-                                * screen_depth_byte) as *mut u32;
                         *dot &= 0x000000ff;
-                        *dot |= (color[get_bit(width_pointer, height_pointer)]) & 0xffffff;
+                        *dot |= if (*(bitmap_pointer as *const u8) & bitmap_mask) != 0 {
+                            front_color
+                        } else {
+                            back_color
+                        } & 0xffffff;
                     }
+                    buffer_pointer += screen_depth_byte;
+                    bitmap_mask >>= 1;
+                    if bitmap_mask == 0 {
+                        bitmap_pointer += 1;
+                        bitmap_mask = 0x80;
+                    }
+                }
+                buffer_pointer += (self.frame_buffer_width - size_x) * screen_depth_byte;
+                if !is_not_aligned_data {
+                    /* This may have a bag... */
+                    bitmap_pointer += bitmap_padding;
+                    bitmap_mask = 0x80;
                 }
             }
         }
