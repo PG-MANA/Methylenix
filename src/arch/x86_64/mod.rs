@@ -90,6 +90,9 @@ pub extern "C" fn multiboot_main(
         panic!("Cannot map memory for frame buffer");
     }
 
+    /* Set up graphic */
+    init_graphic(&multiboot_information);
+
     /* Init interrupt */
     init_interrupt(kernel_code_segment);
 
@@ -113,9 +116,6 @@ pub extern "C" fn multiboot_main(
 
     /* Init Local APIC Timer*/
     get_cpu_manager_cluster().arch_depend_data.local_apic_timer = init_timer();
-
-    /* Set up graphic */
-    init_graphic(&multiboot_information);
 
     /* Init the task management system */
     init_task(
