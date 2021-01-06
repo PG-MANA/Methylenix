@@ -10,7 +10,6 @@
 .global tss_descriptor, tss_descriptor_address, tss
 .global pd, pdpt, pml4
 
-.section .bss
 
 /* PAGE DIRECTPRY (8byte * 512) * 4 */
 .comm pd, 0x4000, 0x1000
@@ -22,7 +21,7 @@
 .comm pml4, 0x1000, 0x1000
 
 /* OS STACK */
-.comm os_stack, OS_STACK_SIZE, 0x1000
+.comm os_stack, OS_STACK_SIZE, 0x10
 
 .section .data
 
