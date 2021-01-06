@@ -300,7 +300,6 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
 /// This function does not return until another process switches to now_context_data.
 /// This function assume 1st argument is passed by "rdi" and 2nd is passed by "rsi".
 #[inline(never)]
-#[allow(unused_variables)]
 pub unsafe extern "C" fn task_switch(
     next_context_data_address: *const ContextData,
     now_context_data_address: *mut ContextData,
@@ -356,6 +355,9 @@ pub unsafe extern "C" fn task_switch(
 
                 jmp     {}
                 1:
-                ", sym run_task
+                ",
+                   sym run_task,
+                   in("rdi") next_context_data_address,
+                   in("rsi") now_context_data_address
     );
 }
