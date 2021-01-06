@@ -141,9 +141,7 @@ impl ThreadEntry {
     }
 
     pub fn set_context(&mut self, context: &ContextData) {
-        unsafe {
-            core::ptr::copy(context as *const _, &mut self.context_data as *mut _, 1);
-        }
+        self.context_data = context.clone();
     }
 
     pub fn get_next_from_run_list_mut(&mut self) -> Option<&'static mut Self> {
