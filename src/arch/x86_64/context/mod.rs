@@ -26,7 +26,7 @@ pub struct ContextManager {
 
 impl ContextManager {
     pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x8000;
-    pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x1000;
+    pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x8000;
     pub const STACK_ALIGN_ORDER: usize = 6; /*size = 2^6 = 64*/
 
     /// Create Context Manager with invalid data.
@@ -99,7 +99,7 @@ impl ContextManager {
     /// Jump to next_context with saving current context into old_context.
     ///
     /// This function does not return until another context jumps to this context.
-    /// each context must be aligned by 64bit (otherwise this function will panic).  
+    /// each context must be aligned by 64bit (otherwise this function will panic).
     pub unsafe fn switch_context(
         &self,
         old_context: &mut ContextData,
