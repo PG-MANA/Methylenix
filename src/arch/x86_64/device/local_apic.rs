@@ -162,9 +162,25 @@ impl LocalApicManager {
     /// See Intel 64 and IA-32 Architectures Software Developer’s Manual Volume 3
     /// 10.6.1 Interrupt Command Register (ICR) The interrupt command register (ICR)
     /// 10.12.9 ICR Operation in x2APIC Mode
-    pub fn send_interrupt_command(&self, destination: u32, delivery_mode: u8, vector: u8) {
+    pub fn send_interrupt_command(
+        &self,
+        destination: u32,
+        delivery_mode: u8,
+        trigger_mode: u8,
+        is_init_ipi_de_assert: bool,
+        vector: u8,
+    ) {
         assert!(delivery_mode < 8);
-        let mut data: u64 = (1 << 14) | ((delivery_mode as u64) << 8) | (vector as u64);
+        let mut data: u64 = if is_init_ipi_de_assert {
+            assert_eq!(delivery_mode, 0b101);
+            assert!(trigger_mode < 2);
+            ((trigger_mode as u64) << 15) | ((delivery_mode as u64) << 8) | (vector as u64)
+        } else {
+            ((trigger_mode as u64) << 15)
+                | (1 << 14)
+                | ((delivery_mode as u64) << 8)
+                | (vector as u64)
+        };
         if self.is_x2apic_enabled {
             data |= (destination as u64) << 32;
         } else {

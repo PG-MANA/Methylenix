@@ -350,19 +350,27 @@ pub fn init_multiple_processors_ap() {
             .unwrap();
         interrupt_manager
             .get_local_apic_manager()
-            .send_interrupt_command(apic_id, 0b101 /*INIT*/, 0);
+            .send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, false, 0);
+
+        timer.busy_wait_us(100);
+
+        interrupt_manager
+            .get_local_apic_manager()
+            .send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, true, 0);
 
         /* Wait 10 millisecond for the AP */
         timer.busy_wait_ms(10);
 
         interrupt_manager
             .get_local_apic_manager()
-            .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
+            .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
+
         timer.busy_wait_us(200);
 
         interrupt_manager
             .get_local_apic_manager()
-            .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, vector);
+            .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
+
         drop(interrupt_manager);
         for _wait in 0..5000
         /* Wait 5s for AP init */
