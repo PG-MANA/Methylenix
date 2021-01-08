@@ -99,18 +99,29 @@ impl Iterator for LocalApicIdIter {
         if self.pointer >= self.length {
             return None;
         }
-        let record_type = unsafe { *((self.base_address + self.pointer).to_usize() as *const u8) };
-        let record_length =
-            unsafe { *(((self.base_address + self.pointer).to_usize() + 1) as *const u8) };
+        let record_base = (self.base_address + self.pointer).to_usize();
+        let record_type = unsafe { *(record_base as *const u8) };
+        let record_length = unsafe { *((record_base + 1) as *const u8) };
+
         self.pointer += MSize::new(record_length as usize);
         match record_type {
-            0 => Some(
-                unsafe { *(((self.base_address + self.pointer).to_usize() + 3) as *const u8) }
-                    as u32,
-            ),
-            9 => Some(unsafe {
-                *(((self.base_address + self.pointer).to_usize() + 4) as *const u32)
-            }),
+            0 => {
+                if (unsafe { *((record_base + 4) as *const u8) } & 1) == 1 {
+                    /* Enabled */
+                    Some(unsafe { *((record_base + 3) as *const u8) } as u32)
+                } else {
+                    self.next()
+                }
+            }
+            9 => {
+                if (unsafe { *((record_base + 8) as *const u8) } & 1) == 1 {
+                    /* Enabled */
+                    Some(unsafe { *((record_base + 4) as *const u32) })
+                } else {
+                    self.next()
+                }
+            }
+
             _ => self.next(),
         }
     }
