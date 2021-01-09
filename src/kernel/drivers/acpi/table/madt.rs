@@ -106,7 +106,7 @@ impl Iterator for LocalApicIdIter {
         self.pointer += MSize::new(record_length as usize);
         match record_type {
             0 => {
-                if (unsafe { *((record_base + 4) as *const u8) } & 1) == 1 {
+                if (unsafe { *((record_base + 4) as *const u32) } & 1) == 1 {
                     /* Enabled */
                     Some(unsafe { *((record_base + 3) as *const u8) } as u32)
                 } else {
@@ -114,7 +114,7 @@ impl Iterator for LocalApicIdIter {
                 }
             }
             9 => {
-                if (unsafe { *((record_base + 8) as *const u8) } & 1) == 1 {
+                if (unsafe { *((record_base + 8) as *const u32) } & 1) == 1 {
                     /* Enabled */
                     Some(unsafe { *((record_base + 4) as *const u32) })
                 } else {
