@@ -334,12 +334,12 @@ pub fn init_multiple_processors_ap() {
         .get_acpi_pm_timer()
         .unwrap();
 
-    let mut num_of_cpu = 0usize;
+    let mut num_of_cpu = 1usize;
     'ap_init_loop: for apic_id in apic_id_list_iter {
-        num_of_cpu += 1;
         if apic_id == bsp_apic_id {
             continue;
         }
+        num_of_cpu += 1;
 
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
 
