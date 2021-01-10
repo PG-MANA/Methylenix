@@ -49,11 +49,10 @@ impl RunQueueManager {
                 .get_context_manager()
                 .jump_to_context(thread.get_context())
         };
-        /* not return here. */
         panic!("Switching to the kernel process was failed.");
     }
 
-    /* sleep running thread and switch to next thread */
+    /// Sleep running thread and switch to next thread
     pub fn sleep(&mut self) {
         let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
@@ -62,7 +61,7 @@ impl RunQueueManager {
         drop(_lock);
         self._switch_to_next_thread(interrupt_flag, None);
         /* running_thread will be linked in sleep_list in this function */
-        /* woke up and return */
+        /* Woke up and return */
     }
 
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) {
@@ -110,7 +109,7 @@ impl RunQueueManager {
                 .task_manager
                 .insert_into_sleep_list(running_thread, &mut self.run_list);
             if should_change_root {
-                /*assert!(next_entry.is_some());*/
+                /* assert!(next_entry.is_some()); */
                 let next_entry = next_entry.unwrap();
                 next_entry.set_up_to_be_root_of_run_list(&mut self.run_list);
                 next_entry

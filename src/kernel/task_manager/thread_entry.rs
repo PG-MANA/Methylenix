@@ -1,7 +1,7 @@
-/*
- * Task Manager Thread Entry
- * This entry contains some arch-depending data
- */
+//!
+//! Task Manager Thread Entry
+//!
+//! This entry contains some arch-depending data
 
 use super::{ProcessEntry, TaskStatus};
 

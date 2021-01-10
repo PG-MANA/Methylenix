@@ -19,9 +19,9 @@
 #[macro_use]
 extern crate alloc;
 
-//usr
+/* Arch independent modules */
 #[macro_use]
 pub mod kernel;
 
-//arch
+/* Arch-depend modules */
 pub mod arch;

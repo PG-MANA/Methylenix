@@ -1,6 +1,6 @@
-/*
- * RwLock(Spin Lock version)
- */
+//!
+//! RwLock(Spin Lock version)
+//!
 
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
@@ -10,7 +10,7 @@ pub struct RwLock<T: ?Sized> {
     write_locked: AtomicBool,
     readers: AtomicUsize,
     data: UnsafeCell<T>,
-    /*poison flag*/
+    /* poison flag(needed?) */
 }
 
 pub struct RwLockReadGuard<'a, T: ?Sized + 'a> {

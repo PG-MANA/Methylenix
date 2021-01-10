@@ -1,6 +1,8 @@
-/*
- * Extended System Description Table Manager
- */
+//!
+//! Extended System Description Table
+//!
+//! This manager contains the information about Extended System Description Table(XSDT).
+//! XSDT is the list of tables like MADT.
 
 use super::table::bgrt::BgrtManager;
 use super::table::fadt::FadtManager;
@@ -8,7 +10,7 @@ use super::table::madt::MadtManager;
 use super::INITIAL_MMAP_SIZE;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 use crate::kernel::memory_manager::MemoryPermissionFlags;
 
 pub struct XsdtManager {
@@ -37,7 +39,7 @@ impl XsdtManager {
             .unwrap()
             .mmap_dev(
                 xsdt_physical_address,
-                INITIAL_MMAP_SIZE.into(),
+                MSize::new(INITIAL_MMAP_SIZE),
                 MemoryPermissionFlags::rodata(),
             ) {
             a
@@ -45,6 +47,7 @@ impl XsdtManager {
             pr_err!("Cannot reserve memory area of XSDT.");
             return false;
         };
+
         if unsafe { *(xsdt_vm_address.to_usize() as *const [u8; 4]) }
             != ['X' as u8, 'S' as u8, 'D' as u8, 'T' as u8]
         {
@@ -62,8 +65,8 @@ impl XsdtManager {
             .unwrap()
             .mremap_dev(
                 xsdt_vm_address,
-                INITIAL_MMAP_SIZE.into(),
-                (xsdt_size as usize).into(),
+                MSize::new(INITIAL_MMAP_SIZE),
+                MSize::new(xsdt_size as usize),
             ) {
             a
         } else {
@@ -73,16 +76,15 @@ impl XsdtManager {
         self.base_address = xsdt_vm_address;
         self.enabled = true;
 
-        let mut count = 0usize;
-
-        while let Some(entry_physical_address) = self.get_entry(count) {
+        let mut index = 0;
+        while let Some(entry_physical_address) = self.get_entry(index) {
             let v_address = if let Ok(a) = get_kernel_manager_cluster()
                 .memory_manager
                 .lock()
                 .unwrap()
                 .mmap_dev(
                     entry_physical_address,
-                    INITIAL_MMAP_SIZE.into(),
+                    MSize::new(INITIAL_MMAP_SIZE),
                     MemoryPermissionFlags::rodata(),
                 ) {
                 a
@@ -90,7 +92,7 @@ impl XsdtManager {
                 pr_err!("Cannot reserve memory area of ACPI Table.");
                 return false;
             };
-            drop(entry_physical_address); /* avoid page fault */
+            drop(entry_physical_address); /* Avoid using it */
             match unsafe { *(v_address.to_usize() as *const [u8; 4]) } {
                 BgrtManager::SIGNATURE => {
                     if !self.bgrt_manager.init(v_address) {
@@ -117,9 +119,9 @@ impl XsdtManager {
             pr_info!(
                 "{}",
                 core::str::from_utf8(unsafe { &*(v_address.to_usize() as *const [u8; 4]) })
-                    .unwrap_or("----")
+                    .unwrap_or("????")
             );
-            count += 1;
+            index += 1;
         }
         return true;
     }

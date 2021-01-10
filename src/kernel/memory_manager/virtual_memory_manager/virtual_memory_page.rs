@@ -1,7 +1,7 @@
-/*
- * Virtual Memory Page Entry
- * structure for mapping virtual address to physical address
- */
+//!
+//! Virtual Memory Page Entry
+//!
+//! This structure contains mapping virtual address to physical address
 
 use crate::kernel::memory_manager::data_type::{MIndex, PAddress};
 use crate::kernel::memory_manager::MemoryOptionFlags;
@@ -58,7 +58,7 @@ impl VirtualMemoryPage {
             assert!(next.p_index > p_index);
         }
         entry.p_index = p_index;
-        /* add: radix tree */
+        /* ADD: radix tree */
         self._insert_after(entry);
     }
 
@@ -80,7 +80,7 @@ impl VirtualMemoryPage {
         if let Some(old_root) = old_root {
             self.list.setup_to_be_root(&mut old_root.list);
         }
-        /*adjust tree*/
+        /* Adjust tree */
     }
 
     pub fn remove_from_list(&mut self, list_head: &mut PtrLinkedList<Self>) {

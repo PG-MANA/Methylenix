@@ -1,7 +1,7 @@
-/*
- * Kernel
- * Modules not depending on Arch
- */
+//!
+//! Kernel Modules
+//!
+//! These modules not depending on Arch
 
 #[macro_use]
 pub mod tty;

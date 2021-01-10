@@ -1,6 +1,6 @@
-/*
- * Mutex(Spin Lock version)
- */
+//!
+//! Mutex(Spin Lock version)
+//!
 
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
@@ -82,7 +82,7 @@ impl<T: ?Sized> Mutex<T> {
         Ok(MutexGuard {
             _lock_flag: lock_holder,
             data: unsafe { &mut *self.data.get() },
-        }) //実質互換性のためにResultに包んでる
+        })
     }
 
     pub fn try_lock(&self) -> Result<MutexGuard<T>, ()> {
@@ -101,12 +101,12 @@ impl<T: ?Sized> Mutex<T> {
 impl<'m, T: ?Sized> Deref for MutexGuard<'m, T> {
     type Target = T;
     fn deref<'a>(&'a self) -> &'a T {
-        &*self.data //参照外しのためのトレイト
+        &*self.data
     }
 }
 
 impl<'m, T: ?Sized> DerefMut for MutexGuard<'m, T> {
     fn deref_mut<'a>(&'a mut self) -> &'a mut T {
-        &mut *self.data //参照外しのためのトレイト
+        &mut *self.data
     }
 }

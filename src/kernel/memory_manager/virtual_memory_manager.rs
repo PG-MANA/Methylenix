@@ -1,10 +1,11 @@
-/*
- * Virtual Memory Manager
- * This manager maintains memory map and controls page_manager.
- * The address and size are rounded up to an integral number of PAGE_SIZE.
-*/
+//!
+//! Virtual Memory Manager
+//!
+//! This manager maintains memory map and controls page_manager.
+//! The address and size are rounded up to an integral number of PAGE_SIZE.
+//!
 
-/* add: add physical_memory into reserved_memory_list when it runs out */
+/* ADD: add physical_memory into reserved_memory_list when it runs out */
 
 mod virtual_memory_entry;
 mod virtual_memory_object;
@@ -14,7 +15,7 @@ use self::virtual_memory_entry::VirtualMemoryEntry;
 /*use self::virtual_memory_object::VirtualMemoryObject;*/
 use self::virtual_memory_page::VirtualMemoryPage;
 
-use super::data_type::{Address, MIndex, MSize, PAddress, VAddress};
+use super::data_type::{Address, MIndex, MOrder, MSize, PAddress, VAddress};
 use super::object_allocator::cache_allocator::CacheAllocator;
 use super::physical_memory_manager::PhysicalMemoryManager;
 use super::pool_allocator::PoolAllocator;
@@ -27,6 +28,7 @@ use crate::arch::target_arch::paging::{
 };
 
 use crate::kernel::ptr_linked_list::PtrLinkedList;
+use core::mem::MaybeUninit;
 
 pub struct VirtualMemoryManager {
     vm_map_entry: PtrLinkedList<VirtualMemoryEntry>,
@@ -69,29 +71,27 @@ impl VirtualMemoryManager {
 
         self.is_system_vm = is_system_vm;
 
-        /* set up cache list */
-        let mut reserved_memory_list: [PAddress; PAGING_CACHE_LENGTH] =
-            [0.into(); PAGING_CACHE_LENGTH];
+        /* Set up cache list */
+        let mut reserved_memory_list =
+            unsafe { MaybeUninit::<[PAddress; PAGING_CACHE_LENGTH]>::uninit().assume_init() };
         for i in 0..PAGING_CACHE_LENGTH {
             let cache_address = pm_manager
-                .alloc(PAGE_SIZE, PAGE_SHIFT.into())
+                .alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT))
                 .expect("Cannot alloc memory for paging cache");
             reserved_memory_list[i] = cache_address;
             self.reserved_memory_list
                 .free(unsafe { &mut *(cache_address.to_usize() as *mut [u8; PAGE_SIZE_USIZE]) });
         }
 
-        /* set up page_manager */
+        /* Set up page_manager */
         if let Err(e) = self.page_manager.init(&mut self.reserved_memory_list) {
             panic!("Cannot init PageManager Err:{:?}", e);
         }
 
         self.setup_pools(pm_manager);
 
-        /* insert cached_memory_list entry */
-        for i in 0..PAGING_CACHE_LENGTH
-        /* 既に使われた分も */
-        {
+        /* Insert cached_memory_list entry */
+        for i in 0..PAGING_CACHE_LENGTH {
             let cache_address = reserved_memory_list[i];
             let mut entry = VirtualMemoryEntry::new(
                 cache_address.to_direct_mapped_v_address(),
@@ -129,7 +129,7 @@ impl VirtualMemoryManager {
 
     fn setup_pools(&mut self, pm_manager: &mut PhysicalMemoryManager) {
         let alloc_func = |size: MSize, name: &str, p: &mut PhysicalMemoryManager| -> VAddress {
-            if let Some(address) = p.alloc(size, PAGE_SHIFT.into()) {
+            if let Some(address) = p.alloc(size, MOrder::new(PAGE_SHIFT)) {
                 address.to_direct_mapped_v_address()
             } else {
                 panic!("Cannot alloc memory for {}.", name);
@@ -161,7 +161,7 @@ impl VirtualMemoryManager {
             if let Err(e) = vm_manager.insert_vm_map_entry(entry, p) {
                 panic!("Cannot insert Virtual Memory Entry Err:{:?}", e);
             };
-            for i in 0.into()..size.to_index() {
+            for i in MIndex::new(0)..size.to_index() {
                 if let Err(e) = vm_manager.associate_address(
                     address.to_direct_mapped_p_address() + i.to_offset(),
                     address + i.to_offset(),
@@ -189,7 +189,7 @@ impl VirtualMemoryManager {
             self,
             "vm_map_entry",
             vm_map_entry_pool_address,
-            Self::VM_MAP_ENTRY_POOL_SIZE.into(),
+            Self::VM_MAP_ENTRY_POOL_SIZE,
             pm_manager,
         );
         /*map_func(
@@ -203,19 +203,19 @@ impl VirtualMemoryManager {
             self,
             "vm_page",
             vm_page_pool_address,
-            Self::VM_PAGE_POOL_SIZE.into(),
+            Self::VM_PAGE_POOL_SIZE,
             pm_manager,
         );
     }
 
     fn setup_direct_mapped_area(&mut self, pm_manager: &mut PhysicalMemoryManager) {
-        /* direct mapped area is used for page table or io map(needs DMA) (object pools should not use this) */
-        /* when use direct mapped area, you must map address into direct_mapped_area.entry. */
+        /* Direct mapped area is used for page table or io map(needs DMA) (object pools should not use this) */
+        /* When use direct mapped area, you must map address into direct_mapped_area.entry. */
         let direct_mapped_area_size =
-            MSize::from((pm_manager.get_free_memory_size().to_usize() / 20) & PAGE_MASK); /* temporary */
-        assert!(MSize::from(2 << PAGE_SHIFT) < direct_mapped_area_size);
+            MSize::new((pm_manager.get_free_memory_size().to_usize() / 20) & PAGE_MASK); /* temporary */
+        assert!(MSize::new(2 << PAGE_SHIFT) < direct_mapped_area_size);
         let direct_mapped_area_address =
-            pm_manager.alloc(direct_mapped_area_size, PAGE_SHIFT.into());
+            pm_manager.alloc(direct_mapped_area_size, MOrder::new(PAGE_SHIFT));
 
         if direct_mapped_area_address.is_none() {
             panic!("Cannot alloc memory for direct map.");
@@ -229,7 +229,8 @@ impl VirtualMemoryManager {
 
         let mut entry = VirtualMemoryEntry::new(
             direct_mapped_area_address.to_direct_mapped_v_address(),
-            direct_mapped_area_size.to_end_address(direct_mapped_area_address.to_usize().into()),
+            direct_mapped_area_size
+                .to_end_address(direct_mapped_area_address.to_direct_mapped_v_address()),
             MemoryPermissionFlags::data(),
             MemoryOptionFlags::new(
                 MemoryOptionFlags::DIRECT_MAP
@@ -241,7 +242,7 @@ impl VirtualMemoryManager {
             &mut entry,
             direct_mapped_area_address,
             direct_mapped_area_address.to_direct_mapped_v_address(),
-            MSize::from(2 << PAGE_SHIFT),
+            MSize::new(2 << PAGE_SHIFT),
             pm_manager,
         ) {
             panic!("Cannot map address for direct map Err:{:?}", e);
@@ -264,10 +265,10 @@ impl VirtualMemoryManager {
 
         let mut direct_mapped_area_allocator = PhysicalMemoryManager::new();
         direct_mapped_area_allocator
-            .set_memory_entry_pool(direct_mapped_area_address.into(), 2 << PAGE_SHIFT);
+            .set_memory_entry_pool(direct_mapped_area_address.to_usize(), 2 << PAGE_SHIFT);
         direct_mapped_area_allocator.free(
-            direct_mapped_area_address + MSize::from(2 << PAGE_SHIFT),
-            direct_mapped_area_size - MSize::from(2 << PAGE_SHIFT),
+            direct_mapped_area_address + MSize::new(2 << PAGE_SHIFT),
+            direct_mapped_area_size - MSize::new(2 << PAGE_SHIFT),
             true,
         );
         self.direct_mapped_area = Some(DirectMappedArea {
@@ -306,7 +307,7 @@ impl VirtualMemoryManager {
             size.to_end_address(physical_address)
                 .to_direct_mapped_v_address(),
         ) {
-            VAddress::from(physical_address.to_usize())
+            VAddress::new(physical_address.to_usize())
         } else if let Some(address) = self.find_usable_memory_area(size) {
             address
         } else {
@@ -392,7 +393,7 @@ impl VirtualMemoryManager {
         let last_p_index = MIndex::from_offset(
             vm_map_entry.get_vm_end_address() - vm_map_entry.get_vm_start_address()
                 + vm_map_entry.get_offset(),
-        ) + 1.into();
+        ) + MIndex::new(1);
         for i in first_p_index..last_p_index {
             if let Some(p) = vm_map_entry.get_object().get_vm_page(i) {
                 if self
@@ -481,16 +482,16 @@ impl VirtualMemoryManager {
                 pr_err!("Cannot associate address.");
                 entry.remove_from_list(&mut self.vm_map_entry);
                 //for rev_i in (0..i).rev() {
-                /*add: self.unassociate_address() */
+                /* ADD: self.unassociate_address() */
                 //}
                 self.vm_map_entry_pool.free(entry);
                 return Err(MemoryError::PagingError);
             }
-            for i in 0.into()..size.to_index() {
+            for i in MIndex::new(0)..size.to_index() {
                 self.update_paging(vm_start_address + i.to_offset());
             }
         } else {
-            for i in 0.into()..size.to_index() {
+            for i in MIndex::new(0)..size.to_index() {
                 if self
                     .associate_address(
                         physical_address + i.to_offset(),
@@ -503,7 +504,7 @@ impl VirtualMemoryManager {
                     pr_err!("Cannot associate address.");
                     entry.remove_from_list(&mut self.vm_map_entry);
                     //for rev_i in (0..i).rev() {
-                    /*add: self.unassociate_address() */
+                    /* ADD: self.unassociate_address() */
                     //}
                     self.vm_map_entry_pool.free(entry);
                     return Err(MemoryError::PagingError);
@@ -522,7 +523,7 @@ impl VirtualMemoryManager {
         permission: MemoryPermissionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<VAddress, MemoryError> {
-        assert_eq!(permission.execute(), false); /*Disallow executing code on device mapping*/
+        assert_eq!(permission.execute(), false); /* Disallow executing code on device mapping */
         self.map_address(
             physical_address,
             virtual_address,
@@ -556,7 +557,7 @@ impl VirtualMemoryManager {
 
     fn _free_address(
         &mut self,
-        vm_map_entry /*will be removed from list and freed*/: &'static mut VirtualMemoryEntry,
+        vm_map_entry /* will be removed from list and freed */: &'static mut VirtualMemoryEntry,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         let first_p_index = vm_map_entry.get_offset().to_index();
@@ -565,7 +566,7 @@ impl VirtualMemoryManager {
                 vm_map_entry.get_vm_start_address(),
                 vm_map_entry.get_vm_end_address(),
             ) + vm_map_entry.get_offset(),
-        ) + 1.into();
+        ) + MIndex::new(1);
         for i in first_p_index..last_p_index {
             if let Some(p) = vm_map_entry.get_object_mut().remove_vm_page(i) {
                 if self
@@ -618,7 +619,6 @@ impl VirtualMemoryManager {
                     .get_vm_start_address()
             {
                 entry.set_up_to_be_root(&mut self.vm_map_entry);
-            //pr_info!("Root was changed.");
             } else {
                 pr_err!("Cannot insert Virtual Memory Entry.");
                 return Err(MemoryError::InsertEntryFailed);
@@ -660,7 +660,7 @@ impl VirtualMemoryManager {
             pr_err!("Size is zero");
             return Err(MemoryError::InvalidSize);
         }
-        for i in MIndex::from(0)..size.to_index() {
+        for i in MIndex::new(0)..size.to_index() {
             self.insert_page_into_vm_map_entry(
                 vm_map_entry,
                 virtual_address + i.to_offset(),
@@ -820,7 +820,7 @@ impl VirtualMemoryManager {
             target_entry.get_vm_end_address() - target_entry.get_vm_start_address()
                 + target_entry.get_offset(),
         );
-        let not_associated_virtual_address = target_entry.get_vm_end_address() + MSize::from(1);
+        let not_associated_virtual_address = target_entry.get_vm_end_address() + MSize::new(1);
         let not_associated_physical_address = target_entry
             .get_object()
             .get_vm_page(old_last_p_index)
@@ -831,7 +831,7 @@ impl VirtualMemoryManager {
         target_entry
             .set_vm_end_address(new_size.to_end_address(target_entry.get_vm_start_address()));
 
-        for i in MIndex::from(0)..MIndex::from_offset(new_size - old_size) {
+        for i in MIndex::new(0)..MIndex::from_offset(new_size - old_size) {
             if let Err(s) = self._map_address(
                 target_entry,
                 not_associated_physical_address + i.to_offset(),
@@ -844,7 +844,7 @@ impl VirtualMemoryManager {
             }
         }
         target_entry.get_object_mut().activate_all_page();
-        for i in MIndex::from(0)..MIndex::from_offset(new_size - old_size) {
+        for i in MIndex::new(0)..MIndex::from_offset(new_size - old_size) {
             if self
                 .associate_address(
                     not_associated_physical_address + i.to_offset(),
@@ -856,7 +856,7 @@ impl VirtualMemoryManager {
             {
                 if !i.is_zero() {
                     target_entry.set_vm_end_address(
-                        not_associated_virtual_address + (i - MIndex::from(1)).to_offset(),
+                        not_associated_virtual_address + (i - MIndex::new(1)).to_offset(),
                     );
                 }
                 return false;
@@ -885,7 +885,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::InvalidSize);
         } else if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
             pr_err!("There is no entry.");
-            return Err(MemoryError::InsertEntryFailed); /*is it ok?*/
+            return Err(MemoryError::InsertEntryFailed); /* Is it ok? */
         }
         if let Some(entry) = self.find_entry_mut(virtual_address) {
             if !entry.get_memory_option_flags().is_dev_map() {
@@ -902,7 +902,7 @@ impl VirtualMemoryManager {
                 .get_vm_page(entry.get_offset().to_index())
                 .unwrap()
                 .get_physical_address();
-            /*p_index最初がマップしているアドレスの最初だと仮定*/
+            /* Assume: p_index is the first of mapping address */
             let option = entry.get_memory_option_flags();
             self._free_address(entry, pm_manager)?;
             self.map_address(
@@ -937,7 +937,7 @@ impl VirtualMemoryManager {
             .as_mut()
             .unwrap()
             .allocator
-            .alloc(size, PAGE_SHIFT.into());
+            .alloc(size, MOrder::new(PAGE_SHIFT));
         if allocated_address.is_none() {
             pr_err!("Cannot alloc from direct map.");
             return Err(MemoryError::AllocPhysicalAddressFailed);
@@ -952,7 +952,7 @@ impl VirtualMemoryManager {
         if let Err(e) = self._map_address(
             direct_map_entry,
             allocated_address,
-            allocated_address.to_usize().into(),
+            allocated_address.to_direct_mapped_v_address(),
             size,
             pm_manager,
         ) {
@@ -964,7 +964,7 @@ impl VirtualMemoryManager {
             return Err(e);
         }
         /* already associated address */
-        return Ok(allocated_address.to_usize().into());
+        return Ok(allocated_address.to_direct_mapped_v_address());
     }
 
     fn _find_entry(&self, vm_address: VAddress) -> Option<&'static VirtualMemoryEntry> {
@@ -1028,15 +1028,15 @@ impl VirtualMemoryManager {
         for e in self.vm_map_entry.iter() {
             let e = unsafe { &*e };
             if let Some(prev) = e.get_prev_entry() {
-                if e.get_vm_start_address() - (prev.get_vm_end_address() + MSize::from(1)) >= size {
-                    return Some(prev.get_vm_end_address() + MSize::from(1));
+                if e.get_vm_start_address() - (prev.get_vm_end_address() + MSize::new(1)) >= size {
+                    return Some(prev.get_vm_end_address() + MSize::new(1));
                 }
             }
             if e.get_next_entry().is_none() {
-                return if e.get_vm_end_address() + MSize::from(1) + size >= MAX_VIRTUAL_ADDRESS {
+                return if e.get_vm_end_address() + MSize::new(1) + size >= MAX_VIRTUAL_ADDRESS {
                     None
                 } else {
-                    Some(e.get_vm_end_address() + MSize::from(1))
+                    Some(e.get_vm_end_address() + MSize::new(1))
                 };
             }
         }
@@ -1044,7 +1044,7 @@ impl VirtualMemoryManager {
     }
 
     pub fn dump_memory_manager(&self) {
-        kprintln!("is system's vm :{}", self.is_system_vm);
+        kprintln!("Is system's vm :{}", self.is_system_vm);
         if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
             kprintln!("There is no root entry.");
             return;
@@ -1063,11 +1063,11 @@ impl VirtualMemoryManager {
             let first_p_index = entry.get_offset().to_index();
             let last_p_index = MIndex::from_offset(
                 entry.get_vm_end_address() - entry.get_vm_start_address() + entry.get_offset(),
-            ) + MIndex::from(1);
+            ) + MIndex::new(1);
 
             let mut omitted = false;
             let mut last_is_not_found = false;
-            let mut last_address = PAddress::from(0);
+            let mut last_address = PAddress::new(0);
 
             for i in first_p_index..last_p_index {
                 if let Some(p) = entry.get_object().get_vm_page(i) {
@@ -1098,7 +1098,7 @@ impl VirtualMemoryManager {
                 } else if !last_is_not_found {
                     kprintln!(" - {} Not Found", i.to_usize());
                     last_is_not_found = true;
-                    last_address = PAddress::from(0);
+                    last_address = PAddress::new(0);
                 }
             }
             if last_is_not_found {
@@ -1118,6 +1118,6 @@ impl VirtualMemoryManager {
             entry = next.unwrap();
         }
         kprintln!("----Page Manager----");
-        self.page_manager.dump_table(None); // 適当
+        self.page_manager.dump_table(None);
     }
 }

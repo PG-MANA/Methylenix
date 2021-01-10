@@ -1,6 +1,8 @@
-/*
- *  Multiple APIC Description Table
- */
+//!
+//! Multiple APIC Description Table
+//!
+//! This manager contains the information of MADT
+//! MADT has the list of Local APIC IDs.
 
 use super::super::INITIAL_MMAP_SIZE;
 

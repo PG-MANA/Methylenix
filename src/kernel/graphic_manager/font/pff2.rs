@@ -1,7 +1,8 @@
-/*
- * PFF2 Font File
- * https://www.gnu.org/software/grub/manual/grub-dev/html_node/PFF2-Font-File-Format.html
- */
+//!
+//! PFF2 Font Manager
+//!
+//! This manager handles PFF2 Font data.
+//! https://www.gnu.org/software/grub/manual/grub-dev/html_node/PFF2-Font-File-Format.html
 
 use super::font_cache::FontCache;
 use super::BitmapFontData;
@@ -40,6 +41,8 @@ struct Pff2FontData {
 }
 
 impl Pff2FontManager {
+    const CHAR_INDEX_SIZE: usize = core::mem::size_of::<Pff2CharIndex>();
+
     pub const fn new() -> Self {
         Self {
             base_address: 0,
@@ -128,31 +131,26 @@ impl Pff2FontManager {
     }
 
     fn build_ascii_cache(&mut self) {
-        use core::mem::size_of;
-        let index_entry_size = size_of::<Pff2CharIndex>();
-        let mut pointer = 0;
+        let mut pointer = self.char_index_address;
+
         for a in ' '..'\x7f' {
             let char_utf32 = [0, 0, 0, a as u8];
             let char_index = {
-                let next_entry = unsafe {
-                    &*((self.char_index_address + pointer * index_entry_size)
-                        as *const Pff2CharIndex)
-                };
+                let next_entry = unsafe { &*(pointer as *const Pff2CharIndex) };
                 if next_entry.code == char_utf32 {
                     next_entry
                 } else {
-                    pointer = 0;
+                    pointer = self.char_index_address;
+                    let limit = self.char_index_address + self.char_index_size;
                     let mut entry;
+
                     loop {
-                        entry = unsafe {
-                            &*((self.char_index_address + pointer * index_entry_size)
-                                as *const Pff2CharIndex)
-                        };
+                        entry = unsafe { &*((self.char_index_address) as *const Pff2CharIndex) };
                         if entry.code == char_utf32 {
                             break;
                         }
-                        pointer += 1;
-                        if pointer * index_entry_size >= self.char_index_size {
+                        pointer += Self::CHAR_INDEX_SIZE;
+                        if pointer >= limit {
                             return;
                         }
                     }
@@ -167,7 +165,7 @@ impl Pff2FontManager {
             let font_data = Self::pff2_font_data_to_font_data(pff2_font_data);
 
             self.font_cache.add_ascii_font_cache(a, font_data);
-            pointer += 1;
+            pointer += Self::CHAR_INDEX_SIZE;
         }
     }
 
@@ -196,9 +194,8 @@ impl Pff2FontManager {
 
     pub fn get_char_font_data(&mut self, c: char) -> Option<BitmapFontData> {
         if c.is_control() {
-            return None;
-        }
-        if c.is_ascii() {
+            None
+        } else if c.is_ascii() {
             Some(self.font_cache.get_cached_ascii_font_data(c))
         } else if let Some(f) = self.font_cache.get_cached_normal_font_data(c) {
             Some(f)
@@ -214,20 +211,17 @@ impl Pff2FontManager {
         let char_utf32: [u8; 4] = (c as u32).to_be_bytes();
         let char_index = {
             let mut entry;
-            let mut pointer = 0;
-            use core::mem::size_of;
-            let index_entry_size = size_of::<Pff2CharIndex>();
+            let mut pointer = self.char_index_address;
+            let limit = self.char_index_address + self.char_index_size;
+            const CHAR_INDEX_SIZE: usize = core::mem::size_of::<Pff2CharIndex>();
 
             loop {
-                entry = unsafe {
-                    &*((self.char_index_address + pointer * index_entry_size)
-                        as *const Pff2CharIndex)
-                };
+                entry = unsafe { &*(pointer as *const Pff2CharIndex) };
                 if entry.code == char_utf32 {
                     break;
                 }
-                pointer += 1;
-                if pointer * index_entry_size >= self.char_index_size {
+                pointer += CHAR_INDEX_SIZE;
+                if pointer >= limit {
                     return None;
                 }
             }

@@ -1,7 +1,7 @@
 //!
 //! Task Manager Process Entry
 //!
-//! This entry contains at least one thread entry
+//! This entry contains at least one thread entry.
 
 use super::{ProcessStatus, TaskSignal, ThreadEntry};
 
@@ -60,7 +60,7 @@ impl ProcessEntry {
         privilege_level: u8,
         priority_level: i8,
     ) {
-        /* assume be locked */
+        /* self.lock must be locked */
         assert_ne!(threads.len(), 0);
         self.p_list = PtrLinkedListNode::new();
         self.signal = TaskSignal::Normal;
@@ -73,8 +73,8 @@ impl ProcessEntry {
         self.next_thread_id = 1;
         self.children = PtrLinkedList::new();
         self.siblings = PtrLinkedListNode::new();
-
         self.thread = PtrLinkedList::new();
+
         if threads.len() == 1 {
             threads[0].set_process(self as *mut _);
             threads[0].set_t_id(1);
@@ -136,6 +136,7 @@ impl ProcessEntry {
 
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) {
         let _lock = self.lock.lock();
+
         if self.num_of_thread == 0 {
             assert!(self.thread.get_first_entry_as_ptr().is_none());
             assert!(self.single_thread.is_none());

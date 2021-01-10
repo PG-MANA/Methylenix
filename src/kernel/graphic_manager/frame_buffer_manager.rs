@@ -1,14 +1,12 @@
-/*
- * Frame Buffer Manager
- * To write image or text
- * This manager is used to show OS's context,
- * if you want to use graphic normally, make other system like wayland.
- */
+//!
+//! Frame Buffer Manager
+//!
+//! This manager is used to write image or text.
+//!
 
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::Address;
-use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::memory_manager::{data_type::Address, MemoryPermissionFlags};
 
 pub struct FrameBufferManager {
     frame_buffer_address: usize,
@@ -67,7 +65,7 @@ impl FrameBufferManager {
         (self.frame_buffer_width, self.frame_buffer_height)
     }
 
-    pub fn clear_screen(&mut self) {
+    pub fn clear_screen(&self) {
         self.fill(0, 0, self.frame_buffer_width, self.frame_buffer_height, 0);
     }
 

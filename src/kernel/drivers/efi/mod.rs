@@ -1,12 +1,18 @@
-/*
- * EFI Function Manager
- */
+//!
+//! EFI Functions Manager
+//!
+//! This manager handles EFI services.
+//! Currently, this is not used.
+
 pub mod table;
 pub mod text;
 
-//use
 use self::table::EfiTableManager;
 use self::text::output::EfiTextOutputManager;
+
+pub type EfiStatus = usize;
+
+pub const EFI_SUCCESS: EfiStatus = 0;
 
 pub struct EfiManager {
     pub is_valid: bool,
@@ -15,22 +21,23 @@ pub struct EfiManager {
 }
 
 impl EfiManager {
-    pub fn new(address: usize) -> EfiManager {
-        let table_manager = EfiTableManager::new(address);
-        let output_manager =
-            EfiTextOutputManager::new(table_manager.get_efi_system_table().console_output_protocol);
+    pub const fn new() -> Self {
         EfiManager {
-            is_valid: true,
-            table_manager,
-            output_manager,
+            is_valid: false,
+            table_manager: EfiTableManager::new(),
+            output_manager: EfiTextOutputManager::new(),
         }
     }
 
-    pub const fn new_static() -> EfiManager {
-        EfiManager {
-            is_valid: false,
-            table_manager: EfiTableManager::new_static(),
-            output_manager: EfiTextOutputManager::new_static(),
-        }
+    pub fn init(&mut self, table_address: usize) -> bool {
+        self.table_manager.init(table_address);
+        self.output_manager.init(
+            self.table_manager
+                .get_efi_system_table()
+                .console_output_protocol,
+        );
+
+        self.is_valid = true;
+        return true;
     }
 }

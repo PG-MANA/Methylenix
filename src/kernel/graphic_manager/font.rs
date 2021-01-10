@@ -1,7 +1,9 @@
-/*
- * Font Management
- * 現在はBitmapフォントでPff2だけだが、他の方式にも対応できるようにしている(trait作る必要あり)
- */
+//!
+//! Font Manager
+//!  
+//! This manager handles font data.
+//! Currently, this manage only PFF2 bitmap font data.
+//!
 
 pub mod font_cache;
 pub mod pff2;
@@ -38,7 +40,7 @@ pub enum FontType {
 }
 
 pub struct FontManager {
-    manager: Pff2FontManager, /*これしかないので*/
+    manager: Pff2FontManager,
 }
 
 impl FontManager {

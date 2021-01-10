@@ -4,6 +4,8 @@
 //! Control TSS.
 //! This struct is not used, but in the future, it may be used to set up ist.
 
+use crate::arch::target_arch::device::cpu;
+
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 use core::mem::size_of;
@@ -57,7 +59,7 @@ impl TssManager {
 
     pub fn init_tss(tss_address: VAddress) {
         let tss_address = tss_address.to_usize();
-        let mut tss = unsafe { &mut *(tss_address as *mut TSS) };
+        let tss = unsafe { &mut *(tss_address as *mut TSS) };
 
         unsafe {
             core::ptr::write_bytes(
@@ -71,12 +73,13 @@ impl TssManager {
     }
 
     pub fn load_current_tss(&mut self) {
-        use crate::arch::target_arch::device::cpu;
         let mut gdt: u128 = 0;
         unsafe { cpu::sgdt(&mut gdt) };
+
         let gdt_address = ((gdt >> 16) & core::usize::MAX as u128) as usize;
         let gdt_limit = (gdt & core::u16::MAX as u128) as u16;
         let tr = unsafe { cpu::store_tr() };
+
         if tr >= gdt_limit {
             self.tss = 0;
             return;

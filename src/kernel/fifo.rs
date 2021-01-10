@@ -1,8 +1,8 @@
-/*
- * FIFO System
- * This FIFO is lock-free.
- * The algorithm may be wrong... if you find a mistake, please tell me...
- */
+//!
+//! FIFO System
+//!
+//! This FIFO is lock-free.
+//! The algorithm may be wrong... if you find a mistake, please tell me...
 
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use core::sync::atomic::{fence, AtomicUsize};
@@ -38,7 +38,7 @@ impl<T: Sized + Copy, const F_SIZE: usize> FIFO<T, F_SIZE> {
                 .write_pointer
                 .compare_exchange(write_pointer, next_write_pointer, Acquire, Relaxed)
                 .is_ok()
-            /*This operation has ABA problem.. but usually buffer_full occurs first and it is rare.*/
+            /* This operation has ABA problem.. but usually buffer_full occurs first and it is rare. */
             {
                 self.buf[write_pointer] = v;
                 fence(Release); /* may be needless */

@@ -22,7 +22,7 @@ pub struct ObjectAllocator {
 
 impl ObjectAllocator {
     pub const fn new() -> Self {
-        ObjectAllocator {
+        Self {
             heap_allocator: HeapAllocator::new(),
         }
     }

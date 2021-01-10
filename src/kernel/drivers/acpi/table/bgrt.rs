@@ -1,6 +1,8 @@
-/*
- * Boot Graphics Resource Table Manager
- */
+//!
+//! Boot Graphics Resource Table Manager
+//!
+//! This manager contains the information of BGRT.
+//! BGRT is usually vendor logo.
 
 use super::super::INITIAL_MMAP_SIZE;
 
@@ -67,7 +69,7 @@ impl BgrtManager {
         if self.enabled {
             let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
             if bgrt.image_type == 0 {
-                return Some((bgrt.image_address as usize).into());
+                return Some(PAddress::new(bgrt.image_address as usize));
             }
         }
         return None;

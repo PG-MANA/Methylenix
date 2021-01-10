@@ -1,6 +1,6 @@
-/*
- * Panic Handler
- */
+//!
+//! Panic Handler
+//!
 
 use crate::arch::target_arch::device::cpu;
 

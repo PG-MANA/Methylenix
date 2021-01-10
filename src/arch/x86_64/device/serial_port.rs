@@ -46,7 +46,7 @@ impl SerialPortManager {
     /// After registering, send the controller to allow IRQ interruption.  
     pub fn init(&self) {
         unsafe {
-            make_device_interrupt_handler!(inthandler24, SerialPortManager::inthandler24_main);
+            make_device_interrupt_handler!(inthandler24, SerialPortManager::int_handler24_main);
             get_kernel_manager_cluster()
                 .boot_strap_cpu_manager
                 .interrupt_manager
@@ -95,7 +95,7 @@ impl SerialPortManager {
     /// If serial port is full or unusable, this function **may take long time**.
     ///
     /// [`send`]: #method.send
-    pub fn sendstr(&self, s: &str) {
+    pub fn send_str(&self, s: &str) {
         if self.port == 0 {
             return;
         }
@@ -140,7 +140,7 @@ impl SerialPortManager {
     /// First, this will get data from serial port controller, and push it into FIFO.
     /// Currently, this wakes the main process up.
     #[inline(never)]
-    fn inthandler24_main() {
+    fn int_handler24_main() {
         if let Ok(interrupt_manager) = get_kernel_manager_cluster()
             .boot_strap_cpu_manager
             .interrupt_manager

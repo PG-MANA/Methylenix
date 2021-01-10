@@ -2,10 +2,12 @@
 //! Heap Allocator
 //!
 
-use crate::arch::x86_64::paging::PAGE_SIZE_USIZE;
+use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
+
 use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize, VAddress};
-use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
-use crate::kernel::memory_manager::{MemoryError, MemoryManager, MemoryPermissionFlags};
+use crate::kernel::memory_manager::{
+    pool_allocator::PoolAllocator, MemoryError, MemoryManager, MemoryPermissionFlags,
+};
 use crate::kernel::sync::spin_lock::Mutex;
 
 pub struct HeapAllocator {

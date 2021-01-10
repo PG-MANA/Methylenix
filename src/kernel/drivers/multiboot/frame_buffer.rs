@@ -1,6 +1,6 @@
-/*
- * Multiboot Information Frame Buffer
- */
+//!
+//! Multiboot Frame Buffer Information
+//!
 
 #[derive(Clone)]
 pub struct FrameBufferInfo {
@@ -9,7 +9,7 @@ pub struct FrameBufferInfo {
     pub width: u32,
     pub height: u32,
     pub depth: u8,
-    pub mode: u8, /* 0 is palette color, 2 is direct RGB, 3 is text mode*/
+    pub mode: u8, /* 0 is palette color, 2 is direct RGB, 3 is text mode */
 }
 
 #[repr(C)]
@@ -29,8 +29,8 @@ pub struct MultibootTagFrameBuffer {
 }
 
 impl FrameBufferInfo {
-    pub fn new(info: &MultibootTagFrameBuffer) -> FrameBufferInfo {
-        FrameBufferInfo {
+    pub fn new(info: &MultibootTagFrameBuffer) -> Self {
+        Self {
             address: info.framebuffer_addr,
             pitch: info.framebuffer_pitch,
             width: info.framebuffer_width,

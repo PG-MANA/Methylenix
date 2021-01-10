@@ -172,7 +172,7 @@ impl GraphicManager {
     pub fn puts(&self, string: &str) -> bool {
         get_kernel_manager_cluster()
             .serial_port_manager
-            .sendstr(string);
+            .send_str(string);
         let _lock = if let Ok(l) = self.lock.try_lock() {
             l
         } else {

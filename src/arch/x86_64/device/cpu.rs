@@ -49,7 +49,7 @@ pub unsafe fn out_byte(port: u16, data: u8) {
 
 #[inline(always)]
 pub unsafe fn in_byte(port: u16) -> u8 {
-    let mut result: u8;
+    let result: u8;
     asm!("in al, dx",in("dx") port,out("al") result);
     result
 }
@@ -59,8 +59,8 @@ pub unsafe fn in_byte(port: u16) -> u8 {
 /// This function is useful when you treat device returning 16bit data with 8bit register.
 #[inline(always)]
 pub unsafe fn in_byte_twice(port: u16) -> (u8 /*first*/, u8 /*second*/) {
-    let mut r1: u8;
-    let mut r2: u8;
+    let r1: u8;
+    let r2: u8;
     asm!("  in  al, dx
             mov bl, al
             in  al, dx    
@@ -70,7 +70,7 @@ pub unsafe fn in_byte_twice(port: u16) -> (u8 /*first*/, u8 /*second*/) {
 
 #[inline(always)]
 pub unsafe fn in_dword(port: u16) -> u32 {
-    let mut result: u32;
+    let result: u32;
     asm!("in eax, dx", in("dx") port, out("eax") result);
     result
 }
@@ -104,8 +104,8 @@ pub unsafe fn lidt(idtr: usize) {
 
 #[inline(always)]
 pub unsafe fn rdmsr(ecx: u32) -> u64 {
-    let mut edx: u32;
-    let mut eax: u32;
+    let edx: u32;
+    let eax: u32;
     asm!("rdmsr", in("ecx") ecx, out("edx") edx, out("eax") eax);
     (edx as u64) << 32 | eax as u64
 }
@@ -134,7 +134,7 @@ pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) 
 
 #[inline(always)]
 pub unsafe fn get_cr0() -> u64 {
-    let mut result: u64;
+    let result: u64;
     asm!("mov {}, cr0", out(reg) result);
     result
 }
@@ -151,14 +151,14 @@ pub unsafe fn set_cr3(address: usize) {
 
 #[inline(always)]
 pub unsafe fn get_cr3() -> usize {
-    let mut result: u64;
+    let result: u64;
     asm!("mov {}, cr3", out(reg) result);
     result as usize
 }
 
 #[inline(always)]
 pub unsafe fn get_cr4() -> u64 {
-    let mut result: u64;
+    let result: u64;
     asm!("mov {}, cr4", out(reg) result);
     result
 }

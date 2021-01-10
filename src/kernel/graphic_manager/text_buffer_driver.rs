@@ -1,8 +1,8 @@
-/*
- * Text Buffer Driver
- * To write text
- * Don't have a string buffer, that should be done by stdio manager.
- */
+//!
+//! Text Buffer Driver(Trait)
+//!
+//! This trait is used to handle text based output driver
+//! Don't have a string buffer, that should be done by stdio manager.
 
 pub trait TextBufferDriver {
     fn puts(&mut self, s: &str) -> bool;
