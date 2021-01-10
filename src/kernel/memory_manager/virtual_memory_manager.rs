@@ -28,7 +28,6 @@ use crate::arch::target_arch::paging::{
 };
 
 use crate::kernel::ptr_linked_list::PtrLinkedList;
-use core::mem::MaybeUninit;
 
 pub struct VirtualMemoryManager {
     vm_map_entry: PtrLinkedList<VirtualMemoryEntry>,
@@ -72,8 +71,9 @@ impl VirtualMemoryManager {
         self.is_system_vm = is_system_vm;
 
         /* Set up cache list */
-        let mut reserved_memory_list =
-            unsafe { MaybeUninit::<[PAddress; PAGING_CACHE_LENGTH]>::uninit().assume_init() };
+        let mut reserved_memory_list = unsafe {
+            core::mem::MaybeUninit::<[PAddress; PAGING_CACHE_LENGTH]>::uninit().assume_init()
+        };
         for i in 0..PAGING_CACHE_LENGTH {
             let cache_address = pm_manager
                 .alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT))

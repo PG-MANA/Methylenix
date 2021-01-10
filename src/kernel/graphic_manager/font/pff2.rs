@@ -145,7 +145,7 @@ impl Pff2FontManager {
                     let mut entry;
 
                     loop {
-                        entry = unsafe { &*((self.char_index_address) as *const Pff2CharIndex) };
+                        entry = unsafe { &*(pointer as *const Pff2CharIndex) };
                         if entry.code == char_utf32 {
                             break;
                         }
@@ -213,14 +213,13 @@ impl Pff2FontManager {
             let mut entry;
             let mut pointer = self.char_index_address;
             let limit = self.char_index_address + self.char_index_size;
-            const CHAR_INDEX_SIZE: usize = core::mem::size_of::<Pff2CharIndex>();
 
             loop {
                 entry = unsafe { &*(pointer as *const Pff2CharIndex) };
                 if entry.code == char_utf32 {
                     break;
                 }
-                pointer += CHAR_INDEX_SIZE;
+                pointer += Self::CHAR_INDEX_SIZE;
                 if pointer >= limit {
                     return None;
                 }

@@ -195,7 +195,7 @@ impl MemoryManager {
     }
 
     pub fn alloc_physical_memory(&mut self, order: MPageOrder) -> Result<PAddress, MemoryError> {
-        /* Initializing use only */
+        /* initializing use only */
         /* Returned memory area is not mapped, if you want to access, you must map. */
         let size = order.to_offset();
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
@@ -207,7 +207,7 @@ impl MemoryManager {
     }
 
     pub fn free_physical_memory(&mut self, physical_address: PAddress, size: MSize) -> bool {
-        /* Initializing use only */
+        /* initializing use only */
         if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
             pm_manager.free(physical_address, size, false)
         } else {
@@ -264,7 +264,7 @@ impl MemoryManager {
         };
 
         //pm_manager.reserve_memory(aligned_physical_address, size, false);
-        // Assume: physical_address must be reserved.
+        /* physical_address must be reserved. */
         /* ADD: check succeeded or failed (failed because of already reserved is ok, but other...) */
         let virtual_address = self.virtual_memory_manager.mmap_dev(
             aligned_physical_address,
@@ -293,7 +293,7 @@ impl MemoryManager {
         };
 
         //pm_manager.reserve_memory(aligned_physical_address, size, false);
-        // Assume: physical_address must be reserved.
+        /* physical_address must be reserved. */
 
         let new_virtual_address = self.virtual_memory_manager.resize_memory_mapping(
             aligned_virtual_address,
@@ -378,14 +378,14 @@ impl MemoryOptionFlags {
     pub const PRE_RESERVED: u16 = 1 << 0;
     pub const DO_NOT_FREE_PHY_ADDR: u16 = 1 << 1;
     pub const WIRED: u16 = 1 << 2;
-    pub const DEV_MAP: u16 = 1 << 3; /* マップしている物理メモリはなにか意味がある */
+    pub const DEV_MAP: u16 = 1 << 3;
     pub const DIRECT_MAP: u16 = 1 << 4;
 
     pub const fn new(flags: u16) -> Self {
         if flags & (!0x1F) != 0 {
-            /* when you add option, you must change this assert */
+            /* When you add option, you must change this assert. */
             panic!("Invalid flags are set.");
-            /*static_assert*/
+            /* static_assert */
         }
         Self { flags }
     }

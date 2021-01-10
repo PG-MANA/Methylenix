@@ -119,7 +119,7 @@ impl WorkQueueManager {
             manager.work_pool.free(work);
             drop(_lock);
             InterruptManager::restore_local_irq(interrupt_flag);
-            /* Execute the work function*/
+            /* Execute the work function */
             work_function(work_data);
         }
     }
