@@ -71,7 +71,7 @@ impl FrameBufferManager {
         self.fill(0, 0, self.frame_buffer_width, self.frame_buffer_height, 0);
     }
 
-    pub fn fill(&mut self, start_x: usize, start_y: usize, end_x: usize, end_y: usize, color: u32) {
+    pub fn fill(&self, start_x: usize, start_y: usize, end_x: usize, end_y: usize, color: u32) {
         assert!(start_x < end_x);
         assert!(start_y < end_y);
         assert!(end_x <= self.frame_buffer_width);
@@ -102,7 +102,7 @@ impl FrameBufferManager {
     }
 
     pub fn scroll(
-        &mut self,
+        &self,
         from_x: usize,
         from_y: usize,
         to_x: usize,
@@ -143,6 +143,28 @@ impl FrameBufferManager {
                     )
                 };
             }
+        }
+    }
+
+    pub fn scroll_screen(&self, height: usize) {
+        assert!(height < self.frame_buffer_height);
+        let color_depth_byte = (self.frame_buffer_color_depth >> 3) as usize;
+        let mut src =
+            self.frame_buffer_address + height * self.frame_buffer_width * color_depth_byte;
+        let mut dst = self.frame_buffer_address;
+        let end = self.frame_buffer_address
+            + (self.frame_buffer_height - height) * self.frame_buffer_width * color_depth_byte;
+        let quad_word_copy_end = if (end & 7) == 0 { end - 8 } else { end & !7 };
+
+        while dst < quad_word_copy_end {
+            unsafe { *(dst as *mut u64) = *(src as *const u64) };
+            src += 1 << 3;
+            dst += 1 << 3;
+        }
+        while dst < end {
+            unsafe { *(dst as *mut u8) = *(src as *const u8) };
+            src += 1;
+            dst += 1;
         }
     }
 

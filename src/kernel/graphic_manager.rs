@@ -142,14 +142,7 @@ impl GraphicManager {
                 if frame_buffer_size.1 <= cursor.y + font_data.height as usize {
                     let scroll_y =
                         font_manager.get_max_font_height() + cursor.y - frame_buffer_size.1;
-                    frame_buffer_manager.scroll(
-                        0,
-                        scroll_y,
-                        0,
-                        0,
-                        frame_buffer_size.0,
-                        frame_buffer_size.1 - scroll_y,
-                    ); /* scroll */
+                    frame_buffer_manager.scroll_screen(scroll_y);
                     frame_buffer_manager.fill(
                         0,
                         frame_buffer_size.1 - scroll_y,
