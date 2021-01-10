@@ -1,8 +1,8 @@
-/*
- * LinkedList
- * This LinkedList only treat ptr from heap
- * Be careful about ptr accessibly and conflict of mutable access
- */
+//!
+//! Linked List
+//!
+//! This LinkedList only treat ptr from heap
+//! Be careful about ptr accessibly and conflict of mutable access.
 
 use core::marker::PhantomData;
 use core::ptr::NonNull;

@@ -7,7 +7,7 @@
 
 .global boot_from_multiboot, BOOT_FROM_MULTIBOOT_MARK
 .extern init_long_mode, fin                 /* at init_long_mode */
-.extern initial_stack, INITIAL_STACK_SIZE   /* at common */
+.extern OS_STACK_SIZE, os_stack             /* at common */
 
 .equ MULTIBOOT_CHECK_MAGIC, 0x36d76289      /* multiboot2 magic code */
 .equ BOOT_FROM_MULTIBOOT_MARK, 1
@@ -16,9 +16,9 @@
 .align 4
 
 boot_from_multiboot:
-  mov   $(initial_stack + INITIAL_STACK_SIZE), %esp
+  mov   $(os_stack + OS_STACK_SIZE), %esp
 
-  /* init eflags */
+  /* Init eflags */
   push  $0
   popfd
   push  $0                          /* for 64bit pop */

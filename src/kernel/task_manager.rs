@@ -7,6 +7,7 @@
 mod process_entry;
 pub mod run_queue_manager;
 mod thread_entry;
+pub mod wait_queue;
 pub mod work_queue;
 
 use self::process_entry::ProcessEntry;
@@ -55,6 +56,7 @@ pub enum ProcessStatus {
 impl TaskManager {
     const NUM_OF_INITIAL_THREAD_ENTRIES: usize = 6;
     const NUM_OF_INITIAL_PROCESS_ENTRIES: usize = 6;
+
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
@@ -229,7 +231,7 @@ impl TaskManager {
     }
 
     fn search_process_mut(&mut self, p_id: usize) -> Option<*mut ProcessEntry> {
-        /* Assume locked */
+        /* self.lock must be locked */
         assert_ne!(p_id, 0);
 
         let process = self.kernel_process;

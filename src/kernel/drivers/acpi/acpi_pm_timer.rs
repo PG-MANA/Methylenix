@@ -1,6 +1,8 @@
-/*
- * ACPI Power Management Timer
- */
+//!
+//! ACPI Power Management Timer
+//!
+//! ACPI Power Management Timer(ACPI PM Timer) is the timer equipped in ACPI.
+//! Its frequency is 3.579545 MHz.
 
 use crate::arch::target_arch::device::cpu;
 

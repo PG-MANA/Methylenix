@@ -1,8 +1,9 @@
-/*
- * Memory Manager
- * This manager is the frontend of physical memory manager and page manager.
- * In this memory system, you should not use alloc::*, use only core::*
- */
+//!
+//! Memory Manager
+//!
+//! This manager is the frontend of physical memory manager and page manager.
+//! In this memory system, you should not use alloc::*, use only core::*
+//!
 
 pub mod data_type;
 pub mod global_allocator;
@@ -78,8 +79,7 @@ impl MemoryManager {
         physical_memory_manager: &'static Mutex<PhysicalMemoryManager>,
         virtual_memory_manager: VirtualMemoryManager,
     ) -> Self {
-        /*カーネル領域の予約*/
-        MemoryManager {
+        Self {
             physical_memory_manager,
             virtual_memory_manager,
         }
@@ -91,7 +91,7 @@ impl MemoryManager {
         permission: MemoryPermissionFlags,
     ) -> Result<VAddress, MemoryError> {
         /* ADD: lazy allocation */
-        /* return physically continuous 2 ^ order pages memory. */
+        /* Return physically continuous 2 ^ order pages memory. */
         let size = order.to_offset();
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT.into()) {
@@ -120,7 +120,7 @@ impl MemoryManager {
         order: MPageOrder,
         permission: MemoryPermissionFlags,
     ) -> Result<VAddress, MemoryError> {
-        /* THINK: rename*/
+        /* THINK: rename */
         /* vmalloc */
         let size = order.to_offset();
         if size <= PAGE_SIZE {
@@ -186,7 +186,7 @@ impl MemoryManager {
             .virtual_memory_manager
             .free_address(aligned_vm_address.into(), &mut pm_manager)
         {
-            pr_err!("{:?}", e); /* free's error tends to be ignored. */
+            pr_err!("{:?}", e); /* The error of 'free_address' tends to be ignored. */
             Err(e)
         } else {
             Ok(())
@@ -196,7 +196,7 @@ impl MemoryManager {
 
     pub fn alloc_physical_memory(&mut self, order: MPageOrder) -> Result<PAddress, MemoryError> {
         /* initializing use only */
-        /* returned memory area is not mapped, if you want to access, you must map. */
+        /* Returned memory area is not mapped, if you want to access, you must map. */
         let size = order.to_offset();
         let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
         if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT.into()) {
@@ -223,13 +223,13 @@ impl MemoryManager {
         option: MemoryOptionFlags,
         should_reserve_physical_memory: bool,
     ) -> Result<VAddress, MemoryError> {
-        /* for some data */
-        /* should remake... */
+        /* For some data mapping */
+        /* should remake...? */
         let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
         let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
             p
         } else {
-            /* add: maybe sleep option */
+            /* ADD: maybe sleep option */
             return Err(MemoryError::MutexError);
         };
 
@@ -253,19 +253,19 @@ impl MemoryManager {
         size: MSize,
         permission: MemoryPermissionFlags,
     ) -> Result<VAddress, MemoryError> {
-        /* for io_map */
-        /* should remake... */
+        /* For IO map */
+        /* should remake...? */
         let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
         let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
             p
         } else {
-            /* add: maybe sleep option */
+            /* ADD: maybe sleep option */
             return Err(MemoryError::MutexError);
         };
 
         //pm_manager.reserve_memory(aligned_physical_address, size, false);
-        // assume: physical_address must be reserved.
-        /* add: check succeeded or failed (failed because of already reserved is ok, but other... )*/
+        /* physical_address must be reserved. */
+        /* ADD: check succeeded or failed (failed because of already reserved is ok, but other...) */
         let virtual_address = self.virtual_memory_manager.mmap_dev(
             aligned_physical_address,
             None,
@@ -288,13 +288,12 @@ impl MemoryManager {
         let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
             p
         } else {
-            /* add: maybe sleep option */
+            /* ADD: maybe sleep option */
             return Err(MemoryError::MutexError);
         };
 
         //pm_manager.reserve_memory(aligned_physical_address, size, false);
-        // assume: physical_address must be reserved.
-        /* add: check succeeded or failed (failed because of already reserved is ok, but other... )*/
+        /* physical_address must be reserved. */
 
         let new_virtual_address = self.virtual_memory_manager.resize_memory_mapping(
             aligned_virtual_address,
@@ -379,14 +378,14 @@ impl MemoryOptionFlags {
     pub const PRE_RESERVED: u16 = 1 << 0;
     pub const DO_NOT_FREE_PHY_ADDR: u16 = 1 << 1;
     pub const WIRED: u16 = 1 << 2;
-    pub const DEV_MAP: u16 = 1 << 3; /* マップしている物理メモリはなにか意味がある */
+    pub const DEV_MAP: u16 = 1 << 3;
     pub const DIRECT_MAP: u16 = 1 << 4;
 
     pub const fn new(flags: u16) -> Self {
         if flags & (!0x1F) != 0 {
-            /* when you add option, you must change this assert */
+            /* When you add option, you must change this assert. */
             panic!("Invalid flags are set.");
-            /*static_assert*/
+            /* static_assert */
         }
         Self { flags }
     }

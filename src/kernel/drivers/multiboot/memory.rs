@@ -1,6 +1,6 @@
-/*
- * Multiboot Information Memory Map
- */
+//!
+//! Multiboot Memory Map Information
+//!
 
 use core::mem;
 
@@ -45,7 +45,7 @@ impl MemoryMapInfo {
 
 impl Iterator for MemoryMapInfo {
     type Item = &'static MemoryMapEntry;
-    fn next(&mut self) -> Option<&'static MemoryMapEntry> {
+    fn next(&mut self) -> Option<Self::Item> {
         if self.cnt == self.num_of_entry {
             None
         } else {

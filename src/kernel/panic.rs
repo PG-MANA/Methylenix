@@ -1,6 +1,6 @@
-/*
- * Panic Handler
- */
+//!
+//! Panic Handler
+//!
 
 use crate::arch::target_arch::device::cpu;
 
@@ -30,7 +30,7 @@ pub fn panic(info: &panic::PanicInfo) -> ! {
 
     loop {
         unsafe {
-            cpu::hlt();
+            cpu::halt();
         }
     }
 }

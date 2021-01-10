@@ -1,7 +1,9 @@
-/*
- * Multiboot Information
- * https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
- */
+//!
+//! Multiboot Information
+//!
+//! This manager contains the multiboot2 information.
+//! https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
+//!
 
 mod elf;
 mod frame_buffer;
@@ -11,7 +13,7 @@ pub use self::elf::{ElfInfo, ElfSection};
 pub use self::frame_buffer::FrameBufferInfo;
 pub use self::memory::{MemoryMapEntry, MemoryMapInfo};
 
-use core::mem;
+use core::{mem, slice, str};
 
 #[repr(C)]
 struct MultibootTag {
@@ -81,19 +83,21 @@ impl MultiBootInformation {
     const TAG_TYPE_EFI64_IH: u32 = 20;
     const TAG_TYPE_BASE_ADDR: u32 = 21;
 
-    pub fn new(address: usize, should_test: bool) -> MultiBootInformation {
+    pub fn new(address: usize, should_test: bool) -> Self {
         #[allow(invalid_value)]
-        let mut mbi: MultiBootInformation = unsafe { mem::MaybeUninit::zeroed().assume_init() };
-        if should_test && !MultiBootInformation::test(address) {
-            panic!("Unaligned Multi Boot Information")
+        let mut mbi: Self = unsafe { mem::MaybeUninit::zeroed().assume_init() };
+        if should_test && !Self::test(address) {
+            pr_err!("Unaligned Multi Boot Information");
+            return mbi;
         }
         mbi.address = address;
-        mbi.size = MultiBootInformation::total_size(address) as usize;
+        mbi.size = Self::get_total_size(address);
         if mbi.size == 0 {
-            panic!("Invalid Multi Boot Information")
+            pr_err!("Invalid Multi Boot Information");
+            return mbi;
         }
-        let mut tag = address + 8;
 
+        let mut tag = address + 8;
         loop {
             let tag_type: u32 = unsafe { (*(tag as *const MultibootTag)).s_type };
             match tag_type {
@@ -110,7 +114,6 @@ impl MultiBootInformation {
                     mbi.new_acpi_rsdp_ptr = Some(tag + 8);
                 }
                 MultiBootInformation::TAG_TYPE_CMDLINE => {
-                    use core::{slice, str};
                     mbi.boot_cmd_line = str::from_utf8(unsafe {
                         slice::from_raw_parts(
                             (tag + 8) as *const u8,
@@ -120,7 +123,6 @@ impl MultiBootInformation {
                     .unwrap_or("");
                 }
                 MultiBootInformation::TAG_TYPE_BOOT_LOADER_NAME => {
-                    use core::{slice, str};
                     mbi.boot_loader_name = str::from_utf8(unsafe {
                         slice::from_raw_parts(
                             (tag + 8) as *const u8,
@@ -140,7 +142,6 @@ impl MultiBootInformation {
                     mbi.elf_info = ElfInfo::new(unsafe { &*(tag as *const _) });
                 }
                 MultiBootInformation::TAG_TYPE_MODULE => {
-                    use core::{slice, str};
                     let module_info = unsafe { &*(tag as *const MultibootTagModule) };
                     for e in mbi.modules.iter_mut() {
                         if e.start_address == 0 && e.end_address == 0 {
@@ -176,7 +177,7 @@ impl MultiBootInformation {
         }
     }
 
-    fn total_size(address: usize) -> u32 {
-        unsafe { *(address as *mut u32) }
+    fn get_total_size(address: usize) -> usize {
+        unsafe { *(address as *mut u32) as usize }
     }
 }

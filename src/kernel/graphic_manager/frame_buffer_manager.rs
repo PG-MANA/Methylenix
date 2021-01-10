@@ -1,14 +1,12 @@
-/*
- * Frame Buffer Manager
- * To write image or text
- * This manager is used to show OS's context,
- * if you want to use graphic normally, make other system like wayland.
- */
+//!
+//! Frame Buffer Manager
+//!
+//! This manager is used to write image or text.
+//!
 
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::Address;
-use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::memory_manager::{data_type::Address, MemoryPermissionFlags};
 
 pub struct FrameBufferManager {
     frame_buffer_address: usize,
@@ -51,7 +49,7 @@ impl FrameBufferManager {
                 self.frame_buffer_address.into(),
                 (self.frame_buffer_width
                     * self.frame_buffer_height
-                    * (self.frame_buffer_color_depth / 8) as usize)
+                    * (self.frame_buffer_color_depth >> 3/* /8 */) as usize)
                     .into(),
                 MemoryPermissionFlags::data(),
             ) {
@@ -63,15 +61,15 @@ impl FrameBufferManager {
         }
     }
 
-    pub const fn get_framer_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
+    pub const fn get_frame_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
         (self.frame_buffer_width, self.frame_buffer_height)
     }
 
-    pub fn clear_screen(&mut self) {
+    pub fn clear_screen(&self) {
         self.fill(0, 0, self.frame_buffer_width, self.frame_buffer_height, 0);
     }
 
-    pub fn fill(&mut self, start_x: usize, start_y: usize, end_x: usize, end_y: usize, color: u32) {
+    pub fn fill(&self, start_x: usize, start_y: usize, end_x: usize, end_y: usize, color: u32) {
         assert!(start_x < end_x);
         assert!(start_y < end_y);
         assert!(end_x <= self.frame_buffer_width);
@@ -102,7 +100,7 @@ impl FrameBufferManager {
     }
 
     pub fn scroll(
-        &mut self,
+        &self,
         from_x: usize,
         from_y: usize,
         to_x: usize,
@@ -146,6 +144,28 @@ impl FrameBufferManager {
         }
     }
 
+    pub fn scroll_screen(&self, height: usize) {
+        assert!(height < self.frame_buffer_height);
+        let color_depth_byte = (self.frame_buffer_color_depth >> 3) as usize;
+        let mut src =
+            self.frame_buffer_address + height * self.frame_buffer_width * color_depth_byte;
+        let mut dst = self.frame_buffer_address;
+        let end = self.frame_buffer_address
+            + (self.frame_buffer_height - height) * self.frame_buffer_width * color_depth_byte;
+        let quad_word_copy_end = if (end & 7) == 0 { end - 8 } else { end & !7 };
+
+        while dst < quad_word_copy_end {
+            unsafe { *(dst as *mut u64) = *(src as *const u64) };
+            src += 1 << 3;
+            dst += 1 << 3;
+        }
+        while dst < end {
+            unsafe { *(dst as *mut u8) = *(src as *const u8) };
+            src += 1;
+            dst += 1;
+        }
+    }
+
     pub fn write_monochrome_bitmap(
         &mut self,
         buffer: usize,
@@ -160,46 +180,62 @@ impl FrameBufferManager {
         assert_ne!(self.frame_buffer_height, 0);
         assert_ne!(self.frame_buffer_width, 0);
 
-        let screen_depth_byte = self.frame_buffer_color_depth as usize / 8;
-        let bitmap_aligned_bitmap_width_pointer = if is_not_aligned_data {
-            size_x
-        } else {
-            (size_x & !3) + 4
-        };
-        let color = [back_color, front_color];
-
-        let get_bit = |x: usize, y: usize| -> usize {
-            let offset = y * bitmap_aligned_bitmap_width_pointer + x;
-            unsafe {
-                (((*((buffer + offset / 8) as *const u8)) >> (7 - (offset & 0b111))) & 1) as usize
-            }
-        };
+        let screen_depth_byte = self.frame_buffer_color_depth as usize >> 3;
+        let bitmap_padding = if is_not_aligned_data { 0 } else { size_x & 7 };
+        let mut bitmap_pointer = buffer;
+        let mut bitmap_mask = 0x80;
+        let mut buffer_pointer = self.frame_buffer_address
+            + (offset_y * self.frame_buffer_width + offset_x) * screen_depth_byte;
 
         if self.frame_buffer_color_depth == 32 {
-            for height_pointer in (0..size_y).rev() {
-                for width_pointer in 0..size_x {
+            for _ in 0..size_y {
+                for _ in 0..size_x {
                     unsafe {
-                        *((self.frame_buffer_address
-                            + ((height_pointer + offset_y) * self.frame_buffer_width
-                                + offset_x
-                                + width_pointer)
-                                * screen_depth_byte) as *mut u32) =
-                            color[get_bit(width_pointer, height_pointer)];
+                        *(buffer_pointer as *mut u32) =
+                            if (*(bitmap_pointer as *const u8) & bitmap_mask) != 0 {
+                                front_color
+                            } else {
+                                back_color
+                            }
                     };
+                    buffer_pointer += screen_depth_byte;
+                    bitmap_mask >>= 1;
+                    if bitmap_mask == 0 {
+                        bitmap_pointer += 1;
+                        bitmap_mask = 0x80;
+                    }
+                }
+                buffer_pointer += (self.frame_buffer_width - size_x) * screen_depth_byte;
+                if !is_not_aligned_data {
+                    /* This may have a bag... */
+                    bitmap_pointer += bitmap_padding;
+                    bitmap_mask = 0x80;
                 }
             }
         } else {
-            for height_pointer in (0..size_y).rev() {
-                for width_pointer in 0..size_x {
+            for _ in 0..size_y {
+                for _ in 0..size_x {
+                    let dot = buffer_pointer as *mut u32;
                     unsafe {
-                        let dot = (self.frame_buffer_address
-                            + ((height_pointer + offset_y) * self.frame_buffer_width
-                                + offset_x
-                                + width_pointer)
-                                * screen_depth_byte) as *mut u32;
                         *dot &= 0x000000ff;
-                        *dot |= (color[get_bit(width_pointer, height_pointer)]) & 0xffffff;
+                        *dot |= if (*(bitmap_pointer as *const u8) & bitmap_mask) != 0 {
+                            front_color
+                        } else {
+                            back_color
+                        } & 0xffffff;
                     }
+                    buffer_pointer += screen_depth_byte;
+                    bitmap_mask >>= 1;
+                    if bitmap_mask == 0 {
+                        bitmap_pointer += 1;
+                        bitmap_mask = 0x80;
+                    }
+                }
+                buffer_pointer += (self.frame_buffer_width - size_x) * screen_depth_byte;
+                if !is_not_aligned_data {
+                    /* This may have a bag... */
+                    bitmap_pointer += bitmap_padding;
+                    bitmap_mask = 0x80;
                 }
             }
         }

@@ -1,16 +1,14 @@
-/*
- * Physical Memory Manager
- * 現時点では連結リスト管理だが、AVL-Treeなども実装してみたい
- */
-/*WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている*/
+//!
+//! Physical Memory Manager
+//!
+//! 現時点では連結リスト管理だが、AVL-Treeなども実装してみたい
+//! WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
 use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress};
 
-use core::mem;
-
-const MEMORY_ENTRY_SIZE: usize = mem::size_of::<MemoryEntry>();
+const MEMORY_ENTRY_SIZE: usize = core::mem::size_of::<MemoryEntry>();
 
 pub struct PhysicalMemoryManager {
     memory_size: MSize,
@@ -22,7 +20,7 @@ pub struct PhysicalMemoryManager {
 }
 
 struct MemoryEntry {
-    /*空きメモリ領域を所持している*/
+    /* Contains free memory area */
     previous: Option<usize>,
     next: Option<usize>,
     list_prev: Option<usize>,
@@ -45,8 +43,8 @@ struct MemoryEntryListIterMut {
 impl PhysicalMemoryManager {
     const NUM_OF_FREE_LIST: usize = 12;
 
-    pub const fn new() -> PhysicalMemoryManager {
-        PhysicalMemoryManager {
+    pub const fn new() -> Self {
+        Self {
             memory_size: MSize::new(0),
             free_memory_size: MSize::new(0),
             free_list: [None; Self::NUM_OF_FREE_LIST],
@@ -107,7 +105,6 @@ impl PhysicalMemoryManager {
         &mut self,
         address: PAddress,
     ) -> Option<&'static mut MemoryEntry> {
-        /* addressの直前のMemoryEntryを探す */
         let mut entry = unsafe { &mut *(self.first_entry as *mut MemoryEntry) };
         while entry.get_start_address() < address {
             if let Some(t) = entry.get_next_entry() {
@@ -155,7 +152,7 @@ impl PhysicalMemoryManager {
 
         if entry.get_start_address() == start_address {
             if entry.get_end_address() == size.to_end_address(start_address) {
-                /* delete the entry */
+                /* Delete the entry */
                 if entry.is_first_entry() {
                     if let Some(next) = entry.get_next_entry() {
                         self.first_entry = next as *mut _ as usize;
@@ -174,7 +171,7 @@ impl PhysicalMemoryManager {
             if size.to_usize() != 1 {
                 return false;
             }
-            /* allocate 1 byte of end_address */
+            /* Allocate 1 byte of end_address */
             entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
             self.chain_entry_to_free_list(entry, entry.get_size() + size, false);
         } else if entry.get_end_address() == size.to_end_address(start_address) {
@@ -185,7 +182,7 @@ impl PhysicalMemoryManager {
             let new_entry = if let Some(t) = self.create_memory_entry() {
                 t
             } else {
-                /* alloc bigger memory pool... */
+                /* TODO: Alloc bigger memory pool... */
                 return false;
             };
             let old_size = entry.get_size();
@@ -216,7 +213,7 @@ impl PhysicalMemoryManager {
             /* already freed */
             false
         } else if entry.get_end_address() >= start_address && !entry.is_first_entry() {
-            /* free duplicated area */
+            /* Free duplicated area */
             self.define_free_memory(
                 entry.get_end_address() + MSize::from(1),
                 MSize::from_address(
@@ -225,7 +222,7 @@ impl PhysicalMemoryManager {
                 ),
             )
         } else if entry.get_end_address() == size.to_end_address(start_address) {
-            /* free duplicated area */
+            /* Free duplicated area */
             /* entry may be first entry */
             self.define_free_memory(start_address, size - entry.get_size())
         } else {
@@ -262,7 +259,7 @@ impl PhysicalMemoryManager {
                 let new_entry = if let Some(t) = self.create_memory_entry() {
                     t
                 } else {
-                    /* allocate bigger memory pool... */
+                    /* TODO: Alloc bigger memory pool... */
                     return false;
                 };
                 new_entry.set_range(start_address, size.to_end_address(start_address));
@@ -288,7 +285,7 @@ impl PhysicalMemoryManager {
                 let new_entry = if let Some(t) = self.create_memory_entry() {
                     t
                 } else {
-                    /* allocate bigger memory pool... */
+                    /* TODO: Alloc bigger memory pool... */
                     return false;
                 };
                 new_entry.set_range(start_address, size.to_end_address(start_address));
@@ -434,7 +431,7 @@ impl PhysicalMemoryManager {
         address: PAddress,
         size: MSize,
         align_order: MOrder,
-    ) -> (PAddress /*address*/, MSize /*size*/) {
+    ) -> (PAddress /* address */, MSize /* size */) {
         let align_size = align_order.to_offset();
         let mask = !(align_size.to_usize() - 1);
         let aligned_address = address.to_usize() & mask;
@@ -451,7 +448,7 @@ impl PhysicalMemoryManager {
         address: PAddress,
         size: MSize,
         align_order: MOrder,
-    ) -> (PAddress /*address*/, MSize /*size*/) {
+    ) -> (PAddress /* address */, MSize /* size */) {
         if address.is_zero() {
             (PAddress::new(0), size)
         } else {
@@ -466,7 +463,7 @@ impl PhysicalMemoryManager {
             };
             while aligned_address < address.to_usize() {
                 if aligned_available_size < align_size {
-                    return (aligned_address.into(), 0.into());
+                    return (PAddress::new(aligned_address), MSize::new(0));
                 }
                 aligned_address += align_size;
                 aligned_available_size -= align_size;
@@ -643,7 +640,7 @@ impl Iterator for MemoryEntryListIter {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(address) = self.entry {
             let entry = unsafe { &*(address as *mut MemoryEntry) };
-            self.entry = entry.list_next; /* ATTENTION: get free_list's next*/
+            self.entry = entry.list_next; /* ATTENTION: get **free_list's** next */
             Some(entry)
         } else {
             None
@@ -656,7 +653,7 @@ impl Iterator for MemoryEntryListIterMut {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(address) = self.entry {
             let entry = unsafe { &mut *(address as *mut MemoryEntry) };
-            self.entry = entry.list_next; /* ATTENTION: get free_list's next*/
+            self.entry = entry.list_next; /* ATTENTION: get **free_list's** next */
             Some(entry)
         } else {
             None

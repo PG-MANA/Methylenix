@@ -1,7 +1,9 @@
-/*
- * Font Cache
- * For BitmapFontData
- */
+//!
+//! Font Cache
+//!
+//! This module contains the cache of BitmapFontData.
+//! All ascii data and DEFAULT_CACHE_LEN of non-ascii data are available.
+//!
 
 use super::BitmapFontData;
 

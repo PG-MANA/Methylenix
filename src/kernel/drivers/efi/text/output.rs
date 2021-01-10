@@ -1,15 +1,14 @@
-/*
- * EFI Output Protocol Manager
- */
+//!
+//! EFI Output Protocol Manager
+//!
 
-//use
-use super::super::table::EfiStatus;
+use super::super::{EfiStatus, EFI_SUCCESS};
 
 #[repr(C)]
 #[derive(Clone)]
 pub struct EfiOutputProtocol {
-    reset: fn(*const EfiOutputProtocol, bool) -> EfiStatus,
-    output: fn(*const EfiOutputProtocol, *const u16) -> EfiStatus,
+    reset: extern "win64" fn(*const EfiOutputProtocol, bool) -> EfiStatus,
+    output: extern "win64" fn(*const EfiOutputProtocol, *const u16) -> EfiStatus,
     test_string: usize,
     query_mode: usize,
     set_mode: usize,
@@ -25,16 +24,15 @@ pub struct EfiTextOutputManager {
 }
 
 impl EfiTextOutputManager {
-    pub fn new(output_protocol: *const EfiOutputProtocol) -> EfiTextOutputManager {
-        EfiTextOutputManager {
-            protocol: output_protocol,
-        }
-    }
-
-    pub const fn new_static() -> EfiTextOutputManager {
+    pub const fn new() -> Self {
         EfiTextOutputManager {
             protocol: 0 as *const EfiOutputProtocol,
         }
+    }
+
+    pub fn init(&mut self, output_protocol: *const EfiOutputProtocol) -> bool {
+        self.protocol = output_protocol;
+        return true;
     }
 
     pub fn reset(&self, extended_verification: bool) -> EfiStatus {
@@ -42,15 +40,21 @@ impl EfiTextOutputManager {
     }
 
     pub fn output(&self, string: &str) -> EfiStatus {
-        let mut buf = [0 as u16; 256];
-        let mut counter = 0;
+        let mut buf = [0; 256];
+        let mut pointer = 0;
+
         for x in string.encode_utf16() {
-            if counter >= buf.len() - 1 {
-                break;
+            if pointer >= buf.len() - 1 {
+                let status = unsafe { ((*(self.protocol)).output)(self.protocol, buf.as_ptr()) };
+                if status != EFI_SUCCESS {
+                    return status;
+                }
+                pointer = 0;
             }
-            buf[counter] = x;
-            counter += 1;
+            buf[pointer] = x;
+            pointer += 1;
         }
+        buf[pointer] = 0;
         unsafe { ((*(self.protocol)).output)(self.protocol, buf.as_ptr()) }
     }
 }

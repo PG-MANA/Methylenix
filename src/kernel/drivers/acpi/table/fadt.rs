@@ -1,6 +1,8 @@
-/*
- *  Fixed ACPI Description Table
- */
+//!
+//! Fixed ACPI Description Table
+//!
+//! This manager contains the information of FADT
+//! FADT has the information about ACPI PowerManagement Timer.
 
 use super::super::INITIAL_MMAP_SIZE;
 
@@ -41,9 +43,9 @@ impl FadtManager {
 
     pub const SIGNATURE: [u8; 4] = ['F' as u8, 'A' as u8, 'C' as u8, 'P' as u8];
     pub fn init(&mut self, fadt_vm_address: VAddress) -> bool {
-        /* bgrt_vm_address must be accessible */
+        /* fadt_vm_address must be accessible */
         let fadt = unsafe { &*(fadt_vm_address.to_usize() as *const FADT) };
-        if fadt.major_version != 1 {
+        if fadt.major_version > 6 {
             pr_err!("Not supported FADT version:{}", fadt.major_version);
         }
         let fadt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
@@ -57,7 +59,7 @@ impl FadtManager {
             ) {
             a
         } else {
-            pr_err!("Cannot reserve memory area of BGRT.");
+            pr_err!("Cannot reserve memory area of FADT.");
             return false;
         };
         self.base_address = fadt_vm_address;

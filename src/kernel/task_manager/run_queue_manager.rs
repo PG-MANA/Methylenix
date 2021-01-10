@@ -7,7 +7,7 @@ use super::thread_entry::ThreadEntry;
 use super::TaskStatus;
 
 use crate::arch::target_arch::context::context_data::ContextData;
-use crate::arch::target_arch::interrupt::InterruptManager;
+use crate::arch::target_arch::interrupt::{InterruptManager, StoredIrqData};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::ptr_linked_list::PtrLinkedList;
@@ -49,18 +49,19 @@ impl RunQueueManager {
                 .get_context_manager()
                 .jump_to_context(thread.get_context())
         };
-        /* not return here. */
         panic!("Switching to the kernel process was failed.");
     }
 
-    /* sleep running thread and switch to next thread */
+    /// Sleep running thread and switch to next thread
     pub fn sleep(&mut self) {
+        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         running_thread.set_task_status(TaskStatus::Sleeping);
         drop(_lock);
-        self.switch_to_next_thread(); /* running_thread will be linked in sleep_list in this function */
-        /* woke up and return */
+        self._switch_to_next_thread(interrupt_flag, None);
+        /* running_thread will be linked in sleep_list in this function */
+        /* Woke up and return */
     }
 
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) {
@@ -83,15 +84,22 @@ impl RunQueueManager {
     }
 
     pub fn switch_to_next_thread(&mut self) {
-        self._switch_to_next_thread(None)
+        self._switch_to_next_thread(InterruptManager::save_and_disable_local_irq(), None)
     }
 
     pub fn switch_to_next_thread_without_saving_context(&mut self, current_context: &ContextData) {
-        self._switch_to_next_thread(Some(current_context))
+        self._switch_to_next_thread(
+            InterruptManager::save_and_disable_local_irq(),
+            Some(current_context),
+        )
     }
 
-    fn _switch_to_next_thread(&mut self, current_thread_context: Option<&ContextData>) {
-        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
+    fn _switch_to_next_thread(
+        &mut self,
+        interrupt_flag: StoredIrqData,
+        current_thread_context: Option<&ContextData>,
+    ) {
+        /* Interrupt must be disabled */
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
@@ -101,7 +109,7 @@ impl RunQueueManager {
                 .task_manager
                 .insert_into_sleep_list(running_thread, &mut self.run_list);
             if should_change_root {
-                /*assert!(next_entry.is_some());*/
+                /* assert!(next_entry.is_some()); */
                 let next_entry = next_entry.unwrap();
                 next_entry.set_up_to_be_root_of_run_list(&mut self.run_list);
                 next_entry

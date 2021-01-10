@@ -1,6 +1,6 @@
-/*
- * TTY Manager
- */
+//!
+//! TTY Manager
+//!
 
 use crate::arch::target_arch::device::cpu::is_interruption_enabled;
 
@@ -13,8 +13,8 @@ use core::mem::MaybeUninit;
 
 pub struct TtyManager {
     lock: SpinLockFlag,
-    input_queue: FIFO<u8, 512usize /*Self::DEFAULT_INPUT_BUFFER_SIZE*/>,
-    output_queue: FIFO<u8, 512usize /*Self::DEFAULT_OUTPUT_BUFFER_SIZE*/>,
+    input_queue: FIFO<u8, { Self::DEFAULT_INPUT_BUFFER_SIZE }>,
+    output_queue: FIFO<u8, { Self::DEFAULT_OUTPUT_BUFFER_SIZE }>,
     output_driver: Option<&'static (dyn Writer)>,
 }
 
@@ -84,7 +84,7 @@ impl TtyManager {
     }
 
     fn _flush(&mut self) -> fmt::Result {
-        /* assume output_driver is some and locked */
+        /* output_driver must be some and locked */
         let mut buffer: [u8; Self::DEFAULT_OUTPUT_BUFFER_SIZE] =
             [unsafe { MaybeUninit::uninit().assume_init() }; Self::DEFAULT_OUTPUT_BUFFER_SIZE];
         let mut pointer = 0usize;

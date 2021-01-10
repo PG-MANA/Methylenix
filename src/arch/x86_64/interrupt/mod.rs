@@ -158,7 +158,7 @@ impl InterruptManager {
     ///  [`set_redirect`]: ../device/io_apic/struct.IoApicManager.html#method.set_redirect
     pub fn set_device_interrupt_function(
         &mut self,
-        function: unsafe fn(),
+        function: unsafe extern "C" fn(),
         irq: Option<u8>,
         ist: Option<u8>,
         index: u16,
@@ -255,5 +255,5 @@ impl InterruptManager {
     /// Dummy handler to init IDT
     ///
     /// This function does nothing.
-    pub fn dummy_handler() {}
+    pub extern "C" fn dummy_handler() {}
 }

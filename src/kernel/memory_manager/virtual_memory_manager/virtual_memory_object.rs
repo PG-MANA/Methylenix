@@ -1,7 +1,7 @@
-/*
- * Virtual Memory Object
- * structure for original data of virtual memory
- */
+//!
+//! Virtual Memory Object
+//!
+//! This manager indicates memory data information like vm_page
 
 use super::virtual_memory_page::VirtualMemoryPage;
 use crate::kernel::memory_manager::data_type::MIndex;
@@ -43,13 +43,12 @@ impl VirtualMemoryObject {
                 return;
             }
             if unsafe { list.get_first_entry() }.unwrap().get_p_index() > p_index {
-                /*must change root*/
+                /* must change root */
                 let root = unsafe { list.get_first_entry_mut() }.unwrap();
                 let root_p_index = root.get_p_index();
                 vm_page.setup_to_be_root(p_index, list);
                 vm_page.insert_after(root, root_p_index);
                 self.linked_page += 1;
-            //pr_info!("root vm_page entry was changed.");
             } else {
                 for e in list.iter_mut() {
                     let e = unsafe { &mut *e };

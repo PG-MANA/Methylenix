@@ -117,7 +117,7 @@ impl GraphicManager {
         let mut cursor = self.cursor.lock().unwrap();
         let mut font_manager = self.font.lock().unwrap();
         let mut frame_buffer_manager = self.graphic.lock().unwrap();
-        let frame_buffer_size = frame_buffer_manager.get_framer_buffer_size();
+        let frame_buffer_size = frame_buffer_manager.get_frame_buffer_size();
 
         for c in s.chars().into_iter() {
             if c == '\n' {
@@ -142,14 +142,7 @@ impl GraphicManager {
                 if frame_buffer_size.1 <= cursor.y + font_data.height as usize {
                     let scroll_y =
                         font_manager.get_max_font_height() + cursor.y - frame_buffer_size.1;
-                    frame_buffer_manager.scroll(
-                        0,
-                        scroll_y,
-                        0,
-                        0,
-                        frame_buffer_size.0,
-                        frame_buffer_size.1 - scroll_y,
-                    ); /* scroll */
+                    frame_buffer_manager.scroll_screen(scroll_y);
                     frame_buffer_manager.fill(
                         0,
                         frame_buffer_size.1 - scroll_y,
@@ -179,7 +172,7 @@ impl GraphicManager {
     pub fn puts(&self, string: &str) -> bool {
         get_kernel_manager_cluster()
             .serial_port_manager
-            .sendstr(string);
+            .send_str(string);
         let _lock = if let Ok(l) = self.lock.try_lock() {
             l
         } else {
@@ -194,8 +187,8 @@ impl GraphicManager {
         }
     }
 
-    pub fn get_framer_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
-        self.graphic.lock().unwrap().get_framer_buffer_size()
+    pub fn get_frame_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
+        self.graphic.lock().unwrap().get_frame_buffer_size()
     }
 
     pub fn fill(&mut self, start_x: usize, start_y: usize, end_x: usize, end_y: usize, color: u32) {

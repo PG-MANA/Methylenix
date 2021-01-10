@@ -3,6 +3,7 @@
 //!
 //! This module treats GateDescriptor.
 //! This is usually used by InterruptManager.
+use super::tss::TssManager;
 use crate::arch::target_arch::device::cpu;
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
@@ -41,7 +42,12 @@ impl GateDescriptor {
     /// Create Gate Descriptor
     ///
     /// the detail is above.
-    pub fn new(offset: unsafe fn(), selector: u16, ist: u8, type_attr: u8) -> GateDescriptor {
+    pub fn new(
+        offset: unsafe extern "C" fn(),
+        selector: u16,
+        ist: u8,
+        type_attr: u8,
+    ) -> GateDescriptor {
         let c = offset as *const unsafe fn() as usize;
         GateDescriptor {
             offset_low: (c & 0xffff) as u16,
@@ -66,8 +72,11 @@ impl GateDescriptor {
             .expect("Cannot alloc the memory for GDT");
 
         let tss_address = object_allocator
-            .alloc(MSize::new(104), memory_manager)
+            .alloc(TssManager::SIZE_OF_TSS, memory_manager)
             .expect("Cannot alloc the memory for TSS");
+
+        TssManager::init_tss(tss_address);
+
         unsafe {
             core::ptr::copy_nonoverlapping(
                 original_gdt as *const u8,
@@ -76,14 +85,14 @@ impl GateDescriptor {
             );
 
             /*Set TSS Descriptor */
-            *((new_gdt_address.to_usize() + copy_size as usize) as *mut u128) = 110
-                | ((tss_address.to_usize() & 0xffff) << 16) as u128
-                | (((tss_address.to_usize() >> 16) & 0xff) << 32) as u128
-                | 0b10001001 << 40
-                | (((tss_address.to_usize() >> 24) & 0xff) << 56) as u128
-                | (tss_address.to_usize() as u128 >> 32) << 64;
-            /* Zeroed TSS */
-            core::ptr::write_bytes(tss_address.to_usize() as *mut u8, 0, 104);
+            *((new_gdt_address.to_usize() + copy_size as usize) as *mut u128) =
+                (TssManager::SIZE_OF_TSS.to_usize() & 0xffff) as u128
+                    | ((tss_address.to_usize() & 0xffff) << 16) as u128
+                    | (((tss_address.to_usize() >> 16) & 0xff) << 32) as u128
+                    | 0b10001001 << 40
+                    | (((TssManager::SIZE_OF_TSS.to_usize() >> 16) & 0xf) << 48) as u128
+                    | (((tss_address.to_usize() >> 24) & 0xff) << 56) as u128
+                    | (tss_address.to_usize() as u128 >> 32) << 64;
         }
         let gdtr = ((new_gdt_address.to_usize() as u128) << 16) | (copy_size + 16) as u128;
         unsafe {

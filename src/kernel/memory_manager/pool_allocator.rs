@@ -1,5 +1,6 @@
 //!
 //! Pool Allocator
+//!
 //! An allocator for fixed size(in future, maybe able to alloc several size...)
 //! This allows nullptr for accessing Physical Address:0
 //!
@@ -24,7 +25,7 @@ impl<T> PoolAllocator<T> {
     const fn size_check() {
         if core::mem::size_of::<T>() < core::mem::size_of::<FreeList>() {
             panic!("PoolAllocator can process the struct bigger than FreeList only.");
-            //static_assert
+            /* static_assert */
         }
     }
 
@@ -94,7 +95,7 @@ impl<T> PoolAllocator<T> {
     }
 
     pub fn free_ptr(&mut self, target: *mut T) {
-        /*do not use target after free */
+        /* Do not use target after free */
         assert!(self.linked_count < core::usize::MAX);
         let e = target as usize as *mut FreeList;
         unsafe { (*e).next = self.head };

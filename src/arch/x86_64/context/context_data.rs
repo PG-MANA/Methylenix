@@ -5,13 +5,14 @@
 //!
 
 #[repr(C, align(64))]
+#[derive(Clone)]
 pub struct ContextData {
     fx_save: [u8; 512],
     registers: Registers,
 }
 
-#[repr(C, packed)]
-#[derive(Default)]
+#[repr(C)]
+#[derive(Default, Clone)]
 struct Registers {
     rax: u64,     /* +  0 */
     rdx: u64,     /* +  1 */

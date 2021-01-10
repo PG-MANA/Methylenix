@@ -45,7 +45,7 @@ pub extern "C" fn multiboot_main(
     user_code_segment: u16,
     user_data_segment: u16,
 ) -> ! {
-    /* Enable fxsave and fxrstor and fs/gs_base   */
+    /* Enable fxsave and fxrstor and fs/gs_base */
     unsafe {
         cpu::enable_sse();
         cpu::enable_fs_gs_base();
@@ -90,6 +90,9 @@ pub extern "C" fn multiboot_main(
         panic!("Cannot map memory for frame buffer");
     }
 
+    /* Set up graphic */
+    init_graphic(&multiboot_information);
+
     /* Init interrupt */
     init_interrupt(kernel_code_segment);
 
@@ -111,11 +114,8 @@ pub extern "C" fn multiboot_main(
     }
     get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
 
-    /* Init Local APIC Timer*/
+    /* Init Local APIC Timer */
     get_cpu_manager_cluster().arch_depend_data.local_apic_timer = init_timer();
-
-    /* Set up graphic */
-    init_graphic(&multiboot_information);
 
     /* Init the task management system */
     init_task(
@@ -304,7 +304,7 @@ pub extern "C" fn directboot_main(
         SerialPortManager::new(0x3F8 /* COM1 */);
     get_kernel_manager_cluster()
         .serial_port_manager
-        .sendstr("Booted from DirectBoot\n");
+        .send_str("Booted from DirectBoot\n");
     loop {
         unsafe {
             cpu::halt();
@@ -314,7 +314,7 @@ pub extern "C" fn directboot_main(
 
 #[no_mangle]
 pub extern "C" fn unknown_boot_main() -> ! {
-    SerialPortManager::new(0x3F8).sendstr("Unknown Boot System!");
+    SerialPortManager::new(0x3F8).send_str("Unknown Boot System!");
     loop {
         unsafe { cpu::halt() };
     }

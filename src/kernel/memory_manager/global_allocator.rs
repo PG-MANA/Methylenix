@@ -1,13 +1,13 @@
-/*
- * Global Allocator
- * allocator for core::alloc::GlobalAlloc
- */
-
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+//!
+//! Global Allocator
+//!
+//! This is the allocator for core::alloc::GlobalAlloc
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::MSize;
+
 use core::alloc::{GlobalAlloc, Layout};
 
 pub struct GlobalAllocator;

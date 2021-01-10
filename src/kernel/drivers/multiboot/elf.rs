@@ -1,6 +1,6 @@
-/*
- * Multiboot Elf Information
- */
+//!
+//! Multiboot ELF Information
+//!
 
 #[repr(C, packed)]
 pub struct MultibootTagElfSections {
@@ -35,8 +35,8 @@ pub struct ElfInfo {
 }
 
 impl ElfInfo {
-    pub fn new(elf: &MultibootTagElfSections) -> ElfInfo {
-        ElfInfo {
+    pub fn new(elf: &MultibootTagElfSections) -> Self {
+        Self {
             address: unsafe { &elf.sections as *const _ as usize },
             size_of_entry: elf.entsize as usize,
             num_of_entry: elf.num as usize,
@@ -47,7 +47,7 @@ impl ElfInfo {
 
 impl Iterator for ElfInfo {
     type Item = &'static ElfSection;
-    fn next(&mut self) -> Option<&'static ElfSection> {
+    fn next(&mut self) -> Option<Self::Item> {
         if self.cnt == self.num_of_entry {
             None
         } else {
@@ -64,8 +64,8 @@ impl Iterator for ElfInfo {
 }
 
 impl Default for ElfInfo {
-    fn default() -> ElfInfo {
-        ElfInfo {
+    fn default() -> Self {
+        Self {
             address: 0,
             num_of_entry: 0,
             size_of_entry: 0,
@@ -75,7 +75,7 @@ impl Default for ElfInfo {
 }
 
 impl ElfSection {
-    pub fn addr(&self) -> usize {
+    pub fn address(&self) -> usize {
         self.section_addr as usize
     }
     pub fn size(&self) -> usize {

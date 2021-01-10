@@ -61,7 +61,7 @@ impl WorkQueueManager {
     }
 
     pub fn add_work(&mut self, w: WorkList) {
-        /* this will be called in the interrupt */
+        /* This will be called in the interrupt */
 
         let work = self
             .work_pool
@@ -102,7 +102,7 @@ impl WorkQueueManager {
                 drop(_lock);
                 InterruptManager::restore_local_irq(interrupt_flag);
                 get_cpu_manager_cluster().run_queue_manager.sleep();
-                /* woke up */
+                /* Woke up */
                 continue;
             }
             let work = unsafe { manager.work_queue.get_first_entry_mut().unwrap() };
@@ -119,7 +119,7 @@ impl WorkQueueManager {
             manager.work_pool.free(work);
             drop(_lock);
             InterruptManager::restore_local_irq(interrupt_flag);
-            // Execute the work function
+            /* Execute the work function */
             work_function(work_data);
         }
     }

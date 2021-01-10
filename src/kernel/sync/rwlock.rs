@@ -1,6 +1,6 @@
-/*
- * RwLock(Spin Lock version)
- */
+//!
+//! RwLock(Spin Lock version)
+//!
 
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
@@ -10,7 +10,7 @@ pub struct RwLock<T: ?Sized> {
     write_locked: AtomicBool,
     readers: AtomicUsize,
     data: UnsafeCell<T>,
-    /*poison flag*/
+    /* poison flag(needed?) */
 }
 
 pub struct RwLockReadGuard<'a, T: ?Sized + 'a> {
@@ -76,7 +76,8 @@ impl<T: ?Sized> RwLock<T> {
     pub fn try_write(&self) -> Result<RwLockWriteGuard<'_, T>, ()> {
         if self
             .write_locked
-            .compare_and_swap(false, true, Ordering::Relaxed)
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
         {
             if self.readers.load(Ordering::Relaxed) != 0 {
                 self.write_locked.store(false, Ordering::Relaxed);

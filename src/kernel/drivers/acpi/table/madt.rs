@@ -1,6 +1,8 @@
-/*
- *  Multiple APIC Description Table
- */
+//!
+//! Multiple APIC Description Table
+//!
+//! This manager contains the information of MADT
+//! MADT has the list of Local APIC IDs.
 
 use super::super::INITIAL_MMAP_SIZE;
 
@@ -28,6 +30,12 @@ pub struct MadtManager {
     enabled: bool,
 }
 
+pub struct LocalApicIdIter {
+    base_address: VAddress,
+    pointer: MSize,
+    length: MSize,
+}
+
 impl MadtManager {
     pub const SIGNATURE: [u8; 4] = ['A' as u8, 'P' as u8, 'I' as u8, 'C' as u8];
 
@@ -41,7 +49,7 @@ impl MadtManager {
     pub fn init(&mut self, madt_vm_address: VAddress) -> bool {
         /* madt_vm_address must be accessible */
         let madt = unsafe { &*(madt_vm_address.to_usize() as *const MADT) };
-        if madt.revision != 4 {
+        if madt.revision > 4 {
             pr_err!("Not supported MADT version: {}", madt.revision);
         }
         if let Ok(a) = get_kernel_manager_cluster()
@@ -66,35 +74,57 @@ impl MadtManager {
     /// Find the Local APIC ID list
     ///
     /// This function will search the Local APIC ID from the Interrupt Controller Structures.
-    /// Each Local APIC ID will be stored in list_to_store and this function will return the number of cores.
-    /// If the size of list_to_store is smaller than the number of cores,
-    /// this function sets Local APIC ID the size of list_to_store, and return.
-    /// Currently, this cannot find more than 256 cores.
-    pub fn find_apic_id_list(&self, list_to_store: &mut [u8]) -> usize {
+    /// Each Local APIC ID will be returned by  LocalApicIdIter.
+    pub fn find_apic_id_list(&self) -> LocalApicIdIter {
         if !self.enabled {
-            return 0;
+            return LocalApicIdIter {
+                base_address: VAddress::new(0),
+                pointer: MSize::new(0),
+                length: MSize::new(0),
+            };
         }
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
         let length = madt.length as usize - core::mem::size_of::<MADT>();
-        let base_address = self.base_address.to_usize() + core::mem::size_of::<MADT>();
-        let mut pointer = 0;
-        let mut list_pointer = 0;
-        while length > pointer {
-            let record_type = unsafe { *((base_address + pointer) as *const u8) };
-            let record_length = unsafe { *((base_address + pointer + 1) as *const u8) };
-            match record_type {
-                0 => {
-                    if list_pointer >= list_to_store.len() {
-                        return list_pointer;
-                    }
-                    list_to_store[list_pointer] =
-                        unsafe { *((base_address + pointer + 3) as *const u8) };
-                    list_pointer += 1;
-                }
-                _ => {}
-            };
-            pointer += record_length as usize;
+        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+
+        return LocalApicIdIter {
+            base_address,
+            pointer: MSize::new(0),
+            length: MSize::new(length),
+        };
+    }
+}
+
+impl Iterator for LocalApicIdIter {
+    type Item = u32;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pointer >= self.length {
+            return None;
         }
-        return list_pointer;
+        let record_base = (self.base_address + self.pointer).to_usize();
+        let record_type = unsafe { *(record_base as *const u8) };
+        let record_length = unsafe { *((record_base + 1) as *const u8) };
+
+        self.pointer += MSize::new(record_length as usize);
+        match record_type {
+            0 => {
+                if (unsafe { *((record_base + 4) as *const u32) } & 1) == 1 {
+                    /* Enabled */
+                    Some(unsafe { *((record_base + 3) as *const u8) } as u32)
+                } else {
+                    self.next()
+                }
+            }
+            9 => {
+                if (unsafe { *((record_base + 8) as *const u32) } & 1) == 1 {
+                    /* Enabled */
+                    Some(unsafe { *((record_base + 4) as *const u32) })
+                } else {
+                    self.next()
+                }
+            }
+
+            _ => self.next(),
+        }
     }
 }

@@ -1,8 +1,9 @@
-/*
- * Advanced Configuration and Power Interface Manager
- * Supported ACPI version 6.3
- * https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf
- */
+//!
+//! Advanced Configuration and Power Interface Manager
+//!
+//! Supported ACPI version 6.3
+//! https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf
+//!
 
 pub mod acpi_pm_timer;
 pub mod table;

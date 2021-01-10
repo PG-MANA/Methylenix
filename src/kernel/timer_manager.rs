@@ -1,11 +1,12 @@
-/*
- * Timer Manager
- * This manager is the frontend of timer system.
- * Arch-specific timer call this function to process timer queue
- * when task-switch, once return to arch-specific timer function
- *  for process of sending end of interrupt and recall this manager
- * The member of this manager may be changed
- */
+//!
+//! Timer Manager
+//!
+//! This manager is the frontend of timer system.
+//! Arch-specific timer call this manager to process timer queue.
+//! When task-switch, this will return to arch-specific timer function once
+//! for processes like sending end of interrupt.
+//! After that, the timer should recall this manager.
+//! The member of this manager may be changed.
 
 pub struct TimerManager {}
 
@@ -16,7 +17,6 @@ pub trait Timer {
     fn get_difference(&self, earlier: usize, later: usize) -> usize;
     fn get_ending_count_value(&self, start: usize, difference: usize) -> usize;
     fn get_max_counter_value(&self) -> usize;
-    /*fn get_interval_ms(&self) -> usize;*/
     #[inline(always)]
     fn busy_wait_ms(&self, ms: usize) {
         let start = self.get_count();

@@ -25,14 +25,14 @@ init_x86_64:
   mov   $tss_descriptor, %ax
   ltr   %ax
 
-  pop   %rdi                /* Pass bootinformation */
+  pop   %rdi                                /* Pass bootinformation */
   mov   $main_code_segment_descriptor, %rsi
   mov   $user_code_segment_descriptor, %rdx
   mov   $user_data_segment_descriptor, %rcx
-  pop   %rax                /* Boot type (Multiboot:1, Directboot: 2)*/
-  mov   $(os_stack + OS_STACK_SIZE), %rsp
+  pop   %rax                                /* Boot type (Multiboot:1, Directboot: 2)*/
+  mov   $(os_stack + OS_STACK_SIZE), %rsp   /* Reset Stack */
   cmp   $BOOT_FROM_MULTIBOOT_MARK, %rax
-  jz    multiboot_main      /* at src/arch/x86_64/mod.rs */
+  jz    multiboot_main                      /* at src/arch/x86_64/mod.rs */
   cmp   $BOOT_FROM_DIRECTBOOT_MARK,%rax
-  jz    directboot_main     /* at src/arch/x86_64/mod.rs */
-  jmp   unknown_boot_main    /* at src/arch/x86_64/mod.rs */
+  jz    directboot_main                     /* at src/arch/x86_64/mod.rs */
+  jmp   unknown_boot_main                   /* at src/arch/x86_64/mod.rs */

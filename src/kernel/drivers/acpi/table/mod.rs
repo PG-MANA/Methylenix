@@ -1,6 +1,6 @@
-/*
- * ACPI Table Handle Modules
- */
+//!
+//! ACPI Table Handle Modules
+//!
 
 pub mod bgrt;
 pub mod fadt;

@@ -54,7 +54,7 @@
 macro_rules! make_device_interrupt_handler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
-        pub unsafe fn $handler_name() {
+        pub unsafe extern fn $handler_name() {
             asm!(
                 "
                 push    rax
@@ -104,7 +104,7 @@ macro_rules! make_device_interrupt_handler {
                 pop     rcx
                 pop     rbx
                 pop     rax
-                iretq", sym $handler_func
+                iretq", sym $handler_func, options(noreturn)
             );
         }
     };
@@ -124,7 +124,7 @@ macro_rules! make_device_interrupt_handler {
 macro_rules! make_context_switch_interrupt_handler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
-        pub unsafe fn $handler_name() {
+        pub unsafe extern fn $handler_name() {
             asm!("
                 sub     rsp, ({1} + 1) * 8 // +1 is for stack alignment
                 mov     [rsp +  0 * 8] ,rax
@@ -203,7 +203,8 @@ macro_rules! make_context_switch_interrupt_handler {
                 mov     r15, [rsp + 14 * 8] 
                 add     rsp, ({1} + 1) * 8
                 iretq", sym $handler_func,
-                const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS);
+                const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS,
+                options(noreturn));
         }
     };
 }
@@ -222,7 +223,7 @@ macro_rules! make_context_switch_interrupt_handler {
 macro_rules! make_error_interrupt_handler {
     ($handler_name: ident, $handler_func: path) => {
         #[naked]
-        pub unsafe fn $ handler_name() {
+        pub unsafe extern fn $ handler_name() {
             asm!("
                 push    rdi
                 mov     rdi, [rsp + 8]
@@ -269,7 +270,7 @@ macro_rules! make_error_interrupt_handler {
                 pop     rax
                 pop     rdi
                 add     rsp, 8
-                iretq", sym $handler_func);
+                iretq", sym $handler_func, options(noreturn));
         }
     };
 }

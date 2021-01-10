@@ -1,6 +1,6 @@
-/*
- * Virtual Memory Entry Chain
- */
+//!
+//! Virtual Memory Entry Chain
+//!
 
 use crate::kernel::memory_manager::data_type::{Address, MOffset, VAddress};
 use crate::kernel::memory_manager::virtual_memory_manager::virtual_memory_object::VirtualMemoryObject;
@@ -8,8 +8,6 @@ use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-
-use core::mem;
 
 #[allow(dead_code)]
 pub struct VirtualMemoryEntry {
@@ -27,7 +25,7 @@ pub struct VirtualMemoryEntry {
 // ADD: thread chain
 
 impl VirtualMemoryEntry {
-    pub const ENTRY_SIZE: usize = mem::size_of::<Self>();
+    pub const ENTRY_SIZE: usize = core::mem::size_of::<Self>();
 
     pub const fn new(
         vm_start_address: VAddress,
@@ -154,7 +152,7 @@ impl VirtualMemoryEntry {
     }
 
     pub fn adjust_entries(&'static mut self) -> &'static mut Self /*new root*/ {
-        // self should be root.
+        /* self should be root. */
         let mut new_root = self;
         while let Some(entry) = new_root.get_prev_entry_mut() {
             new_root = entry;

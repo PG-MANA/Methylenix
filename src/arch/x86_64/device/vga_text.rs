@@ -63,7 +63,7 @@ impl VgaTextDriver {
         self.address = frame_buffer_info.address as usize;
         self.width = frame_buffer_info.width as usize;
         self.height = frame_buffer_info.height as usize;
-        self.cursor.front_color = 0xb; /* bright cyan */
+        self.cursor.front_color = 0xb; /* Bright Cyan */
         self.clear_screen();
         return true;
     }
@@ -123,16 +123,16 @@ impl VgaTextDriver {
                 (self.address + self.width * 2) as *const u16,
                 self.address as *mut u16,
                 self.width * (self.height - 1),
-            ); /*move each lines to above one.*/
+            ); /* Move each lines to above one */
             write_bytes(
                 (self.address + self.width * (self.height - 1) * 2) as *mut u16,
                 0,
                 self.width,
-            ); /* clear the last line */
+            ); /* Clear the last line */
         };
         self.cursor.line -= 1;
         self.cursor.character = 0;
-        /* move the cursor by crt */
+        /* Move the cursor by crt */
         crt::set_cursor_position((self.cursor.line * self.width) as u16);
     }
 
@@ -160,7 +160,7 @@ impl TextBufferDriver for VgaTextDriver {
                         *((self.address
                             + (self.cursor.line * self.width + self.cursor.character) * 2)
                             as *mut u16) = ' ' as u16;
-                    } //the mark to return from the next line by backspace
+                    } /* The mark to return from the next line by backspace */
                     self.cursor.character = 0;
                     self.cursor.line += 1;
                 }
@@ -198,7 +198,7 @@ impl TextBufferDriver for VgaTextDriver {
                 self.scroll_line();
             }
 
-            /* move the cursor by crt */
+            /* Move the cursor by crt */
             crt::set_cursor_position(
                 (self.cursor.line * self.width + self.cursor.character) as u16,
             );

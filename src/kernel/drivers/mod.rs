@@ -1,6 +1,6 @@
-/*
- * Modules to handle device or system like UEFI
- */
+//!
+//! Modules to handle device or system like UEFI
+//!
 
 pub mod acpi;
 pub mod efi;
