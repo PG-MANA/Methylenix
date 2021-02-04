@@ -100,13 +100,13 @@ impl<T: ?Sized> Mutex<T> {
 
 impl<'m, T: ?Sized> Deref for MutexGuard<'m, T> {
     type Target = T;
-    fn deref<'a>(&'a self) -> &'a T {
+    fn deref(&self) -> &T {
         &*self.data
     }
 }
 
 impl<'m, T: ?Sized> DerefMut for MutexGuard<'m, T> {
-    fn deref_mut<'a>(&'a mut self) -> &'a mut T {
+    fn deref_mut(&mut self) -> &mut T {
         &mut *self.data
     }
 }

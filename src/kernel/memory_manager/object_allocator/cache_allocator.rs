@@ -50,7 +50,7 @@ impl<T> CacheAllocator<T> {
             let page = m.alloc_pages(
                 MOrder::from_offset(
                     MSize::new(cache_threshold * core::mem::size_of::<T>()),
-                    MOrder::new(core::usize::MAX),
+                    MOrder::new(usize::MAX),
                 )
                 .to_page_order(),
                 MemoryPermissionFlags::data(),

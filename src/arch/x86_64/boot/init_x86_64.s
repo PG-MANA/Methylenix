@@ -25,7 +25,7 @@ init_x86_64:
   mov   $tss_descriptor, %ax
   ltr   %ax
 
-  pop   %rdi                                /* Pass bootinformation */
+  pop   %rdi                                /* Pass multiboot information */
   mov   $main_code_segment_descriptor, %rsi
   mov   $user_code_segment_descriptor, %rdx
   mov   $user_data_segment_descriptor, %rcx

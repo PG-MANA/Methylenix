@@ -122,7 +122,7 @@ impl TaskManager {
         let idle_thread = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
 
         main_thread.init(process_entry, 0, 0, context_for_main);
-        idle_thread.init(process_entry, 0, core::i8::MIN, context_for_idle);
+        idle_thread.init(process_entry, 0, i8::MIN, context_for_idle);
 
         process_entry.init_kernel_process(
             &mut [main_thread, idle_thread],

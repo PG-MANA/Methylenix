@@ -8,7 +8,7 @@
 .global ap_entry, ap_entry_end, ap_os_stack_address
 
 .extern main_code_segment_descriptor, tss_descriptor, gdtr0 /* at common.asm */
-.extern tss_descriptor_adress, tss, pml4
+.extern tss_descriptor_address, tss, pml4
 .extern ap_boot_main
 
 .section .data

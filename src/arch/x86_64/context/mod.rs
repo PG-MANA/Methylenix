@@ -19,7 +19,9 @@ use crate::kernel::memory_manager::MemoryError;
 pub struct ContextManager {
     system_ss: u16,
     system_cs: u16,
+    #[allow(dead_code)]
     user_ss: u16,
+    #[allow(dead_code)]
     user_cs: u16,
     system_page_table_address: usize,
 }

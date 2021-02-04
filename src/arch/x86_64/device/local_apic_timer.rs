@@ -153,7 +153,6 @@ impl LocalApicTimer {
         if self.frequency != 0 {
             return false;
         }
-        use core::u32;
         let _lock = self.lock.lock();
 
         local_apic.write_apic_register(LocalApicRegisters::TimerDivide, 0b1011);
@@ -255,7 +254,6 @@ impl Timer for LocalApicTimer {
     }
 
     fn get_max_counter_value(&self) -> usize {
-        use core::u32;
         u32::MAX as usize
     }
 }

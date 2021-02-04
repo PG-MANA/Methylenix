@@ -293,7 +293,7 @@ impl MSize {
     }
 
     pub fn to_order(&self, max: Option<MOrder>) -> MOrder {
-        MOrder::from_offset(*self, max.unwrap_or(MOrder::new(core::usize::MAX)))
+        MOrder::from_offset(*self, max.unwrap_or(MOrder::new(usize::MAX)))
     }
 }
 
