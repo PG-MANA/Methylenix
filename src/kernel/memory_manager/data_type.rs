@@ -30,6 +30,12 @@ pub struct MPageOrder(usize);
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct MIndex(usize);
 
+#[derive(Clone, Eq, PartialEq, Copy)]
+pub struct MemoryPermissionFlags(u8);
+
+#[derive(Clone, Eq, PartialEq, Copy)]
+pub struct MemoryOptionFlags(u16);
+
 pub trait Address:
     Copy
     + Clone
@@ -461,5 +467,92 @@ unsafe impl Step for MIndex {
         } else {
             None
         }
+    }
+}
+
+/* MemoryPermissionFlags */
+impl MemoryPermissionFlags {
+    pub const fn new(read: bool, write: bool, execute: bool, user_access: bool) -> Self {
+        Self(
+            ((read as u8) << 0)
+                | ((write as u8) << 1)
+                | ((execute as u8) << 2)
+                | ((user_access as u8) << 3),
+        )
+    }
+
+    pub const fn rodata() -> Self {
+        Self::new(true, false, false, false)
+    }
+
+    pub const fn data() -> Self {
+        Self::new(true, true, false, false)
+    }
+
+    pub fn is_readable(&self) -> bool {
+        self.0 & (1 << 0) != 0
+    }
+
+    pub fn is_writable(&self) -> bool {
+        self.0 & (1 << 1) != 0
+    }
+
+    pub fn is_executable(&self) -> bool {
+        self.0 & (1 << 2) != 0
+    }
+
+    pub fn is_user_accessible(&self) -> bool {
+        self.0 & (1 << 3) != 0
+    }
+}
+
+/* MemoryOptionFlags */
+impl MemoryOptionFlags {
+    pub const NORMAL: Self = Self(0);
+    pub const PRE_RESERVED: Self = Self(1 << 0);
+    pub const DO_NOT_FREE_PHYSICAL_ADDRESS: Self = Self(1 << 1);
+    pub const WIRED: Self = Self(1 << 2);
+    pub const DEV_MAP: Self = Self(1 << 3);
+    pub const DIRECT_MAP: Self = Self(1 << 4);
+
+    pub fn is_pre_reserved(&self) -> bool {
+        (*self & Self::PRE_RESERVED).0 != 0
+    }
+
+    pub fn should_not_free_phy_address(&self) -> bool {
+        (*self & Self::DO_NOT_FREE_PHYSICAL_ADDRESS).0 != 0
+    }
+
+    pub fn is_wired(&self) -> bool {
+        (*self & Self::WIRED).0 != 0
+    }
+
+    pub fn is_dev_map(&self) -> bool {
+        (*self & Self::DEV_MAP).0 != 0
+    }
+
+    pub fn is_direct_mapped(&self) -> bool {
+        (*self & Self::DIRECT_MAP).0 != 0
+    }
+}
+
+impl const BitAnd<Self> for MemoryOptionFlags {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl const BitOr<Self> for MemoryOptionFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl const BitXor<Self> for MemoryOptionFlags {
+    type Output = Self;
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        Self(self.0 ^ rhs.0)
     }
 }

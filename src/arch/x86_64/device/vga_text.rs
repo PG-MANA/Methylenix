@@ -9,8 +9,7 @@ use crate::arch::target_arch::device::crt;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::graphic_manager::text_buffer_driver::TextBufferDriver;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::Address;
-use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::memory_manager::data_type::{Address, MemoryPermissionFlags};
 
 /// VgaTextDriver
 ///

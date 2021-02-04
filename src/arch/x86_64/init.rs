@@ -19,8 +19,9 @@ use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
-use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+};
 use crate::kernel::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::run_queue_manager::RunQueueManager;
@@ -317,7 +318,7 @@ pub fn init_multiple_processors_ap() {
         .alloc_with_option(
             stack_size.to_order(None).to_page_order(),
             MemoryPermissionFlags::data(),
-            MemoryOptionFlags::new(MemoryOptionFlags::DIRECT_MAP),
+            MemoryOptionFlags::DIRECT_MAP,
         )
         .unwrap();
     unsafe {

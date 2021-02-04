@@ -37,7 +37,7 @@ impl VirtualMemoryPage {
     }
 
     pub fn set_page_status(&mut self, option: MemoryOptionFlags) {
-        if option.wired() {
+        if option.is_wired() {
             let _lock = self.lock.lock();
             self.status = PageStatus::Unswappable
         }

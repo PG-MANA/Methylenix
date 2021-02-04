@@ -26,10 +26,10 @@ use self::PagingError::MemoryCacheRanOut;
 use crate::arch::target_arch::device::cpu;
 
 //use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use crate::kernel::memory_manager::{
-    data_type::Address, data_type::MSize, data_type::PAddress, data_type::VAddress,
-    pool_allocator::PoolAllocator, MemoryPermissionFlags,
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
 
 /// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
 pub const PAGE_SIZE: MSize = MSize::from(PAGE_SIZE_USIZE);
@@ -376,9 +376,9 @@ impl PageManager {
         let pte = self.get_target_pte(cache_memory_list, virtual_address, true, true, None)?;
         pte.init();
         pte.set_address(physical_address);
-        pte.set_no_execute(!permission.execute());
-        pte.set_writable(permission.write());
-        pte.set_user_accessible(permission.user_access());
+        pte.set_no_execute(!permission.is_executable());
+        pte.set_writable(permission.is_writable());
+        pte.set_user_accessible(permission.is_user_accessible());
         /* PageManager::reset_paging_local(virtual_address) */
         Ok(())
     }
@@ -446,9 +446,9 @@ impl PageManager {
                     /* PDPTE is free, we can use 1GB paging! */
                     pdpte.init();
                     pdpte.set_huge(true);
-                    pdpte.set_no_execute(!permission.execute());
-                    pdpte.set_writable(permission.write());
-                    pdpte.set_user_accessible(permission.user_access());
+                    pdpte.set_no_execute(!permission.is_executable());
+                    pdpte.set_writable(permission.is_writable());
+                    pdpte.set_user_accessible(permission.is_user_accessible());
                     pdpte.set_address(processing_physical_address);
                     pdpte.set_present(true);
                     processed_size += MSize::from(0x40000000);
@@ -471,9 +471,9 @@ impl PageManager {
                 if !pde.is_present() {
                     pde.init();
                     pde.set_huge(true);
-                    pde.set_no_execute(!permission.execute());
-                    pde.set_writable(permission.write());
-                    pde.set_user_accessible(permission.user_access());
+                    pde.set_no_execute(!permission.is_executable());
+                    pde.set_writable(permission.is_writable());
+                    pde.set_user_accessible(permission.is_user_accessible());
                     pde.set_address(processing_physical_address);
                     pde.set_present(true);
                     processed_size += MSize::from(0x200000);
@@ -507,9 +507,9 @@ impl PageManager {
         }
         let entry =
             self.get_target_paging_entry(cache_memory_list, virtual_address, false, false, false)?;
-        entry.set_writable(permission.write());
-        entry.set_no_execute(!permission.execute());
-        entry.set_user_accessible(permission.user_access());
+        entry.set_writable(permission.is_writable());
+        entry.set_no_execute(!permission.is_executable());
+        entry.set_user_accessible(permission.is_user_accessible());
         Ok(())
     }
 

@@ -10,8 +10,9 @@ use super::table::madt::MadtManager;
 use super::INITIAL_MMAP_SIZE;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
-use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
+};
 
 pub struct XsdtManager {
     base_address: VAddress,

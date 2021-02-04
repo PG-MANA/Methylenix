@@ -15,7 +15,7 @@ use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
 use crate::kernel::memory_manager::{
-    MemoryOptionFlags, MemoryPermissionFlags, SystemMemoryManager,
+    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags, SystemMemoryManager,
 };
 use crate::kernel::sync::spin_lock::Mutex;
 
@@ -115,7 +115,7 @@ pub fn init_memory_by_multiboot_information(
             Some(VAddress::new(section.address())),
             aligned_size,
             permission,
-            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            MemoryOptionFlags::NORMAL,
             &mut physical_memory_manager,
         ) {
             Ok(address) => {
@@ -141,7 +141,7 @@ pub fn init_memory_by_multiboot_information(
             Some(VAddress::new(0)),
             PAGE_SIZE,
             MemoryPermissionFlags::data(),
-            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            MemoryOptionFlags::NORMAL,
             &mut physical_memory_manager,
         )
         .expect("Cannot associate memory for boot code of Application Processors.");
@@ -207,7 +207,7 @@ pub fn init_graphic(multiboot_information: &MultiBootInformation) {
                     module.start_address.into(),
                     (module.end_address - module.start_address).into(),
                     MemoryPermissionFlags::rodata(),
-                    MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+                    MemoryOptionFlags::NORMAL,
                     false,
                 );
             if let Ok(vm_address) = vm_address {

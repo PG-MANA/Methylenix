@@ -15,12 +15,13 @@ use self::virtual_memory_entry::VirtualMemoryEntry;
 /*use self::virtual_memory_object::VirtualMemoryObject;*/
 use self::virtual_memory_page::VirtualMemoryPage;
 
-use super::data_type::{Address, MIndex, MOrder, MSize, PAddress, VAddress};
+use super::data_type::{
+    Address, MIndex, MOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+};
 use super::object_allocator::cache_allocator::CacheAllocator;
 use super::physical_memory_manager::PhysicalMemoryManager;
 use super::pool_allocator::PoolAllocator;
 use super::MemoryError;
-use super::{MemoryOptionFlags, MemoryPermissionFlags};
 
 use crate::arch::target_arch::paging::{PageManager, PagingError};
 use crate::arch::target_arch::paging::{
@@ -97,7 +98,7 @@ impl VirtualMemoryManager {
                 cache_address.to_direct_mapped_v_address(),
                 PAGE_SIZE.to_end_address(cache_address.to_direct_mapped_v_address()),
                 MemoryPermissionFlags::data(),
-                MemoryOptionFlags::new(MemoryOptionFlags::WIRED),
+                MemoryOptionFlags::WIRED,
             );
             if self
                 ._map_address(
@@ -147,7 +148,7 @@ impl VirtualMemoryManager {
                 address,
                 size.to_end_address(address),
                 MemoryPermissionFlags::data(),
-                MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+                MemoryOptionFlags::NORMAL,
             );
             if let Err(e) = vm_manager._map_address(
                 &mut entry,
@@ -232,11 +233,9 @@ impl VirtualMemoryManager {
             direct_mapped_area_size
                 .to_end_address(direct_mapped_area_address.to_direct_mapped_v_address()),
             MemoryPermissionFlags::data(),
-            MemoryOptionFlags::new(
-                MemoryOptionFlags::DIRECT_MAP
-                    | MemoryOptionFlags::PRE_RESERVED
-                    | MemoryOptionFlags::DO_NOT_FREE_PHY_ADDR,
-            ),
+            MemoryOptionFlags::DIRECT_MAP
+                | MemoryOptionFlags::PRE_RESERVED
+                | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
         );
         if let Err(e) = self._map_address(
             &mut entry,
@@ -319,7 +318,7 @@ impl VirtualMemoryManager {
             Some(vm_start_address),
             size,
             permission,
-            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            MemoryOptionFlags::NORMAL,
             pm_manager,
         )
     }
@@ -523,13 +522,13 @@ impl VirtualMemoryManager {
         permission: MemoryPermissionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<VAddress, MemoryError> {
-        assert_eq!(permission.execute(), false); /* Disallow executing code on device mapping */
+        assert_eq!(permission.is_executable(), false); /* Disallow executing code on device mapping */
         self.map_address(
             physical_address,
             virtual_address,
             size,
             permission,
-            MemoryOptionFlags::new(MemoryOptionFlags::DEV_MAP),
+            MemoryOptionFlags::DEV_MAP,
             pm_manager,
         )
     }
@@ -580,7 +579,7 @@ impl VirtualMemoryManager {
                 }
                 if !vm_map_entry
                     .get_memory_option_flags()
-                    .do_not_free_phy_addr()
+                    .should_not_free_phy_address()
                 {
                     pm_manager.free(p.get_physical_address(), PAGE_SIZE, false);
                 }
@@ -1056,9 +1055,9 @@ impl VirtualMemoryManager {
                 entry.get_vm_start_address().to_usize(),
                 MSize::from_address(entry.get_vm_start_address(), entry.get_vm_end_address())
                     .to_usize(),
-                entry.get_permission_flags().write(),
-                entry.get_permission_flags().user_access(),
-                entry.get_permission_flags().execute()
+                entry.get_permission_flags().is_writable(),
+                entry.get_permission_flags().is_user_accessible(),
+                entry.get_permission_flags().is_executable()
             );
             let first_p_index = entry.get_offset().to_index();
             let last_p_index = MIndex::from_offset(

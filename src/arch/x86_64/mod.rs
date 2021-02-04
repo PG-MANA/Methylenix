@@ -23,9 +23,8 @@ use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
-use crate::kernel::memory_manager::MemoryPermissionFlags;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
 
