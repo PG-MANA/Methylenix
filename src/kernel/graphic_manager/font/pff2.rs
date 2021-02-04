@@ -86,16 +86,16 @@ impl Pff2FontManager {
 
             match section_type {
                 "NAME" | "FAMI" | "WEIG" | "SLAN" => {}
-                /* "PTSZ" => {
-                    self.font_point_size = u16::from_be_bytes(unsafe {
+                "PTSZ" => {
+                    /* self.font_point_size = u16::from_be_bytes(unsafe {
                         *((self.base_address + pointer) as *const [u8; 2])
-                    });
-                } */
-                /* "MAXW" => {
-                    self.max_font_width = u16::from_be_bytes(unsafe {
+                    }); */
+                }
+                "MAXW" => {
+                    /* self.max_font_width = u16::from_be_bytes(unsafe {
                         *((self.base_address + pointer) as *const [u8; 2])
-                    });
-                } */
+                    }); */
+                }
                 "MAXH" => {
                     self.max_font_height = u16::from_be_bytes(unsafe {
                         *((self.base_address + pointer) as *const [u8; 2])
