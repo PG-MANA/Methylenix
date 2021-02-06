@@ -80,6 +80,16 @@ impl LocalApicTimer {
         {
             im.send_eoi();
         }
+        if get_cpu_manager_cluster()
+            .arch_depend_data
+            .local_apic_timer
+            .is_deadline_mode_enabled
+        {
+            get_cpu_manager_cluster()
+                .arch_depend_data
+                .local_apic_timer
+                .set_deadline(1000);
+        }
         let context_data = unsafe { &*(c as *const ContextData) };
         get_cpu_manager_cluster()
             .run_queue_manager
