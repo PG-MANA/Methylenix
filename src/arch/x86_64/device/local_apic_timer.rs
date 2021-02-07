@@ -124,9 +124,10 @@ impl LocalApicTimer {
             return false;
         }
 
-        self.frequency = ((unsafe { rdmsr(0xce) as usize } >> 8) & 0xff) * 1000000;
-        /* 2.12 MSRS IN THE 3RD GENERATION INTEL(R) CORE(TM) PROCESSOR FAMILY
-         * (BASED ON INTEL® MICROARCHITECTURE CODE NAME IVY BRIDGE) Intel SDM Vol.4 2-189 */
+        self.frequency = ((unsafe { rdmsr(0xce) as usize } >> 8) & 0xff) * 100 * 1000000;
+        /* Frequency = MSRS(0xCE)[15:8] * 100MHz
+         * 2.12 MSRS IN THE 3RD GENERATION INTEL(R) CORE(TM) PROCESSOR FAMILY
+         * (BASED ON INTEL® MICROARCHITECTURE CODE NAME IVY BRIDGE) Intel SDM Vol.4 2-198 */
         if self.frequency == 0 {
             pr_warn!("Cannot get the frequency of TSC.");
             return false;
