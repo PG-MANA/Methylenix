@@ -2,7 +2,7 @@
 //! Multiboot Information
 //!
 //! This manager contains the multiboot2 information.
-//! https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
+//! <https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html>
 //!
 
 mod elf;

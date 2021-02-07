@@ -1,7 +1,7 @@
 //!
 //! EFI Table manager
 //!
-//! https://uefi.org/sites/default/files/resources/UEFI_Spec_2_7.pdf
+//! <https://uefi.org/sites/default/files/resources/UEFI_Spec_2_7.pdf>
 //!
 
 use super::text::output::EfiOutputProtocol;

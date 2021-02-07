@@ -2,7 +2,7 @@
 //! PFF2 Font Manager
 //!
 //! This manager handles PFF2 Font data.
-//! https://www.gnu.org/software/grub/manual/grub-dev/html_node/PFF2-Font-File-Format.html
+//! <https://www.gnu.org/software/grub/manual/grub-dev/html_node/PFF2-Font-File-Format.html>
 
 use super::font_cache::FontCache;
 use super::BitmapFontData;
