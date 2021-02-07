@@ -10,6 +10,10 @@
 
 pub struct TimerManager {}
 
+impl TimerManager {
+    pub const TIMER_INTERVAL_MS: usize = 10;
+}
+
 pub trait Timer {
     fn get_count(&self) -> usize;
     fn get_frequency_hz(&self) -> usize;

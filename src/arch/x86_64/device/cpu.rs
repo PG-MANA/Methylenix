@@ -111,6 +111,14 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
 }
 
 #[inline(always)]
+pub unsafe fn rdtsc() -> u64 {
+    let edx: u32;
+    let eax: u32;
+    asm!("rdtsc", out("edx") edx, out("eax") eax);
+    (edx as u64) << 32 | eax as u64
+}
+
+#[inline(always)]
 pub unsafe fn wrmsr(ecx: u32, data: u64) {
     let edx: u32 = (data >> 32) as u32;
     let eax: u32 = data as u32;

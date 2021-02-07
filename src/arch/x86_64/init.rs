@@ -173,7 +173,7 @@ pub fn init_timer() -> LocalApicTimer {
         .get_acpi_pm_timer()
     {
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
-        local_apic_timer.set_up_interruption(
+        local_apic_timer.set_up_interrupt(
             InterruptionIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
@@ -186,7 +186,7 @@ pub fn init_timer() -> LocalApicTimer {
         pr_info!("Using PIT to calculate frequency of Local APIC Timer.");
         let mut pit = PitManager::new();
         pit.init();
-        local_apic_timer.set_up_interruption(
+        local_apic_timer.set_up_interrupt(
             InterruptionIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager

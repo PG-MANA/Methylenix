@@ -146,7 +146,7 @@ fn main_process() -> ! {
     get_cpu_manager_cluster()
         .arch_depend_data
         .local_apic_timer
-        .start_interruption(
+        .start_interrupt(
             get_kernel_manager_cluster()
                 .boot_strap_cpu_manager
                 .interrupt_manager
