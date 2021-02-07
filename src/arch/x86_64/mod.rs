@@ -192,7 +192,7 @@ fn draw_boot_logo() {
             .memory_manager
             .lock()
             .unwrap()
-            .free(address.into())
+            .free(VAddress::new(address))
         {
             pr_err!("Freeing the bitmap data of BGRT was failed: {:?}", e);
         }
@@ -208,7 +208,7 @@ fn draw_boot_logo() {
         .get_bgrt_manager()
         .get_image_offset();
     drop(acpi_manager);
-    if boot_logo_physical_address.is_none() || boot_logo_offset.is_none() {
+    if boot_logo_physical_address.is_none() {
         pr_info!("ACPI does not have the BGRT information.");
         return;
     }
@@ -258,7 +258,7 @@ fn draw_boot_logo() {
         .mremap_dev(
             boot_logo_address.into(),
             original_map_size,
-            ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize / 8))
+            ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
                 + file_offset as usize)
                 .into(),
         );
@@ -280,13 +280,29 @@ fn draw_boot_logo() {
     }
     let boot_logo_address = result.unwrap();
 
+    /* Adjust offset if it overflows from frame buffer. */
+    let buffer_size = get_kernel_manager_cluster()
+        .graphic_manager
+        .get_frame_buffer_size();
+    let boot_logo_offset = boot_logo_offset.unwrap();
+    let offset_x = if boot_logo_offset.0 + bitmap_width as usize > buffer_size.0 {
+        (buffer_size.0 - bitmap_width as usize) / 2
+    } else {
+        boot_logo_offset.0
+    };
+    let offset_y = if boot_logo_offset.1 + bitmap_height as usize > buffer_size.1 {
+        (buffer_size.1 - bitmap_height as usize) / 2
+    } else {
+        boot_logo_offset.1
+    };
+
     get_kernel_manager_cluster().graphic_manager.write_bitmap(
-        (boot_logo_address + MSize::from(file_offset as usize)).into(),
+        (boot_logo_address + MSize::new(file_offset as usize)).to_usize(),
         bitmap_color_depth as u8,
         bitmap_width as usize,
         bitmap_height as usize,
-        boot_logo_offset.unwrap().0,
-        boot_logo_offset.unwrap().1,
+        offset_x,
+        offset_y,
     );
 
     free_mapped_address(boot_logo_address.to_usize());
