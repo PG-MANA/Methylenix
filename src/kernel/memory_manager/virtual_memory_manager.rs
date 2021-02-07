@@ -894,7 +894,6 @@ impl VirtualMemoryManager {
             if self.try_expand_size(entry, new_size, pm_manager) {
                 return Ok(virtual_address);
             }
-            pr_info!("expand failed");
             let permission = entry.get_permission_flags();
             let physical_address = entry
                 .get_object()
@@ -1042,7 +1041,13 @@ impl VirtualMemoryManager {
         unreachable!()
     }
 
-    pub fn dump_memory_manager(&self) {
+    pub fn dump_memory_manager(
+        &self,
+        start_vm_address: Option<VAddress>,
+        end_vm_address: Option<VAddress>,
+    ) {
+        let start = start_vm_address.unwrap_or(VAddress::new(0));
+        let end = end_vm_address.unwrap_or(MAX_VIRTUAL_ADDRESS);
         kprintln!("Is system's vm :{}", self.is_system_vm);
         if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
             kprintln!("There is no root entry.");
@@ -1050,6 +1055,14 @@ impl VirtualMemoryManager {
         }
         let mut entry = unsafe { self.vm_map_entry.get_first_entry() }.unwrap();
         loop {
+            if entry.get_vm_start_address() < start || entry.get_vm_end_address() > end {
+                let next = entry.get_next_entry();
+                if next.is_none() {
+                    break;
+                }
+                entry = next.unwrap();
+                continue;
+            }
             kprintln!(
                 "Virtual Address:{:#X} Size:{:#X} W:{}, U:{}, EXE:{}",
                 entry.get_vm_start_address().to_usize(),
@@ -1117,6 +1130,7 @@ impl VirtualMemoryManager {
             entry = next.unwrap();
         }
         kprintln!("----Page Manager----");
-        self.page_manager.dump_table(None);
+        self.page_manager
+            .dump_table(start_vm_address, end_vm_address);
     }
 }

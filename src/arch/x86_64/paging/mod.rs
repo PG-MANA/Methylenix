@@ -651,7 +651,7 @@ impl PageManager {
     /// Dump paging table
     ///
     /// This function shows the status of paging, it prints a lot.
-    pub fn dump_table(&self, end: Option<VAddress>) {
+    pub fn dump_table(&self, start: Option<VAddress>, end: Option<VAddress>) {
         let mut permission = (false /* writable */, false /* no_execute */);
         let mut omitted = false;
         let mut last_address = (
@@ -673,7 +673,9 @@ impl PageManager {
                 }
                 if pdpte.is_huge() {
                     let virtual_address = VAddress::from(0x40000000 * pdpte_count);
-
+                    if start.is_some() && virtual_address < start.unwrap() {
+                        continue;
+                    }
                     if last_address.0 + MSize::from(0x40000000) == virtual_address
                         && last_address.1 + MSize::from(0x40000000) == pdpte.get_address().unwrap()
                         && permission.0 == pdpte.is_writable()
@@ -718,7 +720,9 @@ impl PageManager {
                     if pde.is_huge() {
                         let virtual_address =
                             VAddress::from(0x40000000 * pdpte_count + 0x200000 * pde_count);
-
+                        if start.is_some() && virtual_address < start.unwrap() {
+                            continue;
+                        }
                         if last_address.0 + MSize::from(0x200000) == virtual_address
                             && last_address.1 + MSize::from(0x200000) == pde.get_address().unwrap()
                             && permission.0 == pde.is_writable()
@@ -763,6 +767,9 @@ impl PageManager {
                         let virtual_address = VAddress::from(
                             0x40000000 * pdpte_count + 0x200000 * pde_count + 0x1000 * pte_count,
                         );
+                        if start.is_some() && virtual_address < start.unwrap() {
+                            continue;
+                        }
                         if last_address.0 + MSize::from(0x1000) == virtual_address
                             && last_address.1 + MSize::from(0x1000) == pte.get_address().unwrap()
                             && permission.0 == pte.is_writable()

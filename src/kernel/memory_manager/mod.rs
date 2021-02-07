@@ -308,7 +308,7 @@ impl MemoryManager {
             kprintln!("Can not lock Physical Memory Manager.");
         }
         kprintln!("----Virtual Memory Entries Dump----");
-        self.virtual_memory_manager.dump_memory_manager();
+        self.virtual_memory_manager.dump_memory_manager(None, None);
         kprintln!("----Virtual Memory Entries Dump End----");
     }
 
