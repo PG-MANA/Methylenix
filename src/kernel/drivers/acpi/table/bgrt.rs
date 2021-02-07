@@ -24,8 +24,8 @@ struct BGRT {
     status: u8,
     image_type: u8,
     image_address: u64,
-    image_offset_y: u32,
     image_offset_x: u32,
+    image_offset_y: u32,
 }
 
 pub struct BgrtManager {
