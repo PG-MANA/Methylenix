@@ -66,7 +66,7 @@ impl MadtManager {
             self.enabled = true;
             true
         } else {
-            pr_err!("Cannot reserve memory area of MADT.");
+            pr_err!("Cannot map memory area of MADT.");
             false
         }
     }

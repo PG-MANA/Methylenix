@@ -57,7 +57,7 @@ impl BgrtManager {
         {
             a
         } else {
-            pr_err!("Cannot reserve memory area of BGRT.");
+            pr_err!("Cannot map memory area of BGRT.");
             return false;
         };
         self.base_address = bgrt_vm_address;

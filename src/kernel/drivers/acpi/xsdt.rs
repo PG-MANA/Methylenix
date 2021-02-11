@@ -5,6 +5,7 @@
 //! XSDT is the list of tables like MADT.
 
 use super::table::bgrt::BgrtManager;
+use super::table::dsdt::DsdtManager;
 use super::table::fadt::FadtManager;
 use super::table::madt::MadtManager;
 use super::INITIAL_MMAP_SIZE;
@@ -17,9 +18,12 @@ use crate::kernel::memory_manager::data_type::{
 pub struct XsdtManager {
     base_address: VAddress,
     enabled: bool,
-    bgrt_manager: BgrtManager,
+    /* Essential Managers */
     fadt_manager: FadtManager,
     madt_manager: MadtManager,
+    dsdt_manager: DsdtManager,
+    /* Optional Managers */
+    bgrt_manager: BgrtManager,
 }
 
 impl XsdtManager {
@@ -30,6 +34,7 @@ impl XsdtManager {
             bgrt_manager: BgrtManager::new(),
             fadt_manager: FadtManager::new(),
             madt_manager: MadtManager::new(),
+            dsdt_manager: DsdtManager::new(),
         }
     }
 
@@ -113,6 +118,12 @@ impl XsdtManager {
                         return false;
                     }
                 }
+                DsdtManager::SIGNATURE => {
+                    if !self.dsdt_manager.init(v_address) {
+                        pr_err!("Cannot init DSDT Manager.");
+                        return false;
+                    }
+                }
                 _ => {
                     //
                 }
@@ -123,6 +134,27 @@ impl XsdtManager {
                     .unwrap_or("????")
             );
             index += 1;
+        }
+
+        if !self.dsdt_manager.is_enabled() {
+            let v_address = if let Ok(a) = get_kernel_manager_cluster()
+                .memory_manager
+                .lock()
+                .unwrap()
+                .mmap_dev(
+                    self.fadt_manager.get_dsdt_address().unwrap(),
+                    MSize::new(INITIAL_MMAP_SIZE),
+                    MemoryPermissionFlags::rodata(),
+                ) {
+                a
+            } else {
+                pr_err!("Cannot reserve memory area of DSDT.");
+                return false;
+            };
+            if !self.dsdt_manager.init(v_address) {
+                pr_err!("Cannot init DSDT Manager.");
+                return false;
+            }
         }
         return true;
     }
@@ -137,6 +169,10 @@ impl XsdtManager {
 
     pub fn get_madt_manager(&self) -> &MadtManager {
         &self.madt_manager
+    }
+
+    pub fn get_dsdt_manager(&self) -> &DsdtManager {
+        &self.dsdt_manager
     }
 
     fn get_length(&self) -> Option<usize> {
