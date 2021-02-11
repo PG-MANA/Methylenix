@@ -51,7 +51,7 @@ impl WorkQueueManager {
             Self::WORK_POOL_CACHE_ENTRIES,
             &mut get_kernel_manager_cluster().memory_manager.lock().unwrap(),
         ) {
-            panic!("Cannot init pool: {:?}", e);
+            panic!("Cannot init memory pool for WorkList: {:?}", e);
         }
 
         let thread = task_manager

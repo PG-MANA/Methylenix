@@ -172,7 +172,7 @@ pub unsafe fn get_cr4() -> u64 {
 }
 
 #[inline(always)]
-pub fn is_interruption_enabled() -> bool {
+pub fn is_interrupt_enabled() -> bool {
     let r_flags: u64;
     unsafe {
         asm!("  pushfq

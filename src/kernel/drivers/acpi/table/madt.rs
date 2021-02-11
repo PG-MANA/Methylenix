@@ -19,7 +19,7 @@ struct MADT {
     oem_table_id: [u8; 8],
     oem_revision: u32,
     creator_id: [u8; 4],
-    creator_revision: [u8; 4],
+    creator_revision: u32,
     flags: u32,
     local_interrupt_controller_address: u32,
     /* interrupt_controller_structure: [struct; n] */

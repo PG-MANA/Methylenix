@@ -19,7 +19,7 @@ struct BGRT {
     oem_table_id: [u8; 8],
     oem_revision: u32,
     creator_id: [u8; 4],
-    creator_revision: [u8; 4],
+    creator_revision: u32,
     version: u16,
     status: u8,
     image_type: u8,

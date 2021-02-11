@@ -2,7 +2,7 @@
 //! TTY Manager
 //!
 
-use crate::arch::target_arch::device::cpu::is_interruption_enabled;
+use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 
 use crate::kernel::fifo::FIFO;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -52,7 +52,7 @@ impl TtyManager {
 
         let _lock = if let Ok(l) = self.lock.try_lock() {
             l
-        } else if is_interruption_enabled() {
+        } else if is_interrupt_enabled() {
             self.lock.lock()
         } else {
             return Err(fmt::Error {});
