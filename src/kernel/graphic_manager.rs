@@ -135,11 +135,11 @@ impl GraphicManager {
                 let font_bottom = font_manager.get_ascent() as isize - font_data.y_offset as isize;
                 let font_top = font_bottom as usize - font_data.height as usize;
                 let font_left = font_data.x_offset as usize;
-                if frame_buffer_size.0 <= cursor.x + font_data.width as usize {
+                if frame_buffer_size.0 < cursor.x + font_data.width as usize {
                     cursor.x = 0;
                     cursor.y += font_manager.get_max_font_height();
                 }
-                if frame_buffer_size.1 <= cursor.y + font_data.height as usize {
+                if frame_buffer_size.1 < cursor.y + font_manager.get_max_font_height() {
                     let scroll_y =
                         font_manager.get_max_font_height() + cursor.y - frame_buffer_size.1;
                     frame_buffer_manager.scroll_screen(scroll_y);
