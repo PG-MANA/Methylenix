@@ -13,10 +13,10 @@ use crate::kernel::sync::spin_lock::SpinLockFlag;
 use core::ptr::NonNull;
 
 pub struct ThreadEntry {
-    lock: SpinLockFlag,
-    t_list: PtrLinkedListNode<Self>, /* All thread in process */
-    run_list: PtrLinkedListNode<Self>,
-    sleep_list: PtrLinkedListNode<Self>,
+    pub(super) lock: SpinLockFlag,
+    pub(super) t_list: PtrLinkedListNode<Self>, /* All thread in process */
+    pub(super) run_list: PtrLinkedListNode<Self>,
+    pub(super) sleep_list: PtrLinkedListNode<Self>,
     status: TaskStatus,
     thread_id: usize,
     process: NonNull<ProcessEntry>,
@@ -102,7 +102,7 @@ impl ThreadEntry {
         }
         let ptr = self as *mut _;
         self.sleep_list.set_ptr(ptr);
-        self.sleep_list.insert_after(&mut entry.run_list);
+        self.sleep_list.insert_after(&mut entry.sleep_list);
     }
 
     pub fn set_process(&mut self, process: *mut ProcessEntry) {
