@@ -160,6 +160,17 @@ fn main_process() -> ! {
     draw_boot_logo();
 
     kprintln!("Methylenix");
+
+    get_kernel_manager_cluster()
+        .acpi_manager
+        .lock()
+        .unwrap()
+        .get_xsdt_manager()
+        .get_dsdt_manager()
+        .get_aml_parser()
+        .unwrap()
+        .debug();
+
     loop {
         get_cpu_manager_cluster().run_queue_manager.sleep();
         while let Some(c) = get_kernel_manager_cluster()
