@@ -11,6 +11,7 @@ use crate::kernel::sync::spin_lock::SpinLockFlag;
 use core::fmt;
 use core::mem::MaybeUninit;
 
+#[allow(dead_code)]
 pub struct TtyManager {
     lock: SpinLockFlag,
     input_queue: FIFO<u8, { Self::DEFAULT_INPUT_BUFFER_SIZE }>,

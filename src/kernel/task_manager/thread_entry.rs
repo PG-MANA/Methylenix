@@ -12,6 +12,7 @@ use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::ptr::NonNull;
 
+#[allow(dead_code)]
 pub struct ThreadEntry {
     pub(super) lock: SpinLockFlag,
     pub(super) t_list: PtrLinkedListNode<Self>, /* All thread in process */
