@@ -230,6 +230,7 @@ impl TaskManager {
         Ok(thread)
     }
 
+    #[allow(dead_code)]
     fn search_process_mut(&mut self, p_id: usize) -> Option<*mut ProcessEntry> {
         /* self.lock must be locked */
         assert_ne!(p_id, 0);
