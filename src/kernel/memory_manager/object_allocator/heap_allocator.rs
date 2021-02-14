@@ -11,6 +11,7 @@ use crate::kernel::memory_manager::{
 use crate::kernel::sync::spin_lock::Mutex;
 
 pub struct HeapAllocator {
+    slab_64: PoolAllocator<[u8; 64]>,
     slab_128: PoolAllocator<[u8; 128]>,
     slab_256: PoolAllocator<[u8; 256]>,
     slab_512: PoolAllocator<[u8; 512]>,
@@ -22,6 +23,7 @@ pub struct HeapAllocator {
 impl HeapAllocator {
     pub const fn new() -> Self {
         Self {
+            slab_64: PoolAllocator::new(),
             slab_128: PoolAllocator::new(),
             slab_256: PoolAllocator::new(),
             slab_512: PoolAllocator::new(),
@@ -32,6 +34,12 @@ impl HeapAllocator {
     }
 
     pub fn init(&mut self, memory_manager: &mut MemoryManager) -> Result<(), MemoryError> {
+        let address =
+            memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
+        unsafe {
+            self.slab_64
+                .set_initial_pool(address.to_usize(), PAGE_SIZE_USIZE)
+        };
         let address =
             memory_manager.alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
         unsafe {
@@ -76,7 +84,22 @@ impl HeapAllocator {
         size: MSize,
         memory_manager: &Mutex<MemoryManager>,
     ) -> Result<VAddress, MemoryError> {
-        if size <= MSize::new(128) {
+        if size <= MSize::new(64) {
+            match self.slab_64.alloc_ptr() {
+                Ok(a) => Ok(VAddress::new(a as usize)),
+                Err(()) => {
+                    let address = memory_manager
+                        .lock()
+                        .unwrap()
+                        .alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())?;
+                    for i in 1..(PAGE_SIZE_USIZE >> 6/* PAGE_SIZE / 64 */) {
+                        self.slab_64
+                            .free_ptr((address.to_usize() + (i << 6)) as *mut _);
+                    }
+                    Ok(address)
+                }
+            }
+        } else if size <= MSize::new(128) {
             match self.slab_128.alloc_ptr() {
                 Ok(a) => Ok(VAddress::new(a as usize)),
                 Err(()) => {
@@ -172,7 +195,9 @@ impl HeapAllocator {
     }
 
     pub fn dealloc(&mut self, address: VAddress, size: MSize) {
-        if size <= MSize::new(128) {
+        if size <= MSize::new(64) {
+            self.slab_64.free_ptr(address.into());
+        } else if size <= MSize::new(128) {
             self.slab_128.free_ptr(address.into());
         } else if size <= MSize::new(256) {
             self.slab_256.free_ptr(address.into());
