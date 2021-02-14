@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 use super::expression_opcode;
 use super::opcode;
+use super::parser::ParseHelper;
 use super::{AcpiData, AcpiInt, AmlError, AmlStream};
 
 use crate::ignore_invalid_type_error;
@@ -13,12 +14,13 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+#[derive(Clone, Debug)]
 pub struct PkgLength {
     pub length: usize,
     pub actual_length: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ComputationalData {
     ConstData(AcpiData),
     StringData(&'static str),
@@ -36,7 +38,7 @@ impl ComputationalData {
     const NULL_CHAR: u8 = 0x00;
 
     fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
-        // println!("DataObject: {:#X}", stream.peek_byte()?);
+        /* println!("DataObject: {:#X}", stream.peek_byte()?); */
         match stream.read_byte()? {
             Self::BYTE_PREFIX => Ok(Self::ConstData(stream.read_byte()? as AcpiData)),
             Self::WORD_PREFIX => Ok(Self::ConstData(stream.read_word()? as AcpiData)),
@@ -75,7 +77,7 @@ impl ComputationalData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DataObject {
     ComputationalData(ComputationalData),
     DefPackage(expression_opcode::Package),
@@ -99,7 +101,7 @@ impl DataObject {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DataRefObject {
     DataObject(DataObject),
     ObjectReference(AcpiInt),
@@ -198,7 +200,7 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)] /* Eq: Temporary */
 pub struct NameString {
     paths: Vec<[u8; 4]>,
 }
@@ -208,22 +210,28 @@ impl NameString {
         Self { paths: Vec::new() }
     }
 
+    fn new_with_num(num: usize) -> Self {
+        Self {
+            paths: Vec::with_capacity(num),
+        }
+    }
+
     pub fn root() -> Self {
         Self::new()
     }
 
     pub fn parse(stream: &mut AmlStream, current_scope: Option<&Self>) -> Result<Self, AmlError> {
-        let mut result = Self::root();
+        let mut result: Option<Self> = None;
         let mut c = stream.read_byte()?;
 
         if c == 0x5c {
             c = stream.read_byte()?;
         } else {
             if let Some(cs) = current_scope {
-                result = cs.clone();
+                result = Some(cs.clone());
             }
             while c == 0x5e {
-                result.paths.pop();
+                result.as_mut().unwrap().paths.pop();
                 c = stream.read_byte()?;
             }
         }
@@ -240,12 +248,13 @@ impl NameString {
         } else {
             1
         };
+        let mut result = result.unwrap_or(Self::new_with_num(num_name_path as usize));
         for count in 0..num_name_path {
             if count != 0 {
                 c = stream.read_byte()?;
-                if !c.is_ascii_uppercase() && c != '_' as u8 {
-                    return Err(AmlError::InvalidData);
-                }
+            }
+            if !c.is_ascii_uppercase() && c != '_' as u8 {
+                return Err(AmlError::InvalidData);
             }
             let mut name: [u8; 4] = [0; 4];
             name[0] = c;
@@ -282,6 +291,20 @@ impl NameString {
         }
         return result;
     }
+
+    pub fn is_child(&self, child: &Self) -> bool {
+        let mut i = self.paths.iter();
+        for p2 in child.paths.iter() {
+            if let Some(p1) = i.next() {
+                if p1 != p2 {
+                    return false;
+                }
+            } else {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 impl core::fmt::Display for NameString {
@@ -296,62 +319,102 @@ impl core::fmt::Debug for NameString {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Target {
     Null,
     SuperName(SuperName),
 }
 
 impl Target {
-    pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
+    pub fn parse(
+        stream: &mut AmlStream,
+        current_scope: &NameString,
+        parse_helper: &mut ParseHelper,
+    ) -> Result<Self, AmlError> {
         if stream.peek_byte()? == 0 {
             stream.seek(1)?;
             Ok(Self::Null)
         } else {
-            Ok(Self::SuperName(SuperName::parse(stream, current_scope)?))
+            Ok(Self::SuperName(SuperName::try_parse(
+                stream,
+                current_scope,
+                parse_helper,
+            )?))
         }
     }
 }
 
-pub type SimpleName = SuperName;
-
-/* ArgObj := ARG0OP | Arg1Op | Arg2Op | Arg3Op | Arg4Op | Arg5Op | Arg6Op */
-#[derive(Debug)]
-pub enum SuperName {
+#[derive(Debug, Clone)]
+pub enum SimpleName {
     NameString(NameString),
     ArgObj(u8),
     LocalObj(u8),
+}
+
+impl SimpleName {
+    pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
+        ignore_invalid_type_error!(try_parse_local_object(stream), |n| {
+            return Ok(Self::LocalObj(n));
+        });
+        ignore_invalid_type_error!(try_parse_argument_object(stream), |n| {
+            return Ok(Self::ArgObj(n));
+        });
+        Ok(Self::NameString(NameString::parse(
+            stream,
+            Some(current_scope),
+        )?))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SuperName {
+    SimpleName(SimpleName),
     DebugObj,
     ReferenceTypeOpcode(Box<expression_opcode::ReferenceTypeOpcode>),
 }
 
 impl SuperName {
-    pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
+    pub fn try_parse(
+        stream: &mut AmlStream,
+        current_scope: &NameString,
+        parse_helper: &mut ParseHelper,
+    ) -> Result<Self, AmlError> {
+        let backup = stream.clone();
+        ignore_invalid_type_error!(SimpleName::parse(stream, current_scope), |n| {
+            return Ok(Self::SimpleName(n));
+        });
+        stream.roll_back(&backup);
         let op = stream.peek_byte()?;
-        if opcode::LOCAL0_OP <= op && op <= opcode::LOCAL7_OP {
-            stream.seek(1)?;
-            return Ok(Self::LocalObj(op - opcode::LOCAL0_OP));
-        } else if opcode::ARG0_OP <= op && op <= opcode::ARG6_OP {
-            stream.seek(1)?;
-            return Ok(Self::ArgObj(op - opcode::ARG0_OP));
-        } else if op == opcode::EXT_OP_PREFIX {
+        if op == opcode::EXT_OP_PREFIX {
             let ext_op = stream.peek_byte_with_pos(1)?;
             if ext_op == opcode::DEBUG_OP {
                 stream.seek(2)?;
                 return Ok(Self::DebugObj);
             }
         }
-
-        ignore_invalid_type_error!(
-            expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope),
-            |o| {
-                return Ok(Self::ReferenceTypeOpcode(Box::new(o)));
-            }
-        );
-
-        Ok(Self::NameString(NameString::parse(
-            stream,
-            Some(current_scope),
-        )?))
+        Ok(Self::ReferenceTypeOpcode(Box::new(
+            expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope, parse_helper)?,
+        )))
     }
+}
+
+/* Miscellaneous Objects */
+fn try_parse_miscellaneous_object(
+    stream: &mut AmlStream,
+    start: u8,
+    end: u8,
+) -> Result<u8, AmlError> {
+    if (start..=end).contains(&stream.peek_byte()?) {
+        Ok(stream.read_byte()? - start)
+    } else {
+        Err(AmlError::InvalidType)
+    }
+}
+
+pub fn try_parse_local_object(stream: &mut AmlStream) -> Result<u8, AmlError> {
+    try_parse_miscellaneous_object(stream, opcode::LOCAL0_OP, opcode::LOCAL7_OP)
+}
+
+pub fn try_parse_argument_object(stream: &mut AmlStream) -> Result<u8, AmlError> {
+    try_parse_miscellaneous_object(stream, opcode::ARG0_OP, opcode::ARG6_OP)
 }

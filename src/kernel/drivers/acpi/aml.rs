@@ -8,11 +8,13 @@ mod expression_opcode;
 mod named_object;
 mod namespace_modifier_object;
 mod opcode;
+mod parser;
 mod statement_opcode;
 mod term_object;
 
 use self::data_object::NameString;
 use self::namespace_modifier_object::NamespaceModifierObject;
+use self::parser::ParseHelper;
 use self::term_object::{TermList, TermObj};
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
@@ -35,9 +37,14 @@ pub struct AmlStream {
 pub enum AmlError {
     ReadOutOfRange,
     SeekOutOfRange,
+    PeekOutOfRange,
     InvalidSizeChange,
     InvalidData,
     InvalidType,
+    InvalidMethodName(NameString),
+    InvalidScope(NameString),
+    MutexError,
+    UnsupportedType,
 }
 
 #[macro_export]
@@ -62,10 +69,15 @@ impl AmlParser {
 
     pub fn debug(&mut self) {
         println!("AML Size: {:#X}", self.size.to_usize());
+        let root_name = NameString::root();
+        let mut parse_helper =
+            ParseHelper::new(AmlStream::new(self.base_address, self.size), &root_name);
         let root_term_list = TermList::new(
             AmlStream::new(self.base_address, self.size),
-            NameString::root(),
-        );
+            root_name,
+            &mut parse_helper,
+        )
+        .unwrap();
         match Self::debug_term_list(root_term_list) {
             Ok(_) => {
                 println!("AML End");
@@ -81,7 +93,7 @@ impl AmlParser {
             match o? {
                 TermObj::NamespaceModifierObj(n) => match n {
                     NamespaceModifierObject::DefAlias(d_a) => {
-                        println!("DefAlias({} => {})", d_a.original_name, d_a.alias_name);
+                        println!("DefAlias({} => {})", d_a.name, d_a.destination);
                     }
                     NamespaceModifierObject::DefName(d_n) => {
                         println!("DefName({}) => {:?}", d_n.name, d_n.data_ref_object);
@@ -110,7 +122,12 @@ impl AmlStream {
     }
 
     fn check_pointer(&self, read_size: usize) -> Result<(), AmlError> {
-        if self.pointer + MSize::new(read_size) >= self.limit {
+        if self.pointer + MSize::new(read_size) > self.limit {
+            println!(
+                "AmlError: ({},{})",
+                (self.pointer + MSize::new(read_size) - self.limit).to_usize(),
+                read_size
+            );
             Err(AmlError::ReadOutOfRange)
         } else {
             Ok(())
@@ -149,12 +166,13 @@ impl AmlStream {
     }
 
     fn peek_byte(&self) -> Result<u8, AmlError> {
-        self.check_pointer(1)?;
+        self.check_pointer(1).or(Err(AmlError::PeekOutOfRange))?;
         Ok(unsafe { *(self.pointer.to_usize() as *const u8) })
     }
 
     fn peek_byte_with_pos(&self, pos_forward_from_current: usize) -> Result<u8, AmlError> {
-        self.check_pointer(pos_forward_from_current)?;
+        self.check_pointer(pos_forward_from_current)
+            .or(Err(AmlError::PeekOutOfRange))?;
         Ok(unsafe {
             *((self.pointer + MSize::new(pos_forward_from_current)).to_usize() as *const u8)
         })
