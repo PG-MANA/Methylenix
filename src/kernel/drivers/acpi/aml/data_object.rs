@@ -200,38 +200,32 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)] /* Eq: Temporary */
-pub struct NameString {
-    paths: Vec<[u8; 4]>,
+#[derive(Clone, Eq, PartialEq)]
+pub enum NameString {
+    Normal(([[u8; 4]; 7], u8)),
+    Ex(Vec<[u8; 4]>),
 }
 
 impl NameString {
-    fn new() -> Self {
-        Self { paths: Vec::new() }
-    }
-
-    fn new_with_num(num: usize) -> Self {
-        Self {
-            paths: Vec::with_capacity(num),
-        }
-    }
+    const ROOT_CHAR: u8 = 0x5C;
+    const PARENT_PREFIX_CHAR: u8 = 0x5E;
 
     pub fn root() -> Self {
-        Self::new()
+        Self::Normal(([[0; 4]; 7], 0))
     }
 
     pub fn parse(stream: &mut AmlStream, current_scope: Option<&Self>) -> Result<Self, AmlError> {
-        let mut result: Option<Self> = None;
+        let mut result = Self::root();
         let mut c = stream.read_byte()?;
 
-        if c == 0x5c {
+        if c == Self::ROOT_CHAR {
             c = stream.read_byte()?;
         } else {
-            if let Some(cs) = current_scope {
-                result = Some(cs.clone());
+            if let Some(c_s) = current_scope {
+                result = c_s.clone();
             }
-            while c == 0x5e {
-                result.as_mut().unwrap().paths.pop();
+            while c == Self::PARENT_PREFIX_CHAR {
+                result.up_to_parent_name_space();
                 c = stream.read_byte()?;
             }
         }
@@ -248,7 +242,16 @@ impl NameString {
         } else {
             1
         };
-        let mut result = result.unwrap_or(Self::new_with_num(num_name_path as usize));
+        if let Self::Normal((array, count)) = result {
+            if count + num_name_path > 7 {
+                let mut v: Vec<[u8; 4]> = Vec::with_capacity((count + num_name_path) as usize);
+                for i in 0..count {
+                    v.push(array[i as usize]);
+                }
+                result = Self::Ex(v);
+            }
+        }
+
         for count in 0..num_name_path {
             if count != 0 {
                 c = stream.read_byte()?;
@@ -269,47 +272,149 @@ impl NameString {
                     name[i] = c;
                 }
             }
-            result.paths.push(name);
+            match &mut result {
+                Self::Normal((array, count)) => {
+                    array[*count as usize] = name;
+                    *count += 1;
+                }
+                Self::Ex(v) => {
+                    v.push(name);
+                }
+            }
         }
         return Ok(result);
     }
 
     pub fn up_to_parent_name_space(&mut self) {
-        self.paths.pop();
+        match self {
+            Self::Normal((_, count)) => {
+                if *count == 0 {
+                    return;
+                }
+                *count -= 1;
+            }
+            Self::Ex(v) => {
+                v.pop();
+                if v.len() <= 7 {
+                    let mut i = 0;
+                    let mut array: [[u8; 4]; 7] = [[0; 4]; 7];
+                    for e in v {
+                        array[i] = *e;
+                        i += 1;
+                    }
+                    *self = Self::Normal((array, i as u8));
+                }
+            }
+        }
     }
 
     pub fn to_full_path_string(&self) -> String {
         let mut result = String::from('\\');
         let mut is_root = true;
-        for e in self.paths.iter() {
-            if is_root {
-                is_root = false;
-            } else {
-                result += ".";
+        match self {
+            Self::Normal((array, len)) => {
+                for count in 0..(*len as usize) {
+                    if is_root {
+                        is_root = false;
+                    } else {
+                        result += ".";
+                    }
+                    result += core::str::from_utf8(&array[count]).unwrap_or("");
+                }
             }
-            result += core::str::from_utf8(e).unwrap_or("");
+            Self::Ex(v) => {
+                for e in v.iter() {
+                    if is_root {
+                        is_root = false;
+                    } else {
+                        result += ".";
+                    }
+                    result += core::str::from_utf8(e).unwrap_or("");
+                }
+            }
         }
         return result;
     }
 
-    pub fn is_child(&self, child: &Self) -> bool {
-        let mut i = self.paths.iter();
-        for p2 in child.paths.iter() {
-            if let Some(p1) = i.next() {
-                if p1 != p2 {
-                    return false;
+    fn get_element(&self, index: usize) -> Option<&[u8; 4]> {
+        match self {
+            Self::Normal((array, len)) => {
+                if index >= (*len as usize) {
+                    None
+                } else {
+                    Some(&array[index])
                 }
-            } else {
+            }
+            Self::Ex(v) => v.get(index),
+        }
+    }
+
+    pub fn is_child(&self, child: &Self) -> bool {
+        for index in 0.. {
+            let s1 = self.get_element(index);
+            let s2 = child.get_element(index);
+            if s1.is_none() {
                 return true;
+            }
+            if s1 != s2 {
+                return false;
             }
         }
         return false;
+    }
+
+    pub fn get_relative_path(&self) -> Self {
+        /* To fix... */
+        let mut result = [[0; 4]; 7];
+        match self {
+            Self::Normal((array, len)) => {
+                if *len == 0 {
+                    self.clone()
+                } else {
+                    result[0] = array[*len as usize - 1];
+                    Self::Normal((result, 1))
+                }
+            }
+            Self::Ex(v) => {
+                if let Some(l) = v.last() {
+                    result[0] = *l;
+                    Self::Normal((result, 1))
+                } else {
+                    self.clone()
+                }
+            }
+        }
     }
 }
 
 impl core::fmt::Display for NameString {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Display::fmt(&self.to_full_path_string(), f)
+        use core::fmt::Write;
+        f.write_char('\\')?;
+        let mut is_root = true;
+        match self {
+            Self::Normal((array, len)) => {
+                for count in 0..(*len as usize) {
+                    if is_root {
+                        is_root = false;
+                    } else {
+                        f.write_char('.')?;
+                    }
+                    f.write_str(core::str::from_utf8(&array[count]).unwrap_or("!!!!"))?;
+                }
+            }
+            Self::Ex(v) => {
+                for e in v.iter() {
+                    if is_root {
+                        is_root = false;
+                    } else {
+                        f.write_char('.')?;
+                    }
+                    f.write_str(core::str::from_utf8(e).unwrap_or("!!!!"))?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
