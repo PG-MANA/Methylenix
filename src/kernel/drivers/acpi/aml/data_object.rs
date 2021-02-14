@@ -354,7 +354,7 @@ impl NameString {
             let s1 = self.get_element(index);
             let s2 = child.get_element(index);
             if s1.is_none() {
-                return true;
+                return if s2.is_some() { true } else { false };
             }
             if s1 != s2 {
                 return false;
