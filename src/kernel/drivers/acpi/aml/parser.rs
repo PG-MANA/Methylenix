@@ -2,15 +2,16 @@
 //! ACPI Machine Language Parse Helper
 //!
 
-use super::data_object::{DataRefObject, NameString};
-use super::named_object::NamedObject;
-use super::{AmlError, AmlStream};
+use super::data_object::{ComputationalData, DataObject, DataRefObject, NameString};
+use super::named_object::{External, FieldElement, NamedObject};
+use super::namespace_modifier_object::NamespaceModifierObject;
+use super::statement_opcode::StatementOpcode;
+use super::term_object::{TermList, TermObj};
+use super::{AcpiInt, AmlError};
 
 use crate::kernel::sync::spin_lock::Mutex;
 
-use crate::kernel::drivers::acpi::aml::data_object::DataObject;
-use crate::kernel::drivers::acpi::aml::AcpiInt;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 #[derive(Clone)]
@@ -23,10 +24,11 @@ enum ObjectListItem {
 
 struct ObjectList {
     scope_name: NameString,
-    /* parent: Option<Arc<Mutex<Self>>>, */
+    parent: Option<Weak<Mutex<Self>>>,
     list: Vec<(NameString, ObjectListItem)>,
 }
 
+#[derive(Debug)]
 pub enum ContentObject {
     NamedObject(NamedObject),
     DataRefObject(DataRefObject),
@@ -34,47 +36,98 @@ pub enum ContentObject {
 
 #[derive(Clone)]
 pub struct ParseHelper {
-    root_stream: AmlStream,
+    root_term_list: TermList,
     root_object_list: Arc<Mutex<ObjectList>>,
     current_object_list: Arc<Mutex<ObjectList>>,
+    original_name_searching: Option<NameString>,
 }
 
 impl ObjectList {
-    fn new(_parent: Option<Arc<Mutex<Self>>>, scope: &NameString) -> Self {
+    fn new(parent: Option<Weak<Mutex<Self>>>, scope: &NameString) -> Self {
         Self {
             scope_name: scope.clone(),
-            /* parent, */
+            parent,
             list: Vec::new(),
         }
     }
 
-    pub fn add_item(&mut self, name: NameString, object: ObjectListItem) {
+    fn add_item(&mut self, name: NameString, object: ObjectListItem) {
         self.list.push((name, object));
     }
 
-    pub fn get_item(&self, name: &NameString) -> Option<ObjectListItem> {
+    fn get_item(&self, name: &NameString, should_ignore_scope: bool) -> Option<ObjectListItem> {
         self.list
             .iter()
-            .find(|item| item.0 == *name)
+            .find(|item| {
+                &item.0 == name
+                    && (!should_ignore_scope || !matches!(item.1, ObjectListItem::DefScope(_)))
+            })
+            .and_then(|item| Some(item.1.clone()))
+    }
+
+    fn get_scope(&self, name: &NameString) -> Option<ObjectListItem> {
+        self.list
+            .iter()
+            .find(|item| item.0 == *name && matches!(&item.1, ObjectListItem::DefScope(_)))
             .and_then(|item| Some(item.1.clone()))
     }
 }
 
 impl ParseHelper {
-    pub fn new(stream: AmlStream, scope_name: &NameString) -> Self {
+    pub fn new(root_term_list: TermList, scope_name: &NameString) -> Self {
+        assert!(!scope_name.is_null_name());
+        assert!(!root_term_list.get_scope_name().is_null_name());
         let list = Arc::new(Mutex::new(ObjectList::new(None, scope_name)));
         Self {
-            root_stream: stream,
+            root_term_list,
             current_object_list: list.clone(),
             root_object_list: list,
+            original_name_searching: None,
         }
     }
 
-    pub fn add_def_name(
-        &mut self,
-        name: &NameString,
-        object: &DataRefObject,
-    ) -> Result<(), AmlError> {
+    pub fn init(&mut self) -> Result<(), AmlError> {
+        self.move_current_scope(&NameString::root())?;
+
+        /* Add builtin objects */
+        let gl_name = NameString::from_array(&[['_' as u8, 'G' as u8, 'L' as u8, 0]], true);
+        let gl = NamedObject::DefMutex((gl_name.clone(), 0));
+        let osi_name =
+            NameString::from_array(&[['_' as u8, 'O' as u8, 'S' as u8, 'I' as u8]], true);
+        let osi =
+            NamedObject::DefExternal(External::new(osi_name.clone(), 8 /*OK?(Method)*/, 1));
+        let os_name = NameString::from_array(&[['_' as u8, 'O' as u8, 'S' as u8, 0]], true);
+        let os = DataRefObject::DataObject(DataObject::ComputationalData(
+            ComputationalData::StringData("Methylenix"),
+        ));
+        let rev_name =
+            NameString::from_array(&[['_' as u8, 'R' as u8, 'E' as u8, 'V' as u8]], true);
+        let rev = DataRefObject::DataObject(DataObject::ComputationalData(
+            ComputationalData::ConstObj(2 /* ACPI 2.0 */),
+        ));
+        let dlm_name =
+            NameString::from_array(&[['_' as u8, 'D' as u8, 'L' as u8, 'M' as u8]], true);
+        let dlm = DataRefObject::DataObject(DataObject::ComputationalData(
+            ComputationalData::ConstObj(0 /* temporary */),
+        ));
+
+        self.add_named_object(&gl_name, &gl)?;
+        self.add_named_object(&osi_name, &osi)?;
+        self.add_def_name(&os_name, &os)?;
+        self.add_def_name(&rev_name, &rev)?;
+        self.add_def_name(&dlm_name, &dlm)?;
+        return Ok(());
+    }
+
+    fn back_up(&self) -> Arc<Mutex<ObjectList>> {
+        self.current_object_list.clone()
+    }
+
+    fn restore(&mut self, back_up: Arc<Mutex<ObjectList>>) {
+        self.current_object_list = back_up;
+    }
+
+    fn add_def_name(&mut self, name: &NameString, object: &DataRefObject) -> Result<(), AmlError> {
         Ok(self
             .current_object_list
             .try_lock()
@@ -82,7 +135,7 @@ impl ParseHelper {
             .add_item(name.clone(), ObjectListItem::DefName(object.clone())))
     }
 
-    pub fn add_alias_name(
+    fn add_alias_name(
         &mut self,
         name: &NameString,
         destination: &NameString,
@@ -94,7 +147,7 @@ impl ParseHelper {
             .add_item(name.clone(), ObjectListItem::DefAlias(destination.clone())))
     }
 
-    pub fn add_named_object(
+    fn add_named_object(
         &mut self,
         name: &NameString,
         object: &NamedObject,
@@ -106,73 +159,130 @@ impl ParseHelper {
             .add_item(name.clone(), ObjectListItem::NamedObject(object.clone())))
     }
 
-    pub fn move_into_scope(&mut self, scope_name: &NameString) -> Result<(), AmlError> {
-        let current_object_list = self
+    fn create_new_scope_and_move(&mut self, scope_name: &NameString) -> Result<(), AmlError> {
+        let child_object_list = Arc::new(Mutex::new(ObjectList::new(
+            Some(Arc::downgrade(&self.current_object_list)),
+            scope_name,
+        )));
+        self.current_object_list
+            .try_lock()
+            .or(Err(AmlError::MutexError))?
+            .add_item(
+                scope_name.clone(),
+                ObjectListItem::DefScope(child_object_list.clone()),
+            );
+        self.current_object_list = child_object_list;
+        return Ok(());
+    }
+
+    pub fn move_current_scope(&mut self, scope_name: &NameString) -> Result<(), AmlError> {
+        if scope_name.is_null_name() {
+            return Ok(());
+        }
+        let locked_current_object_list = self
             .current_object_list
             .try_lock()
             .or(Err(AmlError::MutexError))?;
-        if current_object_list.scope_name == *scope_name {
+        if &locked_current_object_list.scope_name == scope_name {
             return Ok(());
         }
-        let scope = current_object_list.get_item(scope_name);
+        if locked_current_object_list.scope_name.is_child(scope_name) {
+            if let Some(ObjectListItem::DefScope(scope)) =
+                locked_current_object_list.get_scope(scope_name)
+            {
+                self.current_object_list = scope;
+                return Ok(());
+            }
+            let mut parent_list_option = locked_current_object_list.parent.clone();
+            drop(locked_current_object_list);
+            while let Some(parent_list) = parent_list_option {
+                if let Ok(locked_parent_list) = parent_list
+                    .clone()
+                    .upgrade()
+                    .ok_or(AmlError::ObjectTreeError)?
+                    .try_lock()
+                {
+                    if locked_parent_list.scope_name.is_child(scope_name) {
+                        drop(locked_parent_list);
+                        let target_list = Self::find_target_scope(
+                            parent_list
+                                .clone()
+                                .upgrade()
+                                .ok_or(AmlError::ObjectTreeError)?,
+                            scope_name,
+                        );
 
-        if let Some(scope) = scope {
-            return match scope {
-                ObjectListItem::DefScope(c) => {
-                    self.current_object_list = c;
-                    Ok(())
+                        if matches!(target_list, Err(AmlError::MutexError)) {
+                            break;
+                        }
+                        let target_list = target_list?;
+                        let locked_target_list =
+                            target_list.try_lock().or(Err(AmlError::MutexError))?;
+                        return if &locked_target_list.scope_name == scope_name {
+                            self.current_object_list = target_list;
+                            Ok(())
+                        } else {
+                            drop(locked_target_list);
+                            self.current_object_list = target_list;
+                            self.create_new_scope_and_move(scope_name)
+                        };
+                    }
+                    if let Ok(locked_parent_list) = parent_list
+                        .upgrade()
+                        .ok_or(AmlError::ObjectTreeError)?
+                        .try_lock()
+                    {
+                        parent_list_option = locked_parent_list.parent.clone();
+                        continue;
+                    }
                 }
-                _ => Err(AmlError::InvalidScope(scope_name.clone())),
-            };
-        }
-        let target_scope = if current_object_list.scope_name.is_child(scope_name) {
-            drop(current_object_list);
-            Self::find_target_scope(self.current_object_list.clone(), scope_name)?
+                break;
+            }
         } else {
-            drop(current_object_list);
-            Self::find_target_scope(self.root_object_list.clone(), scope_name)?
-        };
-
-        if &target_scope
+            drop(locked_current_object_list);
+        }
+        /* Find scope from root */
+        self.current_object_list =
+            Self::find_target_scope(self.root_object_list.clone(), scope_name)?;
+        if &self
+            .current_object_list
             .try_lock()
             .or(Err(AmlError::MutexError))?
             .scope_name
             == scope_name
         {
-            self.current_object_list = target_scope;
-        } else {
-            let child_object_list = Arc::new(Mutex::new(ObjectList::new(
-                Some(self.current_object_list.clone()),
-                scope_name,
-            )));
-            self.current_object_list
-                .try_lock()
-                .or(Err(AmlError::MutexError))?
-                .add_item(
-                    scope_name.clone(),
-                    ObjectListItem::DefScope(child_object_list.clone()),
-                );
-            self.current_object_list = child_object_list;
+            return Ok(());
         }
-        return Ok(());
+        return self.create_new_scope_and_move(scope_name);
     }
 
-    /* pub fn out_from_current_scope(&mut self) {
-        if let Some(p) = self.current_object_list.lock().unwrap().parent.clone() {
-            self.current_object_list = p;
+    pub fn move_parent_scope(&mut self) -> Result<bool, AmlError> {
+        if let Some(p) = self
+            .current_object_list
+            .try_lock()
+            .or(Err(AmlError::MutexError))?
+            .parent
+            .clone()
+        {
+            self.current_object_list = p.upgrade().ok_or(AmlError::ObjectTreeError)?;
+            return Ok(true);
         }
-    } */
+        return Ok(false);
+    }
 
     fn find_target_scope(
         list: Arc<Mutex<ObjectList>>,
         name: &NameString,
     ) -> Result<Arc<Mutex<ObjectList>>, AmlError> {
-        let list_lock = list.try_lock().or(Err(AmlError::MutexError))?;
-        for item in list_lock.list.iter() {
+        let locked_list = list.try_lock().or_else(|_| {
+            pr_err!("Cannot Lock List.");
+            Err(AmlError::MutexError)
+        })?;
+        for item in locked_list.list.iter() {
             if item.0.is_child(name) {
                 if let ObjectListItem::DefScope(child) = &item.1 {
                     let child = child.clone();
-                    drop(list_lock);
+                    drop(locked_list);
                     return Self::find_target_scope(child, name);
                 }
             }
@@ -183,34 +293,61 @@ impl ParseHelper {
     fn find_item_from_list(
         list: Arc<Mutex<ObjectList>>,
         name: &NameString,
+        should_ignore_scope: bool,
     ) -> Result<Option<ObjectListItem>, AmlError> {
-        let list = list.try_lock().or(Err(AmlError::MutexError))?;
-        for item in list.list.iter() {
-            if &item.0 == name {
-                return Ok(Some(item.1.clone()));
-            }
-        }
-        Ok(None)
+        Ok(list
+            .try_lock()
+            .or(Err(AmlError::MutexError))?
+            .get_item(name, should_ignore_scope))
     }
 
-    fn find_item(&self, name: &NameString) -> Result<Option<ObjectListItem>, AmlError> {
+    fn find_item(
+        &self,
+        name: &NameString,
+        should_ignore_scope: bool,
+        should_search_parent: bool,
+    ) -> Result<Option<ObjectListItem>, AmlError> {
         if let Some(item) = Self::find_item_from_list(
             Self::find_target_scope(self.current_object_list.clone(), name)?,
             name,
+            should_ignore_scope,
         )? {
             return Ok(Some(item));
         }
-        Self::find_item_from_list(
-            Self::find_target_scope(self.root_object_list.clone(), name)?,
-            name,
-        )
+        let target_list = Self::find_target_scope(self.root_object_list.clone(), name)?;
+        if let Some(item) =
+            Self::find_item_from_list(target_list.clone(), name, should_ignore_scope)?
+        {
+            return Ok(Some(item));
+        }
+        if should_search_parent {
+            let parent = target_list
+                .try_lock()
+                .or(Err(AmlError::MutexError))?
+                .parent
+                .clone();
+
+            if let Some(parent) = parent {
+                if let Some(item) = Self::find_item_from_list(
+                    parent.upgrade().ok_or(AmlError::ObjectTreeError)?,
+                    name,
+                    should_ignore_scope,
+                )? {
+                    return Ok(Some(item));
+                }
+            }
+        }
+        Ok(None)
     }
 
     pub fn find_content_object(
         &self,
         name: &NameString,
     ) -> Result<Option<ContentObject>, AmlError> {
-        if let Some(item) = self.find_item(name)? {
+        if name.is_null_name() {
+            return Ok(None);
+        }
+        if let Some(item) = self.find_item(name, true, true)? {
             match item {
                 ObjectListItem::NamedObject(o) => Ok(Some(ContentObject::NamedObject(o))),
                 ObjectListItem::DefName(d) => Ok(Some(ContentObject::DataRefObject(d))),
@@ -227,19 +364,22 @@ impl ParseHelper {
         list: Arc<Mutex<ObjectList>>,
         name: &NameString,
     ) -> Result<Option<ContentObject>, AmlError> {
-        let mut list_locked = list.try_lock().or(Err(AmlError::MutexError))?;
-        let mut index = 0;
-        loop {
-            let i = list_locked.list.get(index);
+        let mut locked_list = list.try_lock().or(Err(AmlError::MutexError))?;
+        let mut list_to_search_later: Option<Arc<Mutex<ObjectList>>> = None;
+
+        for index in 0.. {
+            let i = locked_list.list.get(index);
             if i.is_none() {
-                return Ok(None);
+                break;
             }
             let i = i.unwrap();
 
             if &i.0 == name {
-                if !matches!(i.1, ObjectListItem::DefScope(_)) {
+                if let ObjectListItem::DefScope(s) = &i.1 {
+                    list_to_search_later = Some(s.clone());
+                } else {
                     let object = i.1.clone();
-                    drop(list_locked);
+                    drop(locked_list);
                     return match object {
                         ObjectListItem::NamedObject(o) => Ok(Some(ContentObject::NamedObject(o))),
                         ObjectListItem::DefName(d) => Ok(Some(ContentObject::DataRefObject(d))),
@@ -252,15 +392,11 @@ impl ParseHelper {
             } else if i.0.is_child(name) {
                 match &i.1 {
                     ObjectListItem::DefScope(s) => {
-                        let s = s.clone();
-                        drop(list_locked);
-                        return self._find_content_object_with_parsing(s, name);
+                        list_to_search_later = Some(s.clone());
                     }
                     ObjectListItem::DefName(d_r) => match d_r {
                         DataRefObject::DataObject(d_o) => match d_o {
-                            DataObject::ComputationalData(_) => {
-                                return Ok(Some(ContentObject::DataRefObject(d_r.clone())))
-                            }
+                            DataObject::ComputationalData(_) => { /* Ignore */ }
                             DataObject::DefPackage(_) => unimplemented!(),
                             DataObject::DefVarPackage(_) => unimplemented!(),
                         },
@@ -271,35 +407,50 @@ impl ParseHelper {
                     ObjectListItem::DefAlias(_) => unimplemented!(),
                     ObjectListItem::NamedObject(n_o) => {
                         let n_o = n_o.clone();
-                        /* let current_scope = list_locked.scope_name.clone(); */
-                        drop(list_locked);
+                        let scope_name = locked_list.scope_name.clone();
+                        drop(locked_list);
 
-                        n_o.parse_list(self)?;
-
-                        /* let new_scope = Self::find_target_scope(list.clone(), name)?;
-                        if new_scope
-                            .try_lock()
-                            .or(Err(AmlError::MutexError))?
-                            .scope_name
-                            != current_scope
+                        if let Some(o_i) =
+                            self.parse_named_object_recursive(name, &scope_name, n_o)?
                         {
-                            return self._find_content_object_with_parsing(new_scope, name);
-                        } */
-                        list_locked = list.try_lock().or(Err(AmlError::MutexError))?;
+                            return self.convert_object_list_item_list_to_content_object(o_i);
+                        }
+
+                        locked_list = list.try_lock().or(Err(AmlError::MutexError))?;
                     }
                 }
             }
-            index += 1;
+        }
+        drop(locked_list);
+        if let Some(s) = list_to_search_later {
+            self._find_content_object_with_parsing(s, name)
+        } else {
+            Ok(None)
         }
     }
 
     /// Find Element with parsing Field and return the object including it.
+    /// This function is the entrance of searching object.
     pub fn find_content_object_with_parsing(
         &mut self,
         name: &NameString,
     ) -> Result<Option<ContentObject>, AmlError> {
+        if name.is_null_name() {
+            return Ok(None);
+        }
+        let back_up_of_original_name_searching =
+            if let Some(searching) = self.original_name_searching.replace(name.clone()) {
+                if name == &searching {
+                    self.original_name_searching = Some(searching);
+                    return Err(AmlError::NestedSearch);
+                }
+                Some(searching)
+            } else {
+                None
+            };
         if let Some(o) = self.find_content_object(name)? {
             /* may be needless? */
+            self.original_name_searching = back_up_of_original_name_searching;
             return Ok(Some(o));
         }
         let is_child = self
@@ -308,20 +459,157 @@ impl ParseHelper {
             .or(Err(AmlError::MutexError))?
             .scope_name
             .is_child(name);
-        let target_list = if is_child {
+
+        let original_target_list = if is_child {
             Self::find_target_scope(self.current_object_list.clone(), name)?
         } else {
             Self::find_target_scope(self.root_object_list.clone(), name)?
         };
-        self._find_content_object_with_parsing(target_list, name)
+
+        if let Some(c) =
+            self._find_content_object_with_parsing(original_target_list.clone(), name)?
+        {
+            self.original_name_searching = back_up_of_original_name_searching;
+            return Ok(Some(c));
+        }
+        let mut target_list = original_target_list.clone();
+        let relative_target_name = name.get_relative_name(
+            &target_list
+                .try_lock()
+                .or(Err(AmlError::MutexError))?
+                .scope_name,
+        );
+        let back_up = self.back_up();
+
+        loop {
+            if let Some(parent) = target_list
+                .try_lock()
+                .or(Err(AmlError::MutexError))?
+                .parent
+                .clone()
+            {
+                target_list = parent.upgrade().ok_or(AmlError::ObjectTreeError)?;
+            } else {
+                break;
+            };
+
+            let search_name = if let Some(r_n) = relative_target_name.as_ref() {
+                Some(
+                    r_n.get_full_name_path(
+                        &target_list
+                            .try_lock()
+                            .or(Err(AmlError::MutexError))?
+                            .scope_name,
+                    ),
+                )
+            } else {
+                None
+            };
+
+            if let Some(c) = self._find_content_object_with_parsing(
+                target_list.clone(),
+                search_name.as_ref().unwrap_or(name),
+            )? {
+                self.restore(back_up.clone());
+                self.original_name_searching = back_up_of_original_name_searching;
+                return Ok(Some(c));
+            }
+        }
+
+        self.restore(back_up.clone());
+
+        match self.parse_term_list_recursive(name, self.root_term_list.clone()) {
+            Ok(Some(o_i)) => {
+                self.restore(back_up);
+                self.original_name_searching = back_up_of_original_name_searching;
+                return self.convert_object_list_item_list_to_content_object(o_i);
+            }
+            Err(AmlError::NestedSearch) | Ok(None) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
+        self.restore(back_up.clone());
+        let mut target_list = original_target_list;
+        loop {
+            if let Some(parent) = target_list
+                .try_lock()
+                .or(Err(AmlError::MutexError))?
+                .parent
+                .clone()
+            {
+                target_list = parent.upgrade().ok_or(AmlError::ObjectTreeError)?;
+            } else {
+                break;
+            };
+
+            let search_name = if let Some(r_n) = relative_target_name.as_ref() {
+                Some(
+                    r_n.get_full_name_path(
+                        &target_list
+                            .try_lock()
+                            .or(Err(AmlError::MutexError))?
+                            .scope_name,
+                    ),
+                )
+            } else {
+                None
+            };
+            /*println!(
+                "===========Search Scope:{}, Search Name:{:?}, Relative Name:{:?}===========",
+                target_list.try_lock().unwrap().scope_name,
+                search_name,
+                relative_target_name
+            );*/
+            match self.parse_term_list_recursive(
+                search_name.as_ref().unwrap_or(name),
+                self.root_term_list.clone(),
+            ) {
+                Ok(Some(o_i)) => {
+                    self.restore(back_up);
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    return self.convert_object_list_item_list_to_content_object(o_i);
+                }
+                Err(AmlError::NestedSearch) | Ok(None) => {}
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn convert_object_list_item_list_to_content_object(
+        &mut self,
+        o_l_i: ObjectListItem,
+    ) -> Result<Option<ContentObject>, AmlError> {
+        match o_l_i {
+            ObjectListItem::DefScope(_) => {
+                unimplemented!()
+            }
+            ObjectListItem::DefName(d_n) => {
+                return Ok(Some(ContentObject::DataRefObject(d_n)));
+            }
+            ObjectListItem::DefAlias(a) => {
+                return self.find_content_object_with_parsing(&a);
+            }
+            ObjectListItem::NamedObject(n_o) => {
+                return Ok(Some(ContentObject::NamedObject(n_o)));
+            }
+        }
     }
 
     pub fn find_method_argument_count(
         &mut self,
         method_name: &NameString,
     ) -> Result<Option<AcpiInt>, AmlError> {
+        if method_name.is_null_name() {
+            return Ok(Some(0));
+        }
         let result = self.find_content_object_with_parsing(method_name)?;
-
+        if result.is_none() {
+            return Ok(None);
+        }
         Ok(match result.unwrap() {
             ContentObject::DataRefObject(d_r) => match d_r {
                 DataRefObject::ObjectReference(_) => unimplemented!(),
@@ -329,6 +617,131 @@ impl ParseHelper {
             },
             ContentObject::NamedObject(n_o) => n_o.get_argument_count(),
         })
+    }
+
+    fn parse_term_list_recursive(
+        &mut self,
+        target_name: &NameString,
+        mut term_list: TermList,
+    ) -> Result<Option<ObjectListItem>, AmlError> {
+        if !term_list.get_scope_name().is_child(target_name) {
+            return Ok(None);
+        }
+        self.move_current_scope(term_list.get_scope_name())?;
+        while let Some(term_obj) = term_list.next(self)? {
+            match term_obj {
+                TermObj::NamespaceModifierObj(name_modifier_object) => {
+                    if name_modifier_object.get_name() == target_name
+                        || name_modifier_object.get_name().is_child(target_name)
+                    {
+                        match name_modifier_object {
+                            NamespaceModifierObject::DefAlias(a) => {
+                                if a.get_name().is_child(target_name) {
+                                    unimplemented!()
+                                }
+                                self.add_alias_name(a.get_name(), a.get_source())?;
+                                return Ok(Some(ObjectListItem::DefAlias(a.get_source().clone())));
+                            }
+                            NamespaceModifierObject::DefName(n) => {
+                                if !n.get_name().is_child(target_name) {
+                                    self.add_def_name(n.get_name(), n.get_data_ref_object())?;
+                                    return Ok(Some(ObjectListItem::DefName(
+                                        n.get_data_ref_object().clone(),
+                                    )));
+                                }
+                            }
+                            NamespaceModifierObject::DefScope(s) => {
+                                if s.get_name() == target_name {
+                                    continue;
+                                }
+                                if let Some(obj) = self.parse_term_list_recursive(
+                                    target_name,
+                                    s.get_term_list().clone(),
+                                )? {
+                                    return Ok(Some(obj));
+                                }
+                                self.move_current_scope(term_list.get_scope_name())?;
+                            }
+                        }
+                    }
+                }
+                TermObj::NamedObj(named_obj) => {
+                    if let Some(named_obj) = self.parse_named_object_recursive(
+                        target_name,
+                        term_list.get_scope_name(),
+                        named_obj,
+                    )? {
+                        return Ok(Some(named_obj));
+                    }
+                }
+                TermObj::StatementOpcode(statement_op) => {
+                    match statement_op {
+                        /* TODO: Check the target object is if should in the statement. */
+                        StatementOpcode::DefIfElse(ie) => {
+                            if let Some(obj) = self.parse_term_list_recursive(
+                                target_name,
+                                ie.get_if_true_term_list().clone(),
+                            )? {
+                                return Ok(Some(obj));
+                            }
+                            if let Some(e_t) = ie.get_if_false_term_list() {
+                                if let Some(obj) =
+                                    self.parse_term_list_recursive(target_name, e_t.clone())?
+                                {
+                                    return Ok(Some(obj));
+                                }
+                            }
+                        }
+                        StatementOpcode::DefWhile(w) => {
+                            if let Some(obj) = self
+                                .parse_term_list_recursive(target_name, w.get_term_list().clone())?
+                            {
+                                return Ok(Some(obj));
+                            }
+                        }
+                        _ => { /* Ignore */ }
+                    }
+                }
+                TermObj::ExpressionOpcode(_) => { /* Ignore */ }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn parse_named_object_recursive(
+        &mut self,
+        target_name: &NameString,
+        current_scope: &NameString,
+        named_object: NamedObject,
+    ) -> Result<Option<ObjectListItem>, AmlError> {
+        if let Some(name) = named_object.get_name() {
+            if name == target_name {
+                return Ok(Some(ObjectListItem::NamedObject(named_object)));
+            }
+        }
+        if !named_object
+            .get_name()
+            .unwrap_or(current_scope)
+            .is_child(target_name)
+        {
+            return Ok(None);
+        }
+        if let Some(mut field_list) = named_object.get_field_list() {
+            while let Some(e) = field_list.next()? {
+                if let FieldElement::NameField((n, _)) = &e {
+                    if n == target_name {
+                        self.add_named_object(&n, &named_object)?;
+                        return Ok(Some(ObjectListItem::NamedObject(named_object)));
+                    }
+                }
+            }
+            Ok(None)
+        } else if let Some(term_list) = named_object.get_term_list() {
+            self.parse_term_list_recursive(target_name, term_list)
+        } else {
+            Ok(None)
+        }
     }
 }
 

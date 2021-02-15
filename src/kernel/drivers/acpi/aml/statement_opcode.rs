@@ -53,8 +53,12 @@ impl IfElse {
         stream.seek(pkg_length.actual_length)?;
         if_scope_stream.change_size(pkg_length.actual_length)?;
         let predicate = TermArg::parse_integer(&mut if_scope_stream, current_scope, parse_helper)?;
-        let term_list = TermList::new(if_scope_stream, current_scope.clone(), parse_helper)?;
-        let op = stream.peek_byte()?;
+        let term_list = TermList::new(if_scope_stream, current_scope.clone());
+        let op = if stream.is_end_of_stream() {
+            0
+        } else {
+            stream.peek_byte()?
+        };
         if op != opcode::ELSE_OP {
             Ok(Self {
                 predicate,
@@ -68,8 +72,7 @@ impl IfElse {
             stream.seek(pkg_length.actual_length)?;
             drop(stream); /* Avoid using this */
             else_scope_stream.change_size(pkg_length.actual_length)?;
-            let else_term_list =
-                TermList::new(else_scope_stream, current_scope.clone(), parse_helper)?;
+            let else_term_list = TermList::new(else_scope_stream, current_scope.clone());
             Ok(Self {
                 predicate,
                 term_list,
@@ -133,7 +136,7 @@ impl While {
         while_scope_stream.change_size(pkg_length.actual_length)?;
         let predicate =
             TermArg::parse_integer(&mut while_scope_stream, current_scope, parse_helper)?;
-        let term_list = TermList::new(while_scope_stream, current_scope.clone(), parse_helper)?;
+        let term_list = TermList::new(while_scope_stream, current_scope.clone());
         Ok(Self {
             predicate,
             term_list,

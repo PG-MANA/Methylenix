@@ -15,6 +15,7 @@ mod term_object;
 use self::data_object::NameString;
 use self::namespace_modifier_object::NamespaceModifierObject;
 use self::parser::ParseHelper;
+use self::statement_opcode::StatementOpcode;
 use self::term_object::{TermList, TermObj};
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
@@ -37,11 +38,12 @@ pub struct AmlStream {
 pub enum AmlError {
     AccessOutOfRange,
     InvalidSizeChange,
-    InvalidData,
     InvalidType,
     InvalidMethodName(NameString),
     InvalidScope(NameString),
     MutexError,
+    ObjectTreeError,
+    NestedSearch,
     UnsupportedType,
 }
 
@@ -68,15 +70,16 @@ impl AmlParser {
     pub fn debug(&mut self) {
         println!("AML Size: {:#X}", self.size.to_usize());
         let root_name = NameString::root();
-        let mut parse_helper =
-            ParseHelper::new(AmlStream::new(self.base_address, self.size), &root_name);
         let root_term_list = TermList::new(
             AmlStream::new(self.base_address, self.size),
-            root_name,
-            &mut parse_helper,
-        )
-        .unwrap();
-        match Self::debug_term_list(root_term_list) {
+            root_name.clone(),
+        );
+        let mut parse_helper = ParseHelper::new(root_term_list.clone(), &root_name);
+        if let Err(e) = parse_helper.init() {
+            println!("Cannot Init ParseHelper:{:?}", e);
+            return;
+        }
+        match Self::debug_term_list(root_term_list, &mut parse_helper) {
             Ok(_) => {
                 println!("AML End");
             }
@@ -86,24 +89,106 @@ impl AmlParser {
         }
     }
 
-    fn debug_term_list(term_list: TermList) -> Result<(), AmlError> {
-        for o in term_list {
-            match o? {
+    fn debug_term_list(
+        mut term_list: TermList,
+        parse_helper: &mut ParseHelper,
+    ) -> Result<(), AmlError> {
+        while let Some(term_obj) = term_list.next(parse_helper)? {
+            match term_obj {
                 TermObj::NamespaceModifierObj(n) => match n {
                     NamespaceModifierObject::DefAlias(d_a) => {
-                        println!("DefAlias({} => {})", d_a.name, d_a.destination);
+                        println!("DefAlias({} => {})", d_a.get_name(), d_a.get_source());
                     }
                     NamespaceModifierObject::DefName(d_n) => {
-                        println!("DefName({}) => {:?}", d_n.name, d_n.data_ref_object);
+                        println!(
+                            "DefName({}) => {:?}",
+                            d_n.get_name(),
+                            d_n.get_data_ref_object()
+                        );
                     }
                     NamespaceModifierObject::DefScope(d_s) => {
-                        println!("DefScope({}) => {{", d_s.name);
-                        Self::debug_term_list(d_s.term_list.clone())?;
+                        println!("DefScope({}) => {{", d_s.get_name());
+                        parse_helper.move_current_scope(d_s.get_name())?;
+                        Self::debug_term_list(d_s.get_term_list().clone(), parse_helper)?;
+                        parse_helper.move_parent_scope()?;
                         println!("}}");
                     }
                 },
-                d => {
-                    println!("{:?}", d);
+                TermObj::NamedObj(n_o) => {
+                    println!("{:?}", n_o);
+                    if let Some(mut field_list) = n_o.get_field_list() {
+                        println!(
+                            "FieldList({}) => {{",
+                            n_o.get_name().unwrap_or(term_list.get_scope_name())
+                        );
+                        while let Some(field_element) = field_list.next()? {
+                            println!("{:?}", field_element);
+                        }
+                        println!("}}");
+                    } else if let Some(term_list) = n_o.get_term_list() {
+                        let name = n_o.get_name().unwrap();
+                        println!("TermList({}) => {{", name);
+                        parse_helper.move_current_scope(name)?;
+                        Self::debug_term_list(term_list, parse_helper)?;
+                        parse_helper.move_parent_scope()?;
+                        println!("}}");
+                    }
+                }
+                TermObj::StatementOpcode(s_o) => match s_o {
+                    StatementOpcode::DefBreak => {
+                        println!("break;");
+                    }
+                    StatementOpcode::DefBreakPoint => {
+                        println!("(BreakPoint);");
+                    }
+                    StatementOpcode::DefContinue => {
+                        println!("continue;");
+                    }
+                    StatementOpcode::DefFatal(f) => {
+                        println!("{:?}", f);
+                    }
+                    StatementOpcode::DefIfElse(i_e) => {
+                        println!("if({:?}) {{", i_e.get_predicate());
+                        Self::debug_term_list(i_e.get_if_true_term_list().clone(), parse_helper)?;
+                        if let Some(else_term_list) = i_e.get_if_false_term_list() {
+                            println!("}} else {{");
+                            Self::debug_term_list(else_term_list.clone(), parse_helper)?;
+                        } else {
+                            println!("}}");
+                        }
+                    }
+                    StatementOpcode::DefNoop => {
+                        println!("(Noop);")
+                    }
+                    StatementOpcode::DefNotify(notify) => {
+                        println!("{:?}", notify);
+                    }
+                    StatementOpcode::DefRelease(release) => {
+                        println!("Release(Mutex:{:?});", release);
+                    }
+                    StatementOpcode::DefReset(reset) => {
+                        println!("Reset({:?})", reset)
+                    }
+                    StatementOpcode::DefReturn(return_value) => {
+                        println!("return {:?};", return_value);
+                    }
+                    StatementOpcode::DefSignal(signal) => {
+                        println!("Signal({:?})", signal);
+                    }
+                    StatementOpcode::DefSleep(sleep_time) => {
+                        println!("Sleep(microsecond:{:?});", sleep_time);
+                    }
+                    StatementOpcode::DefStall(u_sec_time) => {
+                        println!("Stall(millisecond:{:?})", u_sec_time);
+                    }
+                    StatementOpcode::DefWhile(w) => {
+                        println!("while({:?}) {{", w.get_predicate());
+                        Self::debug_term_list(w.get_term_list().clone(), parse_helper)?;
+                        println!("}}");
+                    }
+                },
+                TermObj::ExpressionOpcode(e_o) => {
+                    println!("{:?}", e_o);
                 }
             }
         }

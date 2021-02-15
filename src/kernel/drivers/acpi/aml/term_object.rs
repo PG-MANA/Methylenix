@@ -21,22 +21,14 @@ use alloc::vec::Vec;
 pub struct TermList {
     stream: AmlStream,
     current_scope: NameString,
-    parse_helper: ParseHelper, /* should not hold this */
 }
 
 impl TermList {
-    pub fn new(
-        stream: AmlStream,
-        current_scope: NameString,
-        parse_helper: &ParseHelper,
-    ) -> Result<Self, AmlError> {
-        let mut parse_helper = parse_helper.clone();
-        parse_helper.move_into_scope(&current_scope)?;
-        Ok(Self {
+    pub fn new(stream: AmlStream, current_scope: NameString) -> Self {
+        Self {
             stream,
             current_scope,
-            parse_helper,
-        })
+        }
     }
 
     pub fn is_end_of_stream(&self) -> bool {
@@ -47,31 +39,12 @@ impl TermList {
         &self.current_scope
     }
 
-impl Iterator for TermList {
-    type Item = Result<TermObj, AmlError>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.stream.is_end_of_stream() {
-            None
+    pub fn next(&mut self, parse_helper: &mut ParseHelper) -> Result<Option<TermObj>, AmlError> {
+        if self.is_end_of_stream() {
+            Ok(None)
         } else {
-            match TermObj::parse(
-                &mut self.stream,
-                &self.current_scope,
-                &mut self.parse_helper,
-            ) {
-                Ok(o) => Some(Ok(o)),
-                Err(AmlError::InvalidType) => {
-                    if self.stream.is_end_of_stream() {
-                        None
-                    } else {
-                        pr_err!("Stream does not end: {:?}", self.stream);
-                        Some(Err(AmlError::InvalidType))
-                    }
-                }
-                Err(e) => {
-                    pr_err!("Parsing TermObj was failed: {:?}", e);
-                    Some(Err(e))
-                }
-            }
+            TermObj::parse(&mut self.stream, &self.current_scope, parse_helper)
+                .and_then(|o| Ok(Some(o)))
         }
     }
 }
@@ -90,9 +63,9 @@ impl TermObj {
         current_scope: &NameString,
         parse_helper: &mut ParseHelper,
     ) -> Result<Self, AmlError> {
-        /* println!("TermObj:{:#X}(Stream:{:?}", stream.peek_byte()?, stream); */
+        /* println!("TermObj: {:#X}", stream.peek_byte()?); */
         ignore_invalid_type_error!(
-            NamespaceModifierObject::try_parse(stream, current_scope, parse_helper),
+            NamespaceModifierObject::try_parse(stream, current_scope),
             |o| {
                 return Ok(Self::NamespaceModifierObj(o));
             }
@@ -100,11 +73,6 @@ impl TermObj {
         ignore_invalid_type_error!(
             NamedObject::try_parse(stream, current_scope, parse_helper),
             |o: NamedObject| {
-                if let Some(name) = o.get_name() {
-                    parse_helper.add_named_object(name, &o)?;
-                } else {
-                    parse_helper.add_named_object(current_scope, &o)?;
-                }
                 return Ok(Self::NamedObj(o));
             }
         );
@@ -180,6 +148,12 @@ impl TermArg {
             )
             || matches!(
                 arg,
+                Self::DataObject(DataObject::ComputationalData(ComputationalData::DefBuffer(
+                    _
+                )))
+            )
+            || matches!(
+                arg,
                 Self::DataObject(DataObject::ComputationalData(ComputationalData::Revision))
             )
             || matches!(arg, Self::DataObject(DataObject::DefVarPackage(_)))
@@ -188,6 +162,7 @@ impl TermArg {
         {
             Ok(arg)
         } else {
+            pr_warn!("Unmatched TermArg:{:?}", arg);
             stream.roll_back(&backup);
             Err(AmlError::InvalidType)
         }

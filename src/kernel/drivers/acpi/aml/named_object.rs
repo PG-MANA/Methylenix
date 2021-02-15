@@ -201,11 +201,7 @@ pub struct PowerRes {
 }
 
 impl PowerRes {
-    fn parse(
-        stream: &mut AmlStream,
-        current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
-    ) -> Result<Self, AmlError> {
+    fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* PowerResOp was read */
         let pkg_length = PkgLength::parse(stream)?;
         let mut power_res_stream = stream.clone();
@@ -216,7 +212,7 @@ impl PowerRes {
         let name = NameString::parse(&mut power_res_stream, Some(current_scope))?;
         let system_level = power_res_stream.read_byte()?;
         let resource_order = power_res_stream.read_word()?;
-        let term_list = TermList::new(power_res_stream, name.clone(), parse_helper)?;
+        let term_list = TermList::new(power_res_stream, name.clone());
         Ok(Self {
             name,
             system_level,
@@ -237,11 +233,7 @@ pub struct ThermalZone {
 }
 
 impl ThermalZone {
-    fn parse(
-        stream: &mut AmlStream,
-        current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
-    ) -> Result<Self, AmlError> {
+    fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* PowerResOp was read */
         let pkg_length = PkgLength::parse(stream)?;
         let mut thermal_zone_stream = stream.clone();
@@ -250,7 +242,7 @@ impl ThermalZone {
         thermal_zone_stream.change_size(pkg_length.actual_length)?;
 
         let name = NameString::parse(&mut thermal_zone_stream, Some(current_scope))?;
-        let term_list = TermList::new(thermal_zone_stream, name.clone(), parse_helper)?;
+        let term_list = TermList::new(thermal_zone_stream, name.clone());
         Ok(Self { name, term_list })
     }
 
@@ -270,7 +262,6 @@ impl Method {
     pub(crate) fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
     ) -> Result<Self, AmlError> {
         /* MethodOp was read */
         let pkg_length = PkgLength::parse(stream)?;
@@ -279,12 +270,12 @@ impl Method {
         drop(stream); /* Avoid using this */
         method_stream.change_size(pkg_length.actual_length)?;
         let name = NameString::parse(&mut method_stream, Some(&current_scope))?;
-        let field_flags = method_stream.read_byte()?;
-        let term_list = TermList::new(method_stream, name.clone(), parse_helper)?;
+        let method_flags = method_stream.read_byte()?;
+        let term_list = TermList::new(method_stream, name.clone());
         Ok(Self {
             name,
-            method_flags: field_flags,
-            term_list: term_list,
+            method_flags,
+            term_list,
         })
     }
 
@@ -422,8 +413,7 @@ impl NamedObject {
                         device_stream.change_size(pkg_length.actual_length)?;
                         let device_name =
                             NameString::parse(&mut device_stream, Some(&current_scope))?;
-                        let term_list =
-                            TermList::new(device_stream, device_name.clone(), parse_helper)?;
+                        let term_list = TermList::new(device_stream, device_name.clone());
                         Ok(Self::DefDevice((device_name, term_list)))
                     }
                     opcode::MUTEX_OP => {
@@ -462,11 +452,7 @@ impl NamedObject {
                     opcode::POWER_RES_OP => {
                         /* DefPowerRes */
                         stream.seek(2)?;
-                        Ok(Self::DefPowerRes(PowerRes::parse(
-                            stream,
-                            current_scope,
-                            parse_helper,
-                        )?))
+                        Ok(Self::DefPowerRes(PowerRes::parse(stream, current_scope)?))
                     }
                     opcode::THERMAL_ZONE_OP => {
                         /* DefThermalZone */
@@ -474,7 +460,6 @@ impl NamedObject {
                         Ok(Self::DefThermalZone(ThermalZone::parse(
                             stream,
                             current_scope,
-                            parse_helper,
                         )?))
                     }
                     _ => Err(AmlError::InvalidType),
@@ -538,11 +523,7 @@ impl NamedObject {
             opcode::METHOD_OP => {
                 /* DefMethod */
                 stream.seek(1)?;
-                Ok(Self::DefMethod(Method::parse(
-                    stream,
-                    current_scope,
-                    parse_helper,
-                )?))
+                Ok(Self::DefMethod(Method::parse(stream, current_scope)?))
             }
             _ => Err(AmlError::InvalidType),
         }
