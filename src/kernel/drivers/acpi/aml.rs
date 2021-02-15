@@ -164,7 +164,7 @@ impl AmlStream {
     }
 
     fn peek_byte(&self) -> Result<u8, AmlError> {
-        self.check_pointer(1)?;
+        self.check_pointer(0)?;
         Ok(unsafe { *(self.pointer.to_usize() as *const u8) })
     }
 
