@@ -27,7 +27,7 @@ pub struct ContextManager {
 }
 
 impl ContextManager {
-    pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x8000;
+    pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x200000;
     pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x8000;
     pub const STACK_ALIGN_ORDER: usize = 6; /*size = 2^6 = 64*/
 
