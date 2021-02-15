@@ -46,7 +46,7 @@ impl ComputationalData {
             Self::QWORD_PREFIX => Ok(Self::ConstData(stream.read_qword()? as AcpiData)),
             Self::STRING_PREFIX => {
                 let start = stream.get_pointer();
-                while stream.read_byte()? != Self::NULL_CHAR {}
+                while stream.read_byte()? != Self::NULL_CHAR && !stream.is_end_of_stream() {}
                 let end = stream.get_pointer();
                 Ok(Self::StringData(
                     core::str::from_utf8(unsafe {
@@ -55,7 +55,7 @@ impl ComputationalData {
                             (end - start).to_usize() - 1,
                         )
                     })
-                    .or(Err(AmlError::InvalidData))?,
+                    .or(Err(AmlError::InvalidType))?,
                 ))
             }
             opcode::BUFFER_OP => Ok(Self::DefBuffer(expression_opcode::ByteList::parse(
@@ -201,9 +201,22 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
 }
 
 #[derive(Clone, Eq, PartialEq)]
-pub enum NameString {
+enum NameStringData {
     Normal(([[u8; 4]; 7], u8)),
     Ex(Vec<[u8; 4]>),
+}
+
+#[derive(Clone, Eq, PartialEq)]
+enum NameStringFlag {
+    RelativePath,
+    AbsolutePath,
+    NullName,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct NameString {
+    data: NameStringData,
+    flag: NameStringFlag,
 }
 
 impl NameString {
@@ -211,27 +224,46 @@ impl NameString {
     const PARENT_PREFIX_CHAR: u8 = 0x5E;
 
     pub fn root() -> Self {
-        Self::Normal(([[0; 4]; 7], 0))
+        Self {
+            data: NameStringData::Normal(([[0; 4]; 7], 0)),
+            flag: NameStringFlag::AbsolutePath,
+        }
+    }
+
+    pub fn is_null_name(&self) -> bool {
+        self.flag == NameStringFlag::NullName
     }
 
     pub fn parse(stream: &mut AmlStream, current_scope: Option<&Self>) -> Result<Self, AmlError> {
         let mut result = Self::root();
         let mut c = stream.read_byte()?;
+        let mut may_be_null_name = true;
 
         if c == Self::ROOT_CHAR {
+            may_be_null_name = false;
+            result.flag = NameStringFlag::AbsolutePath;
             c = stream.read_byte()?;
         } else {
+            result.flag = NameStringFlag::AbsolutePath;
             if let Some(c_s) = current_scope {
-                result = c_s.clone();
+                if !c_s.is_null_name() {
+                    result = c_s.clone();
+                }
             }
             while c == Self::PARENT_PREFIX_CHAR {
+                may_be_null_name = false;
                 result.up_to_parent_name_space();
                 c = stream.read_byte()?;
             }
         }
         /* Name Path */
         let num_name_path = if c == 0x00 {
-            0
+            if may_be_null_name {
+                result.flag = NameStringFlag::NullName;
+                return Ok(result);
+            } else {
+                0
+            }
         } else if c == 0x2E {
             c = stream.read_byte()?;
             2
@@ -242,13 +274,13 @@ impl NameString {
         } else {
             1
         };
-        if let Self::Normal((array, count)) = result {
+        if let NameStringData::Normal((array, count)) = result.data {
             if count + num_name_path > 7 {
                 let mut v: Vec<[u8; 4]> = Vec::with_capacity((count + num_name_path) as usize);
                 for i in 0..count {
                     v.push(array[i as usize]);
                 }
-                result = Self::Ex(v);
+                result.data = NameStringData::Ex(v);
             }
         }
 
@@ -257,7 +289,7 @@ impl NameString {
                 c = stream.read_byte()?;
             }
             if !c.is_ascii_uppercase() && c != '_' as u8 {
-                return Err(AmlError::InvalidData);
+                return Err(AmlError::InvalidType);
             }
             let mut name: [u8; 4] = [0; 4];
             name[0] = c;
@@ -267,17 +299,17 @@ impl NameString {
                     name[i] = 0;
                 } else {
                     if !c.is_ascii_uppercase() && !c.is_ascii_digit() {
-                        return Err(AmlError::InvalidData);
+                        return Err(AmlError::InvalidType);
                     }
                     name[i] = c;
                 }
             }
-            match &mut result {
-                Self::Normal((array, count)) => {
+            match &mut result.data {
+                NameStringData::Normal((array, count)) => {
                     array[*count as usize] = name;
                     *count += 1;
                 }
-                Self::Ex(v) => {
+                NameStringData::Ex(v) => {
                     v.push(name);
                 }
             }
@@ -286,14 +318,17 @@ impl NameString {
     }
 
     pub fn up_to_parent_name_space(&mut self) {
-        match self {
-            Self::Normal((_, count)) => {
+        if self.flag == NameStringFlag::NullName {
+            return;
+        }
+        match &mut self.data {
+            NameStringData::Normal((_, count)) => {
                 if *count == 0 {
                     return;
                 }
                 *count -= 1;
             }
-            Self::Ex(v) => {
+            NameStringData::Ex(v) => {
                 v.pop();
                 if v.len() <= 7 {
                     let mut i = 0;
@@ -302,17 +337,24 @@ impl NameString {
                         array[i] = *e;
                         i += 1;
                     }
-                    *self = Self::Normal((array, i as u8));
+                    self.data = NameStringData::Normal((array, i as u8));
                 }
             }
         }
     }
 
-    pub fn to_full_path_string(&self) -> String {
-        let mut result = String::from('\\');
+    pub fn to_string(&self) -> String {
+        if self.flag == NameStringFlag::NullName {
+            return String::with_capacity(0);
+        }
+        let mut result = if self.flag == NameStringFlag::AbsolutePath {
+            String::from('\\')
+        } else {
+            String::new()
+        };
         let mut is_root = true;
-        match self {
-            Self::Normal((array, len)) => {
+        match &self.data {
+            NameStringData::Normal((array, len)) => {
                 for count in 0..(*len as usize) {
                     if is_root {
                         is_root = false;
@@ -322,7 +364,7 @@ impl NameString {
                     result += core::str::from_utf8(&array[count]).unwrap_or("");
                 }
             }
-            Self::Ex(v) => {
+            NameStringData::Ex(v) => {
                 for e in v.iter() {
                     if is_root {
                         is_root = false;
@@ -337,15 +379,18 @@ impl NameString {
     }
 
     fn get_element(&self, index: usize) -> Option<&[u8; 4]> {
-        match self {
-            Self::Normal((array, len)) => {
+        if self.flag == NameStringFlag::NullName {
+            return None;
+        }
+        match &self.data {
+            NameStringData::Normal((array, len)) => {
                 if index >= (*len as usize) {
                     None
                 } else {
                     Some(&array[index])
                 }
             }
-            Self::Ex(v) => v.get(index),
+            NameStringData::Ex(v) => v.get(index),
         }
     }
 
@@ -363,25 +408,106 @@ impl NameString {
         return false;
     }
 
-    pub fn get_relative_path(&self) -> Self {
-        /* To fix... */
-        let mut result = [[0; 4]; 7];
-        match self {
-            Self::Normal((array, len)) => {
-                if *len == 0 {
-                    self.clone()
-                } else {
-                    result[0] = array[*len as usize - 1];
-                    Self::Normal((result, 1))
+    pub fn get_relative_name(&self, scope_name: &Self) -> Option<Self> {
+        if !scope_name.is_child(self) {
+            return None;
+        }
+        for index in 0.. {
+            let s1 = self.get_element(index);
+            let s2 = scope_name.get_element(index);
+            if s2.is_none() {
+                if s1.is_none() {
+                    return None;
                 }
+                let mut buffer = [[0u8; 4]; 7];
+                let mut vector: Option<Vec<[u8; 4]>> = None;
+                let mut counter = 1;
+                buffer[0] = *s1.unwrap();
+                let mut index = index + 1;
+                while let Some(d) = self.get_element(index) {
+                    if counter >= 7 {
+                        let mut v: Vec<[u8; 4]> = Vec::with_capacity(7);
+                        for i in 0..7 {
+                            v.push(buffer[i]);
+                        }
+                        vector = Some(v);
+                    }
+                    if let Some(v) = vector.as_mut() {
+                        v.push(*d);
+                    } else {
+                        buffer[counter] = *d;
+                        counter += 1;
+                    }
+                    index += 1;
+                }
+                return Some(Self {
+                    data: if let Some(v) = vector {
+                        NameStringData::Ex(v)
+                    } else {
+                        NameStringData::Normal((buffer, counter as u8))
+                    },
+                    flag: NameStringFlag::RelativePath,
+                });
             }
-            Self::Ex(v) => {
-                if let Some(l) = v.last() {
-                    result[0] = *l;
-                    Self::Normal((result, 1))
-                } else {
-                    self.clone()
+            if s1 != s2 {
+                return None;
+            }
+        }
+        unreachable!()
+    }
+
+    pub fn get_full_name_path(&self, scope_name: &Self) -> Self {
+        if self.flag == NameStringFlag::NullName {
+            return scope_name.clone();
+        } else if scope_name.flag == NameStringFlag::NullName {
+            return self.clone();
+        }
+        let mut result = scope_name.clone();
+        let mut index = 0;
+        while let Some(d) = self.get_element(index) {
+            match &mut result.data {
+                NameStringData::Normal((array, counter)) => {
+                    if *counter >= 7 {
+                        let mut v: Vec<[u8; 4]> = Vec::with_capacity(8);
+                        for i in 0..7 {
+                            v.push(array[i]);
+                        }
+                        v.push(*d);
+                        result.data = NameStringData::Ex(v);
+                    } else {
+                        array[*counter as usize] = *d;
+                        *counter += 1;
+                    }
                 }
+                NameStringData::Ex(v) => v.push(*d),
+            }
+            index += 1;
+        }
+        return result;
+    }
+
+    pub fn from_array(array: &[[u8; 4]], is_absolute: bool) -> Self {
+        if array.len() >= 7 {
+            Self {
+                data: NameStringData::Ex(Vec::from(array)),
+                flag: if is_absolute {
+                    NameStringFlag::AbsolutePath
+                } else {
+                    NameStringFlag::RelativePath
+                },
+            }
+        } else {
+            let mut buf = [[0u8; 4]; 7];
+            for index in 0..array.len() {
+                buf[index] = array[index];
+            }
+            Self {
+                data: NameStringData::Normal((buf, array.len() as u8)),
+                flag: if is_absolute {
+                    NameStringFlag::AbsolutePath
+                } else {
+                    NameStringFlag::RelativePath
+                },
             }
         }
     }
@@ -390,10 +516,15 @@ impl NameString {
 impl core::fmt::Display for NameString {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         use core::fmt::Write;
-        f.write_char('\\')?;
+        if self.flag == NameStringFlag::NullName {
+            return Ok(());
+        }
+        if self.flag == NameStringFlag::AbsolutePath {
+            f.write_char('\\')?;
+        }
         let mut is_root = true;
-        match self {
-            Self::Normal((array, len)) => {
+        match &self.data {
+            NameStringData::Normal((array, len)) => {
                 for count in 0..(*len as usize) {
                     if is_root {
                         is_root = false;
@@ -403,7 +534,7 @@ impl core::fmt::Display for NameString {
                     f.write_str(core::str::from_utf8(&array[count]).unwrap_or("!!!!"))?;
                 }
             }
-            Self::Ex(v) => {
+            NameStringData::Ex(v) => {
                 for e in v.iter() {
                     if is_root {
                         is_root = false;
@@ -420,7 +551,11 @@ impl core::fmt::Display for NameString {
 
 impl core::fmt::Debug for NameString {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(format_args!("NameString({})", self))
+        if self.flag == NameStringFlag::NullName {
+            f.write_str("NameString(NullName)")
+        } else {
+            f.write_fmt(format_args!("NameString({})", self))
+        }
     }
 }
 
@@ -484,6 +619,12 @@ impl SuperName {
         current_scope: &NameString,
         parse_helper: &mut ParseHelper,
     ) -> Result<Self, AmlError> {
+        ignore_invalid_type_error!(
+            expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope, parse_helper),
+            |r_n| {
+                return Ok(Self::ReferenceTypeOpcode(Box::new(r_n)));
+            }
+        );
         let backup = stream.clone();
         ignore_invalid_type_error!(SimpleName::parse(stream, current_scope), |n| {
             return Ok(Self::SimpleName(n));
@@ -497,9 +638,7 @@ impl SuperName {
                 return Ok(Self::DebugObj);
             }
         }
-        Ok(Self::ReferenceTypeOpcode(Box::new(
-            expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope, parse_helper)?,
-        )))
+        return Err(AmlError::InvalidType);
     }
 }
 
