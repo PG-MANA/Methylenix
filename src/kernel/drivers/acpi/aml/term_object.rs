@@ -138,12 +138,15 @@ impl TermArg {
         current_scope: &NameString,
         parse_helper: &mut ParseHelper,
     ) -> Result<Self, AmlError> {
-        /* println!("TermArg:{:#X}", stream.peek_byte()?); */
+        /* println!("TermArg: {:#X}", stream.peek_byte()?); */
         ignore_invalid_type_error!(try_parse_local_object(stream), |n| {
             return Ok(Self::LocalObj(n));
         });
         ignore_invalid_type_error!(try_parse_argument_object(stream), |n| {
             return Ok(Self::ArgObj(n));
+        });
+        ignore_invalid_type_error!(DataObject::try_parse(stream, current_scope), |d| {
+            return Ok(Self::DataObject(d));
         });
         ignore_invalid_type_error!(
             ExpressionOpcode::try_parse(stream, current_scope, parse_helper),
@@ -151,9 +154,6 @@ impl TermArg {
                 return Ok(Self::ExpressionOpcode(Box::new(o)));
             }
         );
-        ignore_invalid_type_error!(DataObject::try_parse(stream, current_scope), |d| {
-            return Ok(Self::DataObject(d));
-        });
         return Err(AmlError::InvalidType);
     }
 

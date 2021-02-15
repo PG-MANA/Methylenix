@@ -142,6 +142,15 @@ impl External {
         })
     }
 
+    pub fn new(name: NameString, object_type: u8, argument_count: u8) -> Self {
+        /* Used to define builtin functions */
+        Self {
+            name,
+            object_type,
+            argument_count,
+        }
+    }
+
     pub fn get_name(&self) -> &NameString {
         &self.name
     }
@@ -373,7 +382,7 @@ impl NamedObject {
         parse_helper: &mut ParseHelper,
     ) -> Result<Self, AmlError> {
         let first_byte = stream.peek_byte()?;
-        /* println!("NamedObject:{:#X}", first_byte); */
+        /* println!("NamedObject: {:#X}", first_byte); */
         match first_byte {
             opcode::EXT_OP_PREFIX => {
                 match stream.peek_byte_with_pos(1)? {
@@ -565,65 +574,23 @@ impl NamedObject {
         }
     }
 
-    pub fn parse_list(&self, parse_helper: &mut ParseHelper) -> Result<(), AmlError> {
+    pub fn get_field_list(&self) -> Option<FieldList> {
         match self {
-            NamedObject::DefBankField(b_f) => {
-                let mut list = b_f.field_list.clone();
-                while let Some(e) = list.get_next_element()? {
-                    if let FieldElement::NameField((n, _)) = e {
-                        parse_helper.add_named_object(&n, &self)?; /* OK...?*/
-                    }
-                }
-            }
-            NamedObject::DefCreateField(_) => {}
-            NamedObject::DefDataRegion(_) => {}
-            NamedObject::DefDevice(d_d) => {
-                for _ in d_d.1.clone() {
-                    //let term_obj = term_obj?;
-                    /* Will be created ListItem in TermObj::parse */
-                }
-            }
-            NamedObject::DefField(d_f) => {
-                let mut list = d_f.field_list.clone();
-                while let Some(e) = list.get_next_element()? {
-                    if let FieldElement::NameField((n, _)) = e {
-                        parse_helper.add_named_object(&n, &self)?; /* OK...?*/
-                    }
-                }
-            }
-            NamedObject::DefEvent(_) => {}
-            NamedObject::DefIndexField(d_i) => {
-                let mut list = d_i.field_list.clone();
-                while let Some(e) = list.get_next_element()? {
-                    println!("IndexField:{:?}", e);
-                    if let FieldElement::NameField((n, _)) = e {
-                        parse_helper.add_named_object(&n, &self)?; /* OK...?*/
-                    }
-                }
-            }
-            NamedObject::DefMethod(d_m) => {
-                for _ in d_m.term_list.clone() {
-                    //let term_obj = term_obj?;
-                    /* Will be created ListItem in TermObj::parse */
-                }
-            }
-            NamedObject::DefMutex(_) => {}
-            NamedObject::DefExternal(_) => {}
-            NamedObject::DefOpRegion(_) => {}
-            NamedObject::DefPowerRes(d_p) => {
-                for _ in d_p.term_list.clone() {
-                    //let term_obj = term_obj?;
-                    /* Will be created ListItem in TermObj::parse */
-                }
-            }
-            NamedObject::DefThermalZone(d_t) => {
-                for _ in d_t.term_list.clone() {
-                    //let term_obj = term_obj?;
-                    /* Will be created ListItem in TermObj::parse */
-                }
-            }
+            NamedObject::DefBankField(b_f) => Some(b_f.field_list.clone()),
+            NamedObject::DefField(d_f) => Some(d_f.field_list.clone()),
+            NamedObject::DefIndexField(d_i) => Some(d_i.field_list.clone()),
+            _ => None,
         }
-        Ok(())
+    }
+
+    pub fn get_term_list(&self) -> Option<TermList> {
+        match self {
+            NamedObject::DefDevice(d_d) => Some(d_d.1.clone()),
+            NamedObject::DefMethod(d_m) => Some(d_m.term_list.clone()),
+            NamedObject::DefPowerRes(d_p) => Some(d_p.term_list.clone()),
+            NamedObject::DefThermalZone(d_t) => Some(d_t.term_list.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -641,7 +608,7 @@ impl FieldList {
         })
     }
 
-    fn get_next_element(&mut self) -> Result<Option<FieldElement>, AmlError> {
+    pub fn next(&mut self) -> Result<Option<FieldElement>, AmlError> {
         if self.stream.is_end_of_stream() {
             Ok(None)
         } else {

@@ -173,6 +173,7 @@ impl StatementOpcode {
         current_scope: &NameString,
         parse_helper: &mut ParseHelper,
     ) -> Result<Self, AmlError> {
+        /* println!("StatementOpcode: {:#X}", stream.peek_byte()?); */
         let back_up = stream.clone();
         match stream.read_byte()? {
             opcode::EXT_OP_PREFIX => match stream.read_byte()? {
