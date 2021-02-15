@@ -10,23 +10,31 @@ use super::{AmlError, AmlStream};
 
 #[derive(Debug)]
 pub struct Alias {
-    pub name: NameString,
-    pub destination: NameString,
+    source: NameString,
+    alias: NameString,
 }
 
 impl Alias {
     fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* AliasOp was read */
-        let name = NameString::parse(stream, Some(current_scope))?;
-        let destination = NameString::parse(stream, Some(current_scope))?;
-        Ok(Self { name, destination })
+        let source = NameString::parse(stream, Some(current_scope))?;
+        let alias = NameString::parse(stream, Some(current_scope))?;
+        Ok(Self { source, alias })
+    }
+
+    pub fn get_name(&self) -> &NameString {
+        &self.alias
+    }
+
+    pub fn get_source(&self) -> &NameString {
+        &self.source
     }
 }
 
 #[derive(Debug)]
 pub struct Name {
-    pub name: NameString,
-    pub data_ref_object: DataRefObject,
+    name: NameString,
+    data_ref_object: DataRefObject,
 }
 
 impl Name {
@@ -39,12 +47,20 @@ impl Name {
             data_ref_object,
         })
     }
+
+    pub fn get_name(&self) -> &NameString {
+        &self.name
+    }
+
+    pub fn get_data_ref_object(&self) -> &DataRefObject {
+        &self.data_ref_object
+    }
 }
 
 #[derive(Debug)]
 pub struct Scope {
-    pub name: NameString,
-    pub term_list: TermList,
+    name: NameString,
+    term_list: TermList,
 }
 
 impl Scope {
@@ -64,6 +80,14 @@ impl Scope {
             name: name.clone(),
             term_list: TermList::new(scope_stream, name, parse_helper)?,
         })
+    }
+
+    pub fn get_name(&self) -> &NameString {
+        &self.name
+    }
+
+    pub fn get_term_list(&self) -> &TermList {
+        &self.term_list
     }
 }
 
@@ -103,6 +127,14 @@ impl NamespaceModifierObject {
                 )?))
             }
             _ => Err(AmlError::InvalidType),
+        }
+    }
+
+    pub fn get_name(&self) -> &NameString {
+        match self {
+            Self::DefAlias(a) => a.get_name(),
+            Self::DefName(n) => n.get_name(),
+            Self::DefScope(s) => s.get_name(),
         }
     }
 }

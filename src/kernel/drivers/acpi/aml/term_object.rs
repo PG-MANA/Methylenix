@@ -42,7 +42,10 @@ impl TermList {
     pub fn is_end_of_stream(&self) -> bool {
         self.stream.is_end_of_stream()
     }
-}
+
+    pub fn get_scope_name(&self) -> &NameString {
+        &self.current_scope
+    }
 
 impl Iterator for TermList {
     type Item = Result<TermObj, AmlError>;

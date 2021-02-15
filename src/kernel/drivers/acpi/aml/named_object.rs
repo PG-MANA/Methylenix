@@ -290,7 +290,7 @@ impl Method {
 
 #[derive(Debug, Clone)]
 pub struct Field {
-    name: NameString,
+    region_name: NameString,
     field_flags: u8,
     field_list: FieldList,
 }
@@ -306,25 +306,21 @@ impl Field {
         stream.seek(pkg_length.actual_length)?;
         drop(stream); /* Avoid using this */
         field_stream.change_size(pkg_length.actual_length)?;
-        let name = NameString::parse(&mut field_stream, Some(&current_scope))?;
+        let region_name = NameString::parse(&mut field_stream, Some(&current_scope))?;
         let field_flags = field_stream.read_byte()?;
         let field_list = FieldList::new(field_stream, current_scope)?;
         Ok(Self {
-            name,
+            region_name,
             field_flags,
             field_list,
         })
-    }
-
-    pub fn get_name(&self) -> &NameString {
-        &self.name
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct IndexField {
-    name1: NameString,
-    name2: NameString,
+    index_name: NameString,
+    data_name: NameString,
     field_flags: u8,
     field_list: FieldList,
 }
@@ -340,13 +336,13 @@ impl IndexField {
         stream.seek(pkg_length.actual_length)?;
         drop(stream); /* Avoid using this */
         index_field_stream.change_size(pkg_length.actual_length)?;
-        let name1 = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
-        let name2 = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
+        let index_name = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
+        let data_name = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
         let field_flags = index_field_stream.read_byte()?;
         let field_list = FieldList::new(index_field_stream, current_scope)?;
         Ok(Self {
-            name1,
-            name2,
+            index_name,
+            data_name,
             field_flags,
             field_list,
         })
@@ -556,7 +552,7 @@ impl NamedObject {
             Self::DefDevice((d, _)) => Some(d),
             Self::DefEvent(n) => Some(n),
             Self::DefBankField(_) => None,
-            Self::DefField(f) => Some(f.get_name()),
+            Self::DefField(_) => None,
             Self::DefIndexField(_) => None,
         }
     }
@@ -638,7 +634,7 @@ pub struct FieldList {
 }
 
 impl FieldList {
-    pub fn new(stream: AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
+    fn new(stream: AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         Ok(Self {
             stream,
             current_scope: current_scope.clone(),
@@ -691,7 +687,7 @@ impl FieldList {
 }
 
 #[derive(Debug)]
-enum FieldElement {
+pub enum FieldElement {
     ReservedField(PkgLength),
     AccessField((u8, u8)),
     ExtendedAccessField([u8; 3] /* Temporary */),

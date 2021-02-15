@@ -77,6 +77,18 @@ impl IfElse {
             })
         }
     }
+
+    pub fn get_predicate(&self) -> &TermArg {
+        &self.predicate
+    }
+
+    pub fn get_if_true_term_list(&self) -> &TermList {
+        &self.term_list
+    }
+
+    pub fn get_if_false_term_list(&self) -> Option<&TermList> {
+        self.else_term_list.as_ref()
+    }
 }
 
 #[derive(Debug)]
@@ -126,6 +138,14 @@ impl While {
             predicate,
             term_list,
         })
+    }
+
+    pub fn get_predicate(&self) -> &TermArg {
+        &self.predicate
+    }
+
+    pub fn get_term_list(&self) -> &TermList {
+        &self.term_list
     }
 }
 
