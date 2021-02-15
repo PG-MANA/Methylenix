@@ -35,9 +35,7 @@ pub struct AmlStream {
 
 #[derive(Debug)]
 pub enum AmlError {
-    ReadOutOfRange,
-    SeekOutOfRange,
-    PeekOutOfRange,
+    AccessOutOfRange,
     InvalidSizeChange,
     InvalidData,
     InvalidType,
@@ -52,7 +50,7 @@ macro_rules! ignore_invalid_type_error {
     ($f:expr, $ok_stmt:expr) => {
         match $f {
             Ok(t) => return $ok_stmt(t),
-            Err(AmlError::InvalidType) => {}
+            Err(AmlError::InvalidType) => { /* Ignore */ }
             Err(e) => return Err(e),
         };
     };
@@ -128,7 +126,7 @@ impl AmlStream {
                 (self.pointer + MSize::new(read_size) - self.limit).to_usize(),
                 read_size
             );
-            Err(AmlError::ReadOutOfRange)
+            Err(AmlError::AccessOutOfRange)
         } else {
             Ok(())
         }
@@ -166,13 +164,12 @@ impl AmlStream {
     }
 
     fn peek_byte(&self) -> Result<u8, AmlError> {
-        self.check_pointer(1).or(Err(AmlError::PeekOutOfRange))?;
+        self.check_pointer(1)?;
         Ok(unsafe { *(self.pointer.to_usize() as *const u8) })
     }
 
     fn peek_byte_with_pos(&self, pos_forward_from_current: usize) -> Result<u8, AmlError> {
-        self.check_pointer(pos_forward_from_current)
-            .or(Err(AmlError::PeekOutOfRange))?;
+        self.check_pointer(pos_forward_from_current)?;
         Ok(unsafe {
             *((self.pointer + MSize::new(pos_forward_from_current)).to_usize() as *const u8)
         })
@@ -181,7 +178,7 @@ impl AmlStream {
     fn seek(&mut self, bytes_to_forward: usize) -> Result<(), AmlError> {
         self.pointer += MSize::new(bytes_to_forward);
         if self.pointer > self.limit {
-            Err(AmlError::SeekOutOfRange)
+            Err(AmlError::AccessOutOfRange)
         } else {
             Ok(())
         }
