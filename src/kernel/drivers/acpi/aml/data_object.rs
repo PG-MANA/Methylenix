@@ -511,6 +511,33 @@ impl NameString {
             }
         }
     }
+
+    pub fn len(&self) -> usize {
+        match &self.data {
+            NameStringData::Normal((_, c)) => *c as usize,
+            NameStringData::Ex(v) => v.len(),
+        }
+    }
+
+    pub fn suffix_search(&self, other: &Self) -> bool {
+        if self.flag == NameStringFlag::NullName || other.flag == NameStringFlag::NullName {
+            return true;
+        }
+
+        let self_len = self.len();
+        let other_len = other.len();
+        if self_len == 0 || other_len == 0 {
+            return true;
+        }
+        for (self_index, other_index) in (0..self_len).rev().zip((0..other_len).rev()) {
+            let self_e = self.get_element(self_index).unwrap();
+            let other_e = other.get_element(other_index).unwrap();
+            if self_e != other_e {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 impl core::fmt::Display for NameString {
