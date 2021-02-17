@@ -363,7 +363,7 @@ pub enum ExpressionOpcode {
     DefLOr((Operand, Operand)),
     DefMatch(Match),
     DefMid(Mid),
-    DefNot(Target),
+    DefNot((Operand, Target)),
     DefObjectType(SuperName),
     DefVarPackage(VarPackage),
     DefSizeOf(SuperName),
@@ -606,11 +606,9 @@ impl ExpressionOpcode {
             }
             opcode::NOT_OP => {
                 stream.seek(1)?;
-                Ok(Self::DefNot(Target::parse(
-                    stream,
-                    current_scope,
-                    parse_helper,
-                )?))
+                let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                let target = Target::parse(stream, current_scope, parse_helper)?;
+                Ok(Self::DefNot((operand, target)))
             }
             opcode::OBJECT_TYPE_OP => {
                 stream.seek(1)?;
