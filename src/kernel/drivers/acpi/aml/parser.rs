@@ -359,10 +359,26 @@ impl ParseHelper {
         }
     }
 
+    fn get_parent_object_list(
+        list: Arc<Mutex<ObjectList>>,
+    ) -> Result<Option<Arc<Mutex<ObjectList>>>, AmlError> {
+        if let Some(p) = list
+            .try_lock()
+            .or(Err(AmlError::MutexError))?
+            .parent
+            .clone()
+        {
+            Ok(Some(p.upgrade().ok_or(AmlError::ObjectTreeError)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn _find_content_object_with_parsing(
         &mut self,
         list: Arc<Mutex<ObjectList>>,
         name: &NameString,
+        relative_name: Option<&NameString>,
     ) -> Result<Option<ContentObject>, AmlError> {
         let mut locked_list = list.try_lock().or(Err(AmlError::MutexError))?;
         let mut list_to_search_later: Option<Arc<Mutex<ObjectList>>> = None;
@@ -410,20 +426,42 @@ impl ParseHelper {
                         let scope_name = locked_list.scope_name.clone();
                         drop(locked_list);
 
-                        if let Some(o_i) =
-                            self.parse_named_object_recursive(name, &scope_name, n_o)?
-                        {
+                        if let Some(o_i) = self.parse_named_object_recursive(
+                            name,
+                            &scope_name,
+                            n_o,
+                            relative_name,
+                        )? {
                             return self.convert_object_list_item_list_to_content_object(o_i);
                         }
 
                         locked_list = list.try_lock().or(Err(AmlError::MutexError))?;
                     }
                 }
+            } else if let Some(relative_name) = relative_name {
+                if i.0.suffix_search(relative_name) {
+                    if let ObjectListItem::DefScope(_) = &i.1 {
+                        unreachable!(); /* TODO: Think if it is ok. */
+                    } else {
+                        let object = i.1.clone();
+                        drop(locked_list);
+                        return match object {
+                            ObjectListItem::NamedObject(o) => {
+                                Ok(Some(ContentObject::NamedObject(o)))
+                            }
+                            ObjectListItem::DefName(d) => Ok(Some(ContentObject::DataRefObject(d))),
+                            ObjectListItem::DefAlias(new_name) => {
+                                self.find_content_object_with_parsing(&new_name)
+                            }
+                            ObjectListItem::DefScope(_) => unreachable!(),
+                        };
+                    }
+                }
             }
         }
         drop(locked_list);
         if let Some(s) = list_to_search_later {
-            self._find_content_object_with_parsing(s, name)
+            self._find_content_object_with_parsing(s, name, relative_name)
         } else {
             Ok(None)
         }
@@ -466,59 +504,62 @@ impl ParseHelper {
             Self::find_target_scope(self.root_object_list.clone(), name)?
         };
 
-        if let Some(c) =
-            self._find_content_object_with_parsing(original_target_list.clone(), name)?
-        {
-            self.original_name_searching = back_up_of_original_name_searching;
-            return Ok(Some(c));
-        }
-        let mut target_list = original_target_list.clone();
         let relative_target_name = name.get_relative_name(
-            &target_list
+            &original_target_list
                 .try_lock()
                 .or(Err(AmlError::MutexError))?
                 .scope_name,
         );
+
+        if let Some(c) = self._find_content_object_with_parsing(
+            original_target_list.clone(),
+            name,
+            relative_target_name
+                .as_ref()
+                .and_then(|r| if r.len() == 1 { Some(r) } else { None }),
+        )? {
+            self.original_name_searching = back_up_of_original_name_searching;
+            return Ok(Some(c));
+        }
+        let mut target_list = original_target_list.clone();
         let back_up = self.back_up();
 
-        loop {
-            if let Some(parent) = target_list
-                .try_lock()
-                .or(Err(AmlError::MutexError))?
-                .parent
-                .clone()
-            {
-                target_list = parent.upgrade().ok_or(AmlError::ObjectTreeError)?;
-            } else {
-                break;
-            };
+        if let Some(relative_target_name) = relative_target_name.as_ref() {
+            if relative_target_name.len() == 1 {
+                loop {
+                    if let Some(parent) = Self::get_parent_object_list(target_list)? {
+                        target_list = parent;
+                    } else {
+                        break;
+                    };
 
-            let search_name = if let Some(r_n) = relative_target_name.as_ref() {
-                Some(
-                    r_n.get_full_name_path(
+                    let search_name = relative_target_name.get_full_name_path(
                         &target_list
                             .try_lock()
                             .or(Err(AmlError::MutexError))?
                             .scope_name,
-                    ),
-                )
-            } else {
-                None
-            };
-
-            if let Some(c) = self._find_content_object_with_parsing(
-                target_list.clone(),
-                search_name.as_ref().unwrap_or(name),
-            )? {
+                    );
+                    if let Some(c) = self._find_content_object_with_parsing(
+                        target_list.clone(),
+                        &search_name,
+                        Some(relative_target_name),
+                    )? {
+                        self.restore(back_up.clone());
+                        self.original_name_searching = back_up_of_original_name_searching;
+                        return Ok(Some(c));
+                    }
+                }
                 self.restore(back_up.clone());
-                self.original_name_searching = back_up_of_original_name_searching;
-                return Ok(Some(c));
             }
         }
 
-        self.restore(back_up.clone());
-
-        match self.parse_term_list_recursive(name, self.root_term_list.clone()) {
+        match self.parse_term_list_recursive(
+            name,
+            self.root_term_list.clone(),
+            relative_target_name
+                .as_ref()
+                .and_then(|r| if r.len() == 1 { Some(r) } else { None }),
+        ) {
             Ok(Some(o_i)) => {
                 self.restore(back_up);
                 self.original_name_searching = back_up_of_original_name_searching;
@@ -530,49 +571,38 @@ impl ParseHelper {
             }
         }
         self.restore(back_up.clone());
-        let mut target_list = original_target_list;
-        loop {
-            if let Some(parent) = target_list
-                .try_lock()
-                .or(Err(AmlError::MutexError))?
-                .parent
-                .clone()
-            {
-                target_list = parent.upgrade().ok_or(AmlError::ObjectTreeError)?;
-            } else {
-                break;
-            };
 
-            let search_name = if let Some(r_n) = relative_target_name.as_ref() {
-                Some(
-                    r_n.get_full_name_path(
+        if let Some(relative_target_name) = relative_target_name.as_ref() {
+            if relative_target_name.len() == 1 {
+                let mut target_list = original_target_list;
+                loop {
+                    if let Some(parent) = Self::get_parent_object_list(target_list)? {
+                        target_list = parent;
+                    } else {
+                        break;
+                    };
+
+                    let search_name = relative_target_name.get_full_name_path(
                         &target_list
                             .try_lock()
                             .or(Err(AmlError::MutexError))?
                             .scope_name,
-                    ),
-                )
-            } else {
-                None
-            };
-            /*println!(
-                "===========Search Scope:{}, Search Name:{:?}, Relative Name:{:?}===========",
-                target_list.try_lock().unwrap().scope_name,
-                search_name,
-                relative_target_name
-            );*/
-            match self.parse_term_list_recursive(
-                search_name.as_ref().unwrap_or(name),
-                self.root_term_list.clone(),
-            ) {
-                Ok(Some(o_i)) => {
-                    self.restore(back_up);
-                    self.original_name_searching = back_up_of_original_name_searching;
-                    return self.convert_object_list_item_list_to_content_object(o_i);
-                }
-                Err(AmlError::NestedSearch) | Ok(None) => {}
-                Err(e) => {
-                    return Err(e);
+                    );
+                    match self.parse_term_list_recursive(
+                        &search_name,
+                        self.root_term_list.clone(),
+                        Some(relative_target_name),
+                    ) {
+                        Ok(Some(o_i)) => {
+                            self.restore(back_up);
+                            self.original_name_searching = back_up_of_original_name_searching;
+                            return self.convert_object_list_item_list_to_content_object(o_i);
+                        }
+                        Err(AmlError::NestedSearch) | Ok(None) => {}
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
                 }
             }
         }
@@ -623,6 +653,7 @@ impl ParseHelper {
         &mut self,
         target_name: &NameString,
         mut term_list: TermList,
+        relative_name: Option<&NameString>,
     ) -> Result<Option<ObjectListItem>, AmlError> {
         if !term_list.get_scope_name().is_child(target_name) {
             return Ok(None);
@@ -657,10 +688,31 @@ impl ParseHelper {
                                 if let Some(obj) = self.parse_term_list_recursive(
                                     target_name,
                                     s.get_term_list().clone(),
+                                    relative_name,
                                 )? {
                                     return Ok(Some(obj));
                                 }
                                 self.move_current_scope(term_list.get_scope_name())?;
+                            }
+                        }
+                    } else if let Some(relative_name) = relative_name {
+                        if name_modifier_object.get_name().suffix_search(relative_name) {
+                            match name_modifier_object {
+                                NamespaceModifierObject::DefAlias(a) => {
+                                    self.add_alias_name(a.get_name(), a.get_source())?;
+                                    return Ok(Some(ObjectListItem::DefAlias(
+                                        a.get_source().clone(),
+                                    )));
+                                }
+                                NamespaceModifierObject::DefName(n) => {
+                                    self.add_def_name(n.get_name(), n.get_data_ref_object())?;
+                                    return Ok(Some(ObjectListItem::DefName(
+                                        n.get_data_ref_object().clone(),
+                                    )));
+                                }
+                                NamespaceModifierObject::DefScope(_) => {
+                                    unimplemented!();
+                                }
                             }
                         }
                     }
@@ -670,6 +722,7 @@ impl ParseHelper {
                         target_name,
                         term_list.get_scope_name(),
                         named_obj,
+                        relative_name,
                     )? {
                         return Ok(Some(named_obj));
                     }
@@ -681,21 +734,26 @@ impl ParseHelper {
                             if let Some(obj) = self.parse_term_list_recursive(
                                 target_name,
                                 ie.get_if_true_term_list().clone(),
+                                relative_name,
                             )? {
                                 return Ok(Some(obj));
                             }
                             if let Some(e_t) = ie.get_if_false_term_list() {
-                                if let Some(obj) =
-                                    self.parse_term_list_recursive(target_name, e_t.clone())?
-                                {
+                                if let Some(obj) = self.parse_term_list_recursive(
+                                    target_name,
+                                    e_t.clone(),
+                                    relative_name,
+                                )? {
                                     return Ok(Some(obj));
                                 }
                             }
                         }
                         StatementOpcode::DefWhile(w) => {
-                            if let Some(obj) = self
-                                .parse_term_list_recursive(target_name, w.get_term_list().clone())?
-                            {
+                            if let Some(obj) = self.parse_term_list_recursive(
+                                target_name,
+                                w.get_term_list().clone(),
+                                relative_name,
+                            )? {
                                 return Ok(Some(obj));
                             }
                         }
@@ -714,16 +772,22 @@ impl ParseHelper {
         target_name: &NameString,
         current_scope: &NameString,
         named_object: NamedObject,
+        relative_name: Option<&NameString>,
     ) -> Result<Option<ObjectListItem>, AmlError> {
         if let Some(name) = named_object.get_name() {
             if name == target_name {
                 return Ok(Some(ObjectListItem::NamedObject(named_object)));
+            } else if let Some(relative_name) = relative_name {
+                if name.suffix_search(relative_name) {
+                    return Ok(Some(ObjectListItem::NamedObject(named_object)));
+                }
             }
         }
         if !named_object
             .get_name()
             .unwrap_or(current_scope)
             .is_child(target_name)
+            && relative_name.is_none()
         {
             return Ok(None);
         }
@@ -733,12 +797,17 @@ impl ParseHelper {
                     if n == target_name {
                         self.add_named_object(&n, &named_object)?;
                         return Ok(Some(ObjectListItem::NamedObject(named_object)));
+                    } else if let Some(relative_name) = relative_name {
+                        if !current_scope.is_child(n) && n.suffix_search(relative_name) {
+                            self.add_named_object(&n, &named_object)?;
+                            return Ok(Some(ObjectListItem::NamedObject(named_object)));
+                        }
                     }
                 }
             }
             Ok(None)
         } else if let Some(term_list) = named_object.get_term_list() {
-            self.parse_term_list_recursive(target_name, term_list)
+            self.parse_term_list_recursive(target_name, term_list, relative_name)
         } else {
             Ok(None)
         }
