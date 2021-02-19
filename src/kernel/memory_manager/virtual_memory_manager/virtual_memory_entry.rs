@@ -2,8 +2,9 @@
 //! Virtual Memory Entry Chain
 //!
 
+use super::virtual_memory_object::VirtualMemoryObject;
+
 use crate::kernel::memory_manager::data_type::{Address, MOffset, VAddress};
-use crate::kernel::memory_manager::virtual_memory_manager::virtual_memory_object::VirtualMemoryObject;
 use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};

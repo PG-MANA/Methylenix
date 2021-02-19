@@ -6,7 +6,7 @@
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::MSize;
+use crate::kernel::memory_manager::data_type::{Address, MSize};
 
 use core::alloc::{GlobalAlloc, Layout};
 
@@ -23,7 +23,7 @@ impl GlobalAllocator {
 
 #[alloc_error_handler]
 fn alloc_error_oom(layout: Layout) -> ! {
-    panic!("Memory Allocation Error Err:{:?}", layout);
+    panic!("Memory Allocation({:?}) was failed.", layout);
 }
 
 unsafe impl GlobalAlloc for GlobalAllocator {
@@ -36,8 +36,11 @@ unsafe impl GlobalAlloc for GlobalAllocator {
             .unwrap()
             .alloc(layout_to_size(layout), memory_manager)
         {
-            Ok(address) => address.into(),
-            Err(e) => panic!("Cannot alloc memory for {:?}, Error: {:?}", layout, e),
+            Ok(address) => address.to_usize() as *mut u8,
+            Err(e) => {
+                pr_err!("Cannot alloc memory for {:?}. Error: {:?}", layout, e);
+                0 as *mut u8
+            }
         }
     }
 
@@ -54,7 +57,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
                 memory_manager,
             )
         {
-            pr_err!("{:?}", e);
+            pr_err!("Cannot dealloc memory for {:?}. Error: {:?}", layout, e);
         }
     }
 }
