@@ -6,7 +6,7 @@
 
 use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
 
-use crate::kernel::memory_manager::data_type::{Address, MOrder, MPageOrder, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize, VAddress};
 use crate::kernel::memory_manager::{
     pool_allocator::PoolAllocator, MemoryError, MemoryManager, MemoryPermissionFlags,
 };
@@ -43,33 +43,13 @@ impl<T> CacheAllocator<T> {
         &mut self,
         memory_manager: Option<&Mutex<MemoryManager>>,
     ) -> Result<&'static mut T, MemoryError> {
-        let add_pool = |allocator: &mut PoolAllocator<T>,
-                        cache_threshold: usize,
-                        m: &mut MemoryManager|
-         -> Result<(), MemoryError> {
-            let page = m.alloc_pages(
-                MOrder::from_offset(
-                    MSize::new(cache_threshold * core::mem::size_of::<T>()),
-                    MOrder::new(usize::MAX),
-                )
-                .to_page_order(),
-                MemoryPermissionFlags::data(),
-            )?;
-            unsafe { allocator.add_pool(page.to_usize(), PAGE_SIZE_USIZE) };
-            Ok(())
-        };
-
         let result = self.allocator.alloc();
         if result.is_err() {
             if memory_manager.is_none() {
                 return Err(MemoryError::AddressNotAvailable);
             }
             if let Ok(mut memory_manager) = memory_manager.unwrap().try_lock() {
-                add_pool(
-                    &mut self.allocator,
-                    self.cache_threshold,
-                    &mut memory_manager,
-                )?;
+                self.add_pool(&mut memory_manager)?;
                 return if let Ok(a) = self.allocator.alloc() {
                     Ok(a)
                 } else {
@@ -79,11 +59,7 @@ impl<T> CacheAllocator<T> {
         }
         if memory_manager.is_some() && self.allocator.get_count() < self.cache_threshold {
             if let Ok(mut memory_manager) = memory_manager.unwrap().try_lock() {
-                add_pool(
-                    &mut self.allocator,
-                    self.cache_threshold,
-                    &mut memory_manager,
-                )?;
+                self.add_pool(&mut memory_manager)?;
             }
         }
         return Ok(result.unwrap());
@@ -97,5 +73,14 @@ impl<T> CacheAllocator<T> {
         unsafe {
             self.allocator.add_pool(address.to_usize(), size.to_usize());
         }
+    }
+
+    pub fn add_pool(&mut self, memory_manager: &mut MemoryManager) -> Result<(), MemoryError> {
+        let num_page = MSize::new(self.cache_threshold * core::mem::size_of::<T>())
+            .to_order(None)
+            .to_page_order();
+        let page = memory_manager.alloc_nonlinear_pages(num_page, MemoryPermissionFlags::data())?;
+        self.add_free_area(page, num_page.to_offset());
+        Ok(())
     }
 }
