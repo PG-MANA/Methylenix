@@ -85,9 +85,9 @@ impl VirtualMemoryManager {
         }
 
         /* Set up page_manager */
-        if let Err(e) = self.page_manager.init(&mut self.reserved_memory_list) {
-            panic!("Cannot init PageManager Err:{:?}", e);
-        }
+        self.page_manager
+            .init(&mut self.reserved_memory_list)
+            .expect("Cannot init PageManager");
 
         self.setup_pools(pm_manager);
 
@@ -100,29 +100,24 @@ impl VirtualMemoryManager {
                 MemoryPermissionFlags::data(),
                 MemoryOptionFlags::WIRED,
             );
-            if self
-                ._map_address(
-                    &mut entry,
-                    cache_address,
-                    cache_address.to_direct_mapped_v_address(),
-                    PAGE_SIZE,
-                    pm_manager,
-                )
-                .is_err()
-            {
-                panic!("Cannot map address for paging cache");
-            }
-            if self.insert_vm_map_entry(entry, pm_manager).is_err() {
-                panic!("Cannot insert Virtual Memory Entry for paging cache");
-            }
-            if let Err(e) = self.associate_address(
+            self._map_address(
+                &mut entry,
+                cache_address,
+                cache_address.to_direct_mapped_v_address(),
+                PAGE_SIZE,
+                pm_manager,
+            )
+            .expect("Cannot map address for paging cache");
+
+            self.insert_vm_map_entry(entry, pm_manager)
+                .expect("Cannot insert Virtual Memory Entry for paging cache");
+            self.associate_address(
                 cache_address,
                 cache_address.to_direct_mapped_v_address(),
                 MemoryPermissionFlags::data(),
                 pm_manager,
-            ) {
-                panic!("Cannot associate address for paging cache Err:{:?}", e);
-            }
+            )
+            .expect("Cannot associate address for paging cache");
         }
 
         self.setup_direct_mapped_area(pm_manager);
@@ -159,9 +154,10 @@ impl VirtualMemoryManager {
             ) {
                 panic!("Cannot map address for {} Err:{:?}", name, e);
             }
-            if let Err(e) = vm_manager.insert_vm_map_entry(entry, p) {
-                panic!("Cannot insert Virtual Memory Entry Err:{:?}", e);
-            };
+            vm_manager
+                .insert_vm_map_entry(entry, p)
+                .expect("Cannot insert Virtual Memory Entry");
+
             for i in MIndex::new(0)..size.to_index() {
                 if let Err(e) = vm_manager.associate_address(
                     address.to_direct_mapped_p_address() + i.to_offset(),
@@ -218,10 +214,8 @@ impl VirtualMemoryManager {
         let direct_mapped_area_address =
             pm_manager.alloc(direct_mapped_area_size, MOrder::new(PAGE_SHIFT));
 
-        if direct_mapped_area_address.is_none() {
-            panic!("Cannot alloc memory for direct map.");
-        }
-        let direct_mapped_area_address = direct_mapped_area_address.unwrap();
+        let direct_mapped_area_address =
+            direct_mapped_area_address.expect("Cannot alloc memory for direct map.");
 
         pr_info!(
             "{:#X} bytes are reserved for direct map",
@@ -237,30 +231,27 @@ impl VirtualMemoryManager {
                 | MemoryOptionFlags::PRE_RESERVED
                 | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
         );
-        if let Err(e) = self._map_address(
+        self._map_address(
             &mut entry,
             direct_mapped_area_address,
             direct_mapped_area_address.to_direct_mapped_v_address(),
             MSize::new(2 << PAGE_SHIFT),
             pm_manager,
-        ) {
-            panic!("Cannot map address for direct map Err:{:?}", e);
-        }
+        )
+        .expect("Cannot map address for direct map");
 
-        let entry = match self.insert_vm_map_entry(entry, pm_manager) {
-            Ok(e) => e,
-            Err(e) => panic!("Cannot insert Virtual Memory Entry Err:{:?}", e),
-        };
+        let entry = self
+            .insert_vm_map_entry(entry, pm_manager)
+            .expect("Cannot insert Virtual Memory Entry");
 
-        if let Err(e) = self.associate_address_with_size(
+        self.associate_address_with_size(
             direct_mapped_area_address,
             direct_mapped_area_address.to_direct_mapped_v_address(),
             direct_mapped_area_size,
             MemoryPermissionFlags::data(),
             pm_manager,
-        ) {
-            panic!("Cannot associate address for direct map Err:{:?}", e);
-        }
+        )
+        .expect("Cannot associate address for direct map");
 
         let mut direct_mapped_area_allocator = PhysicalMemoryManager::new();
         direct_mapped_area_allocator
@@ -460,12 +451,7 @@ impl VirtualMemoryManager {
             pm_manager,
         )?;
 
-        let entry = match self.insert_vm_map_entry(entry, pm_manager) {
-            Ok(e) => e,
-            Err(_) => {
-                return Err(MemoryError::InsertEntryFailed);
-            }
-        };
+        let entry = self.insert_vm_map_entry(entry, pm_manager)?;
 
         if entry.get_memory_option_flags().is_dev_map() {
             if self
