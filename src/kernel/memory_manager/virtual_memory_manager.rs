@@ -217,11 +217,9 @@ impl VirtualMemoryManager {
         let direct_mapped_area_size =
             MSize::new((pm_manager.get_free_memory_size().to_usize() / 20) & PAGE_MASK); /* temporary */
         assert!(MSize::new(2 << PAGE_SHIFT) < direct_mapped_area_size);
-        let direct_mapped_area_address =
-            pm_manager.alloc(direct_mapped_area_size, MOrder::new(PAGE_SHIFT));
-
-        let direct_mapped_area_address =
-            direct_mapped_area_address.expect("Cannot alloc memory for direct map.");
+        let direct_mapped_area_address = pm_manager
+            .alloc(direct_mapped_area_size, MOrder::new(PAGE_SHIFT))
+            .expect("Cannot alloc memory for direct map.");
 
         pr_info!(
             "{:#X} ~ {:#X} (size: {:#X}) are reserved for direct map",
@@ -231,25 +229,6 @@ impl VirtualMemoryManager {
                 .to_usize(),
             direct_mapped_area_size.to_usize()
         );
-
-        let mut entry = VirtualMemoryEntry::new(
-            direct_mapped_area_address.to_direct_mapped_v_address(),
-            direct_mapped_area_size
-                .to_end_address(direct_mapped_area_address.to_direct_mapped_v_address()),
-            MemoryPermissionFlags::data(),
-            MemoryOptionFlags::DIRECT_MAP | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
-        );
-        self._map_address(
-            &mut entry,
-            direct_mapped_area_address,
-            direct_mapped_area_address.to_direct_mapped_v_address(),
-            MSize::new(2 << PAGE_SHIFT),
-            pm_manager,
-        )
-        .expect("Cannot map address for direct map");
-
-        self.insert_vm_map_entry(entry, pm_manager)
-            .expect("Cannot insert Virtual Memory Entry");
 
         self.associate_address_with_size(
             direct_mapped_area_address,
@@ -268,6 +247,14 @@ impl VirtualMemoryManager {
             direct_mapped_area_size - MSize::new(2 << PAGE_SHIFT),
             true,
         );
+
+        self.map_memory_from_direct_map(
+            direct_mapped_area_address,
+            MSize::new(2 << PAGE_SHIFT),
+            pm_manager,
+        )
+        .expect("Cannot insert vm_map_entry for direct mapped area allocator.");
+
         self.direct_mapped_area = Some(DirectMappedArea {
             allocator: direct_mapped_area_allocator,
             start_address: direct_mapped_area_address.to_direct_mapped_v_address(),
@@ -389,10 +376,10 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         vm_map_entry.get_object_mut().activate_all_page();
-        let first_p_index = vm_map_entry.get_offset().to_index();
+        let first_p_index = vm_map_entry.get_memory_offset().to_index();
         let last_p_index = MIndex::from_offset(
             vm_map_entry.get_vm_end_address() - vm_map_entry.get_vm_start_address()
-                + vm_map_entry.get_offset(),
+                + vm_map_entry.get_memory_offset(), /* Is it ok? */
         ) + MIndex::new(1);
         for i in first_p_index..last_p_index {
             if let Some(p) = vm_map_entry.get_object().get_vm_page(i) {
@@ -557,12 +544,12 @@ impl VirtualMemoryManager {
         vm_map_entry /* will be removed from list and freed */: &'static mut VirtualMemoryEntry,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
-        let first_p_index = vm_map_entry.get_offset().to_index();
+        let first_p_index = vm_map_entry.get_memory_offset().to_index();
         let last_p_index = MIndex::from_offset(
             MSize::from_address(
                 vm_map_entry.get_vm_start_address(),
                 vm_map_entry.get_vm_end_address(),
-            ) + vm_map_entry.get_offset(),
+            ) + vm_map_entry.get_memory_offset(), /* Is it ok? */
         ) + MIndex::new(1);
         for i in first_p_index..last_p_index {
             if let Some(p) = vm_map_entry.get_object_mut().remove_vm_page(i) {
@@ -582,6 +569,17 @@ impl VirtualMemoryManager {
                     pm_manager.free(p.get_physical_address(), PAGE_SIZE, false);
                 }
                 self.vm_page_pool.free(p);
+            }
+        }
+        if vm_map_entry.get_memory_option_flags().is_dev_map() {
+            if !self.direct_mapped_area.as_mut().unwrap().allocator.free(
+                vm_map_entry
+                    .get_vm_start_address()
+                    .to_direct_mapped_p_address(),
+                vm_map_entry.get_size(),
+                false,
+            ) {
+                pr_err!("Cannot free direct mapped area");
             }
         }
         vm_map_entry.remove_from_list(&mut self.vm_map_entry);
@@ -823,7 +821,7 @@ impl VirtualMemoryManager {
         );
         let old_last_p_index = MIndex::from_offset(
             target_entry.get_vm_end_address() - target_entry.get_vm_start_address()
-                + target_entry.get_offset(),
+                + target_entry.get_memory_offset(), /* Is it ok? */
         );
         let not_associated_virtual_address = target_entry.get_vm_end_address() + MSize::new(1);
         let not_associated_physical_address = target_entry
@@ -903,7 +901,7 @@ impl VirtualMemoryManager {
             let permission = entry.get_permission_flags();
             let physical_address = entry
                 .get_object()
-                .get_vm_page(entry.get_offset().to_index())
+                .get_vm_page(entry.get_memory_offset().to_index())
                 .unwrap()
                 .get_physical_address();
             /* Assume: p_index is the first of mapping address */
@@ -1247,9 +1245,10 @@ impl VirtualMemoryManager {
                 entry.get_permission_flags().is_user_accessible(),
                 entry.get_permission_flags().is_executable()
             );
-            let first_p_index = entry.get_offset().to_index();
+            let first_p_index = entry.get_memory_offset().to_index();
             let last_p_index = MIndex::from_offset(
-                entry.get_vm_end_address() - entry.get_vm_start_address() + entry.get_offset(),
+                entry.get_vm_end_address() - entry.get_vm_start_address()
+                    + entry.get_memory_offset(), /* Is it ok? */
             ) + MIndex::new(1);
 
             let mut omitted = false;
