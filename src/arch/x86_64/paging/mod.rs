@@ -418,7 +418,7 @@ impl PageManager {
             );
         }
 
-        let mut processed_size = MSize::from(0);
+        let mut processed_size = MSize::new(0);
         while processed_size <= size {
             let processing_virtual_address = virtual_address + processed_size;
             let processing_physical_address = physical_address + processed_size;
@@ -430,7 +430,7 @@ impl PageManager {
             if number_of_pde == 0
                 && number_of_pte == 0
                 && (processing_physical_address & 0x3FFFFFFF) == 0
-                && (size - processed_size) >= MSize::from(0x40000000)
+                && (size - processed_size) >= MSize::new(0x40000000)
                 && self.is_1gb_paging_supported
             {
                 /* try to apply 1GB paging */
@@ -451,14 +451,14 @@ impl PageManager {
                     pdpte.set_user_accessible(permission.is_user_accessible());
                     pdpte.set_address(processing_physical_address);
                     pdpte.set_present(true);
-                    processed_size += MSize::from(0x40000000);
+                    processed_size += MSize::new(0x40000000);
                     continue;
                 }
             }
             /* try to apply 2MiB paging */
             if number_of_pte == 0
                 && (processing_physical_address & 0x1FFFFF) == 0
-                && (size - processed_size) >= MSize::from(0x200000)
+                && (size - processed_size) >= MSize::new(0x200000)
             {
                 let pde = self.get_target_pde(
                     cache_memory_list,
@@ -476,7 +476,7 @@ impl PageManager {
                     pde.set_user_accessible(permission.is_user_accessible());
                     pde.set_address(processing_physical_address);
                     pde.set_present(true);
-                    processed_size += MSize::from(0x200000);
+                    processed_size += MSize::new(0x200000);
                     continue;
                 }
             }

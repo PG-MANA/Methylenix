@@ -83,4 +83,8 @@ impl<T> CacheAllocator<T> {
         self.add_free_area(page, num_page.to_offset());
         Ok(())
     }
+
+    pub fn len(&self) -> usize {
+        self.allocator.get_count()
+    }
 }
