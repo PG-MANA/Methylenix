@@ -8,7 +8,7 @@ use crate::arch::target_arch::paging::PAGE_SHIFT;
 use core::convert::{From, Into};
 use core::iter::Step;
 use core::ops::{
-    Add, AddAssign, BitAnd, BitOr, BitXor, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
+    Add, AddAssign, BitAnd, BitOr, BitXor, Mul, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
@@ -310,6 +310,13 @@ impl const Add<PAddress> for MSize {
     type Output = PAddress;
     fn add(self, rhs: PAddress) -> Self::Output {
         PAddress(self.0 + rhs.0)
+    }
+}
+
+impl const Mul<Self> for MSize {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        MSize(self.0 * rhs.0)
     }
 }
 
