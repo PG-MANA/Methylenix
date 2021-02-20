@@ -3,10 +3,11 @@
 //!
 
 use super::data_object::{ComputationalData, DataObject, DataRefObject, NameString};
+use super::expression_opcode::ExpressionOpcode;
 use super::named_object::{External, FieldElement, NamedObject};
 use super::namespace_modifier_object::NamespaceModifierObject;
 use super::statement_opcode::StatementOpcode;
-use super::term_object::{TermList, TermObj};
+use super::term_object::{TermArg, TermList, TermObj};
 use super::{AcpiInt, AmlError};
 
 use crate::kernel::sync::spin_lock::Mutex;
@@ -754,13 +755,22 @@ impl ParseHelper {
                     match statement_op {
                         /* TODO: Check the target object is if should in the statement. */
                         StatementOpcode::DefIfElse(ie) => {
-                            if let Some(obj) = self.parse_term_list_recursive(
-                                target_name,
-                                ie.get_if_true_term_list().clone(),
-                                relative_name,
-                                disable_scope_check,
-                            )? {
-                                return Ok(Some(obj));
+                            let mut check_true_term_list = true;
+                            if let TermArg::ExpressionOpcode(b) = &ie.get_predicate() {
+                                if let ExpressionOpcode::DefCondRefOf(c) = b.as_ref() {
+                                    check_true_term_list = false;
+                                    /*TODO:fix...*/
+                                }
+                            }
+                            if check_true_term_list {
+                                if let Some(obj) = self.parse_term_list_recursive(
+                                    target_name,
+                                    ie.get_if_true_term_list().clone(),
+                                    relative_name,
+                                    disable_scope_check,
+                                )? {
+                                    return Ok(Some(obj));
+                                }
                             }
                             if let Some(e_t) = ie.get_if_false_term_list() {
                                 if let Some(obj) = self.parse_term_list_recursive(

@@ -246,6 +246,41 @@ impl Concat {
 }
 
 #[derive(Debug, Clone)]
+pub struct CondRefOf {
+    source: SuperName,
+    result: Target,
+}
+
+impl CondRefOf {
+    fn parse(
+        stream: &mut AmlStream,
+        current_scope: &NameString,
+        parse_helper: &mut ParseHelper,
+    ) -> Result<Self, AmlError> {
+        /* CondRefOfOp was read */
+        let source = SuperName::try_parse(stream, current_scope, parse_helper)?;
+        let result = Target::parse(stream, current_scope, parse_helper)?;
+        Ok(Self { source, result })
+    }
+
+    pub fn check_source_exists_with_parsing(
+        &self,
+        parse_helper: &mut ParseHelper,
+    ) -> Result<bool, AmlError> {
+        if let SuperName::SimpleName(s_n) = &self.source {
+            match s_n {
+                SimpleName::NameString(name) => Ok(parse_helper
+                    .find_content_object_with_parsing(name)?
+                    .is_some()),
+                _ => Ok(true),
+            }
+        } else {
+            unimplemented!()
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Divide {
     dividend: TermArg,
     divisor: TermArg,
@@ -342,7 +377,7 @@ pub enum ExpressionOpcode {
     DefBuffer(ByteList),
     DefConcat(Concat),
     DefConcatRes(Concat),
-    DefCondRefOf((SuperName, Target)),
+    DefCondRefOf(CondRefOf),
     DefCopyObject(TermArg, SimpleName),
     DefDecrement(SuperName),
     DefDivide(Divide),
@@ -402,9 +437,11 @@ impl ExpressionOpcode {
                 }
                 opcode::COND_REF_OF_OP => {
                     stream.seek(2)?;
-                    let super_name = SuperName::try_parse(stream, current_scope, parse_helper)?;
-                    let target = Target::parse(stream, current_scope, parse_helper)?;
-                    Ok(Self::DefCondRefOf((super_name, target)))
+                    Ok(Self::DefCondRefOf(CondRefOf::parse(
+                        stream,
+                        current_scope,
+                        parse_helper,
+                    )?))
                 }
                 opcode::FROM_BCD_OP => {
                     stream.seek(2)?;

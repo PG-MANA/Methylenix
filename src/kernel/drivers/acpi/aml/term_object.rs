@@ -185,11 +185,9 @@ impl TermArgList {
             list: Vec::with_capacity(argument_count as usize),
         };
         for _ in 0..argument_count {
-            match TermArg::try_parse(stream, current_scope, parse_helper) {
-                Ok(o) => term_arg_list.list.push(o),
-                Err(AmlError::InvalidType) => return Ok(term_arg_list),
-                Err(e) => return Err(e),
-            }
+            term_arg_list
+                .list
+                .push(TermArg::try_parse(stream, current_scope, parse_helper)?);
         }
         return Ok(term_arg_list);
     }
