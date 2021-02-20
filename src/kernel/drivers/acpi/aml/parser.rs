@@ -431,6 +431,7 @@ impl ParseHelper {
                             &scope_name,
                             n_o,
                             relative_name,
+                            false,
                         )? {
                             return self.convert_object_list_item_list_to_content_object(o_i);
                         }
@@ -559,6 +560,7 @@ impl ParseHelper {
             relative_target_name
                 .as_ref()
                 .and_then(|r| if r.len() == 1 { Some(r) } else { None }),
+            false,
         ) {
             Ok(Some(o_i)) => {
                 self.restore(back_up);
@@ -592,6 +594,7 @@ impl ParseHelper {
                         &search_name,
                         self.root_term_list.clone(),
                         Some(relative_target_name),
+                        false,
                     ) {
                         Ok(Some(o_i)) => {
                             self.restore(back_up);
@@ -603,6 +606,23 @@ impl ParseHelper {
                             return Err(e);
                         }
                     }
+                }
+            }
+            /* TODO: delete this extreme process. */
+            match self.parse_term_list_recursive(
+                &name,
+                self.root_term_list.clone(),
+                Some(relative_target_name),
+                true,
+            ) {
+                Ok(Some(o_i)) => {
+                    self.restore(back_up);
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    return self.convert_object_list_item_list_to_content_object(o_i);
+                }
+                Err(AmlError::NestedSearch) | Ok(None) => {}
+                Err(e) => {
+                    return Err(e);
                 }
             }
         }
@@ -654,8 +674,9 @@ impl ParseHelper {
         target_name: &NameString,
         mut term_list: TermList,
         relative_name: Option<&NameString>,
+        disable_scope_check: bool,
     ) -> Result<Option<ObjectListItem>, AmlError> {
-        if !term_list.get_scope_name().is_child(target_name) {
+        if !term_list.get_scope_name().is_child(target_name) && !disable_scope_check {
             return Ok(None);
         }
         self.move_current_scope(term_list.get_scope_name())?;
@@ -689,6 +710,7 @@ impl ParseHelper {
                                     target_name,
                                     s.get_term_list().clone(),
                                     relative_name,
+                                    disable_scope_check,
                                 )? {
                                     return Ok(Some(obj));
                                 }
@@ -723,6 +745,7 @@ impl ParseHelper {
                         term_list.get_scope_name(),
                         named_obj,
                         relative_name,
+                        disable_scope_check,
                     )? {
                         return Ok(Some(named_obj));
                     }
@@ -735,6 +758,7 @@ impl ParseHelper {
                                 target_name,
                                 ie.get_if_true_term_list().clone(),
                                 relative_name,
+                                disable_scope_check,
                             )? {
                                 return Ok(Some(obj));
                             }
@@ -743,6 +767,7 @@ impl ParseHelper {
                                     target_name,
                                     e_t.clone(),
                                     relative_name,
+                                    disable_scope_check,
                                 )? {
                                     return Ok(Some(obj));
                                 }
@@ -753,6 +778,7 @@ impl ParseHelper {
                                 target_name,
                                 w.get_term_list().clone(),
                                 relative_name,
+                                disable_scope_check,
                             )? {
                                 return Ok(Some(obj));
                             }
@@ -773,6 +799,7 @@ impl ParseHelper {
         current_scope: &NameString,
         named_object: NamedObject,
         relative_name: Option<&NameString>,
+        disable_scope_check: bool,
     ) -> Result<Option<ObjectListItem>, AmlError> {
         if let Some(name) = named_object.get_name() {
             if name == target_name {
@@ -788,6 +815,7 @@ impl ParseHelper {
             .unwrap_or(current_scope)
             .is_child(target_name)
             && relative_name.is_none()
+            && !disable_scope_check
         {
             return Ok(None);
         }
@@ -807,7 +835,12 @@ impl ParseHelper {
             }
             Ok(None)
         } else if let Some(term_list) = named_object.get_term_list() {
-            self.parse_term_list_recursive(target_name, term_list, relative_name)
+            self.parse_term_list_recursive(
+                target_name,
+                term_list,
+                relative_name,
+                disable_scope_check,
+            )
         } else {
             Ok(None)
         }
