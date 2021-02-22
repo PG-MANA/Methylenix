@@ -117,9 +117,6 @@ impl AmlParser {
                                 d_s.get_name(),
                                 e
                             );
-                            parse_helper.move_current_scope(term_list.get_scope_name());
-                        } else {
-                            parse_helper.move_parent_scope()?;
                         }
                         parse_helper.move_out_from_current_term_list()?;
                         //println!("}}");
@@ -142,9 +139,6 @@ impl AmlParser {
                         parse_helper.move_into_term_list(object_term_list.clone())?;
                         if let Err(e) = Self::debug_term_list(object_term_list, parse_helper) {
                             pr_err!("Cannot parse {} Error: {:?}. Continue...", name, e);
-                            parse_helper.move_current_scope(term_list.get_scope_name());
-                        } else {
-                            parse_helper.move_parent_scope()?;
                         }
                         parse_helper.move_out_from_current_term_list()?;
                         println!("}}");
@@ -177,9 +171,6 @@ impl AmlParser {
                                     term_list.get_scope_name(),
                                     e
                                 );
-                                parse_helper.move_current_scope(term_list.get_scope_name());
-                            } else {
-                                parse_helper.move_parent_scope()?;
                             }
                             parse_helper.move_out_from_current_term_list()?;
 
@@ -190,9 +181,6 @@ impl AmlParser {
                                     Self::debug_term_list(else_term_list.clone(), parse_helper)
                                 {
                                     pr_err!("Cannot parse else statement of {} Error: {:?}. Continue...",term_list.get_scope_name(),e);
-                                    parse_helper.move_current_scope(term_list.get_scope_name());
-                                } else {
-                                    parse_helper.move_parent_scope()?;
                                 }
                                 parse_helper.move_out_from_current_term_list()?;
                             }
@@ -233,9 +221,6 @@ impl AmlParser {
                                     term_list.get_scope_name(),
                                     e
                                 );
-                                parse_helper.move_current_scope(term_list.get_scope_name());
-                            } else {
-                                parse_helper.move_parent_scope()?;
                             }
                             parse_helper.move_out_from_current_term_list()?;
                             println!("}}");
