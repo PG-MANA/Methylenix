@@ -296,13 +296,16 @@ impl NameString {
             name[0] = c;
             for i in 1..4 {
                 c = stream.read_byte()?;
-                if c == '_' as u8 {
+                if !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != '_' as u8 {
+                    return Err(AmlError::InvalidType);
+                }
+                name[i] = c;
+            }
+            for i in (1..4).rev() {
+                if name[i] == '_' as u8 {
                     name[i] = 0;
                 } else {
-                    if !c.is_ascii_uppercase() && !c.is_ascii_digit() {
-                        return Err(AmlError::InvalidType);
-                    }
-                    name[i] = c;
+                    break;
                 }
             }
             match &mut result.data {
