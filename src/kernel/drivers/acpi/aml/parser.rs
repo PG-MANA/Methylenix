@@ -340,9 +340,11 @@ impl ParseHelper {
                                     relative_name,
                                 );
                                 self.move_out_from_current_term_list()?;
-                                if let Some(obj) = result? {
-                                    return Ok(Some(obj));
-                                }
+                                match result {
+                                    Ok(Some(o)) => return Ok(Some(o)),
+                                    Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+                                    Err(e) => return Err(e),
+                                };
                                 self.move_current_scope(term_list.get_scope_name())?;
                             }
                         }
@@ -369,14 +371,17 @@ impl ParseHelper {
                     }
                 }
                 TermObj::NamedObj(named_obj) => {
-                    if let Some(named_obj) = self.parse_named_object_recursive(
+                    match self.parse_named_object_recursive(
                         target_name,
                         term_list.get_scope_name(),
                         named_obj,
                         relative_name,
-                    )? {
-                        return Ok(Some(named_obj));
+                    ) {
+                        Ok(Some(named_obj)) => return Ok(Some(named_obj)),
+                        Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+                        Err(e) => return Err(e),
                     }
+                    self.move_current_scope(term_list.get_scope_name())?;
                 }
                 TermObj::StatementOpcode(_) => { /* Ignore */ }
                 TermObj::ExpressionOpcode(_) => { /* Ignore */ }
@@ -628,6 +633,7 @@ impl ParseHelper {
                     while let Some(e) = term_list_hierarchy_back_up.pop() {
                         self.term_list_hierarchy.push(e);
                     }
+                    self.original_name_searching = back_up_of_original_name_searching;
                     return Err(e);
                 }
             }
@@ -664,6 +670,7 @@ impl ParseHelper {
                 while let Some(e) = term_list_hierarchy_back_up.pop() {
                     self.term_list_hierarchy.push(e);
                 }
+                self.original_name_searching = back_up_of_original_name_searching;
                 return Err(e);
             }
         }
@@ -672,6 +679,7 @@ impl ParseHelper {
         while let Some(e) = term_list_hierarchy_back_up.pop() {
             self.term_list_hierarchy.push(e);
         }
+        self.original_name_searching = back_up_of_original_name_searching;
         return Ok(None);
     }
 
