@@ -10,6 +10,7 @@ use super::{AcpiData, AcpiInt, AmlError, AmlStream};
 use crate::ignore_invalid_type_error;
 use crate::kernel::memory_manager::data_type::Address;
 
+use crate::kernel::drivers::acpi::aml::data_object::NameStringData::Normal;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -200,7 +201,7 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 enum NameStringData {
     Normal(([[u8; 4]; 7], u8)),
     Ex(Vec<[u8; 4]>),
@@ -213,7 +214,7 @@ enum NameStringFlag {
     NullName,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct NameString {
     data: NameStringData,
     flag: NameStringFlag,
@@ -394,6 +395,22 @@ impl NameString {
         }
     }
 
+    pub fn get_element_as_name_string(&self, index: usize) -> Option<Self> {
+        if self.flag == NameStringFlag::NullName {
+            return None;
+        }
+        if let Some(e) = self.get_element(index) {
+            let mut array = [[0u8; 4]; 7];
+            array[0] = *e;
+            Some(Self {
+                data: Normal((array, 1)),
+                flag: NameStringFlag::RelativePath,
+            })
+        } else {
+            None
+        }
+    }
+
     pub fn is_child(&self, child: &Self) -> bool {
         for index in 0.. {
             let s1 = self.get_element(index);
@@ -533,6 +550,23 @@ impl NameString {
             let self_e = self.get_element(self_index).unwrap();
             let other_e = other.get_element(other_index).unwrap();
             if self_e != other_e {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+impl core::cmp::PartialEq for NameString {
+    fn eq(&self, other: &Self) -> bool {
+        if self.flag == NameStringFlag::NullName && other.flag == NameStringFlag::NullName {
+            return true;
+        }
+        if self.len() != other.len() {
+            return false;
+        }
+        for i in 0..self.len() {
+            if self.get_element(i) != other.get_element(i) {
                 return false;
             }
         }
