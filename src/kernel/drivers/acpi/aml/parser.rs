@@ -194,67 +194,61 @@ impl ParseHelper {
                 self.current_object_list = scope;
                 return Ok(());
             }
-            let mut parent_list_option = locked_current_object_list.parent.clone();
-            drop(locked_current_object_list);
-            while let Some(parent_list) = parent_list_option {
-                if let Ok(locked_parent_list) = parent_list
-                    .clone()
-                    .upgrade()
-                    .ok_or(AmlError::ObjectTreeError)?
-                    .try_lock()
-                {
-                    if locked_parent_list.scope_name.is_child(scope_name) {
-                        drop(locked_parent_list);
-                        let target_list = Self::find_target_scope(
-                            parent_list
-                                .clone()
-                                .upgrade()
-                                .ok_or(AmlError::ObjectTreeError)?,
-                            scope_name,
-                        );
+            /* Search from the child tree */
+            let mut searching_scope_name = locked_current_object_list.scope_name.clone();
+            let mut searching_list = self.current_object_list.clone();
+            let relative_name = scope_name
+                .get_relative_name(&locked_current_object_list.scope_name)
+                .unwrap();
 
-                        if matches!(target_list, Err(AmlError::MutexError)) {
-                            break;
-                        }
-                        let target_list = target_list?;
-                        let locked_target_list =
-                            target_list.try_lock().or(Err(AmlError::MutexError))?;
-                        return if &locked_target_list.scope_name == scope_name {
-                            self.current_object_list = target_list;
-                            Ok(())
-                        } else {
-                            drop(locked_target_list);
-                            self.current_object_list = target_list;
-                            self.create_new_scope_and_move(scope_name)
-                        };
-                    }
-                    if let Ok(locked_parent_list) = parent_list
-                        .upgrade()
-                        .ok_or(AmlError::ObjectTreeError)?
-                        .try_lock()
-                    {
-                        parent_list_option = locked_parent_list.parent.clone();
-                        continue;
-                    }
-                }
-                break;
-            }
-        } else {
             drop(locked_current_object_list);
-        }
-        /* Find scope from root */
-        self.current_object_list =
-            Self::find_target_scope(self.root_object_list.clone(), scope_name)?;
-        if &self
-            .current_object_list
-            .try_lock()
-            .or(Err(AmlError::MutexError))?
-            .scope_name
-            == scope_name
-        {
+            for index in 0..relative_name.len() {
+                searching_scope_name = relative_name
+                    .get_element_as_name_string(index)
+                    .unwrap()
+                    .get_full_name_path(&searching_scope_name);
+                let result = searching_list
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .get_scope(&searching_scope_name);
+                if let Some(ObjectListItem::DefScope(scope)) = result {
+                    self.current_object_list = scope.clone();
+                    searching_list = scope;
+                } else {
+                    self.current_object_list = searching_list;
+                    self.create_new_scope_and_move(&searching_scope_name)?;
+                    searching_list = self.current_object_list.clone();
+                }
+            }
             return Ok(());
         }
-        return self.create_new_scope_and_move(scope_name);
+        /* Search from the parent tree */
+        let mut parent_list_option = locked_current_object_list.parent.clone();
+        drop(locked_current_object_list);
+
+        while let Some(parent_list_weak) = parent_list_option {
+            let parent_list_arc = parent_list_weak
+                .upgrade()
+                .ok_or(AmlError::ObjectTreeError)?;
+            if let Ok(locked_parent_list) = parent_list_arc.clone().try_lock() {
+                if &locked_parent_list.scope_name == scope_name {
+                    self.current_object_list = parent_list_arc;
+                    return Ok(());
+                }
+                if locked_parent_list.scope_name.is_child(scope_name) {
+                    drop(locked_parent_list);
+                    self.current_object_list = parent_list_arc;
+                    return self.move_current_scope(scope_name);
+                }
+                parent_list_option = locked_parent_list.parent.clone();
+            } else {
+                break;
+            }
+        }
+
+        /* Search from root */
+        self.current_object_list = self.root_object_list.clone();
+        return self.move_current_scope(scope_name);
     }
 
     pub fn move_parent_scope(&mut self) -> Result<bool, AmlError> {
