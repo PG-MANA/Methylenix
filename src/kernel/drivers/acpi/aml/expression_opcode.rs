@@ -270,7 +270,7 @@ impl CondRefOf {
         if let SuperName::SimpleName(s_n) = &self.source {
             match s_n {
                 SimpleName::NameString(name) => Ok(parse_helper
-                    .find_content_object_with_parsing(name)?
+                    .search_object_from_list_with_parsing_term_list(name)?
                     .is_some()),
                 _ => Ok(true),
             }

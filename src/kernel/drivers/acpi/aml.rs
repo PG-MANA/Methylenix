@@ -108,7 +108,7 @@ impl AmlParser {
                     }
                     NamespaceModifierObject::DefScope(d_s) => {
                         println!("DefScope({}) => {{", d_s.get_name());
-                        parse_helper.move_current_scope(d_s.get_name())?;
+                        parse_helper.move_into_term_list(d_s.get_term_list().clone())?;
                         if let Err(e) =
                             Self::debug_term_list(d_s.get_term_list().clone(), parse_helper)
                         {
@@ -121,6 +121,7 @@ impl AmlParser {
                         } else {
                             parse_helper.move_parent_scope()?;
                         }
+                        parse_helper.move_out_from_current_term_list()?;
                         //println!("}}");
                     }
                 },
@@ -138,13 +139,14 @@ impl AmlParser {
                     } else if let Some(object_term_list) = n_o.get_term_list() {
                         let name = n_o.get_name().unwrap();
                         println!("TermList({}) => {{", name);
-                        parse_helper.move_current_scope(name)?;
+                        parse_helper.move_into_term_list(object_term_list.clone())?;
                         if let Err(e) = Self::debug_term_list(object_term_list, parse_helper) {
                             pr_err!("Cannot parse {} Error: {:?}. Continue...", name, e);
                             parse_helper.move_current_scope(term_list.get_scope_name());
                         } else {
                             parse_helper.move_parent_scope()?;
                         }
+                        parse_helper.move_out_from_current_term_list()?;
                         println!("}}");
                     }
                 }
@@ -164,6 +166,8 @@ impl AmlParser {
                         }
                         StatementOpcode::DefIfElse(i_e) => {
                             println!("if({:?}) {{", i_e.get_predicate());
+                            parse_helper
+                                .move_into_term_list(i_e.get_if_true_term_list().clone())?;
                             if let Err(e) = Self::debug_term_list(
                                 i_e.get_if_true_term_list().clone(),
                                 parse_helper,
@@ -177,8 +181,11 @@ impl AmlParser {
                             } else {
                                 parse_helper.move_parent_scope()?;
                             }
+                            parse_helper.move_out_from_current_term_list()?;
+
                             if let Some(else_term_list) = i_e.get_if_false_term_list() {
                                 println!("}} else {{");
+                                parse_helper.move_into_term_list(else_term_list.clone())?;
                                 if let Err(e) =
                                     Self::debug_term_list(else_term_list.clone(), parse_helper)
                                 {
@@ -187,6 +194,7 @@ impl AmlParser {
                                 } else {
                                     parse_helper.move_parent_scope()?;
                                 }
+                                parse_helper.move_out_from_current_term_list()?;
                             }
                             println!("}}");
                         }
@@ -216,6 +224,7 @@ impl AmlParser {
                         }
                         StatementOpcode::DefWhile(w) => {
                             println!("while({:?}) {{", w.get_predicate());
+                            parse_helper.move_into_term_list(w.get_term_list().clone())?;
                             if let Err(e) =
                                 Self::debug_term_list(w.get_term_list().clone(), parse_helper)
                             {
@@ -228,6 +237,7 @@ impl AmlParser {
                             } else {
                                 parse_helper.move_parent_scope()?;
                             }
+                            parse_helper.move_out_from_current_term_list()?;
                             println!("}}");
                         }
                     }
