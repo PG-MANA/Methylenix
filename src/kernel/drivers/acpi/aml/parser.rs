@@ -81,23 +81,20 @@ impl ParseHelper {
         self.move_current_scope(&NameString::root())?;
 
         /* Add builtin objects */
-        let gl_name = NameString::from_array(&[['_' as u8, 'G' as u8, 'L' as u8, 0]], true);
+        let gl_name = NameString::from_array(&[*b"_GL\0"], true);
         let gl = NamedObject::DefMutex((gl_name.clone(), 0));
-        let osi_name =
-            NameString::from_array(&[['_' as u8, 'O' as u8, 'S' as u8, 'I' as u8]], true);
+        let osi_name = NameString::from_array(&[*b"_OSI"], true);
         let osi =
             NamedObject::DefExternal(External::new(osi_name.clone(), 8 /*OK?(Method)*/, 1));
-        let os_name = NameString::from_array(&[['_' as u8, 'O' as u8, 'S' as u8, 0]], true);
+        let os_name = NameString::from_array(&[*b"_OS\0"], true);
         let os = DataRefObject::DataObject(DataObject::ComputationalData(
             ComputationalData::StringData("Methylenix"),
         ));
-        let rev_name =
-            NameString::from_array(&[['_' as u8, 'R' as u8, 'E' as u8, 'V' as u8]], true);
+        let rev_name = NameString::from_array(&[*b"_REV"], true);
         let rev = DataRefObject::DataObject(DataObject::ComputationalData(
             ComputationalData::ConstObj(2 /* ACPI 2.0 */),
         ));
-        let dlm_name =
-            NameString::from_array(&[['_' as u8, 'D' as u8, 'L' as u8, 'M' as u8]], true);
+        let dlm_name = NameString::from_array(&[*b"_DLM"], true);
         let dlm = DataRefObject::DataObject(DataObject::ComputationalData(
             ComputationalData::ConstObj(0 /* temporary */),
         ));

@@ -532,6 +532,70 @@ impl NameString {
         }
     }
 
+    pub fn from_string(s: &str) -> Option<Self> {
+        let is_absolute = s.starts_with('\\');
+        let split = s.as_bytes().split(|c| *c == b'\\');
+        let to_u8_4_array = |e: &[u8]| -> [u8; 4] {
+            let mut result = [0u8; 4];
+            for i in 0..e.len() {
+                result[i] = e[i];
+            }
+            for i in (1..4).rev() {
+                if result[i] == '_' as u8 {
+                    result[i] = 0;
+                } else {
+                    break;
+                }
+            }
+            result
+        };
+
+        let count = if is_absolute {
+            split.clone().count() - 1
+        } else {
+            split.clone().count()
+        };
+        if count >= 7 {
+            let mut vec: Vec<[u8; 4]> = Vec::with_capacity(count);
+            for e in split.into_iter() {
+                if e.len() > 4 {
+                    return None;
+                }
+                if e.len() != 0 {
+                    vec.push(to_u8_4_array(e))
+                }
+            }
+            Some(Self {
+                data: NameStringData::Ex(vec),
+                flag: if is_absolute {
+                    NameStringFlag::AbsolutePath
+                } else {
+                    NameStringFlag::RelativePath
+                },
+            })
+        } else {
+            let mut buf = [[0u8; 4]; 7];
+            let mut index = 0;
+            for e in split.into_iter() {
+                if e.len() > 4 {
+                    return None;
+                }
+                if e.len() != 0 {
+                    buf[index] = to_u8_4_array(e);
+                    index += 1;
+                }
+            }
+            Some(Self {
+                data: NameStringData::Normal((buf, index as u8)),
+                flag: if is_absolute {
+                    NameStringFlag::AbsolutePath
+                } else {
+                    NameStringFlag::RelativePath
+                },
+            })
+        }
+    }
+
     pub fn len(&self) -> usize {
         match &self.data {
             NameStringData::Normal((_, c)) => *c as usize,
