@@ -31,6 +31,7 @@ struct ObjectList {
 pub enum ContentObject {
     NamedObject(NamedObject),
     DataRefObject(DataRefObject),
+    Scope(NameString),
 }
 
 pub struct ParseHelper {
@@ -270,6 +271,11 @@ impl ParseHelper {
             Err(AmlError::MutexError)
         })?;
         for item in locked_list.list.iter() {
+            if &item.0 == name {
+                if let ObjectListItem::DefScope(scope) = &item.1 {
+                    return Ok(scope.clone());
+                }
+            }
             if item.0.is_child(name) {
                 if let ObjectListItem::DefScope(child) = &item.1 {
                     let child = child.clone();
@@ -306,6 +312,7 @@ impl ParseHelper {
             return Ok(None);
         }
         self.move_current_scope(term_list.get_scope_name())?;
+        let mut matched_scope: Option<NameString> = None;
 
         while let Some(term_obj) = term_list.next(self)? {
             match term_obj {
@@ -330,7 +337,12 @@ impl ParseHelper {
                                 }
                             }
                             NamespaceModifierObject::DefScope(s) => {
-                                if s.get_name() == target_name {
+                                if s.get_name() == target_name
+                                    || relative_name
+                                        .and_then(|r| Some(r == s.get_name()))
+                                        .unwrap_or(false)
+                                {
+                                    matched_scope = Some(s.get_name().clone());
                                     continue;
                                 }
                                 self.move_into_term_list(s.get_term_list().clone())?;
@@ -388,6 +400,18 @@ impl ParseHelper {
             }
         }
 
+        if let Some(scope) = matched_scope {
+            let target_scope_list =
+                Self::find_target_scope(self.current_object_list.clone(), &scope)?;
+            if target_scope_list
+                .try_lock()
+                .or(Err(AmlError::MutexError))?
+                .scope_name
+                == scope
+            {
+                return Ok(Some(ObjectListItem::DefScope(target_scope_list)));
+            }
+        }
         Ok(None)
     }
 
@@ -688,18 +712,15 @@ impl ParseHelper {
         o_l_i: ObjectListItem,
     ) -> Result<Option<ContentObject>, AmlError> {
         match o_l_i {
-            ObjectListItem::DefScope(_) => {
-                unimplemented!()
-            }
-            ObjectListItem::DefName(d_n) => {
-                return Ok(Some(ContentObject::DataRefObject(d_n)));
-            }
-            ObjectListItem::DefAlias(a) => {
-                return self.search_object_from_list_with_parsing_term_list(&a);
-            }
-            ObjectListItem::NamedObject(n_o) => {
-                return Ok(Some(ContentObject::NamedObject(n_o)));
-            }
+            ObjectListItem::DefScope(s) => Ok(Some(ContentObject::Scope(
+                s.try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .scope_name
+                    .clone(),
+            ))),
+            ObjectListItem::DefName(d_n) => Ok(Some(ContentObject::DataRefObject(d_n))),
+            ObjectListItem::DefAlias(a) => self.search_object_from_list_with_parsing_term_list(&a),
+            ObjectListItem::NamedObject(n_o) => Ok(Some(ContentObject::NamedObject(n_o))),
         }
     }
 
@@ -720,6 +741,7 @@ impl ParseHelper {
                 DataRefObject::DataObject(_) => Some(0),
             },
             ContentObject::NamedObject(n_o) => n_o.get_argument_count(),
+            ContentObject::Scope(_) => Some(0),
         })
     }
 }
