@@ -4,7 +4,8 @@
 //!
 #![allow(dead_code)]
 
-use super::data_object::{NameString, PkgLength, SimpleName, SuperName, Target};
+use super::data_object::PkgLength;
+use super::name_object::{NameString, SimpleName, SuperName, Target};
 use super::opcode;
 use super::parser::ParseHelper;
 use super::term_object::{MethodInvocation, TermArg};

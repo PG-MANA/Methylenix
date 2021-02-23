@@ -5,6 +5,7 @@
 
 mod data_object;
 mod expression_opcode;
+mod name_object;
 mod named_object;
 mod namespace_modifier_object;
 mod opcode;
@@ -12,7 +13,8 @@ mod parser;
 mod statement_opcode;
 mod term_object;
 
-pub use self::data_object::{DataRefObject, NameString};
+pub use self::data_object::DataRefObject;
+pub use self::name_object::NameString;
 use self::namespace_modifier_object::NamespaceModifierObject;
 use self::parser::{ContentObject, ParseHelper};
 use self::statement_opcode::StatementOpcode;

@@ -3,9 +3,10 @@
 //!
 #![allow(dead_code)]
 use super::data_object::{
-    try_parse_argument_object, try_parse_local_object, ComputationalData, DataObject, NameString,
+    try_parse_argument_object, try_parse_local_object, ComputationalData, DataObject,
 };
 use super::expression_opcode::ExpressionOpcode;
+use super::name_object::NameString;
 use super::named_object::NamedObject;
 use super::namespace_modifier_object::NamespaceModifierObject;
 use super::parser::ParseHelper;

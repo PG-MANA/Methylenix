@@ -2,7 +2,8 @@
 //! ACPI Machine Language Parse Helper
 //!
 
-use super::data_object::{ComputationalData, DataObject, DataRefObject, NameString};
+use super::data_object::{ComputationalData, DataObject, DataRefObject};
+use super::name_object::NameString;
 use super::named_object::{External, FieldElement, NamedObject};
 use super::namespace_modifier_object::NamespaceModifierObject;
 use super::term_object::{TermList, TermObj};

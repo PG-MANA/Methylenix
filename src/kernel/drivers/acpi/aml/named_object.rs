@@ -2,7 +2,8 @@
 //! ACPI Machine Language Named Objects
 //!
 #![allow(dead_code)]
-use super::data_object::{NameString, PkgLength};
+use super::data_object::PkgLength;
+use super::name_object::NameString;
 use super::opcode;
 use super::parser::ParseHelper;
 use super::term_object::{TermArg, TermList};
