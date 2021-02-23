@@ -8,19 +8,13 @@ use super::data_object::{NameString, PkgLength, SimpleName, SuperName, Target};
 use super::opcode;
 use super::parser::ParseHelper;
 use super::term_object::{MethodInvocation, TermArg};
-use super::{AcpiInt, AmlError, AmlStream};
+use super::{AcpiInt, AmlError, AmlStream, IntIter};
 
 use crate::ignore_invalid_type_error;
 
 #[derive(Debug, Clone)]
 pub struct Package {
     num_elements: AcpiInt,
-    stream: AmlStream,
-}
-
-#[derive(Debug)]
-pub struct PackageElementList {
-    remaining_element: AcpiInt,
     stream: AmlStream,
 }
 
@@ -45,6 +39,10 @@ impl Package {
             Err(AmlError::InvalidType)
         }
     }
+
+    pub fn to_int_iter(&self) -> IntIter {
+        IntIter::new(self.stream.clone(), self.num_elements)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +65,10 @@ impl VarPackage {
         } else {
             Err(AmlError::InvalidType)
         }
+    }
+
+    pub fn to_int_iter(&self) -> IntIter {
+        unimplemented!()
     }
 }
 

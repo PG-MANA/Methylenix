@@ -4,6 +4,7 @@
 //! This manager contains the information of FADT
 //! FADT has the information about ACPI PowerManagement Timer.
 
+use super::super::GeneralAddress;
 use super::super::INITIAL_MMAP_SIZE;
 
 use crate::kernel::drivers::acpi::acpi_pm_timer::AcpiPmTimer;
@@ -21,7 +22,7 @@ struct FADT {
     oem_revision: u32,
     creator_id: [u8; 4],
     creator_revision: u32,
-    firmware_control_address: u32,
+    firmware_control: u32,
     dsdt_address: u32,
     reserved: u8,
     preferred_pm_profile: u8,
@@ -29,7 +30,13 @@ struct FADT {
     smi_command: u32,
     acpi_enable: u8,
     acpi_disable: u8,
-    ignore: [u8; 76 - 54],
+    s4_bios_req: u8,
+    p_state_cnt: u8,
+    pm1a_event_block: u32,
+    pm1b_event_block: u32,
+    pm1a_control_block: u32,
+    pm1b_control_block: u32,
+    pm2_control_block: u32,
     pm_tmr_block: u32,
     ignore2: [u8; 112 - 80],
     flags: u32,
@@ -39,7 +46,16 @@ struct FADT {
     minor_version: u8,
     x_firmware_control_address: u64,
     x_dsdt_address: u64,
-    ignore3: [u8; 276 - 148],
+    x_pm1a_event_block: [u8; 12],
+    x_pm1b_event_block: [u8; 12],
+    x_pm1a_control_block: [u8; 12],
+    x_pm1b_control_block: [u8; 12],
+    x_pm2_control_block: [u8; 12],
+    x_pm_tmr_block: [u8; 12],
+    ignore3: [u8; 244 - 220],
+    sleep_control_register: [u8; 12],
+    sleep_status_register: [u8; 12],
+    hypervisor_vendor_identity: u64,
 }
 
 pub struct FadtManager {
@@ -84,10 +100,72 @@ impl FadtManager {
     pub fn get_acpi_pm_timer(&self) -> Option<AcpiPmTimer> {
         if self.enabled {
             let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            let address = GeneralAddress::new(&fadt.x_pm_tmr_block).address;
             Some(AcpiPmTimer::new(
-                fadt.pm_tmr_block as usize,
+                if address != 0 {
+                    address as usize
+                } else {
+                    fadt.pm_tmr_block as usize
+                },
                 ((fadt.flags >> 8) & 1) != 0,
             ))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_pm1a_control_block_address(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            let address = GeneralAddress::new(&fadt.x_pm1a_control_block).address;
+            Some(if address != 0 {
+                address as usize
+            } else {
+                fadt.pm1a_control_block as usize
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn get_pm1b_control_block_address(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            let address = GeneralAddress::new(&fadt.x_pm1b_control_block).address;
+            Some(if address != 0 {
+                address as usize
+            } else {
+                fadt.pm1b_control_block as usize
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn get_sleep_control_register(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            let address = GeneralAddress::new(&fadt.sleep_control_register).address;
+            if address != 0 {
+                return Some(address as usize);
+            }
+        }
+        return None;
+    }
+
+    pub fn get_smi_cmd(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            Some(fadt.smi_command as _)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_acpi_enable(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            Some(fadt.acpi_enable as _)
         } else {
             None
         }

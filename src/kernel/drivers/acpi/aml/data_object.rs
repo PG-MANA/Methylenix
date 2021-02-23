@@ -5,12 +5,11 @@
 use super::expression_opcode;
 use super::opcode;
 use super::parser::ParseHelper;
-use super::{AcpiData, AcpiInt, AmlError, AmlStream};
+use super::{AcpiData, AcpiInt, AmlError, AmlStream, IntIter};
 
 use crate::ignore_invalid_type_error;
 use crate::kernel::memory_manager::data_type::Address;
 
-use crate::kernel::drivers::acpi::aml::data_object::NameStringData::Normal;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -76,6 +75,18 @@ impl ComputationalData {
             _ => Err(AmlError::InvalidType),
         }
     }
+
+    pub fn to_int_iter(&self) -> Option<IntIter> {
+        match self {
+            ComputationalData::ConstData(_) => None,
+            ComputationalData::StringData(_) => None,
+            ComputationalData::ConstObj(_) => None,
+            ComputationalData::Revision => None,
+            ComputationalData::DefBuffer(_) => {
+                unimplemented!()
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +125,36 @@ impl DataRefObject {
             Ok(Self::DataObject(d))
         });
         Ok(Self::ObjectReference(parse_integer(stream)?))
+    }
+
+    pub fn to_int_iter(&self) -> Option<IntIter> {
+        match self {
+            DataRefObject::DataObject(d) => match d {
+                DataObject::ComputationalData(c_d) => c_d.to_int_iter(),
+                DataObject::DefPackage(d_p) => Some(d_p.to_int_iter()),
+                DataObject::DefVarPackage(d_v) => Some(d_v.to_int_iter()),
+            },
+            DataRefObject::ObjectReference(_) => None,
+        }
+    }
+
+    pub fn get_const_data(&self) -> Option<AcpiInt> {
+        match self {
+            DataRefObject::DataObject(d) => match d {
+                DataObject::ComputationalData(c) => match c {
+                    ComputationalData::ConstData(c) => Some(*c as AcpiInt),
+                    ComputationalData::StringData(_) => None,
+                    ComputationalData::ConstObj(c) => Some(*c as AcpiInt),
+                    ComputationalData::Revision => None,
+                    ComputationalData::DefBuffer(_) => None,
+                },
+                DataObject::DefPackage(_) => None,
+                DataObject::DefVarPackage(_) => None,
+            },
+            DataRefObject::ObjectReference(_) => {
+                unimplemented!()
+            }
+        }
     }
 }
 
@@ -228,6 +269,13 @@ impl NameString {
         Self {
             data: NameStringData::Normal(([[0; 4]; 7], 0)),
             flag: NameStringFlag::AbsolutePath,
+        }
+    }
+
+    pub fn current() -> Self {
+        Self {
+            data: NameStringData::Normal(([[0; 4]; 7], 0)),
+            flag: NameStringFlag::RelativePath,
         }
     }
 
@@ -406,7 +454,7 @@ impl NameString {
             let mut array = [[0u8; 4]; 7];
             array[0] = *e;
             Some(Self {
-                data: Normal((array, 1)),
+                data: NameStringData::Normal((array, 1)),
                 flag: NameStringFlag::RelativePath,
             })
         } else {

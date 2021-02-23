@@ -12,9 +12,9 @@ mod parser;
 mod statement_opcode;
 mod term_object;
 
-use self::data_object::NameString;
+pub use self::data_object::{DataRefObject, NameString};
 use self::namespace_modifier_object::NamespaceModifierObject;
-use self::parser::ParseHelper;
+use self::parser::{ContentObject, ParseHelper};
 use self::statement_opcode::StatementOpcode;
 use self::term_object::{TermList, TermObj};
 
@@ -26,6 +26,7 @@ type AcpiData = u64;
 pub struct AmlParser {
     base_address: VAddress,
     size: MSize,
+    parse_helper: Option<ParseHelper>,
 }
 
 #[derive(Clone)]
@@ -47,6 +48,43 @@ pub enum AmlError {
     UnsupportedType,
 }
 
+pub struct IntIter {
+    stream: AmlStream,
+    remaining_elements: usize,
+}
+
+impl IntIter {
+    pub fn new(stream: AmlStream, num_of_elements: usize) -> Self {
+        Self {
+            stream,
+            remaining_elements: num_of_elements,
+        }
+    }
+
+    fn get_next(&mut self) -> Result<Option<AcpiInt>, AmlError> {
+        if self.remaining_elements == 0 {
+            Ok(None)
+        } else {
+            let d = DataRefObject::parse(&mut self.stream, &NameString::current())?;
+            self.remaining_elements -= 1;
+            Ok(d.get_const_data())
+        }
+    }
+}
+
+impl Iterator for IntIter {
+    type Item = AcpiInt;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.get_next() {
+            Ok(o) => o,
+            Err(e) => {
+                pr_err!("{:?}", e);
+                None
+            }
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! ignore_invalid_type_error {
     ($f:expr, $ok_stmt:expr) => {
@@ -64,11 +102,14 @@ impl AmlParser {
         Self {
             base_address: address,
             size,
+            parse_helper: None,
         }
     }
 
-    pub fn debug(&mut self) {
-        println!("AML Size: {:#X}", self.size.to_usize());
+    pub fn init(&mut self) -> bool {
+        if self.parse_helper.is_some() {
+            return true;
+        }
         let root_name = NameString::root();
         let root_term_list = TermList::new(
             AmlStream::new(self.base_address, self.size),
@@ -77,9 +118,61 @@ impl AmlParser {
         let mut parse_helper = ParseHelper::new(root_term_list.clone(), &root_name);
         if let Err(e) = parse_helper.init() {
             println!("Cannot Init ParseHelper:{:?}", e);
+            return false;
+        }
+        self.parse_helper = Some(parse_helper);
+        return true;
+    }
+
+    fn get_content_object(&mut self, name: &NameString) -> Option<ContentObject> {
+        if self.parse_helper.is_none() {
+            return None;
+        }
+        match self
+            .parse_helper
+            .as_mut()
+            .unwrap()
+            .search_object_from_list_with_parsing_term_list(name)
+        {
+            Ok(Some(d)) => Some(d),
+            Ok(None) => None,
+            Err(e) => {
+                pr_err!("Cannot parse AML: {:?}", e);
+                None
+            }
+        }
+    }
+
+    pub fn get_data_ref_object(&mut self, name: &NameString) -> Option<DataRefObject> {
+        if let Some(c) = self.get_content_object(name) {
+            match c {
+                ContentObject::NamedObject(n) => {
+                    pr_err!("Expected DataRefObject, but found NamedObject: {:?}", n);
+                    None
+                }
+                ContentObject::DataRefObject(d) => Some(d),
+                ContentObject::Scope(s) => {
+                    pr_err!("Expected DataRefObject, but found Scope: {:?}", s);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn debug(&mut self) {
+        if self.parse_helper.is_none() {
             return;
         }
-        match Self::debug_term_list(root_term_list, &mut parse_helper) {
+        println!("AML Size: {:#X}", self.size.to_usize());
+        let root_name = NameString::root();
+        let root_term_list = TermList::new(
+            AmlStream::new(self.base_address, self.size),
+            root_name.clone(),
+        );
+        match Self::debug_term_list(root_term_list, &mut self.parse_helper.as_mut().unwrap()) {
             Ok(_) => {
                 println!("AML End");
             }
@@ -89,6 +182,7 @@ impl AmlParser {
         }
     }
 
+    #[allow(dead_code)]
     fn debug_term_list(
         mut term_list: TermList,
         parse_helper: &mut ParseHelper,
@@ -119,7 +213,7 @@ impl AmlParser {
                             );
                         }
                         parse_helper.move_out_from_current_term_list()?;
-                        //println!("}}");
+                        println!("}}");
                     }
                 },
                 TermObj::NamedObj(n_o) => {
@@ -246,11 +340,6 @@ impl AmlStream {
 
     fn check_pointer(&self, read_size: usize) -> Result<(), AmlError> {
         if self.pointer + MSize::new(read_size) > self.limit {
-            println!(
-                "AmlError: ({},{})",
-                (self.pointer + MSize::new(read_size) - self.limit).to_usize(),
-                read_size
-            );
             Err(AmlError::AccessOutOfRange)
         } else {
             Ok(())

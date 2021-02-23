@@ -88,7 +88,7 @@ impl ParseHelper {
             NamedObject::DefExternal(External::new(osi_name.clone(), 8 /*OK?(Method)*/, 1));
         let os_name = NameString::from_array(&[*b"_OS\0"], true);
         let os = DataRefObject::DataObject(DataObject::ComputationalData(
-            ComputationalData::StringData("Methylenix"),
+            ComputationalData::StringData(crate::OS_NAME),
         ));
         let rev_name = NameString::from_array(&[*b"_REV"], true);
         let rev = DataRefObject::DataObject(DataObject::ComputationalData(
