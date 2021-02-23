@@ -73,7 +73,7 @@ pub extern "C" fn multiboot_main(
         .kernel_tty_manager
         .open(&get_kernel_manager_cluster().graphic_manager);
 
-    kprintln!("Methylenix");
+    kprintln!("{}", crate::OS_NAME);
     pr_info!(
         "Booted from {}, cmd line: {}",
         multiboot_information.boot_loader_name,
@@ -159,7 +159,7 @@ fn main_process() -> ! {
     /* Draw boot logo */
     draw_boot_logo();
 
-    kprintln!("Methylenix");
+    kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
     loop {
         get_cpu_manager_cluster().run_queue_manager.sleep();
         while let Some(c) = get_kernel_manager_cluster()
