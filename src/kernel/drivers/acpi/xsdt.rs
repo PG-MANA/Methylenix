@@ -54,9 +54,7 @@ impl XsdtManager {
             return false;
         };
 
-        if unsafe { *(xsdt_vm_address.to_usize() as *const [u8; 4]) }
-            != ['X' as u8, 'S' as u8, 'D' as u8, 'T' as u8]
-        {
+        if unsafe { *(xsdt_vm_address.to_usize() as *const [u8; 4]) } != *b"XSDT" {
             pr_err!("XSDT Signature is not correct.");
             return false;
         }

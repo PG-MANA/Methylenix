@@ -37,7 +37,7 @@ pub struct LocalApicIdIter {
 }
 
 impl MadtManager {
-    pub const SIGNATURE: [u8; 4] = ['A' as u8, 'P' as u8, 'I' as u8, 'C' as u8];
+    pub const SIGNATURE: [u8; 4] = *b"APIC";
 
     pub const fn new() -> Self {
         Self {

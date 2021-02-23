@@ -29,7 +29,7 @@ pub struct DsdtManager {
 }
 
 impl DsdtManager {
-    pub const SIGNATURE: [u8; 4] = ['D' as u8, 'S' as u8, 'D' as u8, 'T' as u8];
+    pub const SIGNATURE: [u8; 4] = *b"DSDT";
     pub const fn new() -> Self {
         Self {
             base_address: VAddress::new(0),

@@ -1,7 +1,7 @@
 //!
 //! ACPI Machine Language Data Objects
 //!
-#![allow(dead_code)]
+
 use super::expression_opcode;
 use super::name_object::NameString;
 use super::opcode;

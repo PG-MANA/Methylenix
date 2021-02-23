@@ -51,12 +51,7 @@ impl AcpiManager {
         /* rsdp_ptr is pointer of RSDP. */
         /* *rsdp_ptr must be readable. */
         let rsdp = unsafe { &*(rsdp_ptr as *const RSDP) };
-        if rsdp.signature
-            != [
-                'R' as u8, 'S' as u8, 'D' as u8, ' ' as u8, 'P' as u8, 'T' as u8, 'R' as u8,
-                ' ' as u8,
-            ]
-        {
+        if rsdp.signature != *b"RSD PTR " {
             pr_err!("RSDP Signature is not correct.");
             return false;
         }

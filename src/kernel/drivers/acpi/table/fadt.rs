@@ -64,6 +64,8 @@ pub struct FadtManager {
 }
 
 impl FadtManager {
+    pub const SIGNATURE: [u8; 4] = *b"FACP";
+
     pub const fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
@@ -71,7 +73,6 @@ impl FadtManager {
         }
     }
 
-    pub const SIGNATURE: [u8; 4] = ['F' as u8, 'A' as u8, 'C' as u8, 'P' as u8];
     pub fn init(&mut self, fadt_vm_address: VAddress) -> bool {
         /* fadt_vm_address must be accessible */
         let fadt = unsafe { &*(fadt_vm_address.to_usize() as *const FADT) };

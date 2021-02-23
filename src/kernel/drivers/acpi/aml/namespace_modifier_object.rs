@@ -1,7 +1,7 @@
 //!
 //! ACPI Machine Language  Namespace Modifier Objects
 //!
-#![allow(dead_code)]
+
 use super::data_object::{DataRefObject, PkgLength};
 use super::name_object::NameString;
 use super::opcode;
