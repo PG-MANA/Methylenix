@@ -26,6 +26,7 @@ use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager
 use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
+use crate::kernel::timer_manager::Timer;
 use crate::kernel::tty::TtyManager;
 
 pub struct ArchDependedCpuManagerCluster {
@@ -161,15 +162,27 @@ fn main_process() -> ! {
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
 
-    get_kernel_manager_cluster()
-        .acpi_manager
-        .lock()
-        .unwrap()
-        .get_xsdt_manager()
-        .get_dsdt_manager()
-        .get_aml_parser()
-        .unwrap()
-        .debug();
+    let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+    if acpi_manager.is_available() {
+        if !acpi_manager.enable_acpi() {
+            pr_err!("Cannot enable ACPI.");
+        } else {
+            let acpi_pm_timer = acpi_manager
+                .get_xsdt_manager()
+                .get_fadt_manager()
+                .get_acpi_pm_timer()
+                .unwrap();
+            unsafe { cpu::disable_interrupt() };
+            for i in (1..=5).rev() {
+                println!("System will shutdown after {}s...", i);
+                for _ in 0..1000 {
+                    acpi_pm_timer.busy_wait_ms(1);
+                }
+            }
+            acpi_manager.shutdown(None);
+        }
+    }
+    drop(acpi_manager);
 
     loop {
         get_cpu_manager_cluster().run_queue_manager.sleep();
