@@ -11,10 +11,10 @@
 .global pd, pdpt, pml4
 
 
-/* PAGE DIRECTPRY (8byte * 512) * 4 */
+/* PAGE DIRECTORY (8byte * 512) * 4 */
 .comm pd, 0x4000, 0x1000
 
-/* PAGE DIRECTPRY POINTER TABLE (8byte * 512[4 entries are used]) */
+/* PAGE DIRECTORY POINTER TABLE (8byte * 512[4 entries are used]) */
 .comm pdpt, 0x1000, 0x1000
 
 /* PML4 (8byte * 512[1 entry is used]) */

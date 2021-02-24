@@ -9,6 +9,7 @@ use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
 
+#[allow(dead_code)]
 pub struct ProcessEntry {
     lock: SpinLockFlag,
     p_list: PtrLinkedListNode<Self>,

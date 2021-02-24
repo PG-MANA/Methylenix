@@ -18,6 +18,7 @@ pub struct SerialPortManager {
     port: u16,
     write_lock: SpinLockFlag,
     fifo: FIFO<u8, 256usize>,
+    enabled: bool,
 }
 
 impl SerialPortManager {
@@ -32,6 +33,7 @@ impl SerialPortManager {
             port: io_port,
             write_lock: SpinLockFlag::new(),
             fifo: FIFO::new(0),
+            enabled: true,
         }
     }
 
@@ -68,21 +70,25 @@ impl SerialPortManager {
     /// Send a 8bit data.
     ///
     /// If serial port is full or unusable, this function tries 0xFF times and fallback.
-    pub fn send(&self, data: u8) {
-        if self.port == 0 {
+    pub fn send(&mut self, data: u8) {
+        if self.port == 0 || !self.enabled {
             return;
         }
         let _lock = self.write_lock.lock();
         self._send(data);
     }
 
-    fn _send(&self, data: u8) {
-        let mut timeout: usize = 0xFF;
+    fn _send(&mut self, data: u8) {
+        let mut timeout: usize = 0xFFFF;
         while timeout > 0 {
             if self.is_completed_transmitter() {
                 break;
             }
             timeout -= 1;
+        }
+        if timeout == 0 {
+            self.enabled = false;
+            return;
         }
         unsafe {
             out_byte(self.port, data);
@@ -95,8 +101,8 @@ impl SerialPortManager {
     /// If serial port is full or unusable, this function **may take long time**.
     ///
     /// [`send`]: #method.send
-    pub fn send_str(&self, s: &str) {
-        if self.port == 0 {
+    pub fn send_str(&mut self, s: &str) {
+        if self.port == 0 || !self.enabled {
             return;
         }
         let _lock = self.write_lock.lock();

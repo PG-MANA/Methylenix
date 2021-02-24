@@ -76,8 +76,8 @@ impl TssManager {
         let mut gdt: u128 = 0;
         unsafe { cpu::sgdt(&mut gdt) };
 
-        let gdt_address = ((gdt >> 16) & core::usize::MAX as u128) as usize;
-        let gdt_limit = (gdt & core::u16::MAX as u128) as u16;
+        let gdt_address = ((gdt >> 16) & usize::MAX as u128) as usize;
+        let gdt_limit = (gdt & u16::MAX as u128) as u16;
         let tr = unsafe { cpu::store_tr() };
 
         if tr >= gdt_limit {

@@ -12,7 +12,9 @@ pub mod physical_memory_manager;
 pub mod pool_allocator;
 pub mod virtual_memory_manager;
 
-use self::data_type::{Address, MPageOrder, MSize, PAddress, VAddress};
+use self::data_type::{
+    Address, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+};
 use self::physical_memory_manager::PhysicalMemoryManager;
 use self::virtual_memory_manager::VirtualMemoryManager;
 
@@ -28,16 +30,6 @@ pub struct MemoryManager {
 /* To share PhysicalMemoryManager */
 pub struct SystemMemoryManager {
     original_physical_memory_manager: Mutex<PhysicalMemoryManager>,
-}
-
-#[derive(Clone, Eq, PartialEq, Copy)]
-pub struct MemoryPermissionFlags {
-    flags: u8,
-}
-
-#[derive(Clone, Eq, PartialEq, Copy)]
-pub struct MemoryOptionFlags {
-    flags: u16,
 }
 
 #[derive(Clone, Eq, PartialEq, Copy, Debug)]
@@ -134,7 +126,7 @@ impl MemoryManager {
         let entry = self.virtual_memory_manager.alloc_address_without_mapping(
             size,
             permission,
-            MemoryOptionFlags::new(MemoryOptionFlags::NORMAL),
+            MemoryOptionFlags::NORMAL,
             &mut pm_manager,
         )?;
         let vm_start_address = entry.get_vm_start_address();
@@ -170,7 +162,7 @@ impl MemoryManager {
     ) -> Result<VAddress, MemoryError> {
         let size = order.to_offset();
 
-        if option.is_direct_mapped() && permission.execute() == false {
+        if option.is_direct_mapped() && permission.is_executable() == false {
             let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
             return self
                 .virtual_memory_manager
@@ -316,7 +308,7 @@ impl MemoryManager {
             kprintln!("Can not lock Physical Memory Manager.");
         }
         kprintln!("----Virtual Memory Entries Dump----");
-        self.virtual_memory_manager.dump_memory_manager();
+        self.virtual_memory_manager.dump_memory_manager(None, None);
         kprintln!("----Virtual Memory Entries Dump End----");
     }
 
@@ -333,80 +325,5 @@ impl MemoryManager {
                 ) + PAGE_SIZE,
             )
         }
-    }
-}
-
-impl MemoryPermissionFlags {
-    /* Bitfield代わりとして使っているので命名規則は変えている。 */
-    pub const fn new(read: bool, write: bool, execute: bool, user_access: bool) -> Self {
-        Self {
-            flags: ((read as u8) << 0)
-                | ((write as u8) << 1)
-                | ((execute as u8) << 2)
-                | ((user_access as u8) << 3),
-        }
-    }
-
-    pub const fn rodata() -> Self {
-        Self::new(true, false, false, false)
-    }
-
-    pub const fn data() -> Self {
-        Self::new(true, true, false, false)
-    }
-
-    pub fn read(&self) -> bool {
-        self.flags & (1 << 0) != 0
-    }
-
-    pub fn write(&self) -> bool {
-        self.flags & (1 << 1) != 0
-    }
-
-    pub fn execute(&self) -> bool {
-        self.flags & (1 << 2) != 0
-    }
-
-    pub fn user_access(&self) -> bool {
-        self.flags & (1 << 3) != 0
-    }
-}
-
-impl MemoryOptionFlags {
-    /* Bitfield代わりとして使っているので命名規則は変えている。 */
-    pub const NORMAL: u16 = 0;
-    pub const PRE_RESERVED: u16 = 1 << 0;
-    pub const DO_NOT_FREE_PHY_ADDR: u16 = 1 << 1;
-    pub const WIRED: u16 = 1 << 2;
-    pub const DEV_MAP: u16 = 1 << 3;
-    pub const DIRECT_MAP: u16 = 1 << 4;
-
-    pub const fn new(flags: u16) -> Self {
-        if flags & (!0x1F) != 0 {
-            /* When you add option, you must change this assert. */
-            panic!("Invalid flags are set.");
-            /* static_assert */
-        }
-        Self { flags }
-    }
-
-    pub fn pre_reserved(&self) -> bool {
-        self.flags & Self::PRE_RESERVED != 0
-    }
-
-    pub fn do_not_free_phy_addr(&self) -> bool {
-        self.flags & Self::DO_NOT_FREE_PHY_ADDR != 0
-    }
-
-    pub fn wired(&self) -> bool {
-        self.flags & Self::WIRED != 0
-    }
-
-    pub fn is_dev_map(&self) -> bool {
-        self.flags & Self::DEV_MAP != 0
-    }
-
-    pub fn is_direct_mapped(&self) -> bool {
-        self.flags & Self::DIRECT_MAP != 0
     }
 }

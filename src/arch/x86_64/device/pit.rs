@@ -19,7 +19,6 @@ use crate::kernel::timer_manager::Timer;
 pub struct PitManager {
     lock: SpinLockFlag,
     reload_value: u16,
-    is_interrupt_enabled: bool,
 }
 
 impl PitManager {
@@ -32,7 +31,6 @@ impl PitManager {
         Self {
             lock: SpinLockFlag::new(),
             reload_value: 0,
-            is_interrupt_enabled: false,
         }
     }
 
@@ -57,23 +55,6 @@ impl PitManager {
         let _lock = self.lock.lock();
         unsafe { cpu::out_byte(0x43, 0) };
         self.reload_value = 0;
-        self.is_interrupt_enabled = false;
-    }
-
-    /// Start interruption of the PIT.
-    ///
-    /// This function sets registers to allow interruption.
-    /// Currently, this manager has no interrupt handler and does not use this function.   
-    #[allow(dead_code)]
-    pub fn set_up_interrupt(&mut self) {
-        let _lock = self.lock.lock();
-        unsafe {
-            self.reload_value = 11932u16;
-            cpu::out_byte(0x43, 0x34);
-            cpu::out_byte(0x40, (self.reload_value & 0xff) as u8);
-            cpu::out_byte(0x40, (self.reload_value >> 8) as u8);
-        }
-        self.is_interrupt_enabled = true;
     }
 }
 

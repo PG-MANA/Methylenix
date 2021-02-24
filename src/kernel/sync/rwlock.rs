@@ -48,7 +48,7 @@ impl<T: ?Sized> RwLock<T> {
             && self
                 .readers
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
-                    if x == usize::max_value() {
+                    if x == usize::MAX {
                         None
                     } else {
                         Some(x + 1)
@@ -94,7 +94,7 @@ impl<T: ?Sized> RwLock<T> {
 
 impl<T: ?Sized> Deref for RwLockReadGuard<'_, T> {
     type Target = T;
-    fn deref<'a>(&'a self) -> &'a T {
+    fn deref(&self) -> &T {
         &*self.data
     }
 }
@@ -110,7 +110,7 @@ impl<'a, T: ?Sized> Drop for RwLockReadGuard<'_, T> {
 impl<T: ?Sized> Deref for RwLockWriteGuard<'_, T> {
     type Target = T;
 
-    fn deref<'a>(&'a self) -> &'a T {
+    fn deref(&self) -> &T {
         &*self.data
     }
 }

@@ -96,7 +96,7 @@ impl<T> PoolAllocator<T> {
 
     pub fn free_ptr(&mut self, target: *mut T) {
         /* Do not use target after free */
-        assert!(self.linked_count < core::usize::MAX);
+        assert!(self.linked_count < usize::MAX);
         let e = target as usize as *mut FreeList;
         unsafe { (*e).next = self.head };
         self.head = Some(e);

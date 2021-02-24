@@ -10,6 +10,10 @@
 
 pub struct TimerManager {}
 
+impl TimerManager {
+    pub const TIMER_INTERVAL_MS: usize = 10;
+}
+
 pub trait Timer {
     fn get_count(&self) -> usize;
     fn get_frequency_hz(&self) -> usize;
@@ -24,13 +28,8 @@ pub trait Timer {
         if difference > self.get_max_counter_value() {
             panic!("Cannot count more than max_counter_value");
         }
-
         let end = self.get_ending_count_value(start, difference);
-        if self.is_count_up_timer() {
-            while self.get_count() < end {}
-        } else {
-            while self.get_count() > end {}
-        }
+        self.wait_until(end);
     }
     #[inline(always)]
     fn busy_wait_us(&self, us: usize) {
@@ -42,10 +41,19 @@ pub trait Timer {
             panic!("Cannot count less than the resolution");
         }
         let end = self.get_ending_count_value(start, difference);
+        self.wait_until(end);
+    }
+    #[inline(always)]
+    fn wait_until(&self, end_counter_value: usize) {
+        use core::hint::spin_loop;
         if self.is_count_up_timer() {
-            while self.get_count() < end {}
+            while self.get_count() < end_counter_value {
+                spin_loop();
+            }
         } else {
-            while self.get_count() > end {}
+            while self.get_count() > end_counter_value {
+                spin_loop();
+            }
         }
     }
 }

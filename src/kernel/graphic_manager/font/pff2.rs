@@ -2,7 +2,7 @@
 //! PFF2 Font Manager
 //!
 //! This manager handles PFF2 Font data.
-//! https://www.gnu.org/software/grub/manual/grub-dev/html_node/PFF2-Font-File-Format.html
+//! <https://www.gnu.org/software/grub/manual/grub-dev/html_node/PFF2-Font-File-Format.html>
 
 use super::font_cache::FontCache;
 use super::BitmapFontData;
@@ -11,15 +11,15 @@ use crate::kernel::memory_manager::data_type::{Address, VAddress};
 
 pub struct Pff2FontManager {
     base_address: usize,
-    max_font_width: u16,
+    /* max_font_width: u16, */
     max_font_height: u16,
     ascent: u16,
     decent: u16,
     char_index_address: usize,
     char_index_size: usize,
-    data_address: usize,
-    data_size: usize,
-    font_point_size: u16,
+    /* data_address: usize, */
+    /* data_size: usize, */
+    /* font_point_size: u16, */
     font_cache: FontCache,
 }
 
@@ -47,14 +47,14 @@ impl Pff2FontManager {
         Self {
             base_address: 0,
             max_font_height: 0,
-            max_font_width: 0,
+            /* max_font_width: 0, */
             ascent: 0,
             decent: 0,
             char_index_address: 0,
             char_index_size: 0,
-            data_address: 0,
-            data_size: 0,
-            font_point_size: 0,
+            /* data_address: 0, */
+            /* data_size: 0, */
+            /* font_point_size: 0, */
             font_cache: FontCache::new(),
         }
     }
@@ -87,14 +87,14 @@ impl Pff2FontManager {
             match section_type {
                 "NAME" | "FAMI" | "WEIG" | "SLAN" => {}
                 "PTSZ" => {
-                    self.font_point_size = u16::from_be_bytes(unsafe {
+                    /* self.font_point_size = u16::from_be_bytes(unsafe {
                         *((self.base_address + pointer) as *const [u8; 2])
-                    });
+                    }); */
                 }
                 "MAXW" => {
-                    self.max_font_width = u16::from_be_bytes(unsafe {
+                    /* self.max_font_width = u16::from_be_bytes(unsafe {
                         *((self.base_address + pointer) as *const [u8; 2])
-                    });
+                    }); */
                 }
                 "MAXH" => {
                     self.max_font_height = u16::from_be_bytes(unsafe {
@@ -116,8 +116,8 @@ impl Pff2FontManager {
                     self.char_index_size = section_length;
                 }
                 "DATA" => {
-                    self.data_address = self.base_address + pointer;
-                    self.data_size = section_length;
+                    /* self.data_address = self.base_address + pointer; */
+                    /* self.data_size = section_length; */
                     break;
                 }
                 _ => {

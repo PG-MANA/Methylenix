@@ -2,8 +2,9 @@
 //! Virtual Memory Entry Chain
 //!
 
-use crate::kernel::memory_manager::data_type::{Address, MOffset, VAddress};
-use crate::kernel::memory_manager::virtual_memory_manager::virtual_memory_object::VirtualMemoryObject;
+use super::virtual_memory_object::VirtualMemoryObject;
+
+use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
 
 use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
@@ -63,7 +64,11 @@ impl VirtualMemoryEntry {
         self.end_address = new_end_address;
     }
 
-    pub const fn get_offset(&self) -> MOffset {
+    pub fn get_size(&self) -> MSize {
+        MSize::from_address(self.get_vm_start_address(), self.get_vm_end_address())
+    }
+
+    pub const fn get_memory_offset(&self) -> MOffset {
         self.offset
     }
 

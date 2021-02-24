@@ -6,7 +6,7 @@
 
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::{data_type::Address, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{Address, MemoryPermissionFlags};
 
 pub struct FrameBufferManager {
     frame_buffer_address: usize,

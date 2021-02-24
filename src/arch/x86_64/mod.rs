@@ -23,9 +23,8 @@ use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
-use crate::kernel::memory_manager::MemoryPermissionFlags;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
 
@@ -74,7 +73,7 @@ pub extern "C" fn multiboot_main(
         .kernel_tty_manager
         .open(&get_kernel_manager_cluster().graphic_manager);
 
-    kprintln!("Methylenix");
+    kprintln!("{}", crate::OS_NAME);
     pr_info!(
         "Booted from {}, cmd line: {}",
         multiboot_information.boot_loader_name,
@@ -100,19 +99,18 @@ pub extern "C" fn multiboot_main(
     get_kernel_manager_cluster().serial_port_manager.init();
 
     /* Setup ACPI */
-    let mut acpi_manager = AcpiManager::new();
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
-        if let Some(a) = init_acpi(rsdp_address) {
-            acpi_manager = a;
-        } else {
-            pr_warn!("Failed initializing ACPI.");
+        if !init_acpi_early(rsdp_address) {
+            pr_err!("Failed Init ACPI.");
+            get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
         }
     } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
         pr_warn!("ACPI 1.0 is not supported.");
+        get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
     } else {
         pr_warn!("ACPI is not available.");
+        get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
     }
-    get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
 
     /* Init Local APIC Timer */
     get_cpu_manager_cluster().arch_depend_data.local_apic_timer = init_timer();
@@ -147,7 +145,7 @@ fn main_process() -> ! {
     get_cpu_manager_cluster()
         .arch_depend_data
         .local_apic_timer
-        .start_interruption(
+        .start_interrupt(
             get_kernel_manager_cluster()
                 .boot_strap_cpu_manager
                 .interrupt_manager
@@ -160,7 +158,12 @@ fn main_process() -> ! {
     /* Draw boot logo */
     draw_boot_logo();
 
-    kprintln!("Methylenix");
+    kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
+
+    if !init_acpi_later() {
+        pr_err!("Cannot init ACPI devices.");
+    }
+
     loop {
         get_cpu_manager_cluster().run_queue_manager.sleep();
         while let Some(c) = get_kernel_manager_cluster()
@@ -193,26 +196,27 @@ fn draw_boot_logo() {
             .memory_manager
             .lock()
             .unwrap()
-            .free(address.into())
+            .free(VAddress::new(address))
         {
             pr_err!("Freeing the bitmap data of BGRT was failed: {:?}", e);
         }
     };
     let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
 
-    let boot_logo_physical_address = acpi_manager
-        .get_xsdt_manager()
-        .get_bgrt_manager()
-        .get_bitmap_physical_address();
-    let boot_logo_offset = acpi_manager
-        .get_xsdt_manager()
-        .get_bgrt_manager()
-        .get_image_offset();
+    let bgrt_manager = acpi_manager.get_xsdt_manager().get_bgrt_manager();
     drop(acpi_manager);
-    if boot_logo_physical_address.is_none() || boot_logo_offset.is_none() {
+    if bgrt_manager.is_none() {
         pr_info!("ACPI does not have the BGRT information.");
         return;
     }
+    let bgrt_manager = bgrt_manager.unwrap();
+    let boot_logo_physical_address = bgrt_manager.get_bitmap_physical_address();
+    let boot_logo_offset = bgrt_manager.get_image_offset();
+    if boot_logo_physical_address.is_none() {
+        pr_info!("Boot Logo is compressed.");
+        return;
+    }
+    drop(bgrt_manager);
 
     let original_map_size = MSize::from(54);
     let result = get_kernel_manager_cluster()
@@ -259,7 +263,7 @@ fn draw_boot_logo() {
         .mremap_dev(
             boot_logo_address.into(),
             original_map_size,
-            ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize / 8))
+            ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
                 + file_offset as usize)
                 .into(),
         );
@@ -281,13 +285,29 @@ fn draw_boot_logo() {
     }
     let boot_logo_address = result.unwrap();
 
+    /* Adjust offset if it overflows from frame buffer. */
+    let buffer_size = get_kernel_manager_cluster()
+        .graphic_manager
+        .get_frame_buffer_size();
+    let boot_logo_offset = boot_logo_offset;
+    let offset_x = if boot_logo_offset.0 + bitmap_width as usize > buffer_size.0 {
+        (buffer_size.0 - bitmap_width as usize) / 2
+    } else {
+        boot_logo_offset.0
+    };
+    let offset_y = if boot_logo_offset.1 + bitmap_height as usize > buffer_size.1 {
+        (buffer_size.1 - bitmap_height as usize) / 2
+    } else {
+        boot_logo_offset.1
+    };
+
     get_kernel_manager_cluster().graphic_manager.write_bitmap(
-        (boot_logo_address + MSize::from(file_offset as usize)).into(),
+        (boot_logo_address + MSize::new(file_offset as usize)).to_usize(),
         bitmap_color_depth as u8,
         bitmap_width as usize,
         bitmap_height as usize,
-        boot_logo_offset.unwrap().0,
-        boot_logo_offset.unwrap().1,
+        offset_x,
+        offset_y,
     );
 
     free_mapped_address(boot_logo_address.to_usize());

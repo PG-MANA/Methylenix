@@ -7,8 +7,9 @@
 use crate::arch::target_arch::device::cpu;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
-use crate::kernel::memory_manager::MemoryPermissionFlags;
+use crate::kernel::memory_manager::data_type::{
+    Address, MemoryPermissionFlags, PAddress, VAddress,
+};
 
 pub struct LocalApicManager {
     apic_id: u32,

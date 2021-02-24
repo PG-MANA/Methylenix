@@ -54,6 +54,18 @@ pub unsafe fn in_byte(port: u16) -> u8 {
     result
 }
 
+#[inline(always)]
+pub unsafe fn out_word(port: u16, data: u16) {
+    asm!("out dx, ax",in("dx") port, in("ax") data);
+}
+
+#[inline(always)]
+pub unsafe fn in_word(port: u16) -> u16 {
+    let result: u16;
+    asm!("in ax, dx",in("dx") port,out("ax") result);
+    result
+}
+
 /// Operate "in" twice.
 ///
 /// This function is useful when you treat device returning 16bit data with 8bit register.
@@ -111,6 +123,14 @@ pub unsafe fn rdmsr(ecx: u32) -> u64 {
 }
 
 #[inline(always)]
+pub unsafe fn rdtsc() -> u64 {
+    let edx: u32;
+    let eax: u32;
+    asm!("rdtsc", out("edx") edx, out("eax") eax);
+    (edx as u64) << 32 | eax as u64
+}
+
+#[inline(always)]
 pub unsafe fn wrmsr(ecx: u32, data: u64) {
     let edx: u32 = (data >> 32) as u32;
     let eax: u32 = data as u32;
@@ -164,7 +184,7 @@ pub unsafe fn get_cr4() -> u64 {
 }
 
 #[inline(always)]
-pub fn is_interruption_enabled() -> bool {
+pub fn is_interrupt_enabled() -> bool {
     let r_flags: u64;
     unsafe {
         asm!("  pushfq
