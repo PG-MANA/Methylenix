@@ -571,7 +571,7 @@ impl VirtualMemoryManager {
                 self.vm_page_pool.free(p);
             }
         }
-        if vm_map_entry.get_memory_option_flags().is_dev_map() {
+        if vm_map_entry.get_memory_option_flags().is_direct_mapped() {
             if !self.direct_mapped_area.as_mut().unwrap().allocator.free(
                 vm_map_entry
                     .get_vm_start_address()
