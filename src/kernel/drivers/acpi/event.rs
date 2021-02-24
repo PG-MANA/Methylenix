@@ -12,6 +12,7 @@ use crate::kernel::sync::spin_lock::SpinLockFlag;
 #[derive(Copy, Clone, Debug)]
 #[repr(u16)]
 pub enum AcpiFixedEvent {
+    Global = 1 << 5,
     PowerButton = 1 << 8,
     SleepButton = 1 << 9,
 }
@@ -147,6 +148,9 @@ impl AcpiEventManager {
                 }
                 AcpiFixedEvent::SleepButton => {
                     pr_info!("Sleep Button");
+                }
+                AcpiFixedEvent::Global => {
+                    pr_info!("Global Event!");
                 }
             }
         } else {

@@ -46,7 +46,7 @@ struct FADT {
     pm_timer_len: u8,
     gp_event0_block_len: u8,
     gp_event1_block_len: u8,
-    ignore2: [u8; 112 - 94],
+    ignore: [u8; 112 - 94],
     flags: u32,
     reset_register: [u8; 12],
     reset_value: u8,
@@ -60,7 +60,8 @@ struct FADT {
     x_pm1b_control_block: [u8; 12],
     x_pm2_control_block: [u8; 12],
     x_pm_tmr_block: [u8; 12],
-    ignore3: [u8; 244 - 220],
+    x_gpe0_block: [u8; 12],
+    x_gpe1_block: [u8; 12],
     sleep_control_register: [u8; 12],
     sleep_status_register: [u8; 12],
     hypervisor_vendor_identity: u64,
@@ -192,6 +193,52 @@ impl FadtManager {
         if self.enabled {
             let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
             Some(fadt.pm1_event_len as _)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_general_purpose_event_0_block(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            let address = GeneralAddress::new(&fadt.x_gpe0_block).address;
+            Some(if address != 0 {
+                address as usize
+            } else {
+                fadt.gp_event0_block as usize
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn get_general_purpose_event_0_block_len(&self) -> Option<u8> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            Some(fadt.gp_event0_block_len)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_general_purpose_event_1_block_len(&self) -> Option<u8> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            Some(fadt.gp_event1_block_len)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_general_purpose_event_1_block(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            let address = GeneralAddress::new(&fadt.x_gpe1_block).address;
+            Some(if address != 0 {
+                address as usize
+            } else {
+                fadt.gp_event1_block as usize
+            })
         } else {
             None
         }

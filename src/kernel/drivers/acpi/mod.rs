@@ -291,7 +291,7 @@ impl AcpiManager {
             if self.search_device(None, "\\_SB\\PWRB", b"PNP0C0C") {
                 pr_info!("This computer has power button.");
             }
-            false
+            false /* Usually it is controlled by SMBus */
         } else {
             pr_info!("PowerButton is the fixed hardware power button.");
             acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton)
