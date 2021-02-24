@@ -30,7 +30,6 @@ struct BGRT {
 
 pub struct BgrtManager {
     base_address: VAddress,
-    enabled: bool,
 }
 
 impl BgrtManager {
@@ -39,7 +38,6 @@ impl BgrtManager {
     pub const fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
-            enabled: false,
         }
     }
 
@@ -61,26 +59,34 @@ impl BgrtManager {
             return false;
         };
         self.base_address = bgrt_vm_address;
-        self.enabled = true;
         return true;
     }
 
     pub fn get_bitmap_physical_address(&self) -> Option<PAddress> {
-        if self.enabled {
-            let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
-            if bgrt.image_type == 0 {
-                return Some(PAddress::new(bgrt.image_address as usize));
-            }
-        }
-        return None;
-    }
-
-    pub fn get_image_offset(&self) -> Option<(usize /*x*/, usize /*y*/)> {
-        if self.enabled {
-            let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
-            Some((bgrt.image_offset_x as usize, bgrt.image_offset_y as usize))
+        let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
+        if bgrt.image_type == 0 {
+            Some(PAddress::new(bgrt.image_address as usize))
         } else {
             None
+        }
+    }
+
+    pub fn get_image_offset(&self) -> (usize /*x*/, usize /*y*/) {
+        let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
+        (bgrt.image_offset_x as usize, bgrt.image_offset_y as usize)
+    }
+}
+
+impl Drop for BgrtManager {
+    fn drop(&mut self) {
+        if !self.base_address.is_zero() {
+            if let Ok(mut m) = get_kernel_manager_cluster().memory_manager.try_lock() {
+                if let Err(e) = m.free(self.base_address) {
+                    pr_warn!("Cannot free BGRT. Error: {:?}", e);
+                }
+            } else {
+                pr_warn!("Cannot lock MemoryManager.");
+            }
         }
     }
 }

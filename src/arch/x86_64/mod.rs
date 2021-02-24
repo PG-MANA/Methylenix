@@ -203,19 +203,20 @@ fn draw_boot_logo() {
     };
     let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
 
-    let boot_logo_physical_address = acpi_manager
-        .get_xsdt_manager()
-        .get_bgrt_manager()
-        .get_bitmap_physical_address();
-    let boot_logo_offset = acpi_manager
-        .get_xsdt_manager()
-        .get_bgrt_manager()
-        .get_image_offset();
+    let bgrt_manager = acpi_manager.get_xsdt_manager().get_bgrt_manager();
     drop(acpi_manager);
-    if boot_logo_physical_address.is_none() {
+    if bgrt_manager.is_none() {
         pr_info!("ACPI does not have the BGRT information.");
         return;
     }
+    let bgrt_manager = bgrt_manager.unwrap();
+    let boot_logo_physical_address = bgrt_manager.get_bitmap_physical_address();
+    let boot_logo_offset = bgrt_manager.get_image_offset();
+    if boot_logo_physical_address.is_none() {
+        pr_info!("Boot Logo is compressed.");
+        return;
+    }
+    drop(bgrt_manager);
 
     let original_map_size = MSize::from(54);
     let result = get_kernel_manager_cluster()
@@ -288,7 +289,7 @@ fn draw_boot_logo() {
     let buffer_size = get_kernel_manager_cluster()
         .graphic_manager
         .get_frame_buffer_size();
-    let boot_logo_offset = boot_logo_offset.unwrap();
+    let boot_logo_offset = boot_logo_offset;
     let offset_x = if boot_logo_offset.0 + bitmap_width as usize > buffer_size.0 {
         (buffer_size.0 - bitmap_width as usize) / 2
     } else {

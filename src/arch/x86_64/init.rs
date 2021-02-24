@@ -197,14 +197,18 @@ pub fn init_timer() -> LocalApicTimer {
             .get_local_apic_manager(),
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
-    } else if let Some(pm_timer) = get_kernel_manager_cluster()
+    } else if get_kernel_manager_cluster()
         .acpi_manager
         .lock()
         .unwrap()
-        .get_xsdt_manager()
-        .get_fadt_manager()
-        .get_acpi_pm_timer()
+        .is_available()
     {
+        let pm_timer = get_kernel_manager_cluster()
+            .acpi_manager
+            .lock()
+            .unwrap()
+            .get_fadt_manager()
+            .get_acpi_pm_timer();
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
         local_apic_timer.set_up_interrupt(
             InterruptionIndex::LocalApicTimer as u16,
@@ -301,16 +305,30 @@ pub fn setup_cpu_manager_cluster(
 /// This function will setup multiple processors by using ACPI
 /// This is in the development
 pub fn init_multiple_processors_ap() {
+    /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
+    let boot_address = 0usize;
+
     /* Get available Local APIC IDs from ACPI */
-    let apic_id_list_iter = get_kernel_manager_cluster()
+    let madt_manager = get_kernel_manager_cluster()
         .acpi_manager
         .lock()
         .unwrap()
         .get_xsdt_manager()
-        .get_madt_manager()
-        .find_apic_id_list();
-    /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
-    let boot_address = 0usize;
+        .get_madt_manager();
+    if madt_manager.is_none() {
+        pr_info!("ACPI does not have MADT.");
+        if let Err(e) = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .free(VAddress::new(boot_address))
+        {
+            pr_err!("Cannot free temporary stack: {:?}", e);
+        }
+        return;
+    }
+    let madt_manager = madt_manager.unwrap();
+    let apic_id_list_iter = madt_manager.find_apic_id_list();
 
     /* Set BSP Local APIC ID into cpu_manager */
     let mut cpu_manager = get_cpu_manager_cluster();
@@ -363,10 +381,8 @@ pub fn init_multiple_processors_ap() {
         .acpi_manager
         .lock()
         .unwrap()
-        .get_xsdt_manager()
         .get_fadt_manager()
-        .get_acpi_pm_timer()
-        .unwrap();
+        .get_acpi_pm_timer();
 
     let mut num_of_cpu = 1usize;
     'ap_init_loop: for apic_id in apic_id_list_iter {
@@ -436,6 +452,8 @@ pub fn init_multiple_processors_ap() {
     {
         pr_err!("Cannot free temporary stack: {:?}", e);
     }
+
+    madt_manager.release_memory_map();
 
     if num_of_cpu != 1 {
         pr_info!("Found {} CPUs", num_of_cpu);

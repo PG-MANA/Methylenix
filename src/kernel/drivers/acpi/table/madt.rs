@@ -27,7 +27,6 @@ struct MADT {
 
 pub struct MadtManager {
     base_address: VAddress,
-    enabled: bool,
 }
 
 pub struct LocalApicIdIter {
@@ -42,7 +41,6 @@ impl MadtManager {
     pub const fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
-            enabled: false,
         }
     }
 
@@ -63,7 +61,6 @@ impl MadtManager {
             )
         {
             self.base_address = a;
-            self.enabled = true;
             true
         } else {
             pr_err!("Cannot map memory area of MADT.");
@@ -76,22 +73,31 @@ impl MadtManager {
     /// This function will search the Local APIC ID from the Interrupt Controller Structures.
     /// Each Local APIC ID will be returned by  LocalApicIdIter.
     pub fn find_apic_id_list(&self) -> LocalApicIdIter {
-        if !self.enabled {
-            return LocalApicIdIter {
-                base_address: VAddress::new(0),
-                pointer: MSize::new(0),
-                length: MSize::new(0),
-            };
-        }
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
         let length = madt.length as usize - core::mem::size_of::<MADT>();
         let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
 
-        return LocalApicIdIter {
+        LocalApicIdIter {
             base_address,
             pointer: MSize::new(0),
             length: MSize::new(length),
-        };
+        }
+    }
+
+    /// Release memory map and drop my self
+    ///
+    /// When you finished your process, this function should be called to free memory mapping.
+    pub fn release_memory_map(self) {
+        if !self.base_address.is_zero() {
+            if let Ok(mut m) = get_kernel_manager_cluster().memory_manager.try_lock() {
+                if let Err(e) = m.free(self.base_address) {
+                    pr_warn!("Cannot free MADT. Error: {:?}", e);
+                }
+            } else {
+                pr_warn!("Cannot lock MemoryManager.");
+            }
+        }
+        drop(self)
     }
 }
 

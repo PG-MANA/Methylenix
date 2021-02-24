@@ -8,11 +8,7 @@ use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager
 use crate::kernel::task_manager::work_queue::WorkList;
 
 pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
-    let irq = acpi_manager
-        .get_xsdt_manager()
-        .get_fadt_manager()
-        .get_sci_int()
-        .unwrap();
+    let irq = acpi_manager.get_fadt_manager().get_sci_int();
     make_device_interrupt_handler!(handler, acpi_event_handler);
     get_cpu_manager_cluster()
         .interrupt_manager

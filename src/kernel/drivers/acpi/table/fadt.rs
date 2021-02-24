@@ -69,7 +69,6 @@ struct FADT {
 
 pub struct FadtManager {
     base_address: VAddress,
-    enabled: bool,
 }
 
 impl FadtManager {
@@ -78,7 +77,6 @@ impl FadtManager {
     pub const fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
-            enabled: false,
         }
     }
 
@@ -103,196 +101,127 @@ impl FadtManager {
             return false;
         };
         self.base_address = fadt_vm_address;
-        self.enabled = true;
+
         return true;
     }
 
-    pub fn get_acpi_pm_timer(&self) -> Option<AcpiPmTimer> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = GeneralAddress::new(&fadt.x_pm_tmr_block).address;
-            Some(AcpiPmTimer::new(
-                if address != 0 {
-                    address as usize
-                } else {
-                    fadt.pm_tmr_block as usize
-                },
-                ((fadt.flags >> 8) & 1) != 0,
-            ))
-        } else {
-            None
-        }
-    }
-
-    pub fn get_flags(&self) -> Option<u32> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            Some(fadt.flags)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_pm1a_control_block_address(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = GeneralAddress::new(&fadt.x_pm1a_control_block).address;
-            Some(if address != 0 {
+    pub fn get_acpi_pm_timer(&self) -> AcpiPmTimer {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_pm_tmr_block).address;
+        AcpiPmTimer::new(
+            if address != 0 {
                 address as usize
             } else {
-                fadt.pm1a_control_block as usize
-            })
+                fadt.pm_tmr_block as usize
+            },
+            ((fadt.flags >> 8) & 1) != 0,
+        )
+    }
+
+    pub fn get_flags(&self) -> u32 {
+        unsafe { &*(self.base_address.to_usize() as *const FADT) }.flags
+    }
+
+    pub fn get_pm1a_control_block_address(&self) -> usize {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_pm1a_control_block).address;
+        if address != 0 {
+            address as usize
         } else {
-            None
+            fadt.pm1a_control_block as usize
         }
     }
 
-    pub fn get_pm1b_control_block_address(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = GeneralAddress::new(&fadt.x_pm1b_control_block).address;
-            Some(if address != 0 {
-                address as usize
-            } else {
-                fadt.pm1b_control_block as usize
-            })
+    pub fn get_pm1b_control_block_address(&self) -> usize {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_pm1b_control_block).address;
+        if address != 0 {
+            address as usize
         } else {
-            None
+            fadt.pm1b_control_block as usize
         }
     }
 
-    pub fn get_pm1a_event_block_address(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = GeneralAddress::new(&fadt.x_pm1a_event_block).address;
-            Some(if address != 0 {
-                address as usize
-            } else {
-                fadt.pm1a_event_block as usize
-            })
+    pub fn get_pm1a_event_block_address(&self) -> usize {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_pm1a_event_block).address;
+        if address != 0 {
+            address as usize
         } else {
-            None
+            fadt.pm1a_event_block as usize
         }
     }
 
-    pub fn get_pm1b_event_block_address(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = GeneralAddress::new(&fadt.x_pm1b_event_block).address;
-            Some(if address != 0 {
-                address as usize
-            } else {
-                fadt.pm1b_event_block as usize
-            })
+    pub fn get_pm1b_event_block_address(&self) -> usize {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_pm1b_event_block).address;
+        if address != 0 {
+            address as usize
         } else {
-            None
+            fadt.pm1b_event_block as usize
         }
     }
 
-    pub fn get_pm1_event_block_len(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            Some(fadt.pm1_event_len as _)
+    pub fn get_pm1_event_block_len(&self) -> u8 {
+        unsafe { &*(self.base_address.to_usize() as *const FADT) }.pm1_event_len
+    }
+
+    pub fn get_general_purpose_event_0_block(&self) -> usize {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_gpe0_block).address;
+        if address != 0 {
+            address as usize
         } else {
-            None
+            fadt.gp_event0_block as usize
         }
     }
 
-    pub fn get_general_purpose_event_0_block(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = GeneralAddress::new(&fadt.x_gpe0_block).address;
-            Some(if address != 0 {
-                address as usize
-            } else {
-                fadt.gp_event0_block as usize
-            })
-        } else {
-            None
-        }
+    pub fn get_general_purpose_event_0_block_len(&self) -> u8 {
+        unsafe { &*(self.base_address.to_usize() as *const FADT) }.gp_event0_block_len
     }
 
-    pub fn get_general_purpose_event_0_block_len(&self) -> Option<u8> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            Some(fadt.gp_event0_block_len)
-        } else {
-            None
-        }
+    pub fn get_general_purpose_event_1_block_len(&self) -> u8 {
+        unsafe { &*(self.base_address.to_usize() as *const FADT) }.gp_event1_block_len
     }
 
-    pub fn get_general_purpose_event_1_block_len(&self) -> Option<u8> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            Some(fadt.gp_event1_block_len)
+    pub fn get_general_purpose_event_1_block(&self) -> usize {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_gpe1_block).address;
+        if address != 0 {
+            address as usize
         } else {
-            None
-        }
-    }
-
-    pub fn get_general_purpose_event_1_block(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = GeneralAddress::new(&fadt.x_gpe1_block).address;
-            Some(if address != 0 {
-                address as usize
-            } else {
-                fadt.gp_event1_block as usize
-            })
-        } else {
-            None
+            fadt.gp_event1_block as usize
         }
     }
 
     pub fn get_sleep_control_register(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = GeneralAddress::new(&fadt.sleep_control_register).address;
-            if address != 0 {
-                return Some(address as usize);
-            }
-        }
-        return None;
-    }
-
-    pub fn get_sci_int(&self) -> Option<u16> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            Some(fadt.sci_int)
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.sleep_control_register).address;
+        if address != 0 {
+            Some(address as usize)
         } else {
             None
         }
     }
 
-    pub fn get_smi_cmd(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            Some(fadt.smi_command as _)
-        } else {
-            None
-        }
+    pub fn get_sci_int(&self) -> u16 {
+        unsafe { &*(self.base_address.to_usize() as *const FADT) }.sci_int
     }
 
-    pub fn get_acpi_enable(&self) -> Option<usize> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            Some(fadt.acpi_enable as _)
-        } else {
-            None
-        }
+    pub fn get_smi_cmd(&self) -> u32 {
+        unsafe { &*(self.base_address.to_usize() as *const FADT) }.smi_command
     }
 
-    pub fn get_dsdt_address(&self) -> Option<PAddress> {
-        if self.enabled {
-            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-            let address = if fadt.x_dsdt_address != 0 {
-                fadt.x_dsdt_address as usize
-            } else {
-                fadt.dsdt_address as usize
-            };
-            Some(PAddress::new(address))
+    pub fn get_acpi_enable(&self) -> u8 {
+        unsafe { &*(self.base_address.to_usize() as *const FADT) }.acpi_enable
+    }
+
+    pub fn get_dsdt_address(&self) -> PAddress {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        if fadt.x_dsdt_address != 0 {
+            PAddress::new(fadt.x_dsdt_address as usize)
         } else {
-            None
+            PAddress::new(fadt.dsdt_address as usize)
         }
     }
 }

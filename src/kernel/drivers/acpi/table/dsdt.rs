@@ -25,7 +25,6 @@ struct DSDT {
 
 pub struct DsdtManager {
     base_address: VAddress,
-    enabled: bool,
 }
 
 impl DsdtManager {
@@ -33,12 +32,11 @@ impl DsdtManager {
     pub const fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
-            enabled: false,
         }
     }
 
-    pub const fn is_enabled(&self) -> bool {
-        self.enabled
+    pub const fn is_inited(&self) -> bool {
+        !self.base_address.is_zero()
     }
 
     pub fn init(&mut self, dsdt_vm_address: VAddress) -> bool {
@@ -63,19 +61,14 @@ impl DsdtManager {
             return false;
         };
         self.base_address = dsdt_vm_address;
-        self.enabled = true;
         return true;
     }
 
-    pub fn get_aml_parser(&self) -> Option<AmlParser> {
-        if self.enabled {
-            let dsdt = unsafe { &*(self.base_address.to_usize() as *const DSDT) };
-            Some(AmlParser::new(
-                self.base_address + MSize::new(core::mem::size_of::<DSDT>()),
-                MSize::new(dsdt.length as usize - core::mem::size_of::<DSDT>()),
-            ))
-        } else {
-            None
-        }
+    pub fn get_aml_parser(&self) -> AmlParser {
+        let dsdt = unsafe { &*(self.base_address.to_usize() as *const DSDT) };
+        AmlParser::new(
+            self.base_address + MSize::new(core::mem::size_of::<DSDT>()),
+            MSize::new(dsdt.length as usize - core::mem::size_of::<DSDT>()),
+        )
     }
 }

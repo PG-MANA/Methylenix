@@ -5,21 +5,23 @@
 //! <https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf>
 //!
 
+use self::aml::{AmlParser, NameString};
+use self::event::{AcpiEventManager, AcpiFixedEvent};
+use self::table::dsdt::DsdtManager;
+use self::table::fadt::FadtManager;
+use self::table::xsdt::XsdtManager;
+
+use crate::arch::target_arch::device::cpu::{disable_interrupt, in_byte, out_byte, out_word};
+
+use crate::kernel::memory_manager::data_type::PAddress;
+
 pub mod acpi_pm_timer;
 pub mod aml;
 pub mod event;
 pub mod table;
-pub mod xsdt;
-
-use self::aml::{AmlParser, NameString};
-use self::xsdt::XsdtManager;
-
-use crate::arch::target_arch::device::cpu::{disable_interrupt, in_byte, out_byte, out_word};
-use crate::kernel::drivers::acpi::event::{AcpiEventManager, AcpiFixedEvent};
 
 pub struct AcpiManager {
     enabled: bool,
-    _check_sum: u32,
     oem_id: [u8; 6],
     xsdt_manager: XsdtManager,
 }
@@ -43,7 +45,6 @@ impl AcpiManager {
     pub const fn new() -> Self {
         Self {
             enabled: false,
-            _check_sum: 0,
             oem_id: [0; 6],
             xsdt_manager: XsdtManager::new(),
         }
@@ -63,8 +64,15 @@ impl AcpiManager {
         }
         //ADD: checksum verification
         self.oem_id = rsdp.oem_id.clone();
+        if !self
+            .xsdt_manager
+            .init(PAddress::new(rsdp.xsdt_address as usize))
+        {
+            pr_err!("Cannot init XSDT Manager.");
+            return false;
+        }
         self.enabled = true;
-        return self.xsdt_manager.init((rsdp.xsdt_address as usize).into());
+        return true;
     }
 
     pub fn init_acpi_event_manager(&self, event_manager: &mut AcpiEventManager) -> bool {
@@ -90,11 +98,7 @@ impl AcpiManager {
     }
 
     fn get_aml_parler(&self) -> AmlParser {
-        let mut p = self
-            .get_xsdt_manager()
-            .get_dsdt_manager()
-            .get_aml_parser()
-            .expect("Cannot get Aml Parser");
+        let mut p = self.get_dsdt_manager().get_aml_parser();
         assert!(p.init());
         p
     }
@@ -103,27 +107,23 @@ impl AcpiManager {
         &self.xsdt_manager
     }
 
+    /* FADT must exists */
+    pub fn get_fadt_manager(&self) -> &FadtManager {
+        assert!(self.is_available());
+        &self.xsdt_manager.get_fadt_manager()
+    }
+
+    /* DSDT must exists */
+    pub fn get_dsdt_manager(&self) -> &DsdtManager {
+        assert!(self.is_available());
+        &self.xsdt_manager.get_dsdt_manager()
+    }
+
     pub fn enable_acpi(&self) -> bool {
-        let smi_cmd = self
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_smi_cmd()
-            .unwrap();
-        let enable = self
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_acpi_enable()
-            .unwrap();
-        let pm1_a_port = self
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_pm1a_control_block_address()
-            .unwrap();
-        let pm1_b_port = self
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_pm1b_control_block_address()
-            .unwrap();
+        let smi_cmd = self.get_fadt_manager().get_smi_cmd();
+        let enable = self.get_fadt_manager().get_acpi_enable();
+        let pm1_a_port = self.get_fadt_manager().get_pm1a_control_block_address();
+        let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block_address();
 
         if smi_cmd == 0 {
             /* HW reduced ACPI */
@@ -200,16 +200,8 @@ impl AcpiManager {
             None
         };
 
-        let pm1_a_port = self
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_pm1a_control_block_address()
-            .expect("Cannot find PM1A Control Block");
-        let pm1_b_port = self
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_pm1b_control_block_address()
-            .expect("Cannot find PM1B Control Block");
+        let pm1_a_port = self.get_fadt_manager().get_pm1a_control_block_address();
+        let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block_address();
 
         let sleep_control_register = self
             .get_xsdt_manager()
@@ -241,11 +233,7 @@ impl AcpiManager {
 
         /* for debug */
         unsafe { disable_interrupt() };
-        let timer = self
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_acpi_pm_timer()
-            .unwrap();
+        let timer = self.get_fadt_manager().get_acpi_pm_timer();
         for i in (1..=3).rev() {
             println!("System will shutdown after {}s...", i);
             for _ in 0..1000 {
@@ -279,14 +267,7 @@ impl AcpiManager {
     }
 
     pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
-        if (self
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_flags()
-            .unwrap()
-            & (1 << 4))
-            != 0
-        {
+        if (self.get_fadt_manager().get_flags() & (1 << 4)) != 0 {
             pr_info!("PowerButton is the control method power button.");
             if self.search_device(None, "\\_SB\\PWRB", b"PNP0C0C") {
                 pr_info!("This computer has power button.");
