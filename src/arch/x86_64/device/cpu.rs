@@ -59,6 +59,13 @@ pub unsafe fn out_word(port: u16, data: u16) {
     asm!("out dx, ax",in("dx") port, in("ax") data);
 }
 
+#[inline(always)]
+pub unsafe fn in_word(port: u16) -> u16 {
+    let result: u16;
+    asm!("in ax, dx",in("dx") port,out("ax") result);
+    result
+}
+
 /// Operate "in" twice.
 ///
 /// This function is useful when you treat device returning 16bit data with 8bit register.

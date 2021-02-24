@@ -19,6 +19,7 @@ use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
+use crate::kernel::drivers::acpi::event::AcpiFixedEvent;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
@@ -26,7 +27,6 @@ use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager
 use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::timer_manager::Timer;
 use crate::kernel::tty::TtyManager;
 
 pub struct ArchDependedCpuManagerCluster {
@@ -104,6 +104,11 @@ pub extern "C" fn multiboot_main(
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
         if let Some(a) = init_acpi(rsdp_address) {
             acpi_manager = a;
+            if !acpi_manager
+                .init_acpi_event_manager(&mut get_kernel_manager_cluster().acpi_event_manager)
+            {
+                pr_err!("Cannot init ACPI Event Manager");
+            }
         } else {
             pr_warn!("Failed initializing ACPI.");
         }
@@ -164,22 +169,29 @@ fn main_process() -> ! {
 
     let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
     if acpi_manager.is_available() {
+        if !device::acpi::setup_interrupt(&acpi_manager) {
+            pr_err!("Cannot setup ACPI interrupt.");
+        }
         if !acpi_manager.enable_acpi() {
             pr_err!("Cannot enable ACPI.");
-        } else {
-            let acpi_pm_timer = acpi_manager
-                .get_xsdt_manager()
-                .get_fadt_manager()
-                .get_acpi_pm_timer()
-                .unwrap();
-            unsafe { cpu::disable_interrupt() };
-            for i in (1..=5).rev() {
-                println!("System will shutdown after {}s...", i);
-                for _ in 0..1000 {
-                    acpi_pm_timer.busy_wait_ms(1);
-                }
+        }
+        if (acpi_manager
+            .get_xsdt_manager()
+            .get_fadt_manager()
+            .get_flags()
+            .unwrap()
+            & (1 << 4))
+            != 0
+        {
+            pr_info!("PowerButton is the control method power button.");
+            if acpi_manager.search_device(None, "\\_SB\\PWRB", b"PNP0C0C") {
+                pr_info!("This computer has power button.");
             }
-            acpi_manager.shutdown(None);
+        } else {
+            pr_info!("PowerButton is the fixed hardware power button.");
+            get_kernel_manager_cluster()
+                .acpi_event_manager
+                .enable_fixed_event(AcpiFixedEvent::PowerButton);
         }
     }
     drop(acpi_manager);

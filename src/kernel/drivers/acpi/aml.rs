@@ -13,8 +13,9 @@ mod parser;
 mod statement_opcode;
 mod term_object;
 
-pub use self::data_object::DataRefObject;
+pub use self::data_object::{eisa_id_to_dword, DataRefObject};
 pub use self::name_object::NameString;
+use self::named_object::{Device, NamedObject};
 use self::namespace_modifier_object::NamespaceModifierObject;
 use self::parser::{ContentObject, ParseHelper};
 use self::statement_opcode::StatementOpcode;
@@ -161,6 +162,51 @@ impl AmlParser {
         } else {
             None
         }
+    }
+
+    pub fn get_device(&mut self, name: &NameString, hid: &[u8; 7]) -> Option<Device> {
+        let hid = eisa_id_to_dword(hid);
+        if let Some(c) = self.get_content_object(name) {
+            match c {
+                ContentObject::NamedObject(n) => {
+                    if let NamedObject::DefDevice(d) = n {
+                        match d.get_hid(self.parse_helper.as_mut().unwrap()) {
+                            Ok(Some(d_id)) => {
+                                if d_id == hid {
+                                    return Some(d);
+                                } else {
+                                    pr_info!(
+                                        "Miss matched HID: Searching({}):{}, Found: {}",
+                                        d.get_name(),
+                                        hid,
+                                        d_id
+                                    );
+                                }
+                            }
+                            Ok(None) => {
+                                pr_info!("{} has no HID", d.get_name());
+                            }
+                            Err(e) => {
+                                pr_err!("Parsing AML was failed: {:?}", e)
+                            }
+                        }
+                    } else {
+                        pr_err!("Expected Device, but found NamedObject: {:?}", n);
+                    }
+                }
+                ContentObject::DataRefObject(d) => {
+                    pr_err!("Expected Device, but found DataRefObject: {:?}", d);
+                }
+                ContentObject::Scope(s) => {
+                    pr_err!("Expected Device, but found Scope: {:?}", s);
+                }
+            }
+        }
+        return None;
+    }
+
+    pub fn get_parse_helper(&mut self) -> &mut ParseHelper {
+        self.parse_helper.as_mut().unwrap()
     }
 
     #[allow(dead_code)]

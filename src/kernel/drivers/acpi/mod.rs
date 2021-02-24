@@ -7,13 +7,17 @@
 
 pub mod acpi_pm_timer;
 pub mod aml;
+pub mod event;
 pub mod table;
 pub mod xsdt;
 
 use self::aml::{AmlParser, NameString};
 use self::xsdt::XsdtManager;
 
-use crate::arch::target_arch::device::cpu::{disable_interrupt, in_byte, out_byte, out_word};
+use crate::arch::target_arch::device::cpu::{
+    disable_interrupt, in_byte, in_word, out_byte, out_word,
+};
+use crate::kernel::drivers::acpi::event::AcpiEventManager;
 
 pub struct AcpiManager {
     enabled: bool,
@@ -65,6 +69,15 @@ impl AcpiManager {
         return self.xsdt_manager.init((rsdp.xsdt_address as usize).into());
     }
 
+    pub fn init_acpi_event_manager(&self, event_manager: &mut AcpiEventManager) -> bool {
+        if self.enabled {
+            *event_manager = AcpiEventManager::new(&self.get_xsdt_manager().get_fadt_manager());
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_available(&self) -> bool {
         self.enabled
     }
@@ -75,6 +88,16 @@ impl AcpiManager {
         } else {
             None
         }
+    }
+
+    fn get_aml_parler(&self) -> AmlParser {
+        let mut p = self
+            .get_xsdt_manager()
+            .get_dsdt_manager()
+            .get_aml_parser()
+            .expect("Cannot get Aml Parser");
+        assert!(p.init());
+        p
     }
 
     pub fn get_xsdt_manager(&self) -> &XsdtManager {
@@ -97,13 +120,24 @@ impl AcpiManager {
             .get_fadt_manager()
             .get_pm1a_control_block_address()
             .unwrap();
+        let pm1_b_port = self
+            .get_xsdt_manager()
+            .get_fadt_manager()
+            .get_pm1b_control_block_address()
+            .unwrap();
 
         if smi_cmd == 0 {
+            /* HW reduced ACPI */
             return true;
         }
         unsafe { out_byte(smi_cmd as _, enable as _) };
         while (unsafe { in_byte(pm1_a_port as _) & 1 }) == 0 {
             core::hint::spin_loop();
+        }
+        if pm1_b_port != 0 {
+            while (unsafe { in_byte(pm1_b_port as _) & 1 }) == 0 {
+                core::hint::spin_loop();
+            }
         }
         return true;
     }
@@ -162,13 +196,7 @@ impl AcpiManager {
 
     pub fn shutdown(&mut self, aml_parser: Option<&mut AmlParser>) -> ! {
         let mut default_parser = if aml_parser.is_none() {
-            let mut p = self
-                .get_xsdt_manager()
-                .get_dsdt_manager()
-                .get_aml_parser()
-                .expect("Cannot get Aml Parser");
-            assert!(p.init());
-            Some(p)
+            Some(self.get_aml_parler())
         } else {
             None
         };
@@ -206,6 +234,29 @@ impl AcpiManager {
         );
         loop {
             core::hint::spin_loop()
+        }
+    }
+
+    pub fn search_device(
+        &mut self,
+        aml_parser: Option<&mut AmlParser>,
+        name: &str,
+        hid: &[u8; 7],
+    ) -> bool {
+        let mut default_aml_parser = if aml_parser.is_none() {
+            Some(self.get_aml_parler())
+        } else {
+            None
+        };
+        let mut aml_parser = aml_parser.or(default_aml_parser.as_mut()).unwrap();
+
+        if let Some(d) = aml_parser.get_device(
+            &NameString::from_string(name).expect("Invalid NameString"),
+            hid,
+        ) {
+            true
+        } else {
+            false
         }
     }
 }

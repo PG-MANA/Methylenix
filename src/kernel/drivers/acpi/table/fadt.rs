@@ -38,7 +38,15 @@ struct FADT {
     pm1b_control_block: u32,
     pm2_control_block: u32,
     pm_tmr_block: u32,
-    ignore2: [u8; 112 - 80],
+    gp_event0_block: u32,
+    gp_event1_block: u32,
+    pm1_event_len: u8,
+    pm1_control_len: u8,
+    pm2_control_len: u8,
+    pm_timer_len: u8,
+    gp_event0_block_len: u8,
+    gp_event1_block_len: u8,
+    ignore2: [u8; 112 - 94],
     flags: u32,
     reset_register: [u8; 12],
     reset_value: u8,
@@ -115,6 +123,15 @@ impl FadtManager {
         }
     }
 
+    pub fn get_flags(&self) -> Option<u32> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            Some(fadt.flags)
+        } else {
+            None
+        }
+    }
+
     pub fn get_pm1a_control_block_address(&self) -> Option<usize> {
         if self.enabled {
             let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
@@ -143,6 +160,43 @@ impl FadtManager {
         }
     }
 
+    pub fn get_pm1a_event_block_address(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            let address = GeneralAddress::new(&fadt.x_pm1a_event_block).address;
+            Some(if address != 0 {
+                address as usize
+            } else {
+                fadt.pm1a_event_block as usize
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn get_pm1b_event_block_address(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            let address = GeneralAddress::new(&fadt.x_pm1b_event_block).address;
+            Some(if address != 0 {
+                address as usize
+            } else {
+                fadt.pm1b_event_block as usize
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn get_pm1_event_block_len(&self) -> Option<usize> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            Some(fadt.pm1_event_len as _)
+        } else {
+            None
+        }
+    }
+
     pub fn get_sleep_control_register(&self) -> Option<usize> {
         if self.enabled {
             let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
@@ -152,6 +206,15 @@ impl FadtManager {
             }
         }
         return None;
+    }
+
+    pub fn get_sci_int(&self) -> Option<u16> {
+        if self.enabled {
+            let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+            Some(fadt.sci_int)
+        } else {
+            None
+        }
     }
 
     pub fn get_smi_cmd(&self) -> Option<usize> {

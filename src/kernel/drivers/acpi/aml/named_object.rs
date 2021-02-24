@@ -2,11 +2,12 @@
 //! ACPI Machine Language Named Objects
 //!
 #![allow(dead_code)]
-use super::data_object::PkgLength;
+use super::data_object::{ComputationalData, DataObject, DataRefObject, PkgLength};
 use super::name_object::NameString;
+use super::namespace_modifier_object::NamespaceModifierObject;
 use super::opcode;
 use super::parser::ParseHelper;
-use super::term_object::{TermArg, TermList};
+use super::term_object::{TermArg, TermList, TermObj};
 use super::{AcpiInt, AmlError, AmlStream};
 
 #[derive(Debug, Clone)]
@@ -228,6 +229,52 @@ impl PowerRes {
 }
 
 #[derive(Debug, Clone)]
+pub struct Device {
+    device_name: NameString,
+    term_list: TermList,
+}
+
+impl Device {
+    fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
+        /* DeviceOp was read */
+        let pkg_length = PkgLength::parse(stream)?;
+        let mut device_stream = stream.clone();
+        stream.seek(pkg_length.actual_length)?;
+        drop(stream);
+        device_stream.change_size(pkg_length.actual_length)?;
+        let device_name = NameString::parse(&mut device_stream, Some(&current_scope))?;
+        let term_list = TermList::new(device_stream, device_name.clone());
+        Ok(Self {
+            device_name,
+            term_list,
+        })
+    }
+
+    pub fn get_name(&self) -> &NameString {
+        &self.device_name
+    }
+
+    pub fn get_hid(&self, parse_helper: &mut ParseHelper) -> Result<Option<u32>, AmlError> {
+        let hid_name = NameString::from_array(&[*b"_HID"], false)
+            .get_full_name_path(self.term_list.get_scope_name());
+        let mut term_list = self.term_list.clone();
+        while let Some(term_obj) = term_list.next(parse_helper)? {
+            if let TermObj::NamespaceModifierObj(NamespaceModifierObject::DefName(n)) = term_obj {
+                if n.get_name() == &hid_name {
+                    if let DataRefObject::DataObject(DataObject::ComputationalData(
+                        ComputationalData::ConstData(d),
+                    )) = n.get_data_ref_object()
+                    {
+                        return Ok(Some(*d as u32));
+                    }
+                }
+            }
+        }
+        return Ok(None);
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ThermalZone {
     name: NameString,
     term_list: TermList,
@@ -355,7 +402,7 @@ pub enum NamedObject {
     DefBankField(BankField),
     DefCreateField(CreateField),
     DefDataRegion(DataRegion),
-    DefDevice((NameString, TermList)),
+    DefDevice(Device),
     DefField(Field),
     DefEvent(NameString),
     DefIndexField(IndexField),
@@ -408,14 +455,7 @@ impl NamedObject {
                     }
                     opcode::DEVICE_OP => {
                         stream.seek(2)?;
-                        let pkg_length = PkgLength::parse(stream)?;
-                        let mut device_stream = stream.clone();
-                        stream.seek(pkg_length.actual_length)?;
-                        device_stream.change_size(pkg_length.actual_length)?;
-                        let device_name =
-                            NameString::parse(&mut device_stream, Some(&current_scope))?;
-                        let term_list = TermList::new(device_stream, device_name.clone());
-                        Ok(Self::DefDevice((device_name, term_list)))
+                        Ok(Self::DefDevice(Device::parse(stream, current_scope)?))
                     }
                     opcode::MUTEX_OP => {
                         stream.seek(2)?;
@@ -540,7 +580,7 @@ impl NamedObject {
             Self::DefThermalZone(z) => Some(z.get_name()),
             Self::DefPowerRes(p) => Some(p.get_name()),
             Self::DefOpRegion(o) => Some(o.get_name()),
-            Self::DefDevice((d, _)) => Some(d),
+            Self::DefDevice(d) => Some(d.get_name()),
             Self::DefEvent(n) => Some(n),
             Self::DefBankField(_) => None,
             Self::DefField(_) => None,
@@ -567,7 +607,7 @@ impl NamedObject {
 
     pub fn get_term_list(&self) -> Option<TermList> {
         match self {
-            NamedObject::DefDevice(d_d) => Some(d_d.1.clone()),
+            NamedObject::DefDevice(d_d) => Some(d_d.term_list.clone()),
             NamedObject::DefMethod(d_m) => Some(d_m.term_list.clone()),
             NamedObject::DefPowerRes(d_p) => Some(d_p.term_list.clone()),
             NamedObject::DefThermalZone(d_t) => Some(d_t.term_list.clone()),

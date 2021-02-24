@@ -238,6 +238,22 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
     }
 }
 
+pub fn eisa_id_to_dword(id: &[u8; 7]) -> u32 {
+    let to_compressed_mfg_code = |c: u8| -> u32 { ((c - 0x40) & 0b11111) as u32 };
+    let to_hex = |c: u8| -> u32 {
+        (if c.is_ascii_digit() {
+            c - b'0'
+        } else {
+            c - b'A' + 0xA
+        }) as u32
+    };
+
+    ((to_compressed_mfg_code(id[0]) << 2) | (to_compressed_mfg_code(id[1]) >> 3))
+        | ((((to_compressed_mfg_code(id[1]) & 0b111) << 5) | to_compressed_mfg_code(id[2])) << 8)
+        | (((to_hex(id[3]) << 4) | to_hex(id[4])) << 16)
+        | (((to_hex(id[5]) << 4) | to_hex(id[6])) << 24)
+}
+
 /* Miscellaneous Objects */
 fn try_parse_miscellaneous_object(
     stream: &mut AmlStream,
