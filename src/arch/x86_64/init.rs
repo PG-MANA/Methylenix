@@ -127,20 +127,53 @@ pub fn init_interrupt(kernel_selector: u16) {
         .io_apic_manager = Mutex::new(io_apic_manager);
 }
 
-///Init AcpiManager
-pub fn init_acpi(rsdp_ptr: usize) -> Option<AcpiManager> {
-    use core::str;
-
+/// Init AcpiManager without parsing AML
+///
+/// This function initializes ACPI Manager.
+/// ACPI Manager will parse some tables and return.
+/// If succeeded, this will move it into kernel_manager_cluster.
+pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
     let mut acpi_manager = AcpiManager::new();
     if !acpi_manager.init(rsdp_ptr) {
         pr_warn!("Cannot init ACPI.");
-        return None;
+        return false;
     }
-    pr_info!(
-        "OEM ID:{}",
-        str::from_utf8(&acpi_manager.get_oem_id().unwrap_or([0; 6])).unwrap_or("NOT FOUND")
-    );
-    Some(acpi_manager)
+    if !acpi_manager.init_acpi_event_manager(&mut get_kernel_manager_cluster().acpi_event_manager) {
+        pr_err!("Cannot init ACPI Event Manager");
+        return false;
+    }
+
+    if let Some(oem) = acpi_manager.get_oem_id() {
+        pr_info!("OEM ID: {}", oem,);
+    }
+
+    get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
+    return true;
+}
+
+/// Init AcpiManager and AcpiEventManager with parsing AML
+///
+/// This function will setup some devices like power button.
+/// They will call malloc, therefore this function should be called after init of memory_manager
+pub fn init_acpi_later() -> bool {
+    let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+    if !acpi_manager.is_available() {
+        pr_info!("ACPI is not available.");
+        return true;
+    }
+    if !super::device::acpi::setup_interrupt(&acpi_manager) {
+        pr_err!("Cannot setup ACPI interrupt.");
+        return false;
+    }
+    if !acpi_manager.enable_acpi() {
+        pr_err!("Cannot enable ACPI.");
+        return false;
+    }
+    if !acpi_manager.enable_power_button(&mut get_kernel_manager_cluster().acpi_event_manager) {
+        pr_err!("Cannot enable power button.");
+        return false;
+    }
+    return true;
 }
 
 /// Init Timer
@@ -164,14 +197,18 @@ pub fn init_timer() -> LocalApicTimer {
             .get_local_apic_manager(),
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
-    } else if let Some(pm_timer) = get_kernel_manager_cluster()
+    } else if get_kernel_manager_cluster()
         .acpi_manager
         .lock()
         .unwrap()
-        .get_xsdt_manager()
-        .get_fadt_manager()
-        .get_acpi_pm_timer()
+        .is_available()
     {
+        let pm_timer = get_kernel_manager_cluster()
+            .acpi_manager
+            .lock()
+            .unwrap()
+            .get_fadt_manager()
+            .get_acpi_pm_timer();
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
         local_apic_timer.set_up_interrupt(
             InterruptionIndex::LocalApicTimer as u16,
@@ -268,16 +305,30 @@ pub fn setup_cpu_manager_cluster(
 /// This function will setup multiple processors by using ACPI
 /// This is in the development
 pub fn init_multiple_processors_ap() {
+    /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
+    let boot_address = 0usize;
+
     /* Get available Local APIC IDs from ACPI */
-    let apic_id_list_iter = get_kernel_manager_cluster()
+    let madt_manager = get_kernel_manager_cluster()
         .acpi_manager
         .lock()
         .unwrap()
         .get_xsdt_manager()
-        .get_madt_manager()
-        .find_apic_id_list();
-    /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
-    let boot_address = 0usize;
+        .get_madt_manager();
+    if madt_manager.is_none() {
+        pr_info!("ACPI does not have MADT.");
+        if let Err(e) = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .free(VAddress::new(boot_address))
+        {
+            pr_err!("Cannot free temporary stack: {:?}", e);
+        }
+        return;
+    }
+    let madt_manager = madt_manager.unwrap();
+    let apic_id_list_iter = madt_manager.find_apic_id_list();
 
     /* Set BSP Local APIC ID into cpu_manager */
     let mut cpu_manager = get_cpu_manager_cluster();
@@ -330,10 +381,8 @@ pub fn init_multiple_processors_ap() {
         .acpi_manager
         .lock()
         .unwrap()
-        .get_xsdt_manager()
         .get_fadt_manager()
-        .get_acpi_pm_timer()
-        .unwrap();
+        .get_acpi_pm_timer();
 
     let mut num_of_cpu = 1usize;
     'ap_init_loop: for apic_id in apic_id_list_iter {
@@ -403,6 +452,8 @@ pub fn init_multiple_processors_ap() {
     {
         pr_err!("Cannot free temporary stack: {:?}", e);
     }
+
+    madt_manager.release_memory_map();
 
     if num_of_cpu != 1 {
         pr_info!("Found {} CPUs", num_of_cpu);
