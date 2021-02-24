@@ -122,8 +122,8 @@ impl AcpiManager {
     pub fn enable_acpi(&self) -> bool {
         let smi_cmd = self.get_fadt_manager().get_smi_cmd();
         let enable = self.get_fadt_manager().get_acpi_enable();
-        let pm1_a_port = self.get_fadt_manager().get_pm1a_control_block_address();
-        let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block_address();
+        let pm1_a_port = self.get_fadt_manager().get_pm1a_control_block();
+        let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block();
 
         if smi_cmd == 0 {
             /* HW reduced ACPI */
@@ -200,8 +200,8 @@ impl AcpiManager {
             None
         };
 
-        let pm1_a_port = self.get_fadt_manager().get_pm1a_control_block_address();
-        let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block_address();
+        let pm1_a_port = self.get_fadt_manager().get_pm1a_control_block();
+        let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block();
 
         let sleep_control_register = self
             .get_xsdt_manager()
@@ -256,7 +256,7 @@ impl AcpiManager {
         };
         let aml_parser = aml_parser.or(default_aml_parser.as_mut()).unwrap();
 
-        if let Some(d) = aml_parser.get_device(
+        if let Some(_) = aml_parser.get_device(
             &NameString::from_string(name).expect("Invalid NameString"),
             hid,
         ) {

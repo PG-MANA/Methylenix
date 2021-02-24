@@ -122,27 +122,7 @@ impl FadtManager {
         unsafe { &*(self.base_address.to_usize() as *const FADT) }.flags
     }
 
-    pub fn get_pm1a_control_block_address(&self) -> usize {
-        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_pm1a_control_block).address;
-        if address != 0 {
-            address as usize
-        } else {
-            fadt.pm1a_control_block as usize
-        }
-    }
-
-    pub fn get_pm1b_control_block_address(&self) -> usize {
-        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_pm1b_control_block).address;
-        if address != 0 {
-            address as usize
-        } else {
-            fadt.pm1b_control_block as usize
-        }
-    }
-
-    pub fn get_pm1a_event_block_address(&self) -> usize {
+    pub fn get_pm1a_event_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
         let address = GeneralAddress::new(&fadt.x_pm1a_event_block).address;
         if address != 0 {
@@ -152,7 +132,17 @@ impl FadtManager {
         }
     }
 
-    pub fn get_pm1b_event_block_address(&self) -> usize {
+    pub fn get_pm1a_control_block(&self) -> usize {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_pm1a_control_block).address;
+        if address != 0 {
+            address as usize
+        } else {
+            fadt.pm1a_control_block as usize
+        }
+    }
+
+    pub fn get_pm1b_event_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
         let address = GeneralAddress::new(&fadt.x_pm1b_event_block).address;
         if address != 0 {
@@ -162,11 +152,21 @@ impl FadtManager {
         }
     }
 
+    pub fn get_pm1b_control_block(&self) -> usize {
+        let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
+        let address = GeneralAddress::new(&fadt.x_pm1b_control_block).address;
+        if address != 0 {
+            address as usize
+        } else {
+            fadt.pm1b_control_block as usize
+        }
+    }
+
     pub fn get_pm1_event_block_len(&self) -> u8 {
         unsafe { &*(self.base_address.to_usize() as *const FADT) }.pm1_event_len
     }
 
-    pub fn get_general_purpose_event_0_block(&self) -> usize {
+    pub fn get_gp_event0_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
         let address = GeneralAddress::new(&fadt.x_gpe0_block).address;
         if address != 0 {
@@ -176,15 +176,11 @@ impl FadtManager {
         }
     }
 
-    pub fn get_general_purpose_event_0_block_len(&self) -> u8 {
+    pub fn get_gp_event0_block_len(&self) -> u8 {
         unsafe { &*(self.base_address.to_usize() as *const FADT) }.gp_event0_block_len
     }
 
-    pub fn get_general_purpose_event_1_block_len(&self) -> u8 {
-        unsafe { &*(self.base_address.to_usize() as *const FADT) }.gp_event1_block_len
-    }
-
-    pub fn get_general_purpose_event_1_block(&self) -> usize {
+    pub fn get_gp_event1_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
         let address = GeneralAddress::new(&fadt.x_gpe1_block).address;
         if address != 0 {
@@ -192,6 +188,10 @@ impl FadtManager {
         } else {
             fadt.gp_event1_block as usize
         }
+    }
+
+    pub fn get_gp_event1_block_len(&self) -> u8 {
+        unsafe { &*(self.base_address.to_usize() as *const FADT) }.gp_event1_block_len
     }
 
     pub fn get_sleep_control_register(&self) -> Option<usize> {

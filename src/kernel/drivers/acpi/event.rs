@@ -42,8 +42,8 @@ impl AcpiEventManager {
     pub fn new(fadt_manager: &FadtManager) -> Self {
         Self {
             write_lock: SpinLockFlag::new(),
-            pm1a_event_block: fadt_manager.get_pm1a_event_block_address(),
-            pm1b_event_block: fadt_manager.get_pm1b_event_block_address(),
+            pm1a_event_block: fadt_manager.get_pm1a_event_block(),
+            pm1b_event_block: fadt_manager.get_pm1b_event_block(),
             pm1_event_block_len: fadt_manager.get_pm1_event_block_len(),
             pm1a_enabled_event: 0,
             pm1b_enabled_event: 0,
