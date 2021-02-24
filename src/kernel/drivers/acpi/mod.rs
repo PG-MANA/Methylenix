@@ -14,10 +14,8 @@ pub mod xsdt;
 use self::aml::{AmlParser, NameString};
 use self::xsdt::XsdtManager;
 
-use crate::arch::target_arch::device::cpu::{
-    disable_interrupt, in_byte, in_word, out_byte, out_word,
-};
-use crate::kernel::drivers::acpi::event::AcpiEventManager;
+use crate::arch::target_arch::device::cpu::{disable_interrupt, in_byte, out_byte, out_word};
+use crate::kernel::drivers::acpi::event::{AcpiEventManager, AcpiFixedEvent};
 
 pub struct AcpiManager {
     enabled: bool,
@@ -82,9 +80,10 @@ impl AcpiManager {
         self.enabled
     }
 
-    pub fn get_oem_id(&self) -> Option<[u8; 6]> {
+    pub fn get_oem_id(&self) -> Option<&str> {
+        use core::str::from_utf8;
         if self.enabled {
-            Some(self.oem_id)
+            from_utf8(&self.oem_id).ok()
         } else {
             None
         }
@@ -237,6 +236,25 @@ impl AcpiManager {
         }
     }
 
+    pub fn shutdown_test(&mut self) -> ! {
+        use crate::kernel::timer_manager::Timer;
+
+        /* for debug */
+        unsafe { disable_interrupt() };
+        let timer = self
+            .get_xsdt_manager()
+            .get_fadt_manager()
+            .get_acpi_pm_timer()
+            .unwrap();
+        for i in (1..=3).rev() {
+            println!("System will shutdown after {}s...", i);
+            for _ in 0..1000 {
+                timer.busy_wait_ms(1);
+            }
+        }
+        self.shutdown(None)
+    }
+
     pub fn search_device(
         &mut self,
         aml_parser: Option<&mut AmlParser>,
@@ -248,7 +266,7 @@ impl AcpiManager {
         } else {
             None
         };
-        let mut aml_parser = aml_parser.or(default_aml_parser.as_mut()).unwrap();
+        let aml_parser = aml_parser.or(default_aml_parser.as_mut()).unwrap();
 
         if let Some(d) = aml_parser.get_device(
             &NameString::from_string(name).expect("Invalid NameString"),
@@ -257,6 +275,26 @@ impl AcpiManager {
             true
         } else {
             false
+        }
+    }
+
+    pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
+        if (self
+            .get_xsdt_manager()
+            .get_fadt_manager()
+            .get_flags()
+            .unwrap()
+            & (1 << 4))
+            != 0
+        {
+            pr_info!("PowerButton is the control method power button.");
+            if self.search_device(None, "\\_SB\\PWRB", b"PNP0C0C") {
+                pr_info!("This computer has power button.");
+            }
+            false
+        } else {
+            pr_info!("PowerButton is the fixed hardware power button.");
+            acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton)
         }
     }
 }

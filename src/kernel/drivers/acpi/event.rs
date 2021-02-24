@@ -6,6 +6,7 @@ use super::table::fadt::FadtManager;
 
 use crate::arch::target_arch::device::cpu::{in_word, out_word};
 
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 #[derive(Copy, Clone, Debug)]
@@ -137,7 +138,12 @@ impl AcpiEventManager {
         if let Some(event) = AcpiFixedEvent::from_u16(event as u16) {
             match event {
                 AcpiFixedEvent::PowerButton => {
-                    pr_info!("Power Button!");
+                    pr_info!("Power Button was pushed.");
+                    if let Ok(mut m) = get_kernel_manager_cluster().acpi_manager.try_lock() {
+                        m.shutdown_test()
+                    } else {
+                        pr_err!("Cannot lock ACPI Manager.");
+                    }
                 }
                 AcpiFixedEvent::SleepButton => {
                     pr_info!("Sleep Button");

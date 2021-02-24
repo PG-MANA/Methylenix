@@ -19,7 +19,6 @@ use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
-use crate::kernel::drivers::acpi::event::AcpiFixedEvent;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
@@ -100,24 +99,18 @@ pub extern "C" fn multiboot_main(
     get_kernel_manager_cluster().serial_port_manager.init();
 
     /* Setup ACPI */
-    let mut acpi_manager = AcpiManager::new();
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
-        if let Some(a) = init_acpi(rsdp_address) {
-            acpi_manager = a;
-            if !acpi_manager
-                .init_acpi_event_manager(&mut get_kernel_manager_cluster().acpi_event_manager)
-            {
-                pr_err!("Cannot init ACPI Event Manager");
-            }
-        } else {
-            pr_warn!("Failed initializing ACPI.");
+        if !init_acpi_early(rsdp_address) {
+            pr_err!("Failed Init ACPI.");
+            get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
         }
     } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
         pr_warn!("ACPI 1.0 is not supported.");
+        get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
     } else {
         pr_warn!("ACPI is not available.");
+        get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
     }
-    get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
 
     /* Init Local APIC Timer */
     get_cpu_manager_cluster().arch_depend_data.local_apic_timer = init_timer();
@@ -167,34 +160,9 @@ fn main_process() -> ! {
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
 
-    let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
-    if acpi_manager.is_available() {
-        if !device::acpi::setup_interrupt(&acpi_manager) {
-            pr_err!("Cannot setup ACPI interrupt.");
-        }
-        if !acpi_manager.enable_acpi() {
-            pr_err!("Cannot enable ACPI.");
-        }
-        if (acpi_manager
-            .get_xsdt_manager()
-            .get_fadt_manager()
-            .get_flags()
-            .unwrap()
-            & (1 << 4))
-            != 0
-        {
-            pr_info!("PowerButton is the control method power button.");
-            if acpi_manager.search_device(None, "\\_SB\\PWRB", b"PNP0C0C") {
-                pr_info!("This computer has power button.");
-            }
-        } else {
-            pr_info!("PowerButton is the fixed hardware power button.");
-            get_kernel_manager_cluster()
-                .acpi_event_manager
-                .enable_fixed_event(AcpiFixedEvent::PowerButton);
-        }
+    if !init_acpi_later() {
+        pr_err!("Cannot init ACPI devices.");
     }
-    drop(acpi_manager);
 
     loop {
         get_cpu_manager_cluster().run_queue_manager.sleep();

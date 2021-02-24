@@ -127,20 +127,53 @@ pub fn init_interrupt(kernel_selector: u16) {
         .io_apic_manager = Mutex::new(io_apic_manager);
 }
 
-///Init AcpiManager
-pub fn init_acpi(rsdp_ptr: usize) -> Option<AcpiManager> {
-    use core::str;
-
+/// Init AcpiManager without parsing AML
+///
+/// This function initializes ACPI Manager.
+/// ACPI Manager will parse some tables and return.
+/// If succeeded, this will move it into kernel_manager_cluster.
+pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
     let mut acpi_manager = AcpiManager::new();
     if !acpi_manager.init(rsdp_ptr) {
         pr_warn!("Cannot init ACPI.");
-        return None;
+        return false;
     }
-    pr_info!(
-        "OEM ID:{}",
-        str::from_utf8(&acpi_manager.get_oem_id().unwrap_or([0; 6])).unwrap_or("NOT FOUND")
-    );
-    Some(acpi_manager)
+    if !acpi_manager.init_acpi_event_manager(&mut get_kernel_manager_cluster().acpi_event_manager) {
+        pr_err!("Cannot init ACPI Event Manager");
+        return false;
+    }
+
+    if let Some(oem) = acpi_manager.get_oem_id() {
+        pr_info!("OEM ID: {}", oem,);
+    }
+
+    get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
+    return true;
+}
+
+/// Init AcpiManager and AcpiEventManager with parsing AML
+///
+/// This function will setup some devices like power button.
+/// They will call malloc, therefore this function should be called after init of memory_manager
+pub fn init_acpi_later() -> bool {
+    let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+    if !acpi_manager.is_available() {
+        pr_info!("ACPI is not available.");
+        return true;
+    }
+    if !super::device::acpi::setup_interrupt(&acpi_manager) {
+        pr_err!("Cannot setup ACPI interrupt.");
+        return false;
+    }
+    if !acpi_manager.enable_acpi() {
+        pr_err!("Cannot enable ACPI.");
+        return false;
+    }
+    if !acpi_manager.enable_power_button(&mut get_kernel_manager_cluster().acpi_event_manager) {
+        pr_err!("Cannot enable power button.");
+        return false;
+    }
+    return true;
 }
 
 /// Init Timer
