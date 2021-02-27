@@ -147,25 +147,18 @@ impl SerialPortManager {
     /// Currently, this wakes the main process up.
     #[inline(never)]
     fn int_handler24_main() {
-        if let Ok(interrupt_manager) = get_kernel_manager_cluster()
-            .boot_strap_cpu_manager
-            .interrupt_manager
-            .try_lock()
-        {
-            interrupt_manager.send_eoi();
-        }
         let work = WorkList::new(
             Self::worker,
             get_kernel_manager_cluster().serial_port_manager.read() as usize,
         );
+        if let Ok(interrupt_manager) = get_cpu_manager_cluster().interrupt_manager.try_lock() {
+            interrupt_manager.send_eoi();
+        }
         get_cpu_manager_cluster().work_queue_manager.add_work(work);
     }
 
     fn worker(data: usize) {
-        get_kernel_manager_cluster()
-            .serial_port_manager
-            .enqueue_key(data as u8);
-        get_kernel_manager_cluster().task_manager.wakeup(0, 1);
+        unimplemented!()
     }
 
     /// Check if the transmission was completed.

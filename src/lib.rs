@@ -14,6 +14,7 @@
 #![feature(panic_info_message)]
 #![feature(step_trait)]
 #![feature(step_trait_ext)]
+#![feature(try_blocks)]
 
 #[allow(unused_imports)]
 #[macro_use]

@@ -88,7 +88,21 @@ impl ContextData {
         data.registers.rflags = 0x202;
         data.registers.rsp = stack as u64;
         data.registers.cr3 = cr3 as u64;
-        data
+        return data;
+    }
+
+    /// Create ContextData for system from 'original_context'.
+    ///
+    /// ContextData's rflags is set as 0x202(allow interrupt).
+    pub fn fork_context_data(original_context: &Self, entry_address: usize, stack: usize) -> Self {
+        let mut forked_data = Self::new();
+        forked_data.registers.rip = entry_address as u64;
+        forked_data.registers.cr3 = original_context.registers.cr3;
+        forked_data.registers.cs = original_context.registers.cs;
+        forked_data.registers.ss = original_context.registers.ss;
+        forked_data.registers.rflags = 0x202;
+        forked_data.registers.rsp = stack as u64;
+        return forked_data;
     }
 
     /// Get Paging table address(address of PML4)

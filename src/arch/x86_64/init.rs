@@ -6,8 +6,7 @@
 
 pub mod multiboot;
 
-use crate::arch::target_arch::context::context_data::ContextData;
-use crate::arch::target_arch::context::ContextManager;
+use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
@@ -41,9 +40,12 @@ pub fn init_task(
     user_cs: u16,
     user_ss: u16,
     main_process: fn() -> !,
-    idle_task: fn() -> !,
+    idle_process: fn() -> !,
 ) {
     let mut context_manager = ContextManager::new();
+    let mut run_queue_manager = RunQueueManager::new();
+    let mut task_manager = TaskManager::new();
+
     context_manager.init(
         system_cs,
         0, /*is it ok?*/
@@ -51,54 +53,37 @@ pub fn init_task(
         user_ss,
         unsafe { cpu::get_cr3() },
     );
+    run_queue_manager.init();
 
-    let create_context = |c: &ContextManager, entry_function: fn() -> !| -> ContextData {
-        match c.create_system_context(entry_function as *const fn() as usize, None) {
-            Ok(m) => m,
-            Err(e) => panic!("Cannot create a ContextData: {:?}", e),
-        }
-    };
-    let context_for_main = create_context(&context_manager, main_process);
+    let main_context = context_manager
+        .create_system_context(main_process, None)
+        .expect("Cannot create main thread's context.");
+    let idle_context = context_manager
+        .create_system_context(idle_process, Some(ContextManager::IDLE_THREAD_STACK_SIZE))
+        .expect("Cannot create idle thread's context.");
 
-    get_cpu_manager_cluster().run_queue_manager = RunQueueManager::new();
-    get_cpu_manager_cluster().run_queue_manager.init();
-    get_kernel_manager_cluster().task_manager = TaskManager::new();
-    let main_thread = get_kernel_manager_cluster()
-        .task_manager
-        .init(context_manager, context_for_main);
-    let idle_thread = get_kernel_manager_cluster()
-        .task_manager
-        .create_kernel_thread(
-            idle_task as *const fn() -> !,
-            Some(MSize::new(0x1000)),
-            i8::MIN,
-        )
-        .unwrap();
-    get_cpu_manager_cluster()
-        .run_queue_manager
-        .add_thread(main_thread);
-    get_cpu_manager_cluster()
-        .run_queue_manager
-        .add_thread(idle_thread);
+    task_manager.init(
+        context_manager,
+        main_context,
+        idle_context,
+        &mut run_queue_manager,
+    );
+
+    get_cpu_manager_cluster().run_queue_manager = run_queue_manager;
+    get_kernel_manager_cluster().task_manager = task_manager;
 }
 
 /// Init application processor's TaskManager
 ///
 ///
 pub fn init_task_ap(idle_task: fn() -> !) {
-    get_cpu_manager_cluster().run_queue_manager = RunQueueManager::new();
-    get_cpu_manager_cluster().run_queue_manager.init();
-    let idle_thread = get_kernel_manager_cluster()
+    let mut run_queue_manager = RunQueueManager::new();
+    run_queue_manager.init();
+    get_kernel_manager_cluster()
         .task_manager
-        .create_kernel_thread(
-            idle_task as *const fn() -> !,
-            Some(MSize::new(0x1000)),
-            i8::MIN,
-        )
-        .unwrap();
-    get_cpu_manager_cluster()
-        .run_queue_manager
-        .add_thread(idle_thread);
+        .init_idle(idle_task, &mut run_queue_manager)
+        .expect("Cannot init ap's idle thread.");
+    get_cpu_manager_cluster().run_queue_manager = run_queue_manager;
 }
 
 /// Init SoftInterrupt

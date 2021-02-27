@@ -10,7 +10,7 @@ pub mod context_data;
 use self::context_data::ContextData;
 
 use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::paging::PAGE_MASK;
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize};
 use crate::kernel::memory_manager::MemoryError;
@@ -28,12 +28,11 @@ pub struct ContextManager {
 
 impl ContextManager {
     pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x200000;
+    pub const IDLE_THREAD_STACK_SIZE: MSize = PAGE_SIZE;
     pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x8000;
     pub const STACK_ALIGN_ORDER: usize = 6; /*size = 2^6 = 64*/
 
     /// Create Context Manager with invalid data.
-    ///
-    /// This function is const fn.
     pub const fn new() -> Self {
         Self {
             system_cs: 0,
@@ -63,9 +62,11 @@ impl ContextManager {
     /// Create system context data
     ///
     /// This function makes a context data with system code/stack segment.
+    ///
+    /// `entry_address` must not return.
     pub fn create_system_context(
         &self,
-        entry_address: usize,
+        entry_address: fn() -> !,
         stack_size: Option<MSize>,
     ) -> Result<ContextData, MemoryError> {
         let stack_size = stack_size.unwrap_or(MSize::new(Self::DEFAULT_STACK_SIZE_OF_SYSTEM));
@@ -80,7 +81,7 @@ impl ContextManager {
             .alloc(stack_size, &get_kernel_manager_cluster().memory_manager)?;
 
         Ok(ContextData::create_context_data_for_system(
-            entry_address,
+            entry_address as *const fn() as usize,
             (stack_address + stack_size).to_usize() - 8, /* For SystemV ABI Stack Alignment */
             self.system_cs as u64,
             self.system_ss as u64,
@@ -88,11 +89,41 @@ impl ContextManager {
         ))
     }
 
+    /// Create system context data from 'original_context_data'
+    ///
+    /// This function makes a context data with system code/stack segment.
+    ///
+    /// `entry_address` must not return.
+    pub fn fork_system_context(
+        &self,
+        original_context_data: &ContextData,
+        entry_address: fn() -> !,
+        stack_size: Option<MSize>,
+    ) -> Result<ContextData, MemoryError> {
+        let stack_size = stack_size.unwrap_or(MSize::new(Self::DEFAULT_STACK_SIZE_OF_SYSTEM));
+        if (stack_size & !PAGE_MASK) != 0 {
+            return Err(MemoryError::SizeNotAligned);
+        }
+
+        let stack_address = get_cpu_manager_cluster()
+            .object_allocator
+            .lock()
+            .unwrap()
+            .alloc(stack_size, &get_kernel_manager_cluster().memory_manager)?;
+
+        Ok(ContextData::fork_context_data(
+            original_context_data,
+            entry_address as *const fn() as usize,
+            (stack_address + stack_size).to_usize() - 8, /* For SystemV ABI Stack Alignment */
+        ))
+    }
+
     /// Jump to specific context data.
     ///
     /// This function **does not** save current process data.
     /// This is used when OS starts task management system.
-    /// ContextData must be aligned by 64bit
+    ///
+    /// **ContextData must be aligned by 64bit**.
     pub unsafe fn jump_to_context(&self, context: &mut ContextData) {
         assert_eq!(core::mem::align_of_val(context), 64);
         cpu::run_task(context as *mut _);
