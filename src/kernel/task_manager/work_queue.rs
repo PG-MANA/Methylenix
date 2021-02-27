@@ -14,7 +14,7 @@ use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAlloc
 use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
-pub struct WorkQueueManager {
+pub struct WorkQueue {
     work_queue: PtrLinkedList<WorkList>,
     lock: SpinLockFlag,
     work_pool: CacheAllocator<WorkList>,
@@ -37,7 +37,7 @@ impl WorkList {
     }
 }
 
-impl WorkQueueManager {
+impl WorkQueue {
     const WORK_POOL_CACHE_ENTRIES: usize = 64;
 
     pub fn init(&mut self, task_manager: &mut TaskManager) {
@@ -86,8 +86,8 @@ impl WorkQueueManager {
         if worker_thread.get_task_status() == TaskStatus::Sleeping
             || worker_thread.get_task_status() == TaskStatus::New
         {
-            let run_queue_manager = &mut get_cpu_manager_cluster().run_queue_manager;
-            if let Err(e) = run_queue_manager.add_thread(worker_thread) {
+            let run_queue = &mut get_cpu_manager_cluster().run_queue;
+            if let Err(e) = run_queue.add_thread(worker_thread) {
                 pr_err!(
                     "Cannot add worker_thread to RunQueueManager. Error: {:?}",
                     e
@@ -100,7 +100,7 @@ impl WorkQueueManager {
     }
 
     fn work_queue_thread() -> ! {
-        let manager = &mut get_cpu_manager_cluster().work_queue_manager;
+        let manager = &mut get_cpu_manager_cluster().work_queue;
         loop {
             let interrupt_flag = InterruptManager::save_and_disable_local_irq();
             let _lock = manager.lock.lock();
@@ -108,7 +108,7 @@ impl WorkQueueManager {
                 assert!(!unsafe { &mut *manager.daemon_thread }.lock.is_locked());
                 drop(_lock);
                 get_cpu_manager_cluster()
-                    .run_queue_manager
+                    .run_queue
                     .sleep_current_thread(Some(interrupt_flag));
                 /* Woke up */
                 continue;

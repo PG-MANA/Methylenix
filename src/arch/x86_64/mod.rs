@@ -124,14 +124,14 @@ pub extern "C" fn multiboot_main(
         idle,
     );
 
-    /* Setup the interrupt work queue system */
-    init_interrupt_work_queue_manager();
+    /* Setup work queue system */
+    init_work_queue();
 
     /* Setup APs if the processor is multicore-processor */
     init_multiple_processors_ap();
 
     /* Switch to main process */
-    get_cpu_manager_cluster().run_queue_manager.start()
+    get_cpu_manager_cluster().run_queue.start()
     /* Never return to here */
 }
 
@@ -165,7 +165,7 @@ fn main_process() -> ! {
     }
 
     loop {
-        get_cpu_manager_cluster().run_queue_manager.sleep();
+        get_cpu_manager_cluster().run_queue.sleep();
         while let Some(c) = get_kernel_manager_cluster()
             .serial_port_manager
             .dequeue_key()
@@ -395,9 +395,9 @@ pub extern "C" fn ap_boot_main() -> ! {
 
     cpu_manager.arch_depend_data.local_apic_timer = init_timer();
     init_task_ap(ap_idle);
-    init_interrupt_work_queue_manager();
+    init_work_queue();
     /* Switch to ap_idle task with own stack */
-    cpu_manager.run_queue_manager.start()
+    cpu_manager.run_queue.start()
 }
 
 fn ap_idle() -> ! {

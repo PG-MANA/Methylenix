@@ -23,7 +23,7 @@ use crate::kernel::memory_manager::data_type::{
 };
 use crate::kernel::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::task_manager::run_queue_manager::RunQueueManager;
+use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::Timer;
 
@@ -43,7 +43,7 @@ pub fn init_task(
     idle_process: fn() -> !,
 ) {
     let mut context_manager = ContextManager::new();
-    let mut run_queue_manager = RunQueueManager::new();
+    let mut run_queue = RunQueue::new();
     let mut task_manager = TaskManager::new();
 
     context_manager.init(
@@ -53,7 +53,7 @@ pub fn init_task(
         user_ss,
         unsafe { cpu::get_cr3() },
     );
-    run_queue_manager.init();
+    run_queue.init();
 
     let main_context = context_manager
         .create_system_context(main_process, None)
@@ -62,14 +62,9 @@ pub fn init_task(
         .create_system_context(idle_process, Some(ContextManager::IDLE_THREAD_STACK_SIZE))
         .expect("Cannot create idle thread's context.");
 
-    task_manager.init(
-        context_manager,
-        main_context,
-        idle_context,
-        &mut run_queue_manager,
-    );
+    task_manager.init(context_manager, main_context, idle_context, &mut run_queue);
 
-    get_cpu_manager_cluster().run_queue_manager = run_queue_manager;
+    get_cpu_manager_cluster().run_queue = run_queue;
     get_kernel_manager_cluster().task_manager = task_manager;
 }
 
@@ -77,19 +72,19 @@ pub fn init_task(
 ///
 ///
 pub fn init_task_ap(idle_task: fn() -> !) {
-    let mut run_queue_manager = RunQueueManager::new();
-    run_queue_manager.init();
+    let mut run_queue = RunQueue::new();
+    run_queue.init();
     get_kernel_manager_cluster()
         .task_manager
-        .init_idle(idle_task, &mut run_queue_manager)
+        .init_idle(idle_task, &mut run_queue)
         .expect("Cannot init ap's idle thread.");
-    get_cpu_manager_cluster().run_queue_manager = run_queue_manager;
+    get_cpu_manager_cluster().run_queue = run_queue;
 }
 
 /// Init SoftInterrupt
-pub fn init_interrupt_work_queue_manager() {
+pub fn init_work_queue() {
     get_cpu_manager_cluster()
-        .work_queue_manager
+        .work_queue
         .init(&mut get_kernel_manager_cluster().task_manager);
 }
 

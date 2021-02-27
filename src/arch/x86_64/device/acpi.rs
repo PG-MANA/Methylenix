@@ -25,7 +25,7 @@ extern "C" fn acpi_event_handler() {
         .find_occurred_fixed_event()
     {
         let work = WorkList::new(AcpiEventManager::acpi_fixed_event_worker, acpi_event as _);
-        get_cpu_manager_cluster().work_queue_manager.add_work(work);
+        get_cpu_manager_cluster().work_queue.add_work(work);
         if !get_kernel_manager_cluster()
             .acpi_event_manager
             .reset_fixed_event_status(acpi_event)

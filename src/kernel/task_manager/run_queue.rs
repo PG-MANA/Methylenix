@@ -14,13 +14,13 @@ use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::ptr_linked_list::PtrLinkedList;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
-pub struct RunQueueManager {
+pub struct RunQueue {
     lock: SpinLockFlag,
     run_list: PtrLinkedList<ThreadEntry>,
     running_thread: Option<*mut ThreadEntry>,
 }
 
-impl RunQueueManager {
+impl RunQueue {
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),

@@ -86,7 +86,7 @@ impl LocalApicTimer {
         /* Task switch */
         let context_data = unsafe { &*(c as *const ContextData) };
         get_cpu_manager_cluster()
-            .run_queue_manager
+            .run_queue
             .switch_to_next_thread_without_saving_context(context_data);
     }
 

@@ -5,7 +5,7 @@
 //! Task management system has two struct, arch-independent and depend on arch.
 
 mod process_entry;
-pub mod run_queue_manager;
+pub mod run_queue;
 mod thread_entry;
 pub mod wait_queue;
 pub mod work_queue;
@@ -22,7 +22,7 @@ use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAlloc
 use crate::kernel::memory_manager::MemoryError;
 use crate::kernel::ptr_linked_list::PtrLinkedList;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-use crate::kernel::task_manager::run_queue_manager::RunQueueManager;
+use crate::kernel::task_manager::run_queue::RunQueue;
 
 pub struct TaskManager {
     lock: SpinLockFlag,
@@ -96,7 +96,7 @@ impl TaskManager {
         context_manager: ContextManager,
         kernel_main_context: ContextData,
         idle_context: ContextData,
-        run_queue_manager: &mut RunQueueManager,
+        run_queue: &mut RunQueue,
     ) {
         let _lock = self.lock.lock();
         let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
@@ -135,8 +135,8 @@ impl TaskManager {
         idle_thread.set_ptr_to_list();
 
         /* Set threads to run_queue_manager */
-        run_queue_manager.add_thread(main_thread);
-        run_queue_manager.add_thread(idle_thread);
+        run_queue.add_thread(main_thread);
+        run_queue.add_thread(idle_thread);
 
         self.kernel_process = kernel_process;
         self.idle_thread = idle_thread;
@@ -149,7 +149,7 @@ impl TaskManager {
     pub fn init_idle(
         &mut self,
         idle_fn: fn() -> !,
-        run_queue_manager: &mut RunQueueManager,
+        run_queue: &mut RunQueue,
     ) -> Result<(), TaskError> {
         let idle_thread = unsafe { &mut *self.idle_thread };
         let mut forked_thread = self.fork_system_thread(
@@ -158,7 +158,7 @@ impl TaskManager {
             Some(ContextManager::IDLE_THREAD_STACK_SIZE),
         )?;
         let _lock = forked_thread.lock.lock();
-        run_queue_manager.add_thread(forked_thread);
+        run_queue.add_thread(forked_thread);
         return Ok(());
     }
 
@@ -231,7 +231,7 @@ impl TaskManager {
     ) -> Result<&'static mut ThreadEntry, TaskError> {
         let _lock = self.lock.lock();
         let mut clone_thread = get_cpu_manager_cluster()
-            .run_queue_manager
+            .run_queue
             .copy_running_thread_data()?;
         let forked_thread =
             self.fork_system_thread(&mut clone_thread, entry_address, stack_size)?;
@@ -241,7 +241,7 @@ impl TaskManager {
 
         if should_set_into_run_queue {
             if let Err(e) = get_cpu_manager_cluster()
-                .run_queue_manager
+                .run_queue
                 .add_thread(forked_thread)
             {
                 pr_err!("Cannot add thread to RunQueueManager. Error: {:?}", e);
@@ -270,9 +270,7 @@ impl TaskManager {
         thread.run_list.unset_prev_and_next();
         thread.set_task_status(TaskStatus::CanRun);
         /* Currently, add this cpu's run queue. */
-        get_cpu_manager_cluster()
-            .run_queue_manager
-            .add_thread(thread)?;
+        get_cpu_manager_cluster().run_queue.add_thread(thread)?;
         return Ok(());
     }
 }
