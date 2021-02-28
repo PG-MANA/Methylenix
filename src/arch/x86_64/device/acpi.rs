@@ -12,8 +12,6 @@ pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
     make_device_interrupt_handler!(handler, acpi_event_handler);
     get_cpu_manager_cluster()
         .interrupt_manager
-        .lock()
-        .unwrap()
         .set_device_interrupt_function(handler, Some(irq as u8), None, 0x20 + irq, 0);
 
     return true;
@@ -36,11 +34,5 @@ extern "C" fn acpi_event_handler() {
         pr_err!("Unknown ACPI Event");
     }
 
-    if let Ok(interrupt_manager) = get_kernel_manager_cluster()
-        .boot_strap_cpu_manager
-        .interrupt_manager
-        .try_lock()
-    {
-        interrupt_manager.send_eoi();
-    }
+    get_cpu_manager_cluster().interrupt_manager.send_eoi();
 }

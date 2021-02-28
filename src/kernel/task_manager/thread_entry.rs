@@ -61,12 +61,12 @@ impl ThreadEntry {
         self.process = NonNull::new(process).unwrap();
     }
 
-    pub fn get_process(&self) -> &ProcessEntry {
-        unsafe { self.process.as_ref() }
+    pub fn get_process(&self) -> &'static ProcessEntry {
+        unsafe { &*self.process.as_ptr() }
     }
 
-    pub fn get_process_mut(&mut self) -> &mut ProcessEntry {
-        unsafe { self.process.as_mut() }
+    pub fn get_process_mut(&mut self) -> &'static mut ProcessEntry {
+        unsafe { &mut *self.process.as_ptr() }
     }
 
     pub const fn get_task_status(&self) -> TaskStatus {

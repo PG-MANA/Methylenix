@@ -107,9 +107,12 @@ impl WorkQueue {
             if manager.work_queue.is_empty() {
                 assert!(!unsafe { &mut *manager.daemon_thread }.lock.is_locked());
                 drop(_lock);
-                get_cpu_manager_cluster()
+                if let Err(e) = get_cpu_manager_cluster()
                     .run_queue
-                    .sleep_current_thread(Some(interrupt_flag));
+                    .sleep_current_thread(Some(interrupt_flag))
+                {
+                    pr_err!("Cannot sleep work queue thread. Error: {:?}", e);
+                }
                 /* Woke up */
                 continue;
             }

@@ -51,7 +51,7 @@ pub fn get_kernel_manager_cluster() -> &'static mut KernelManagerCluster {
 pub struct CpuManagerCluster {
     pub cpu_id: usize,
     pub list: PtrLinkedListNode<Self>,
-    pub interrupt_manager: Mutex<InterruptManager>,
+    pub interrupt_manager: InterruptManager,
     pub work_queue: WorkQueue,
     pub object_allocator: Mutex<ObjectAllocator>,
     pub run_queue: RunQueue,

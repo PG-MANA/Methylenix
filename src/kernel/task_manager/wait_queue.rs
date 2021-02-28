@@ -10,7 +10,8 @@
 
 use super::{TaskError, TaskStatus, ThreadEntry};
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::arch::target_arch::interrupt::InterruptManager;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::ptr_linked_list::PtrLinkedList;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
@@ -27,12 +28,8 @@ impl WaitQueue {
         }
     }
 
-    /// Add the thread to WaitQueue.
-    ///
-    /// `thread` must be unlocked.
-    pub fn add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+    pub fn _add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(!thread.lock.is_locked());
-        let _lock = self.lock.lock();
 
         if let Some(first_thread) = unsafe { self.list.get_first_entry_mut() } {
             let _first_thread_lock = first_thread
@@ -50,6 +47,39 @@ impl WaitQueue {
                 .set_first_entry(Some(&mut thread.sleep_list as *mut _));
         }
         return Ok(());
+    }
+
+    /// Add the thread to WaitQueue.
+    ///
+    /// `thread` must be unlocked.
+    pub fn add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+        assert!(!thread.lock.is_locked());
+        let _lock = self.lock.lock();
+        self._add_thread(thread)
+    }
+
+    pub fn add_current_thread(&mut self) -> Result<(), TaskError> {
+        let _lock = self.lock.lock();
+
+        /* Chain running_thread.sleep_list */
+        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
+        let running_thread = get_cpu_manager_cluster().run_queue.get_running_thread();
+        let result: Result<(), TaskError> = try {
+            let _running_thread_lock = running_thread
+                .lock
+                .try_lock()
+                .or(Err(TaskError::ThreadLockError))?;
+            running_thread.sleep_list.unset_prev_and_next();
+            self._add_thread(running_thread)?
+        };
+        if result.is_ok() {
+            get_cpu_manager_cluster()
+                .run_queue
+                .sleep_current_thread(Some(interrupt_flag))?;
+        } else {
+            InterruptManager::restore_local_irq(interrupt_flag);
+        }
+        return result;
     }
 
     pub fn wakeup(&mut self) -> Result<(), TaskError> {

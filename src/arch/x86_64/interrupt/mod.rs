@@ -15,9 +15,9 @@ use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{MSize, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags};
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
-use crate::kernel::memory_manager::data_type::Address;
 use core::mem::{size_of, MaybeUninit};
 
 pub struct StoredIrqData {
@@ -29,6 +29,7 @@ pub struct StoredIrqData {
 /// This has io_apic and local_apic handler inner.
 /// This struct may be changed in the future.
 pub struct InterruptManager {
+    lock: SpinLockFlag,
     idt: MaybeUninit<&'static mut [GateDescriptor; InterruptManager::IDT_MAX as usize]>,
     main_selector: u16,
     local_apic: LocalApicManager,
@@ -55,6 +56,7 @@ impl InterruptManager {
     pub const fn new() -> InterruptManager {
         InterruptManager {
             idt: MaybeUninit::uninit(),
+            lock: SpinLockFlag::new(),
             main_selector: 0,
             local_apic: LocalApicManager::new(),
             tss_manager: TssManager::new(),
@@ -62,6 +64,8 @@ impl InterruptManager {
     }
 
     fn alloc_and_init_idt(&mut self) {
+        let flag = Self::save_and_disable_local_irq();
+        let _lock = self.lock.lock();
         self.idt.write(unsafe {
             &mut *(get_kernel_manager_cluster()
                 .memory_manager
@@ -77,6 +81,8 @@ impl InterruptManager {
             }
             self.flush();
         }
+        drop(_lock);
+        Self::restore_local_irq(flag);
     }
 
     /// Init this manager.
@@ -164,6 +170,9 @@ impl InterruptManager {
         index: u16,
         privilege_level: u8,
     ) -> bool {
+        if !cpu::is_interrupt_enabled() {
+            return false;
+        }
         if index <= 32 || index > 0xFF {
             /* CPU exception interrupt */
             /* intel reserved */
@@ -171,6 +180,8 @@ impl InterruptManager {
         }
         let type_attr: u8 = 0xe | (privilege_level & 0x3) << 5 | 1 << 7;
 
+        let flag = Self::save_and_disable_local_irq();
+        let _lock = self.lock.lock();
         unsafe {
             self.set_gate_descriptor(
                 index,
@@ -185,6 +196,8 @@ impl InterruptManager {
                 .unwrap()
                 .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
         }
+        drop(_lock);
+        Self::restore_local_irq(flag);
         return true;
     }
 
@@ -204,6 +217,7 @@ impl InterruptManager {
             )
             .expect("Cannot allocate pages for ist.");
 
+        let _lock = self.lock.lock();
         self.tss_manager
             .set_ist(ist, (stack + stack_size).to_usize())
     }
@@ -225,6 +239,7 @@ impl InterruptManager {
             )
             .expect("Cannot allocate pages for rsp.");
 
+        let _lock = self.lock.lock();
         self.tss_manager
             .set_rsp(rsp, (stack + stack_size).to_usize())
     }

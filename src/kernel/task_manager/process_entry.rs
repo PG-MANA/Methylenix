@@ -9,6 +9,7 @@ use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
 
+#[allow(dead_code)]
 pub struct ProcessEntry {
     pub(super) p_list: PtrLinkedListNode<Self>,
     pub(super) children: PtrLinkedList<Self>,
@@ -67,17 +68,21 @@ impl ProcessEntry {
             self.update_next_thread_id();
         } else {
             self.single_thread = None;
-            let mut prev_thread = None;
-
             for i in 0..threads.len() {
                 let _thread_lock = threads[0].lock.lock();
                 threads[i].set_process(self as *mut _);
                 threads[i].set_t_id(self.next_thread_id);
                 drop(_thread_lock);
                 self.update_next_thread_id();
-                self.set_thread_into_thread_list(threads[i], prev_thread)
+                let thread = unsafe { &mut *(threads[i] as *mut ThreadEntry) };
+                let prev = if i > 0 {
+                    Some(unsafe { &mut *(threads[i - 1] as *mut ThreadEntry) })
+                } else {
+                    None
+                };
+
+                self.set_thread_into_thread_list(thread, prev)
                     .expect("Cannot insert thread.");
-                prev_thread = Some(threads[i]);
             }
         }
     }
@@ -117,7 +122,7 @@ impl ProcessEntry {
             prev_thread.t_list.insert_after(&mut thread.t_list);
         } else {
             /* Current chain the last of t_list */
-            let mut last_entry = unsafe { self.thread.get_last_entry_mut().unwrap() };
+            let last_entry = unsafe { self.thread.get_last_entry_mut().unwrap() };
             let _lock = thread.lock.lock();
             let _prev_lock = last_entry
                 .lock
@@ -176,10 +181,8 @@ impl ProcessEntry {
         if self.num_of_thread == 1 {
             assert!(self.thread.is_empty());
             assert!(self.single_thread.is_some());
-            self.set_thread_into_thread_list(
-                unsafe { &mut *self.single_thread.take().unwrap() },
-                None,
-            )?;
+            let single_thread = unsafe { &mut *self.single_thread.take().unwrap() };
+            self.set_thread_into_thread_list(single_thread, None)?;
             self.set_thread_into_thread_list(thread, None /* compare and set */)?;
         } else {
             assert!(!self.thread.is_empty());

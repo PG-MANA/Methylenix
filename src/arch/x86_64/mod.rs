@@ -146,11 +146,8 @@ fn main_process() -> ! {
         .arch_depend_data
         .local_apic_timer
         .start_interrupt(
-            get_kernel_manager_cluster()
-                .boot_strap_cpu_manager
+            get_cpu_manager_cluster()
                 .interrupt_manager
-                .lock()
-                .unwrap()
                 .get_local_apic_manager(),
         );
     pr_info!("All init are done!");
@@ -165,12 +162,9 @@ fn main_process() -> ! {
     }
 
     loop {
-        get_cpu_manager_cluster().run_queue.sleep();
-        while let Some(c) = get_kernel_manager_cluster()
-            .serial_port_manager
-            .dequeue_key()
-        {
-            print!("{}", c as char);
+        let c = get_kernel_manager_cluster().kernel_tty_manager.getc(true);
+        if c.is_some() {
+            print!("{}", c.unwrap() as char);
         }
         if get_kernel_manager_cluster()
             .kernel_tty_manager
@@ -386,12 +380,10 @@ pub extern "C" fn ap_boot_main() -> ! {
     interrupt_manager.init_ap(
         &mut get_kernel_manager_cluster()
             .boot_strap_cpu_manager
-            .interrupt_manager
-            .lock()
-            .unwrap(),
+            .interrupt_manager,
     );
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
-    cpu_manager.interrupt_manager = Mutex::new(interrupt_manager);
+    cpu_manager.interrupt_manager = interrupt_manager;
 
     cpu_manager.arch_depend_data.local_apic_timer = init_timer();
     init_task_ap(ap_idle);

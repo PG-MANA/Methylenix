@@ -14,7 +14,7 @@ use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu::{cpuid, rdmsr, rdtsc, wrmsr};
 use crate::arch::target_arch::device::local_apic::{LocalApicManager, LocalApicRegisters};
 
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::timer_manager::{Timer, TimerManager};
 
@@ -71,13 +71,6 @@ impl LocalApicTimer {
     /// Currently, this function sends end of interrupt and switches to next thread.
     #[inline(never)]
     pub extern "C" fn local_apic_timer_handler(c: u64) {
-        if let Ok(im) = get_kernel_manager_cluster()
-            .boot_strap_cpu_manager
-            .interrupt_manager
-            .try_lock()
-        {
-            im.send_eoi();
-        }
         get_cpu_manager_cluster()
             .arch_depend_data
             .local_apic_timer
@@ -85,9 +78,10 @@ impl LocalApicTimer {
 
         /* Task switch */
         let context_data = unsafe { &*(c as *const ContextData) };
+        get_cpu_manager_cluster().interrupt_manager.send_eoi();
         get_cpu_manager_cluster()
             .run_queue
-            .switch_to_next_thread_without_saving_context(context_data);
+            .schedule(None, Some(context_data));
     }
 
     /// Reset timer deadline for next interrupt

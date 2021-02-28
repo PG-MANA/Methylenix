@@ -1,5 +1,5 @@
 //!
-//! Task Run Queue Manager
+//! Task Run Queue
 //!
 //! This module manages per-cpu run queue.
 
@@ -60,6 +60,7 @@ impl RunQueue {
     /// This function will not change thread.task_status.
     ///
     /// `thread` must be locked and **`thread` must not be running thread**.
+    #[allow(dead_code)]
     pub(super) fn remove_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(thread.lock.is_locked());
         let interrupt_flag = InterruptManager::save_and_disable_local_irq();
@@ -78,7 +79,7 @@ impl RunQueue {
     /// Set current thread's status to Sleeping and call [Self::schedule].
     ///
     /// This function changes [Self::running_thread] to Sleep and call [Self::schedule].
-    /// This does not chain `ThreadEntry::sleep_list`.
+    /// This does not check `ThreadEntry::sleep_list`.
     ///
     /// [Self::running_thread] must be unlocked.
     pub fn sleep_current_thread(
@@ -105,7 +106,6 @@ impl RunQueue {
     /// This function returns mut reference of current thread.
     ///
     /// To avoid dead lock of current thread's lock, the interrupt must be disabled.
-    #[allow(dead_code)]
     pub fn get_running_thread(&mut self) -> &mut ThreadEntry {
         assert!(!is_interrupt_enabled());
         unsafe { &mut *self.running_thread.unwrap() }

@@ -76,8 +76,8 @@ impl TaskManager {
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
-            kernel_process: unsafe { core::ptr::null_mut() },
-            idle_thread: unsafe { core::ptr::null_mut() },
+            kernel_process: core::ptr::null_mut(),
+            idle_thread: core::ptr::null_mut(),
             context_manager: ContextManager::new(),
             process_entry_pool: CacheAllocator::new(ProcessEntry::PROCESS_ENTRY_ALIGN_ORDER),
             thread_entry_pool: CacheAllocator::new(ThreadEntry::THREAD_ENTRY_ALIGN_ORDER),
@@ -121,7 +121,7 @@ impl TaskManager {
 
         kernel_process.init(
             0,
-            unsafe { core::ptr::null_mut() },
+            core::ptr::null_mut(),
             &mut [main_thread, idle_thread],
             memory_manager as *const _,
             0,
@@ -135,8 +135,12 @@ impl TaskManager {
         idle_thread.set_ptr_to_list();
 
         /* Set threads to run_queue_manager */
-        run_queue.add_thread(main_thread);
-        run_queue.add_thread(idle_thread);
+        run_queue
+            .add_thread(main_thread)
+            .expect("Cannot add main thread to RunQueue.");
+        run_queue
+            .add_thread(idle_thread)
+            .expect("Cannot add idle thread to RunQueue.");
 
         self.kernel_process = kernel_process;
         self.idle_thread = idle_thread;
@@ -146,20 +150,20 @@ impl TaskManager {
     /// Init idle thread for additional processors.
     ///
     /// This function forks idle thread and sets it to run_queue_manager.
-    pub fn init_idle(
-        &mut self,
-        idle_fn: fn() -> !,
-        run_queue: &mut RunQueue,
-    ) -> Result<(), TaskError> {
+    pub fn init_idle(&mut self, idle_fn: fn() -> !, run_queue: &mut RunQueue) {
         let idle_thread = unsafe { &mut *self.idle_thread };
-        let mut forked_thread = self.fork_system_thread(
-            idle_thread,
-            idle_fn,
-            Some(ContextManager::IDLE_THREAD_STACK_SIZE),
-        )?;
+        let forked_thread = self
+            .fork_system_thread(
+                idle_thread,
+                idle_fn,
+                Some(ContextManager::IDLE_THREAD_STACK_SIZE),
+            )
+            .expect("Cannot fork idle thread.");
         let _lock = forked_thread.lock.lock();
-        run_queue.add_thread(forked_thread);
-        return Ok(());
+        run_queue
+            .add_thread(forked_thread)
+            .expect("Cannot init ap's idle thread.");
+        return;
     }
 
     /// Fork `thread` and create `ThreadEntry`.
@@ -194,7 +198,7 @@ impl TaskManager {
             .lock
             .try_lock()
             .or(Err(TaskError::ThreadLockError))?;
-        parent_process.add_thread(new_thread);
+        parent_process.add_thread(new_thread)?;
         return Ok(new_thread);
     }
 
@@ -244,7 +248,7 @@ impl TaskManager {
                 .run_queue
                 .add_thread(forked_thread)
             {
-                pr_err!("Cannot add thread to RunQueueManager. Error: {:?}", e);
+                pr_err!("Cannot add thread to RunQueue. Error: {:?}", e);
                 let process = forked_thread.get_process_mut();
                 if let Err(r_e) = process.remove_thread(forked_thread) {
                     pr_err!("Removing thread from process was failed. Error: {:?}", r_e);

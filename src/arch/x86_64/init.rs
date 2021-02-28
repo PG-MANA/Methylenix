@@ -6,7 +6,7 @@
 
 pub mod multiboot;
 
-use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
+use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
@@ -76,8 +76,7 @@ pub fn init_task_ap(idle_task: fn() -> !) {
     run_queue.init();
     get_kernel_manager_cluster()
         .task_manager
-        .init_idle(idle_task, &mut run_queue)
-        .expect("Cannot init ap's idle thread.");
+        .init_idle(idle_task, &mut run_queue);
     get_cpu_manager_cluster().run_queue = run_queue;
 }
 
@@ -98,7 +97,7 @@ pub fn init_interrupt(kernel_selector: u16) {
     interrupt_manager.init(kernel_selector);
     get_kernel_manager_cluster()
         .boot_strap_cpu_manager
-        .interrupt_manager = Mutex::new(interrupt_manager);
+        .interrupt_manager = interrupt_manager;
 
     let mut io_apic_manager = IoApicManager::new();
     io_apic_manager.init();
@@ -172,8 +171,6 @@ pub fn init_timer() -> LocalApicTimer {
         InterruptionIndex::LocalApicTimer as u16,
         get_cpu_manager_cluster()
             .interrupt_manager
-            .lock()
-            .unwrap()
             .get_local_apic_manager(),
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
@@ -194,8 +191,6 @@ pub fn init_timer() -> LocalApicTimer {
             InterruptionIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
-                .lock()
-                .unwrap()
                 .get_local_apic_manager(),
             &pm_timer,
         );
@@ -207,8 +202,6 @@ pub fn init_timer() -> LocalApicTimer {
             InterruptionIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
-                .lock()
-                .unwrap()
                 .get_local_apic_manager(),
             &pit,
         );
@@ -223,14 +216,10 @@ pub fn init_timer() -> LocalApicTimer {
 
     get_cpu_manager_cluster()
         .interrupt_manager
-        .lock()
-        .unwrap()
         .set_ist(1, 0x4000.into());
 
     get_cpu_manager_cluster()
         .interrupt_manager
-        .lock()
-        .unwrap()
         .set_device_interrupt_function(
             local_apic_timer_handler,
             None,
@@ -314,8 +303,6 @@ pub fn init_multiple_processors_ap() {
     let mut cpu_manager = get_cpu_manager_cluster();
     let bsp_apic_id = get_cpu_manager_cluster()
         .interrupt_manager
-        .lock()
-        .unwrap()
         .get_local_apic_manager()
         .get_apic_id();
     cpu_manager.cpu_id = bsp_apic_id as usize;
@@ -373,35 +360,29 @@ pub fn init_multiple_processors_ap() {
 
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
 
-        let interrupt_manager = get_kernel_manager_cluster()
+        let local_apic_manager = &get_kernel_manager_cluster()
             .boot_strap_cpu_manager
             .interrupt_manager
-            .lock()
-            .unwrap();
-        interrupt_manager
-            .get_local_apic_manager()
-            .send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, false, 0);
+            .get_local_apic_manager();
+
+        local_apic_manager.send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, false, 0);
 
         timer.busy_wait_us(100);
 
-        interrupt_manager
-            .get_local_apic_manager()
-            .send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, true, 0);
+        local_apic_manager.send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, true, 0);
 
         /* Wait 10 millisecond for the AP */
         timer.busy_wait_ms(10);
 
-        interrupt_manager
-            .get_local_apic_manager()
+        local_apic_manager
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
 
         timer.busy_wait_us(200);
 
-        interrupt_manager
-            .get_local_apic_manager()
+        local_apic_manager
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
 
-        drop(interrupt_manager);
+        drop(local_apic_manager);
         for _wait in 0..5000
         /* Wait 5s for AP init */
         {
