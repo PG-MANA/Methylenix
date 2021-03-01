@@ -161,16 +161,13 @@ fn main_process() -> ! {
         pr_err!("Cannot init ACPI devices.");
     }
 
+    let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
-        let c = get_kernel_manager_cluster().kernel_tty_manager.getc(true);
+        let c = tty.getc(true);
         if c.is_some() {
             print!("{}", c.unwrap() as char);
         }
-        if get_kernel_manager_cluster()
-            .kernel_tty_manager
-            .flush()
-            .is_err()
-        {
+        if tty.flush().is_err() {
             pr_err!("Cannot flush text.");
         }
     }

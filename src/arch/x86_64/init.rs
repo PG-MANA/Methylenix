@@ -12,7 +12,7 @@ use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
-use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{
@@ -80,7 +80,7 @@ pub fn init_task_ap(idle_task: fn() -> !) {
     get_cpu_manager_cluster().run_queue = run_queue;
 }
 
-/// Init SoftInterrupt
+/// Init Work Queue
 pub fn init_work_queue() {
     get_cpu_manager_cluster()
         .work_queue
@@ -95,9 +95,7 @@ pub fn init_interrupt(kernel_selector: u16) {
 
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
-    get_kernel_manager_cluster()
-        .boot_strap_cpu_manager
-        .interrupt_manager = interrupt_manager;
+    get_cpu_manager_cluster().interrupt_manager = interrupt_manager;
 
     let mut io_apic_manager = IoApicManager::new();
     io_apic_manager.init();
@@ -216,7 +214,7 @@ pub fn init_timer() -> LocalApicTimer {
 
     get_cpu_manager_cluster()
         .interrupt_manager
-        .set_ist(1, 0x4000.into());
+        .set_ist(1, PAGE_SIZE);
 
     get_cpu_manager_cluster()
         .interrupt_manager
