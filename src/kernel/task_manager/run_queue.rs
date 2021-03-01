@@ -82,6 +82,8 @@ impl RunQueue {
     /// This does not check `ThreadEntry::sleep_list`.
     ///
     /// [Self::running_thread] must be unlocked.
+    ///
+    /// **Ensure that SpinLocks are unlocked before calling this function.**  
     pub fn sleep_current_thread(
         &mut self,
         interrupt_flag: Option<StoredIrqData>,
@@ -130,6 +132,7 @@ impl RunQueue {
     /// Add thread into this run queue.
     ///
     /// `thread` must be locked.
+    /// **Be careful that other threads in this run queue must be unlocked.**
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(thread.lock.is_locked());
         let interrupt_flag = InterruptManager::save_and_disable_local_irq();
@@ -173,13 +176,17 @@ impl RunQueue {
                     running_thread.run_list.remove_from_list(&mut self.run_list);
                 } else {
                     next_thread.run_list.terminate_prev_entry();
-                    if running_thread.run_list.get_prev_as_ptr().is_none() {
-                        self.run_list
-                            .set_first_entry(Some(&mut next_thread.run_list as *mut _));
-                    }
+                    self.run_list
+                        .set_first_entry(Some(&mut next_thread.run_list as *mut _));
                 }
+                running_thread.run_list.unset_prev_and_next();
                 next_thread
             } else {
+                if let Some(prev_thread) = unsafe { running_thread.run_list.get_prev_mut() } {
+                    let _prev_thread_lock = prev_thread.lock.lock();
+                    running_thread.run_list.remove_from_list(&mut self.run_list);
+                }
+                running_thread.run_list.unset_prev_and_next();
                 unsafe { self.run_list.get_first_entry_mut() }.unwrap()
             }
         } else {
@@ -204,6 +211,8 @@ impl RunQueue {
             InterruptManager::restore_local_irq(interrupt_flag);
             return;
         }
+
+        self.running_thread = Some(next_thread);
         if let Some(c) = current_context {
             let _running_thread_lock = running_thread.lock.lock();
             running_thread.set_context(c);
@@ -225,6 +234,7 @@ impl RunQueue {
                     .get_context_manager()
                     .switch_context(running_thread.get_context(), next_thread.get_context());
             }
+            return;
         }
     }
 }

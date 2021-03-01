@@ -137,11 +137,12 @@ impl TaskManager {
         /* Set threads to run_queue_manager */
         run_queue
             .add_thread(main_thread)
-            .expect("Cannot add main thread to RunQueue.");
+            .expect("Cannot add main thread to RunQueue");
+        drop(_main_thread_lock);
         run_queue
             .add_thread(idle_thread)
-            .expect("Cannot add idle thread to RunQueue.");
-
+            .expect("Cannot add idle thread to RunQueue");
+        drop(_idle_thread_lock);
         self.kernel_process = kernel_process;
         self.idle_thread = idle_thread;
         return;
@@ -158,11 +159,11 @@ impl TaskManager {
                 idle_fn,
                 Some(ContextManager::IDLE_THREAD_STACK_SIZE),
             )
-            .expect("Cannot fork idle thread.");
+            .expect("Cannot fork idle thread");
         let _lock = forked_thread.lock.lock();
         run_queue
             .add_thread(forked_thread)
-            .expect("Cannot init ap's idle thread.");
+            .expect("Cannot init ap's idle thread");
         return;
     }
 

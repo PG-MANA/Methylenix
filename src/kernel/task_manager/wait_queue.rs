@@ -8,9 +8,11 @@
 //!
 //! Do not call this Manager in interrupt handlers, please add work_queue and call from there.
 
-use super::{TaskError, TaskStatus, ThreadEntry};
+use super::{TaskError, ThreadEntry};
 
+use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 use crate::arch::target_arch::interrupt::InterruptManager;
+
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::ptr_linked_list::PtrLinkedList;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
@@ -28,20 +30,18 @@ impl WaitQueue {
         }
     }
 
-    pub fn _add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
-        assert!(!thread.lock.is_locked());
+    fn _add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+        assert!(thread.lock.is_locked());
 
         if let Some(first_thread) = unsafe { self.list.get_first_entry_mut() } {
             let _first_thread_lock = first_thread
                 .lock
                 .try_lock()
                 .or(Err(TaskError::ThreadLockError))?;
-            let _thread_lock = thread.lock.lock();
             thread.set_ptr_to_list();
             thread.sleep_list.unset_prev_and_next();
             first_thread.sleep_list.insert_after(&mut thread.sleep_list);
         } else {
-            let _thread_lock = thread.lock.lock();
             thread.sleep_list.unset_prev_and_next();
             self.list
                 .set_first_entry(Some(&mut thread.sleep_list as *mut _));
@@ -55,10 +55,12 @@ impl WaitQueue {
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(!thread.lock.is_locked());
         let _lock = self.lock.lock();
+        let _thread_lock = thread.lock.try_lock().or(Err(TaskError::ThreadLockError))?;
         self._add_thread(thread)
     }
 
     pub fn add_current_thread(&mut self) -> Result<(), TaskError> {
+        assert!(is_interrupt_enabled());
         let _lock = self.lock.lock();
 
         /* Chain running_thread.sleep_list */
@@ -73,6 +75,7 @@ impl WaitQueue {
             self._add_thread(running_thread)?
         };
         if result.is_ok() {
+            drop(_lock);
             get_cpu_manager_cluster()
                 .run_queue
                 .sleep_current_thread(Some(interrupt_flag))?;
@@ -87,7 +90,6 @@ impl WaitQueue {
         for t in self.list.iter_mut() {
             let thread = unsafe { &mut *t };
             let _thread_lock = thread.lock.lock();
-            thread.set_task_status(TaskStatus::CanRun);
             thread.sleep_list.remove_from_list(&mut self.list);
             thread.sleep_list.unset_prev_and_next();
             drop(_thread_lock);
