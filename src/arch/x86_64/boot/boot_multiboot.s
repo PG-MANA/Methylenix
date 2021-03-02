@@ -1,13 +1,13 @@
 /*
- * Boot code for Multiboot
+ * Boot entry for Multiboot
  */
 
 .code32
 .att_syntax
 
-.global boot_from_multiboot, BOOT_FROM_MULTIBOOT_MARK
-.extern init_long_mode, fin                 /* at init_long_mode */
-.extern OS_STACK_SIZE, os_stack             /* at common */
+.global boot_multiboot, BOOT_FROM_MULTIBOOT_MARK
+.extern setup_long_mode, fin                /* at setup_long_mode.s */
+.extern OS_STACK_SIZE, os_stack             /* at common.s */
 
 .equ MULTIBOOT_CHECK_MAGIC, 0x36d76289      /* multiboot2 magic code */
 .equ BOOT_FROM_MULTIBOOT_MARK, 1
@@ -15,12 +15,11 @@
 .section .text
 .align 4
 
-boot_from_multiboot:
+boot_multiboot:
   mov   $(os_stack + OS_STACK_SIZE), %esp
 
-  /* Init eflags */
   push  $0
-  popfd
+  popfd                             /* Clear eflags */
   push  $0                          /* for 64bit pop */
   push  $BOOT_FROM_MULTIBOOT_MARK   /* the mark booted from multiboot */
   push  $0                          /* for 64bit pop */
@@ -28,7 +27,7 @@ boot_from_multiboot:
 
   cmp   $MULTIBOOT_CHECK_MAGIC, %eax
   jne   bad_magic
-  jmp   init_long_mode
+  jmp   setup_long_mode
 
 bad_magic:
   mov   $BOOT_ERROR_STR_SIZE, %ecx
