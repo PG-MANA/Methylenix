@@ -170,9 +170,6 @@ impl InterruptManager {
         index: u16,
         privilege_level: u8,
     ) -> bool {
-        if cpu::is_interrupt_enabled() {
-            return false;
-        }
         if index <= 32 || index > 0xFF {
             /* CPU exception interrupt */
             /* intel reserved */
