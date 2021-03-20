@@ -12,7 +12,6 @@ use crate::kernel::task_manager::wait_queue::WaitQueue;
 use core::fmt;
 use core::mem::MaybeUninit;
 
-#[allow(dead_code)]
 pub struct TtyManager {
     input_lock: SpinLockFlag,
     output_lock: SpinLockFlag,
@@ -53,7 +52,7 @@ impl TtyManager {
             #[allow(unused_must_use)]
             if let Err(e) = self.input_wait_queue.wakeup() {
                 use core::fmt::Write;
-                write!(self, "Cannot wakeup sleeping threads. Error: {:?}", e);
+                write!(self, "Cannot wakeup sleeping threads. Error: {:?}\n", e);
             }
             Ok(())
         } else {
@@ -73,7 +72,7 @@ impl TtyManager {
         #[allow(unused_must_use)]
         if let Err(e) = self.input_wait_queue.add_current_thread() {
             use core::fmt::Write;
-            write!(self, "Cannot wakeup sleeping threads. Error: {:?}", e);
+            write!(self, "Cannot wakeup sleeping threads. Error: {:?}\n", e);
         }
         self.getc(false)
     }
@@ -196,29 +195,29 @@ macro_rules! print {
 #[macro_export]
 macro_rules! println {
     ($fmt:expr) => (print!(concat!($fmt,"\n")));
-    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*)); //\nをつける
+    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*));
 }
 
 #[macro_export]
 macro_rules! kprintln {
     ($fmt:expr) => (print!(concat!($fmt,"\n")));
-    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*)); //\nをつける
+    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*));
 }
 
 #[macro_export]
 macro_rules! pr_info {
     ($fmt:expr) => ($crate::kernel::tty::print_debug_message(6, format_args!(concat!($fmt,"\n"))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(6, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(6, format_args!(concat!($fmt, "\n"),$($arg)*)));
 }
 
 #[macro_export]
 macro_rules! pr_warn {
     ($fmt:expr) => ($crate::kernel::tty::print_debug_message(4, format_args!(concat!($fmt,"\n"))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(4, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(4, format_args!(concat!($fmt, "\n"),$($arg)*)));
 }
 
 #[macro_export]
 macro_rules! pr_err {
     ($fmt:expr) => ($crate::kernel::tty::print_debug_message(3, format_args!(concat!($fmt,"\n"))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(3, format_args!(concat!($fmt, "\n"),$($arg)*))); //\nをつける
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(3, format_args!(concat!($fmt, "\n"),$($arg)*)));
 }

@@ -53,7 +53,10 @@ pub fn init_task(
         user_ss,
         unsafe { cpu::get_cr3() },
     );
-    run_queue.init();
+    let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
+    let memory_manager = &get_kernel_manager_cluster().memory_manager;
+    run_queue.init(&mut object_allocator, memory_manager);
+    drop(object_allocator);
 
     let main_context = context_manager
         .create_system_context(main_process, None)
@@ -73,7 +76,11 @@ pub fn init_task(
 ///
 pub fn init_task_ap(idle_task: fn() -> !) {
     let mut run_queue = RunQueue::new();
-    run_queue.init();
+    let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
+    let memory_manager = &get_kernel_manager_cluster().memory_manager;
+    run_queue.init(&mut object_allocator, memory_manager);
+    drop(object_allocator);
+
     get_kernel_manager_cluster()
         .task_manager
         .init_idle(idle_task, &mut run_queue);
