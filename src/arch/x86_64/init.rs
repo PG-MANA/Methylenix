@@ -6,14 +6,13 @@
 
 pub mod multiboot;
 
-use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
-use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{
@@ -24,7 +23,7 @@ use crate::kernel::memory_manager::data_type::{
 };
 use crate::kernel::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::task_manager::run_queue_manager::RunQueueManager;
+use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::Timer;
 
@@ -41,9 +40,12 @@ pub fn init_task(
     user_cs: u16,
     user_ss: u16,
     main_process: fn() -> !,
-    idle_task: fn() -> !,
+    idle_process: fn() -> !,
 ) {
     let mut context_manager = ContextManager::new();
+    let mut run_queue = RunQueue::new();
+    let mut task_manager = TaskManager::new();
+
     context_manager.init(
         system_cs,
         0, /*is it ok?*/
@@ -51,60 +53,44 @@ pub fn init_task(
         user_ss,
         unsafe { cpu::get_cr3() },
     );
+    let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
+    let memory_manager = &get_kernel_manager_cluster().memory_manager;
+    run_queue.init(&mut object_allocator, memory_manager);
+    drop(object_allocator);
 
-    let create_context = |c: &ContextManager, entry_function: fn() -> !| -> ContextData {
-        match c.create_system_context(entry_function as *const fn() as usize, None) {
-            Ok(m) => m,
-            Err(e) => panic!("Cannot create a ContextData: {:?}", e),
-        }
-    };
-    let context_for_main = create_context(&context_manager, main_process);
+    let main_context = context_manager
+        .create_system_context(main_process, None)
+        .expect("Cannot create main thread's context.");
+    let idle_context = context_manager
+        .create_system_context(idle_process, Some(ContextManager::IDLE_THREAD_STACK_SIZE))
+        .expect("Cannot create idle thread's context.");
 
-    get_cpu_manager_cluster().run_queue_manager = RunQueueManager::new();
-    get_cpu_manager_cluster().run_queue_manager.init();
-    get_kernel_manager_cluster().task_manager = TaskManager::new();
-    let main_thread = get_kernel_manager_cluster()
-        .task_manager
-        .init(context_manager, context_for_main);
-    let idle_thread = get_kernel_manager_cluster()
-        .task_manager
-        .create_kernel_thread(
-            idle_task as *const fn() -> !,
-            Some(MSize::new(0x1000)),
-            i8::MIN,
-        )
-        .unwrap();
-    get_cpu_manager_cluster()
-        .run_queue_manager
-        .add_thread(main_thread);
-    get_cpu_manager_cluster()
-        .run_queue_manager
-        .add_thread(idle_thread);
+    task_manager.init(context_manager, main_context, idle_context, &mut run_queue);
+
+    get_cpu_manager_cluster().run_queue = run_queue;
+    get_kernel_manager_cluster().task_manager = task_manager;
 }
 
 /// Init application processor's TaskManager
 ///
 ///
 pub fn init_task_ap(idle_task: fn() -> !) {
-    get_cpu_manager_cluster().run_queue_manager = RunQueueManager::new();
-    get_cpu_manager_cluster().run_queue_manager.init();
-    let idle_thread = get_kernel_manager_cluster()
+    let mut run_queue = RunQueue::new();
+    let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
+    let memory_manager = &get_kernel_manager_cluster().memory_manager;
+    run_queue.init(&mut object_allocator, memory_manager);
+    drop(object_allocator);
+
+    get_kernel_manager_cluster()
         .task_manager
-        .create_kernel_thread(
-            idle_task as *const fn() -> !,
-            Some(MSize::new(0x1000)),
-            i8::MIN,
-        )
-        .unwrap();
-    get_cpu_manager_cluster()
-        .run_queue_manager
-        .add_thread(idle_thread);
+        .init_idle(idle_task, &mut run_queue);
+    get_cpu_manager_cluster().run_queue = run_queue;
 }
 
-/// Init SoftInterrupt
-pub fn init_interrupt_work_queue_manager() {
+/// Init Work Queue
+pub fn init_work_queue() {
     get_cpu_manager_cluster()
-        .work_queue_manager
+        .work_queue
         .init(&mut get_kernel_manager_cluster().task_manager);
 }
 
@@ -116,9 +102,7 @@ pub fn init_interrupt(kernel_selector: u16) {
 
     let mut interrupt_manager = InterruptManager::new();
     interrupt_manager.init(kernel_selector);
-    get_kernel_manager_cluster()
-        .boot_strap_cpu_manager
-        .interrupt_manager = Mutex::new(interrupt_manager);
+    get_cpu_manager_cluster().interrupt_manager = interrupt_manager;
 
     let mut io_apic_manager = IoApicManager::new();
     io_apic_manager.init();
@@ -192,8 +176,6 @@ pub fn init_timer() -> LocalApicTimer {
         InterruptionIndex::LocalApicTimer as u16,
         get_cpu_manager_cluster()
             .interrupt_manager
-            .lock()
-            .unwrap()
             .get_local_apic_manager(),
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
@@ -214,8 +196,6 @@ pub fn init_timer() -> LocalApicTimer {
             InterruptionIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
-                .lock()
-                .unwrap()
                 .get_local_apic_manager(),
             &pm_timer,
         );
@@ -227,8 +207,6 @@ pub fn init_timer() -> LocalApicTimer {
             InterruptionIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
-                .lock()
-                .unwrap()
                 .get_local_apic_manager(),
             &pit,
         );
@@ -243,14 +221,10 @@ pub fn init_timer() -> LocalApicTimer {
 
     get_cpu_manager_cluster()
         .interrupt_manager
-        .lock()
-        .unwrap()
-        .set_ist(1, 0x4000.into());
+        .set_ist(1, PAGE_SIZE);
 
     get_cpu_manager_cluster()
         .interrupt_manager
-        .lock()
-        .unwrap()
         .set_device_interrupt_function(
             local_apic_timer_handler,
             None,
@@ -334,8 +308,6 @@ pub fn init_multiple_processors_ap() {
     let mut cpu_manager = get_cpu_manager_cluster();
     let bsp_apic_id = get_cpu_manager_cluster()
         .interrupt_manager
-        .lock()
-        .unwrap()
         .get_local_apic_manager()
         .get_apic_id();
     cpu_manager.cpu_id = bsp_apic_id as usize;
@@ -393,35 +365,29 @@ pub fn init_multiple_processors_ap() {
 
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
 
-        let interrupt_manager = get_kernel_manager_cluster()
+        let local_apic_manager = &get_kernel_manager_cluster()
             .boot_strap_cpu_manager
             .interrupt_manager
-            .lock()
-            .unwrap();
-        interrupt_manager
-            .get_local_apic_manager()
-            .send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, false, 0);
+            .get_local_apic_manager();
+
+        local_apic_manager.send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, false, 0);
 
         timer.busy_wait_us(100);
 
-        interrupt_manager
-            .get_local_apic_manager()
-            .send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, true, 0);
+        local_apic_manager.send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, true, 0);
 
         /* Wait 10 millisecond for the AP */
         timer.busy_wait_ms(10);
 
-        interrupt_manager
-            .get_local_apic_manager()
+        local_apic_manager
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
 
         timer.busy_wait_us(200);
 
-        interrupt_manager
-            .get_local_apic_manager()
+        local_apic_manager
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
 
-        drop(interrupt_manager);
+        drop(local_apic_manager);
         for _wait in 0..5000
         /* Wait 5s for AP init */
         {

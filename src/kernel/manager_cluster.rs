@@ -15,8 +15,8 @@ use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
 use crate::kernel::ptr_linked_list::PtrLinkedListNode;
-use crate::kernel::task_manager::run_queue_manager::RunQueueManager;
-use crate::kernel::task_manager::work_queue::WorkQueueManager;
+use crate::kernel::task_manager::run_queue::RunQueue;
+use crate::kernel::task_manager::work_queue::WorkQueue;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::tty::TtyManager;
 
@@ -51,10 +51,10 @@ pub fn get_kernel_manager_cluster() -> &'static mut KernelManagerCluster {
 pub struct CpuManagerCluster {
     pub cpu_id: usize,
     pub list: PtrLinkedListNode<Self>,
-    pub interrupt_manager: Mutex<InterruptManager>,
-    pub work_queue_manager: WorkQueueManager,
+    pub interrupt_manager: InterruptManager,
+    pub work_queue: WorkQueue,
     pub object_allocator: Mutex<ObjectAllocator>,
-    pub run_queue_manager: RunQueueManager,
+    pub run_queue: RunQueue,
     pub arch_depend_data: ArchDependedCpuManagerCluster,
 }
 

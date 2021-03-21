@@ -92,6 +92,10 @@ impl<T> PtrLinkedList<T> {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.head.is_none()
+    }
+
     pub fn iter(&self) -> PtrLinkedListIter<T> {
         PtrLinkedListIter {
             head: self.head,
@@ -192,6 +196,14 @@ impl<T> PtrLinkedListNode<T> {
         self.terminate_prev_entry();
         self.next = NonNull::new(old_root);
         old_root.prev = NonNull::new(self);
+    }
+
+    /// Set prev and next to None
+    ///
+    /// This function **only** unset, does not check prev and next.
+    pub fn unset_prev_and_next(&mut self) {
+        self.prev = None;
+        self.next = None;
     }
 
     pub fn terminate_prev_entry(&mut self) {

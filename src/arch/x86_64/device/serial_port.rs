@@ -5,7 +5,6 @@
 
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 
-use crate::kernel::fifo::FIFO;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::task_manager::work_queue::WorkList;
@@ -17,7 +16,6 @@ use crate::kernel::task_manager::work_queue::WorkList;
 pub struct SerialPortManager {
     port: u16,
     write_lock: SpinLockFlag,
-    fifo: FIFO<u8, 256usize>,
     enabled: bool,
 }
 
@@ -29,10 +27,9 @@ impl SerialPortManager {
     ///
     /// [`init`]: #method.init
     pub fn new(io_port: u16) -> SerialPortManager {
-        SerialPortManager {
+        Self {
             port: io_port,
             write_lock: SpinLockFlag::new(),
-            fifo: FIFO::new(0),
             enabled: true,
         }
     }
@@ -52,8 +49,6 @@ impl SerialPortManager {
             get_kernel_manager_cluster()
                 .boot_strap_cpu_manager
                 .interrupt_manager
-                .lock()
-                .unwrap()
                 .set_device_interrupt_function(inthandler24, Some(4), None, 0x24, 0);
             let _lock = self.write_lock.lock();
             out_byte(self.port + 1, 0x00); // Off the FIFO of controller
@@ -125,47 +120,27 @@ impl SerialPortManager {
         unsafe { in_byte(self.port) }
     }
 
-    /// dequeue a 8bit-data from FIFO contains arriving data.
-    ///
-    /// If there is no new data, this function will return None.
-    /// This function is lock free.
-    pub fn dequeue_key(&mut self) -> Option<u8> {
-        self.fifo.dequeue()
-    }
-
-    /// enqueue a 8bit-data into FIFO contains arriving data.
-    ///
-    /// This function is called by interrupt handler.
-    /// This function is lock free.
-    fn enqueue_key(&mut self, key: u8) {
-        self.fifo.enqueue(key);
-    }
-
     /// Serial Port interrupt handler
     ///
     /// First, this will get data from serial port controller, and push it into FIFO.
     /// Currently, this wakes the main process up.
     #[inline(never)]
     fn int_handler24_main() {
-        if let Ok(interrupt_manager) = get_kernel_manager_cluster()
-            .boot_strap_cpu_manager
-            .interrupt_manager
-            .try_lock()
-        {
-            interrupt_manager.send_eoi();
-        }
         let work = WorkList::new(
             Self::worker,
             get_kernel_manager_cluster().serial_port_manager.read() as usize,
         );
-        get_cpu_manager_cluster().work_queue_manager.add_work(work);
+        get_cpu_manager_cluster().work_queue.add_work(work);
+        get_cpu_manager_cluster().interrupt_manager.send_eoi();
     }
 
     fn worker(data: usize) {
-        get_kernel_manager_cluster()
-            .serial_port_manager
-            .enqueue_key(data as u8);
-        get_kernel_manager_cluster().task_manager.wakeup(0, 1);
+        if let Err(e) = get_kernel_manager_cluster()
+            .kernel_tty_manager
+            .input(data as u8)
+        {
+            pr_err!("Cannot input data to tty. Error: {:?}", e);
+        }
     }
 
     /// Check if the transmission was completed.

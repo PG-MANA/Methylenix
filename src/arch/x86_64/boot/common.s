@@ -5,7 +5,7 @@
 .equ IO_MAP_SIZE,           0xffff
 .equ OS_STACK_SIZE,         0x8000
 
-.global initial_stack, INITIAL_STACK_SIZE, os_stack, OS_STACK_SIZE, gdt, gdtr0
+.global os_stack, OS_STACK_SIZE, gdt, gdtr0
 .global main_code_segment_descriptor, user_code_segment_descriptor, user_data_segment_descriptor
 .global tss_descriptor, tss_descriptor_address, tss
 .global pd, pdpt, pml4

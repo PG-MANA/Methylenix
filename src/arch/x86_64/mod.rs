@@ -124,14 +124,14 @@ pub extern "C" fn multiboot_main(
         idle,
     );
 
-    /* Setup the interrupt work queue system */
-    init_interrupt_work_queue_manager();
+    /* Setup work queue system */
+    init_work_queue();
 
     /* Setup APs if the processor is multicore-processor */
     init_multiple_processors_ap();
 
     /* Switch to main process */
-    get_cpu_manager_cluster().run_queue_manager.start()
+    get_cpu_manager_cluster().run_queue.start()
     /* Never return to here */
 }
 
@@ -146,11 +146,8 @@ fn main_process() -> ! {
         .arch_depend_data
         .local_apic_timer
         .start_interrupt(
-            get_kernel_manager_cluster()
-                .boot_strap_cpu_manager
+            get_cpu_manager_cluster()
                 .interrupt_manager
-                .lock()
-                .unwrap()
                 .get_local_apic_manager(),
         );
     pr_info!("All init are done!");
@@ -164,19 +161,13 @@ fn main_process() -> ! {
         pr_err!("Cannot init ACPI devices.");
     }
 
+    let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
-        get_cpu_manager_cluster().run_queue_manager.sleep();
-        while let Some(c) = get_kernel_manager_cluster()
-            .serial_port_manager
-            .dequeue_key()
-        {
-            print!("{}", c as char);
+        let c = tty.getc(true);
+        if c.is_some() {
+            print!("{}", c.unwrap() as char);
         }
-        if get_kernel_manager_cluster()
-            .kernel_tty_manager
-            .flush()
-            .is_err()
-        {
+        if tty.flush().is_err() {
             pr_err!("Cannot flush text.");
         }
     }
@@ -386,18 +377,16 @@ pub extern "C" fn ap_boot_main() -> ! {
     interrupt_manager.init_ap(
         &mut get_kernel_manager_cluster()
             .boot_strap_cpu_manager
-            .interrupt_manager
-            .lock()
-            .unwrap(),
+            .interrupt_manager,
     );
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
-    cpu_manager.interrupt_manager = Mutex::new(interrupt_manager);
+    cpu_manager.interrupt_manager = interrupt_manager;
 
     cpu_manager.arch_depend_data.local_apic_timer = init_timer();
     init_task_ap(ap_idle);
-    init_interrupt_work_queue_manager();
+    init_work_queue();
     /* Switch to ap_idle task with own stack */
-    cpu_manager.run_queue_manager.start()
+    cpu_manager.run_queue.start()
 }
 
 fn ap_idle() -> ! {

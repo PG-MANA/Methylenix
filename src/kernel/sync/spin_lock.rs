@@ -79,6 +79,10 @@ impl SpinLockFlag {
             }
         }
     }
+
+    pub fn is_locked(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
+    }
 }
 
 impl Drop for SpinLockFlagHolder {
