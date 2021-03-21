@@ -153,6 +153,7 @@ impl RunQueue {
     /// Set current thread's status to Sleeping and call [Self::schedule].
     ///
     /// This function changes [Self::running_thread] to Sleep and call [Self::schedule].
+    /// `task_status` is set into current thread(it must not be Running).
     /// This does not check `ThreadEntry::sleep_list`.
     ///
     /// [Self::running_thread] must be unlocked.
@@ -161,16 +162,19 @@ impl RunQueue {
     pub fn sleep_current_thread(
         &mut self,
         interrupt_flag: Option<StoredIrqData>,
+        task_status: TaskStatus,
     ) -> Result<(), TaskError> {
         assert!(!unsafe { &mut *self.running_thread.unwrap() }
             .lock
             .is_locked());
+        assert_ne!(task_status, TaskStatus::Running);
+
         let interrupt_flag =
             interrupt_flag.unwrap_or_else(|| InterruptManager::save_and_disable_local_irq());
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let _running_thread_lock = running_thread.lock.lock();
-        running_thread.set_task_status(TaskStatus::Sleeping);
+        running_thread.set_task_status(task_status);
         drop(_running_thread_lock);
         drop(_lock);
         self.schedule(Some(interrupt_flag), None);
@@ -258,7 +262,7 @@ impl RunQueue {
                     .set_first_entry(Some(&mut thread.run_list));
                 self.run_list.set_first_entry(Some(&mut run_list.chain));
             }
-            thread.set_task_status(TaskStatus::CanRun);
+            thread.set_task_status(TaskStatus::Running);
             if self
                 .running_thread
                 .and_then(|r| {
@@ -267,6 +271,7 @@ impl RunQueue {
                 .unwrap_or(false)
             {
                 self.should_recheck_priority = true;
+                self.should_reschedule = true;
             }
             thread.time_slice = 5; /*Temporary*/
         };
@@ -279,12 +284,12 @@ impl RunQueue {
         let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let running_thread = self.get_running_thread();
-        running_thread.time_slice -= 1;
         if running_thread.time_slice < 1 {
             running_thread.time_slice = 5; /*Temporary*/
             self.should_reschedule = true;
+        } else {
+            running_thread.time_slice -= 1;
         }
-        self.get_running_thread().time_slice -= 1;
         drop(_lock);
         InterruptManager::restore_local_irq(interrupt_flag);
     }
@@ -313,7 +318,7 @@ impl RunQueue {
         let _lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let _running_thread_lock = running_thread.lock.lock();
-        let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
+        let next_thread = if running_thread.get_task_status() != TaskStatus::Running {
             if let Some(next_thread) = unsafe { running_thread.run_list.get_next_mut() } {
                 let _next_thread_lock = next_thread.lock.lock();
                 let _prev_lock = get_prev_thread_lock(running_thread);
@@ -334,27 +339,20 @@ impl RunQueue {
                 Self::get_highest_priority_thread(&mut self.run_list)
                     .expect("Cannot get thread to run")
             }
+        } else if self.should_recheck_priority {
+            self.should_recheck_priority = false;
+            Self::get_highest_priority_thread(&mut self.run_list).expect("Cannot get thread to run")
+        } else if let Some(next_thread) = unsafe { running_thread.run_list.get_next_mut() } {
+            next_thread
         } else {
-            running_thread.set_task_status(TaskStatus::CanRun);
-            if self.should_recheck_priority {
-                self.should_recheck_priority = false;
-                Self::get_highest_priority_thread(&mut self.run_list)
-                    .expect("Cannot get thread to run")
-            } else if let Some(next_thread) = unsafe { running_thread.run_list.get_next_mut() } {
-                next_thread
-            } else {
-                Self::get_highest_priority_thread(&mut self.run_list)
-                    .expect("Cannot get thread to run")
-            }
+            Self::get_highest_priority_thread(&mut self.run_list).expect("Cannot get thread to run")
         };
 
         let running_thread_t_id = running_thread.get_t_id();
         let running_thread_p_id = running_thread.get_process().get_pid();
         drop(_running_thread_lock);
 
-        assert_eq!(next_thread.get_task_status(), TaskStatus::CanRun);
-
-        next_thread.set_task_status(TaskStatus::Running);
+        assert_eq!(next_thread.get_task_status(), TaskStatus::Running);
 
         if running_thread_t_id == next_thread.get_t_id()
             && running_thread_p_id == next_thread.get_process().get_pid()
@@ -365,6 +363,7 @@ impl RunQueue {
             return;
         }
 
+        self.should_reschedule = false;
         self.running_thread = Some(next_thread);
         if let Some(c) = current_context {
             let _running_thread_lock = running_thread.lock.lock();

@@ -47,9 +47,10 @@ pub enum TaskSignal {
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum TaskStatus {
     New,
-    Sleeping,
-    CanRun,
+    Interruptible,
+    Uninterruptible,
     Running,
+    Stopped,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -291,7 +292,6 @@ impl TaskManager {
         let _thread_lock = thread.lock.lock();
         thread.set_ptr_to_list();
         thread.run_list.unset_prev_and_next();
-        thread.set_task_status(TaskStatus::CanRun);
         thread.time_slice = 5; /* Temporary */
         /* Currently, add this cpu's run queue. */
         get_cpu_manager_cluster().run_queue.add_thread(thread)?;

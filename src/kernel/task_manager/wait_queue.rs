@@ -8,7 +8,7 @@
 //!
 //! Do not call this Manager in interrupt handlers, please add work_queue and call from there.
 
-use super::{TaskError, ThreadEntry};
+use super::{TaskError, TaskStatus, ThreadEntry};
 
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 use crate::arch::target_arch::interrupt::InterruptManager;
@@ -78,7 +78,7 @@ impl WaitQueue {
             drop(_lock);
             get_cpu_manager_cluster()
                 .run_queue
-                .sleep_current_thread(Some(interrupt_flag))?;
+                .sleep_current_thread(Some(interrupt_flag), TaskStatus::Interruptible)?;
         } else {
             InterruptManager::restore_local_irq(interrupt_flag);
         }

@@ -4,8 +4,7 @@
 //! This module manages delay-interrupt process.
 //! The structure may be changed.
 
-use super::thread_entry::ThreadEntry;
-use super::{TaskManager, TaskStatus};
+use super::{TaskManager, TaskStatus, ThreadEntry};
 
 use crate::arch::target_arch::interrupt::InterruptManager;
 
@@ -84,9 +83,7 @@ impl WorkQueue {
         }
         let worker_thread = unsafe { &mut *self.daemon_thread };
         let _worker_thread_lock = worker_thread.lock.lock();
-        if worker_thread.get_task_status() == TaskStatus::Sleeping
-            || worker_thread.get_task_status() == TaskStatus::New
-        {
+        if worker_thread.get_task_status() != TaskStatus::Running {
             let run_queue = &mut get_cpu_manager_cluster().run_queue;
             if let Err(e) = run_queue.add_thread(worker_thread) {
                 pr_err!(
@@ -110,7 +107,7 @@ impl WorkQueue {
                 drop(_lock);
                 if let Err(e) = get_cpu_manager_cluster()
                     .run_queue
-                    .sleep_current_thread(Some(interrupt_flag))
+                    .sleep_current_thread(Some(interrupt_flag), TaskStatus::Interruptible)
                 {
                     pr_err!("Cannot sleep work queue thread. Error: {:?}", e);
                 }
