@@ -39,6 +39,7 @@ impl WorkList {
 
 impl WorkQueue {
     const WORK_POOL_CACHE_ENTRIES: usize = 64;
+    const DEFAULT_PRIORITY: u8 = 10;
 
     pub fn init(&mut self, task_manager: &mut TaskManager) {
         self.lock = SpinLockFlag::new();
@@ -54,7 +55,7 @@ impl WorkQueue {
             .expect("Cannot init memory pool for WorkList.");
 
         let thread = task_manager
-            .create_kernel_thread_for_init(Self::work_queue_thread, None, 0)
+            .create_kernel_thread_for_init(Self::work_queue_thread, None, Self::DEFAULT_PRIORITY)
             .expect("Cannot add the soft interrupt daemon.");
         self.daemon_thread = thread as *mut _;
     }

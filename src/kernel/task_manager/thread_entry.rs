@@ -24,7 +24,7 @@ pub struct ThreadEntry {
     process: NonNull<ProcessEntry>,
     context_data: ContextData,
     privilege_level: u8,
-    priority_level: i8,
+    priority_level: u8,
 }
 
 impl ThreadEntry {
@@ -34,7 +34,7 @@ impl ThreadEntry {
         &mut self,
         process: *mut ProcessEntry,
         privilege_level: u8,
-        priority_level: i8,
+        priority_level: u8,
         context_data: ContextData,
     ) {
         self.lock = SpinLockFlag::new();
@@ -77,7 +77,7 @@ impl ThreadEntry {
         self.thread_id
     }
 
-    pub const fn get_priority_level(&self) -> i8 {
+    pub const fn get_priority_level(&self) -> u8 {
         self.priority_level
     }
 
@@ -85,7 +85,7 @@ impl ThreadEntry {
         self.privilege_level
     }
 
-    pub fn set_priority_level(&mut self, p: i8) {
+    pub fn set_priority_level(&mut self, p: u8) {
         self.priority_level = p;
     }
 

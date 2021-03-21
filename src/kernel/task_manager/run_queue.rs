@@ -16,17 +16,16 @@ use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
 use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag, SpinLockFlagHolder};
 
 struct RunList {
-    priority_level: i8,
+    priority_level: u8,
     thread_list: PtrLinkedList<ThreadEntry>,
     chain: PtrLinkedListNode<Self>,
 }
 
 impl RunList {
-    const fn new(priority_level: i8) -> Self {
+    const fn new(priority_level: u8) -> Self {
         Self {
             priority_level,
             thread_list: PtrLinkedList::new(),
@@ -44,7 +43,7 @@ pub struct RunQueue {
 }
 
 impl RunQueue {
-    const DEFAULT_RUN_LIST_ALLOC_SIZE: usize = 3;
+    const DEFAULT_RUN_LIST_ALLOC_SIZE: usize = 12;
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
@@ -97,6 +96,19 @@ impl RunQueue {
             }
         }
         return None;
+    }
+
+    fn alloc_run_list(
+        allocator: &mut PoolAllocator<RunList>,
+        priority_level: u8,
+    ) -> &'static mut RunList {
+        let run_list = allocator
+            .alloc()
+            .expect("Cannot alloc RunList(TODO: alloc from object allocator)");
+        *run_list = RunList::new(priority_level);
+        let pointer = run_list as *mut _;
+        run_list.chain.set_ptr(pointer);
+        run_list
     }
 
     fn remove_target_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
@@ -213,14 +225,8 @@ impl RunQueue {
                         }
                         break;
                     }
-                    if list.priority_level < priority {
-                        let run_list = self
-                            .run_list_allocator
-                            .alloc()
-                            .expect("Cannot alloc RunList.");
-                        *run_list = RunList::new(priority);
-                        let pointer = run_list as *mut _;
-                        run_list.chain.set_ptr(pointer);
+                    if list.priority_level > priority {
+                        let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
                         run_list
                             .thread_list
                             .set_first_entry(Some(&mut thread.run_list));
@@ -230,13 +236,7 @@ impl RunQueue {
                     if let Some(next) = unsafe { list.chain.get_next_mut() } {
                         list = next;
                     } else {
-                        let run_list = self
-                            .run_list_allocator
-                            .alloc()
-                            .expect("Cannot alloc RunList.");
-                        *run_list = RunList::new(priority);
-                        let pointer = run_list as *mut _;
-                        run_list.chain.set_ptr(pointer);
+                        let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
                         run_list
                             .thread_list
                             .set_first_entry(Some(&mut thread.run_list));
@@ -245,13 +245,7 @@ impl RunQueue {
                     }
                 }
             } else {
-                let run_list = self
-                    .run_list_allocator
-                    .alloc()
-                    .expect("Cannot alloc RunList.");
-                *run_list = RunList::new(priority);
-                let pointer = run_list as *mut _;
-                run_list.chain.set_ptr(pointer);
+                let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
                 run_list
                     .thread_list
                     .set_first_entry(Some(&mut thread.run_list));
@@ -280,6 +274,14 @@ impl RunQueue {
         interrupt_flag: Option<StoredIrqData>,
         current_context: Option<&ContextData>,
     ) {
+        let get_prev_thread_lock =
+            |running_thread: &mut ThreadEntry| -> Option<SpinLockFlagHolder> {
+                if let Some(prev_thread) = unsafe { running_thread.run_list.get_prev_mut() } {
+                    Some(prev_thread.lock.lock())
+                } else {
+                    None
+                }
+            };
         let interrupt_flag =
             interrupt_flag.unwrap_or_else(|| InterruptManager::save_and_disable_local_irq());
         let _lock = self.lock.lock();
@@ -288,12 +290,7 @@ impl RunQueue {
         let next_thread = if running_thread.get_task_status() == TaskStatus::Sleeping {
             if let Some(next_thread) = unsafe { running_thread.run_list.get_next_mut() } {
                 let _next_thread_lock = next_thread.lock.lock();
-                let _prev_lock =
-                    if let Some(prev_thread) = unsafe { running_thread.run_list.get_prev_mut() } {
-                        Some(prev_thread.lock.lock())
-                    } else {
-                        None
-                    };
+                let _prev_lock = get_prev_thread_lock(running_thread);
                 self.remove_target_thread(running_thread)
                     .expect("Cannot remove running thread from RunList");
                 running_thread.run_list.unset_prev_and_next();
@@ -304,12 +301,7 @@ impl RunQueue {
                     next_thread
                 }
             } else {
-                let _prev_lock =
-                    if let Some(prev_thread) = unsafe { running_thread.run_list.get_prev_mut() } {
-                        Some(prev_thread.lock.lock())
-                    } else {
-                        None
-                    };
+                let _prev_lock = get_prev_thread_lock(running_thread);
                 self.remove_target_thread(running_thread)
                     .expect("Cannot remove running thread from RunList");
                 running_thread.run_list.unset_prev_and_next();
@@ -322,13 +314,11 @@ impl RunQueue {
                 self.should_recheck_priority = false;
                 Self::get_highest_priority_thread(&mut self.run_list)
                     .expect("Cannot get thread to run")
+            } else if let Some(next_thread) = unsafe { running_thread.run_list.get_next_mut() } {
+                next_thread
             } else {
-                if let Some(next_thread) = unsafe { running_thread.run_list.get_next_mut() } {
-                    next_thread
-                } else {
-                    Self::get_highest_priority_thread(&mut self.run_list)
-                        .expect("Cannot get thread to run")
-                }
+                Self::get_highest_priority_thread(&mut self.run_list)
+                    .expect("Cannot get thread to run")
             }
         };
 

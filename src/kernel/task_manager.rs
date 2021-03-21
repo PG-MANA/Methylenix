@@ -9,8 +9,12 @@ pub mod run_queue;
 mod thread_entry;
 pub mod wait_queue;
 pub mod work_queue;
+pub mod scheduling_class {
+    pub mod kernel;
+}
 
 use self::process_entry::ProcessEntry;
+use self::scheduling_class::kernel::KernelSchedulingClass;
 use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
@@ -116,8 +120,18 @@ impl TaskManager {
         let main_thread = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
         let idle_thread = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
 
-        main_thread.init(kernel_process, 0, 0, kernel_main_context);
-        idle_thread.init(kernel_process, 0, i8::MIN, idle_context);
+        main_thread.init(
+            kernel_process,
+            0,
+            KernelSchedulingClass::get_normal_priority(),
+            kernel_main_context,
+        );
+        idle_thread.init(
+            kernel_process,
+            0,
+            KernelSchedulingClass::get_idle_thread_priority(),
+            idle_context,
+        );
 
         kernel_process.init(
             0,
@@ -207,7 +221,7 @@ impl TaskManager {
         &mut self,
         entry_address: fn() -> !,
         stack_size: Option<MSize>,
-        priority_level: i8,
+        kernel_priority: u8,
     ) -> Result<&'static mut ThreadEntry, TaskError> {
         let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
@@ -216,7 +230,8 @@ impl TaskManager {
             let forked_thread =
                 self.fork_system_thread(&mut main_thread, entry_address, stack_size)?;
             let _forked_thread_lock = forked_thread.lock.lock();
-            forked_thread.set_priority_level(priority_level);
+            forked_thread
+                .set_priority_level(KernelSchedulingClass::get_custom_priority(kernel_priority));
             forked_thread.set_task_status(TaskStatus::New);
             forked_thread
         };
@@ -231,7 +246,7 @@ impl TaskManager {
         &mut self,
         entry_address: fn() -> !,
         stack_size: Option<MSize>,
-        priority_level: i8,
+        kernel_priority: u8,
         should_set_into_run_queue: bool,
     ) -> Result<&'static mut ThreadEntry, TaskError> {
         let _lock = self.lock.lock();
@@ -241,7 +256,8 @@ impl TaskManager {
         let forked_thread =
             self.fork_system_thread(&mut clone_thread, entry_address, stack_size)?;
         let _forked_thread_lock = forked_thread.lock.lock();
-        forked_thread.set_priority_level(priority_level);
+        forked_thread
+            .set_priority_level(KernelSchedulingClass::get_custom_priority(kernel_priority));
         forked_thread.set_task_status(TaskStatus::New);
 
         if should_set_into_run_queue {
