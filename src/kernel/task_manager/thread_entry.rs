@@ -18,6 +18,7 @@ pub struct ThreadEntry {
     pub(super) run_list: PtrLinkedListNode<Self>,
     pub(super) sleep_list: PtrLinkedListNode<Self>,
     pub(super) lock: SpinLockFlag,
+    pub(super) time_slice: u32,
 
     status: TaskStatus,
     thread_id: usize,
@@ -42,6 +43,7 @@ impl ThreadEntry {
         self.t_list = PtrLinkedListNode::new();
         self.run_list = PtrLinkedListNode::new();
         self.sleep_list = PtrLinkedListNode::new();
+        self.time_slice = 0;
         self.status = TaskStatus::New;
         self.thread_id = 0;
         self.process = NonNull::new(process).unwrap();
@@ -114,6 +116,7 @@ impl ThreadEntry {
             t_list: PtrLinkedListNode::new(),
             run_list: PtrLinkedListNode::new(),
             sleep_list: PtrLinkedListNode::new(),
+            time_slice: 0,
             lock: SpinLockFlag::new(),
             status: self.status,
             thread_id: self.thread_id,

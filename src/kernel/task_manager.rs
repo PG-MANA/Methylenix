@@ -209,6 +209,7 @@ impl TaskManager {
             new_context,
         );
         drop(_original_thread_lock);
+        new_thread.time_slice = 5; /* Temporary */
         let _process_lock = parent_process
             .lock
             .try_lock()
@@ -259,6 +260,7 @@ impl TaskManager {
         forked_thread
             .set_priority_level(KernelSchedulingClass::get_custom_priority(kernel_priority));
         forked_thread.set_task_status(TaskStatus::New);
+        forked_thread.time_slice = 5; /* Temporary */
 
         if should_set_into_run_queue {
             if let Err(e) = get_cpu_manager_cluster()
@@ -290,6 +292,7 @@ impl TaskManager {
         thread.set_ptr_to_list();
         thread.run_list.unset_prev_and_next();
         thread.set_task_status(TaskStatus::CanRun);
+        thread.time_slice = 5; /* Temporary */
         /* Currently, add this cpu's run queue. */
         get_cpu_manager_cluster().run_queue.add_thread(thread)?;
         return Ok(());

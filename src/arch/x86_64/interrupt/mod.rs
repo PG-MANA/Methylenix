@@ -11,10 +11,11 @@ mod tss;
 use self::idt::GateDescriptor;
 use self::tss::TssManager;
 
+use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
@@ -268,4 +269,16 @@ impl InterruptManager {
     ///
     /// This function does nothing.
     pub extern "C" fn dummy_handler() {}
+
+    /// Post script for interrupt
+    ///
+    /// This function calls `schedule` if needed.
+    pub extern "C" fn post_interrupt_handler(context_data: u64) {
+        if get_cpu_manager_cluster().run_queue.should_call_schedule() {
+            get_cpu_manager_cluster().run_queue.schedule(
+                None,
+                Some(unsafe { &*(context_data as *const ContextData) }),
+            );
+        }
+    }
 }

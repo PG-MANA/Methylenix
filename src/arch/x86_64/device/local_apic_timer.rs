@@ -10,7 +10,6 @@
 //! which is invariant.
 //! Except TSC-Deadline mode, we must check frequency of it by PIT or ACPI PM Timer.    
 
-use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu::{cpuid, rdmsr, rdtsc, wrmsr};
 use crate::arch::target_arch::device::local_apic::{LocalApicManager, LocalApicRegisters};
 
@@ -70,18 +69,13 @@ impl LocalApicTimer {
     /// This function is called when the interrupt occurred.
     /// Currently, this function sends end of interrupt and switches to next thread.
     #[inline(never)]
-    pub extern "C" fn local_apic_timer_handler(c: u64) {
+    pub extern "C" fn local_apic_timer_handler() {
         get_cpu_manager_cluster()
             .arch_depend_data
             .local_apic_timer
             .reset_deadline();
-
-        /* Task switch */
-        let context_data = unsafe { &*(c as *const ContextData) };
+        get_cpu_manager_cluster().run_queue.tick();
         get_cpu_manager_cluster().interrupt_manager.send_eoi();
-        get_cpu_manager_cluster()
-            .run_queue
-            .schedule(None, Some(context_data));
     }
 
     /// Reset timer deadline for next interrupt

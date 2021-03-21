@@ -40,6 +40,7 @@ pub struct RunQueue {
     running_thread: Option<*mut ThreadEntry>,
     run_list_allocator: PoolAllocator<RunList>,
     should_recheck_priority: bool,
+    should_reschedule: bool,
 }
 
 impl RunQueue {
@@ -51,6 +52,7 @@ impl RunQueue {
             running_thread: None,
             run_list_allocator: PoolAllocator::new(),
             should_recheck_priority: false,
+            should_reschedule: false,
         }
     }
 
@@ -230,7 +232,12 @@ impl RunQueue {
                         run_list
                             .thread_list
                             .set_first_entry(Some(&mut thread.run_list));
-                        list.chain.insert_after(&mut run_list.chain);
+                        if list.chain.get_prev_as_ptr().is_none() {
+                            list.chain.insert_before(&mut run_list.chain);
+                            self.run_list.set_first_entry(Some(&mut run_list.chain));
+                        } else {
+                            list.chain.insert_before(&mut run_list.chain);
+                        }
                         break;
                     }
                     if let Some(next) = unsafe { list.chain.get_next_mut() } {
@@ -261,10 +268,29 @@ impl RunQueue {
             {
                 self.should_recheck_priority = true;
             }
+            thread.time_slice = 5; /*Temporary*/
         };
         drop(_lock);
         InterruptManager::restore_local_irq(interrupt_flag);
         return result;
+    }
+
+    pub fn tick(&mut self) {
+        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
+        let _lock = self.lock.lock();
+        let running_thread = self.get_running_thread();
+        running_thread.time_slice -= 1;
+        if running_thread.time_slice < 1 {
+            running_thread.time_slice = 5; /*Temporary*/
+            self.should_reschedule = true;
+        }
+        self.get_running_thread().time_slice -= 1;
+        drop(_lock);
+        InterruptManager::restore_local_irq(interrupt_flag);
+    }
+
+    pub fn should_call_schedule(&self) -> bool {
+        self.should_reschedule
     }
 
     /// This function checks current running thread and if it has to change task, this will call switch_to_next_thread.
