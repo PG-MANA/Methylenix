@@ -8,13 +8,13 @@ use crate::arch::target_arch::device::serial_port::SerialPortManager;
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::{ArchDependedCpuManagerCluster, ArchDependedKernelManagerCluster};
 
+use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::efi::EfiManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
-use crate::kernel::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::work_queue::WorkQueue;
 use crate::kernel::task_manager::TaskManager;

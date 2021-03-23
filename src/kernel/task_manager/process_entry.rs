@@ -5,8 +5,8 @@
 
 use super::{ProcessStatus, TaskError, TaskSignal, ThreadEntry};
 
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::memory_manager::MemoryManager;
-use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
 
 #[allow(dead_code)]
@@ -87,16 +87,6 @@ impl ProcessEntry {
         }
     }
 
-    /// Set self-pointer to all PtrLinkedLists.
-    ///
-    /// [Self::lock] must be locked.
-    pub fn set_ptr_to_list(&mut self) {
-        assert!(self.lock.is_locked());
-        let ptr = self as *mut Self;
-        self.p_list.set_ptr(ptr);
-        self.siblings.set_ptr(ptr);
-    }
-
     /// Chain `thread` into self.thread(List, ThreadEntry::t_list)
     ///
     /// This function does not check [Self::num_of_threads].
@@ -107,28 +97,26 @@ impl ProcessEntry {
         prev_thread: Option<&mut ThreadEntry>,
     ) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());
-        thread.set_ptr_to_list();
         if self.thread.is_empty() {
-            let _lock = thread.lock.try_lock().or(Err(TaskError::ThreadLockError))?;
-            thread.t_list.unset_prev_and_next();
-            self.thread
-                .set_first_entry(Some(&mut thread.t_list as *mut _));
+            self.thread.insert_head(&mut thread.t_list);
         } else if let Some(prev_thread) = prev_thread {
             let _lock = thread.lock.lock();
             let _prev_lock = prev_thread
                 .lock
                 .try_lock()
                 .or(Err(TaskError::ThreadLockError))?;
-            prev_thread.t_list.insert_after(&mut thread.t_list);
+            self.thread
+                .insert_after(&mut prev_thread.t_list, &mut thread.t_list);
         } else {
             /* Current chain the last of t_list */
-            let last_entry = unsafe { self.thread.get_last_entry_mut().unwrap() };
+            let tail = unsafe {
+                self.thread
+                    .get_last_entry_mut(offset_of!(ThreadEntry, t_list))
+                    .unwrap()
+            };
             let _lock = thread.lock.lock();
-            let _prev_lock = last_entry
-                .lock
-                .try_lock()
-                .or(Err(TaskError::ThreadLockError))?;
-            last_entry.t_list.insert_after(&mut thread.t_list);
+            let _prev_lock = tail.lock.try_lock().or(Err(TaskError::ThreadLockError))?;
+            self.thread.insert_tail(&mut thread.t_list);
         }
         return Ok(());
     }
@@ -155,8 +143,7 @@ impl ProcessEntry {
                 None
             }
         } else {
-            for e in self.thread.iter_mut() {
-                let thread = unsafe { &mut *e };
+            for thread in unsafe { self.thread.iter_mut(offset_of!(ThreadEntry, t_list)) } {
                 if thread.get_t_id() == t_id {
                     return Some(thread);
                 }
@@ -204,11 +191,16 @@ impl ProcessEntry {
         if self.num_of_thread == 1 {
             return Err(TaskError::InvalidProcessEntry);
         } else if self.num_of_thread == 2 {
-            thread.t_list.remove_from_list(&mut self.thread);
-            let another_thread = unsafe { self.thread.get_first_entry_mut().unwrap() };
-            self.single_thread = Some(another_thread as *mut _);
+            self.thread.remove(&mut thread.t_list);
+            let single_thread = unsafe {
+                self.thread
+                    .take_first_entry(offset_of!(ThreadEntry, t_list))
+                    .unwrap()
+            };
+            assert!(self.thread.is_empty());
+            self.single_thread = Some(single_thread as *mut _);
         } else {
-            thread.t_list.remove_from_list(&mut self.thread);
+            self.thread.remove(&mut thread.t_list);
         }
         self.num_of_thread -= 1;
         return Ok(());

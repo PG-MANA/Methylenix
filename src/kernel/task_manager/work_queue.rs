@@ -8,9 +8,9 @@ use super::{TaskManager, TaskStatus, ThreadEntry};
 
 use crate::arch::target_arch::interrupt::InterruptManager;
 
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
-use crate::kernel::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 pub struct WorkQueue {
@@ -72,15 +72,9 @@ impl WorkQueue {
         *work = w;
         work.list = PtrLinkedListNode::new();
         let ptr = work as *mut _;
-        work.list.set_ptr(ptr);
 
-        if let Some(last_entry) = unsafe { self.work_queue.get_last_entry_mut() } {
-            let ptr = work as *mut _;
-            work.list.set_ptr(ptr);
-            last_entry.list.insert_after(&mut work.list);
-        } else {
-            self.work_queue.set_first_entry(Some(&mut work.list));
-        }
+        self.work_queue.insert_tail(&mut work.list);
+
         let worker_thread = unsafe { &mut *self.daemon_thread };
         let _worker_thread_lock = worker_thread.lock.lock();
         if worker_thread.get_task_status() != TaskStatus::Running {
@@ -114,15 +108,12 @@ impl WorkQueue {
                 /* Woke up */
                 continue;
             }
-            let work = unsafe { manager.work_queue.get_first_entry_mut().unwrap() };
-            if let Some(next) = unsafe { work.list.get_next_mut() } {
-                next.list.terminate_prev_entry();
+            let work = unsafe {
                 manager
                     .work_queue
-                    .set_first_entry(Some(&mut next.list as *mut _));
-            } else {
-                manager.work_queue.set_first_entry(None);
-            }
+                    .take_first_entry(offset_of!(WorkList, list))
+                    .unwrap()
+            };
             let work_function = work.worker_function;
             let work_data = work.data;
             manager.work_pool.free(work);

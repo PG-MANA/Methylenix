@@ -4,8 +4,8 @@
 //! This manager indicates memory data information like vm_page
 
 use super::virtual_memory_page::VirtualMemoryPage;
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::memory_manager::data_type::MIndex;
-use crate::kernel::ptr_linked_list::PtrLinkedList;
 /*use crate::kernel::sync::spin_lock::Mutex;*/
 
 pub struct VirtualMemoryObject {
@@ -36,39 +36,41 @@ impl VirtualMemoryObject {
 
     pub fn add_vm_page(&mut self, p_index: MIndex, vm_page: &'static mut VirtualMemoryPage) {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
-            if list.get_first_entry_as_ptr().is_none() {
+            vm_page.set_p_index(p_index);
+            const OFFSET: usize = offset_of!(VirtualMemoryPage, list);
+            if list.is_empty() {
                 assert_eq!(self.linked_page, 0);
-                vm_page.setup_to_be_root(p_index, list);
-                self.linked_page = 1;
-                return;
-            }
-            if unsafe { list.get_first_entry() }.unwrap().get_p_index() > p_index {
-                /* must change root */
-                let root = unsafe { list.get_first_entry_mut() }.unwrap();
-                let root_p_index = root.get_p_index();
-                vm_page.setup_to_be_root(p_index, list);
-                vm_page.insert_after(root, root_p_index);
-                self.linked_page += 1;
+                let _lock = vm_page.lock.lock();
+                list.insert_head(&mut vm_page.list);
+            } else if unsafe { list.get_first_entry(OFFSET) }
+                .unwrap()
+                .get_p_index()
+                > p_index
+            {
+                let _lock = vm_page.lock.lock();
+                let _first_entry_lock =
+                    unsafe { list.get_first_entry(OFFSET) }.unwrap().lock.lock();
+                list.insert_head(&mut vm_page.list);
             } else {
-                for e in list.iter_mut() {
-                    let e = unsafe { &mut *e };
+                for e in unsafe { list.iter_mut(OFFSET) } {
                     if p_index < e.get_p_index() {
-                        e.get_prev_entry_mut()
-                            .unwrap()
-                            .insert_after(vm_page, p_index);
-                        self.linked_page += 1;
-                        return;
-                    } else if e.get_next_entry().is_none() {
-                        e.insert_after(vm_page, p_index);
-                        self.linked_page += 1;
-                        return;
+                        let _lock = vm_page.lock.lock();
+                        let _prev_lock = unsafe { e.list.get_prev(OFFSET) }.unwrap().lock.lock();
+                        list.insert_before(&mut e.list, &mut vm_page.list);
+                    } else if !e.list.has_next() {
+                        let _lock = vm_page.lock.lock();
+                        let _prev_lock = e.lock.lock();
+                        list.insert_tail(&mut vm_page.list);
                     }
                 }
-                pr_err!("Can not insert vm_page.");
             }
+            self.linked_page += 1;
         } else {
             let mut list = PtrLinkedList::<VirtualMemoryPage>::new();
-            vm_page.setup_to_be_root(p_index, &mut list);
+            let _lock = vm_page.lock.lock();
+            vm_page.set_p_index(p_index);
+            list.insert_head(&mut vm_page.list);
+
             self.object = VirtualMemoryObjectType::Page(list);
             self.linked_page = 1;
         }
@@ -76,8 +78,7 @@ impl VirtualMemoryObject {
 
     pub fn activate_all_page(&mut self) {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
-            for e in list.iter_mut() {
-                let e = unsafe { &mut *e };
+            for e in unsafe { list.iter_mut(offset_of!(VirtualMemoryPage, list)) } {
                 e.activate();
             }
         }
@@ -85,14 +86,13 @@ impl VirtualMemoryObject {
 
     pub fn get_vm_page(&self, p_index: MIndex) -> Option<&VirtualMemoryPage> {
         if let VirtualMemoryObjectType::Page(list) = &self.object {
-            for e in list.iter() {
-                let e = unsafe { &*e };
+            for e in unsafe { list.iter(offset_of!(VirtualMemoryPage, list)) } {
                 if e.get_p_index() == p_index {
                     return Some(e);
                 }
             }
         }
-        None
+        return None;
     }
 
     pub fn remove_vm_page(
@@ -100,16 +100,15 @@ impl VirtualMemoryObject {
         p_index: MIndex,
     ) -> Option<&'static mut VirtualMemoryPage /*removed page*/> {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
-            for e in list.iter_mut() {
-                let e = unsafe { &mut *e };
+            for e in unsafe { list.iter_mut(offset_of!(VirtualMemoryPage, list)) } {
                 if e.get_p_index() == p_index {
-                    e.remove_from_list(list);
+                    list.remove(&mut e.list);
                     return Some(e);
                 } else if e.get_p_index() > p_index {
                     break;
                 }
             }
         }
-        None
+        return None;
     }
 }

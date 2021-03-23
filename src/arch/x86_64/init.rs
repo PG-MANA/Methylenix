@@ -14,6 +14,7 @@ use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
+use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
@@ -21,7 +22,6 @@ use crate::kernel::manager_cluster::{
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
 };
-use crate::kernel::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;

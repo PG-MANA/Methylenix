@@ -20,11 +20,11 @@ use self::thread_entry::ThreadEntry;
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 use crate::arch::target_arch::interrupt::InterruptManager;
 
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::MSize;
 use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
 use crate::kernel::memory_manager::MemoryError;
-use crate::kernel::ptr_linked_list::PtrLinkedList;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::task_manager::run_queue::RunQueue;
 
@@ -145,9 +145,6 @@ impl TaskManager {
         let _process_lock = kernel_process.lock.lock();
         let _main_thread_lock = main_thread.lock.lock();
         let _idle_thread_lock = idle_thread.lock.lock();
-        kernel_process.set_ptr_to_list();
-        main_thread.set_ptr_to_list();
-        idle_thread.set_ptr_to_list();
 
         /* Set threads to run_queue_manager */
         run_queue
@@ -290,8 +287,6 @@ impl TaskManager {
     /// `thread` must be unlocked.
     pub fn wake_up_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         let _thread_lock = thread.lock.lock();
-        thread.set_ptr_to_list();
-        thread.run_list.unset_prev_and_next();
         thread.time_slice = 5; /* Temporary */
         /* Currently, add this cpu's run queue. */
         get_cpu_manager_cluster().run_queue.add_thread(thread)?;

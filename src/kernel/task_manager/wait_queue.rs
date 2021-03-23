@@ -13,8 +13,8 @@ use super::{TaskError, TaskStatus, ThreadEntry};
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 use crate::arch::target_arch::interrupt::InterruptManager;
 
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::ptr_linked_list::PtrLinkedList;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 pub struct WaitQueue {
@@ -33,18 +33,17 @@ impl WaitQueue {
     fn _add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(thread.lock.is_locked());
 
-        if let Some(first_thread) = unsafe { self.list.get_first_entry_mut() } {
-            let _first_thread_lock = first_thread
+        if let Some(last_thread) = unsafe {
+            self.list
+                .get_last_entry_mut(offset_of!(ThreadEntry, sleep_list))
+        } {
+            let last_thread_lock = last_thread
                 .lock
                 .try_lock()
                 .or(Err(TaskError::ThreadLockError))?;
-            thread.set_ptr_to_list();
-            thread.sleep_list.unset_prev_and_next();
-            first_thread.sleep_list.insert_after(&mut thread.sleep_list);
+            self.list.insert_tail(&mut thread.sleep_list);
         } else {
-            thread.sleep_list.unset_prev_and_next();
-            self.list
-                .set_first_entry(Some(&mut thread.sleep_list as *mut _));
+            self.list.insert_head(&mut thread.sleep_list)
         }
         return Ok(());
     }
@@ -71,7 +70,6 @@ impl WaitQueue {
                 .lock
                 .try_lock()
                 .or(Err(TaskError::ThreadLockError))?;
-            running_thread.sleep_list.unset_prev_and_next();
             self._add_thread(running_thread)?
         };
         if result.is_ok() {
@@ -87,11 +85,9 @@ impl WaitQueue {
 
     pub fn wakeup(&mut self) -> Result<(), TaskError> {
         let _lock = self.lock.lock();
-        for t in self.list.iter_mut() {
-            let thread = unsafe { &mut *t };
+        for thread in unsafe { self.list.iter_mut(offset_of!(ThreadEntry, sleep_list)) } {
             let _thread_lock = thread.lock.lock();
-            thread.sleep_list.remove_from_list(&mut self.list);
-            thread.sleep_list.unset_prev_and_next();
+            self.list.remove(&mut thread.sleep_list);
             drop(_thread_lock);
             get_kernel_manager_cluster()
                 .task_manager

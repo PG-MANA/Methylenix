@@ -4,7 +4,7 @@
 
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 
-use crate::kernel::fifo::FIFO;
+use crate::kernel::collections::fifo::Fifo;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::task_manager::wait_queue::WaitQueue;
@@ -15,8 +15,8 @@ use core::mem::MaybeUninit;
 pub struct TtyManager {
     input_lock: SpinLockFlag,
     output_lock: SpinLockFlag,
-    input_queue: FIFO<u8, { Self::DEFAULT_INPUT_BUFFER_SIZE }>,
-    output_queue: FIFO<u8, { Self::DEFAULT_OUTPUT_BUFFER_SIZE }>,
+    input_queue: Fifo<u8, { Self::DEFAULT_INPUT_BUFFER_SIZE }>,
+    output_queue: Fifo<u8, { Self::DEFAULT_OUTPUT_BUFFER_SIZE }>,
     output_driver: Option<&'static (dyn Writer)>,
     input_wait_queue: WaitQueue,
 }
@@ -33,8 +33,8 @@ impl TtyManager {
         Self {
             input_lock: SpinLockFlag::new(),
             output_lock: SpinLockFlag::new(),
-            input_queue: FIFO::new(0),
-            output_queue: FIFO::new(0),
+            input_queue: Fifo::new(0),
+            output_queue: Fifo::new(0),
             output_driver: None,
             input_wait_queue: WaitQueue::new(),
         }
@@ -52,7 +52,7 @@ impl TtyManager {
             #[allow(unused_must_use)]
             if let Err(e) = self.input_wait_queue.wakeup() {
                 use core::fmt::Write;
-                write!(self, "Cannot wakeup sleeping threads. Error: {:?}\n", e);
+                writeln!(self, "Cannot wakeup sleeping threads. Error: {:?}", e);
             }
             Ok(())
         } else {
@@ -72,7 +72,7 @@ impl TtyManager {
         #[allow(unused_must_use)]
         if let Err(e) = self.input_wait_queue.add_current_thread() {
             use core::fmt::Write;
-            write!(self, "Cannot wakeup sleeping threads. Error: {:?}\n", e);
+            writeln!(self, "Cannot wakeup sleeping threads. Error: {:?}\n", e);
         }
         self.getc(false)
     }

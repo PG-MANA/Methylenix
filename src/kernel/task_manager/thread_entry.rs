@@ -7,7 +7,7 @@ use super::{ProcessEntry, TaskStatus};
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
-use crate::kernel::ptr_linked_list::PtrLinkedListNode;
+use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::ptr::NonNull;
@@ -50,13 +50,6 @@ impl ThreadEntry {
         self.context_data = context_data;
         self.privilege_level = privilege_level;
         self.priority_level = priority_level;
-    }
-
-    pub fn set_ptr_to_list(&mut self) {
-        let ptr = self as *mut Self;
-        self.t_list.set_ptr(ptr);
-        self.sleep_list.set_ptr(ptr);
-        self.run_list.set_ptr(ptr);
     }
 
     pub fn set_process(&mut self, process: *mut ProcessEntry) {
@@ -105,10 +98,6 @@ impl ThreadEntry {
 
     pub fn set_context(&mut self, context: &ContextData) {
         self.context_data = context.clone();
-    }
-
-    pub fn get_next_from_run_list_mut(&mut self) -> Option<&'static mut Self> {
-        unsafe { self.run_list.get_next_mut() }
     }
 
     pub fn copy_data(&self) -> Self {

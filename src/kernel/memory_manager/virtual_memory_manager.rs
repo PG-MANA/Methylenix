@@ -23,12 +23,12 @@ use super::physical_memory_manager::PhysicalMemoryManager;
 use super::pool_allocator::PoolAllocator;
 use super::MemoryError;
 
-use crate::arch::target_arch::paging::{PageManager, PagingError};
 use crate::arch::target_arch::paging::{
-    MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE, PAGING_CACHE_LENGTH,
+    PageManager, PagingError, MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE,
+    PAGE_SIZE_USIZE, PAGING_CACHE_LENGTH,
 };
 
-use crate::kernel::ptr_linked_list::PtrLinkedList;
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 
 use core::ops::RangeInclusive;
 
@@ -463,7 +463,7 @@ impl VirtualMemoryManager {
                 .is_err()
             {
                 pr_err!("Cannot associate address.");
-                entry.remove_from_list(&mut self.vm_map_entry);
+                self.vm_map_entry.remove(&mut entry.list);
                 //for rev_i in (0..i).rev() {
                 /* ADD: self.unassociate_address() */
                 //}
@@ -485,7 +485,7 @@ impl VirtualMemoryManager {
                     .is_err()
                 {
                     pr_err!("Cannot associate address.");
-                    entry.remove_from_list(&mut self.vm_map_entry);
+                    self.vm_map_entry.remove(&mut entry.list);
                     //for rev_i in (0..i).rev() {
                     /* ADD: self.unassociate_address() */
                     //}
@@ -527,7 +527,7 @@ impl VirtualMemoryManager {
             pr_err!("Virtual Address is not aligned.");
             return Err(MemoryError::AddressNotAligned);
         }
-        if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
+        if self.vm_map_entry.is_empty() {
             pr_err!("There is no entry.");
             return Err(MemoryError::InsertEntryFailed);
         }
@@ -571,27 +571,24 @@ impl VirtualMemoryManager {
                 self.vm_page_pool.free(p);
             }
         }
-        if vm_map_entry.get_memory_option_flags().is_direct_mapped() {
-            if !self.direct_mapped_area.as_mut().unwrap().allocator.free(
+        if vm_map_entry.get_memory_option_flags().is_direct_mapped()
+            && !self.direct_mapped_area.as_mut().unwrap().allocator.free(
                 vm_map_entry
                     .get_vm_start_address()
                     .to_direct_mapped_p_address(),
                 vm_map_entry.get_size(),
                 false,
-            ) {
-                pr_err!("Cannot free direct mapped area");
-            }
+            )
+        {
+            pr_err!("Cannot free direct mapped area");
         }
-        vm_map_entry.remove_from_list(&mut self.vm_map_entry);
-        if let Some(root) = unsafe { self.vm_map_entry.get_first_entry_mut() } {
-            self.vm_map_entry.set_first_entry(None);
-            root.adjust_entries()
-                .set_up_to_be_root(&mut self.vm_map_entry);
-        }
+
+        self.vm_map_entry.remove(&mut vm_map_entry.list);
+        self.adjust_vm_entries();
         vm_map_entry.set_disabled();
         self.vm_map_entry_pool.free(vm_map_entry);
 
-        Ok(())
+        return Ok(());
     }
 
     fn insert_vm_map_entry(
@@ -607,28 +604,27 @@ impl VirtualMemoryManager {
             }
         };
         *entry = source;
-        let result = entry as *mut _;
-        assert!(entry.get_prev_entry().is_none());
-        assert!(entry.get_next_entry().is_none());
-        if self.vm_map_entry.get_first_entry_as_ptr().is_some() {
-            if let Some(prev_entry) = self.find_previous_entry_mut(entry.get_vm_start_address()) {
-                prev_entry.insert_after(entry);
-            } else if entry.get_vm_end_address()
-                < unsafe { self.vm_map_entry.get_first_entry() }
-                    .unwrap()
-                    .get_vm_start_address()
-            {
-                entry.set_up_to_be_root(&mut self.vm_map_entry);
-            } else {
-                pr_err!("Cannot insert Virtual Memory Entry.");
-                return Err(MemoryError::InsertEntryFailed);
+        if self.vm_map_entry.is_empty() {
+            self.vm_map_entry.insert_head(&mut entry.list);
+        } else if let Some(prev_entry) = self.find_previous_entry_mut(entry.get_vm_start_address())
+        {
+            self.vm_map_entry
+                .insert_after(&mut prev_entry.list, &mut entry.list);
+        } else if entry.get_vm_end_address()
+            < unsafe {
+                self.vm_map_entry
+                    .get_first_entry(offset_of!(VirtualMemoryEntry, list))
             }
-            //self.vm_map_entry = Some(root.adjust_entries());
-            Ok(unsafe { &mut *result })
+            .unwrap()
+            .get_vm_start_address()
+        {
+            self.vm_map_entry.insert_head(&mut entry.list);
         } else {
-            entry.set_up_to_be_root(&mut self.vm_map_entry);
-            Ok(entry)
+            pr_err!("Cannot insert Virtual Memory Entry.");
+            return Err(MemoryError::InsertEntryFailed);
         }
+        self.adjust_vm_entries();
+        return Ok(entry);
     }
 
     /// insert pages into entry (not sync with PageManager)
@@ -800,10 +796,13 @@ impl VirtualMemoryManager {
         {
             return true;
         }
-        if let Some(next_entry_address) = target_entry.get_next_entry() {
+        if let Some(next_entry) = unsafe {
+            target_entry
+                .list
+                .get_next(offset_of!(VirtualMemoryEntry, list))
+        } {
             let next_entry_start_address =
-                unsafe { &*(next_entry_address as *const VirtualMemoryEntry) }
-                    .get_vm_start_address();
+                unsafe { &*(next_entry as *const VirtualMemoryEntry) }.get_vm_start_address();
             if new_size.to_end_address(target_entry.get_vm_start_address())
                 >= next_entry_start_address
             {
@@ -886,7 +885,7 @@ impl VirtualMemoryManager {
         } else if new_size.is_zero() {
             pr_err!("Size is zero");
             return Err(MemoryError::InvalidSize);
-        } else if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
+        } else if self.vm_map_entry.is_empty() {
             pr_err!("There is no entry.");
             return Err(MemoryError::InsertEntryFailed); /* Is it ok? */
         }
@@ -1096,8 +1095,7 @@ impl VirtualMemoryManager {
     }
 
     fn _find_entry(&self, vm_address: VAddress) -> Option<&'static VirtualMemoryEntry> {
-        for e in self.vm_map_entry.iter() {
-            let e = unsafe { &*e };
+        for e in unsafe { self.vm_map_entry.iter(offset_of!(VirtualMemoryEntry, list)) } {
             if e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address {
                 return Some(e);
             }
@@ -1106,8 +1104,10 @@ impl VirtualMemoryManager {
     }
 
     fn find_entry_mut(&mut self, vm_address: VAddress) -> Option<&'static mut VirtualMemoryEntry> {
-        for e in self.vm_map_entry.iter_mut() {
-            let e = unsafe { &mut *e };
+        for e in unsafe {
+            self.vm_map_entry
+                .iter_mut(offset_of!(VirtualMemoryEntry, list))
+        } {
             if e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address {
                 return Some(e);
             }
@@ -1119,11 +1119,11 @@ impl VirtualMemoryManager {
         &mut self,
         vm_address: VAddress,
     ) -> Option<&'static mut VirtualMemoryEntry> {
-        for e in self.vm_map_entry.iter_mut() {
-            let e = unsafe { &mut *e };
+        const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
+        for e in unsafe { self.vm_map_entry.iter_mut(OFFSET) } {
             if e.get_vm_start_address() > vm_address {
-                return e.get_prev_entry_mut();
-            } else if e.get_next_entry().is_none() && e.get_vm_end_address() < vm_address {
+                return unsafe { e.list.get_prev_mut(OFFSET) };
+            } else if !e.list.has_next() && e.get_vm_end_address() < vm_address {
                 return Some(e);
             }
         }
@@ -1143,8 +1143,7 @@ impl VirtualMemoryManager {
         if Self::is_overlapped(&memory_area, &direct_map_area) {
             return false;
         }
-        for e in self.vm_map_entry.iter() {
-            let e = unsafe { &*e };
+        for e in unsafe { self.vm_map_entry.iter(offset_of!(VirtualMemoryEntry, list)) } {
             if (e.get_vm_start_address() <= vm_start_address
                 && e.get_vm_end_address() >= vm_start_address)
                 || (e.get_vm_start_address() <= vm_end_address
@@ -1163,10 +1162,9 @@ impl VirtualMemoryManager {
         let direct_map_start_address = self.direct_mapped_area.as_ref().unwrap().start_address;
         let direct_map_end_address = self.direct_mapped_area.as_ref().unwrap().end_address;
         let direct_map_area = direct_map_start_address..=direct_map_end_address;
-
-        for e in self.vm_map_entry.iter() {
-            let e = unsafe { &*e };
-            if let Some(prev) = e.get_prev_entry() {
+        const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
+        for e in unsafe { self.vm_map_entry.iter(OFFSET) } {
+            if let Some(prev) = unsafe { e.list.get_prev(OFFSET) } {
                 if e.get_vm_start_address() - (prev.get_vm_end_address() + MSize::new(1)) >= size {
                     let start_address = prev.get_vm_end_address() + MSize::new(1);
                     let memory_area = start_address..=size.to_end_address(start_address);
@@ -1183,7 +1181,7 @@ impl VirtualMemoryManager {
                     return Some(prev.get_vm_end_address() + MSize::new(1));
                 }
             }
-            if e.get_next_entry().is_none() {
+            if !e.list.has_next() {
                 return if e.get_vm_end_address() + MSize::new(1) + size >= MAX_VIRTUAL_ADDRESS {
                     None
                 } else {
@@ -1207,6 +1205,10 @@ impl VirtualMemoryManager {
         unreachable!()
     }
 
+    fn adjust_vm_entries(&mut self) {
+        /* Currently, do nothing */
+    }
+
     fn is_overlapped<T: Address>(range_1: &RangeInclusive<T>, range_2: &RangeInclusive<T>) -> bool {
         range_1.contains(range_2.start())
             || range_1.contains(range_2.end())
@@ -1222,14 +1224,15 @@ impl VirtualMemoryManager {
         let start = start_vm_address.unwrap_or(VAddress::new(0));
         let end = end_vm_address.unwrap_or(MAX_VIRTUAL_ADDRESS);
         kprintln!("Is system's vm :{}", self.is_system_vm);
-        if self.vm_map_entry.get_first_entry_as_ptr().is_none() {
+        if self.vm_map_entry.is_empty() {
             kprintln!("There is no root entry.");
             return;
         }
-        let mut entry = unsafe { self.vm_map_entry.get_first_entry() }.unwrap();
+        let offset = offset_of!(VirtualMemoryEntry, list);
+        let mut entry = unsafe { self.vm_map_entry.get_first_entry(offset) }.unwrap();
         loop {
             if entry.get_vm_start_address() < start || entry.get_vm_end_address() > end {
-                let next = entry.get_next_entry();
+                let next = unsafe { entry.list.get_next(offset) };
                 if next.is_none() {
                     break;
                 }
@@ -1296,7 +1299,7 @@ impl VirtualMemoryManager {
                     last_address.to_usize()
                 );
             }
-            let next = entry.get_next_entry();
+            let next = unsafe { entry.list.get_next(offset) };
             if next.is_none() {
                 break;
             }
