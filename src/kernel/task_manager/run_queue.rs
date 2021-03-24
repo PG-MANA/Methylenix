@@ -92,7 +92,6 @@ impl RunQueue {
         run_list: &mut PtrLinkedList<RunList>,
     ) -> Option<&mut ThreadEntry> {
         for list in unsafe { run_list.iter_mut(offset_of!(RunList, chain)) } {
-            let list = unsafe { &mut *list };
             if let Some(t) = unsafe {
                 list.thread_list
                     .get_first_entry_mut(offset_of!(ThreadEntry, run_list))

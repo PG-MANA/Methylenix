@@ -71,7 +71,6 @@ impl WorkQueue {
         /* CacheAllocator will try lock memory_manager and if that was failed and pool is not enough, it will return Err. */
         *work = w;
         work.list = PtrLinkedListNode::new();
-        let ptr = work as *mut _;
 
         self.work_queue.insert_tail(&mut work.list);
 

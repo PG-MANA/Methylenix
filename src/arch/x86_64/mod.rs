@@ -19,6 +19,7 @@ use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
@@ -58,6 +59,7 @@ pub extern "C" fn multiboot_main(
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
     /* Setup BSP CPU Manager Cluster */
+    get_kernel_manager_cluster().cpu_list = PtrLinkedList::new();
     setup_cpu_manager_cluster(Some(VAddress::new(
         &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
     )));
@@ -352,14 +354,6 @@ pub extern "C" fn ap_boot_main() -> ! {
 
     /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
-    let mut cpu_manager_list = &mut get_kernel_manager_cluster().boot_strap_cpu_manager.list;
-    loop {
-        if cpu_manager_list.get_next_as_ptr().is_none() {
-            cpu_manager_list.insert_after(&mut cpu_manager.list);
-            break;
-        }
-        cpu_manager_list = &mut unsafe { cpu_manager_list.get_next_mut() }.unwrap().list;
-    }
 
     /* Setup memory management system */
     let mut object_allocator = ObjectAllocator::new();

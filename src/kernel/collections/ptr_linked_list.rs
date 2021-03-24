@@ -9,18 +9,17 @@ use core::ptr::NonNull;
 
 #[macro_export]
 macro_rules! offset_of {
-    ($struct_type:ty, $member: ident) => {{
+    ($struct_type:ty, $member: tt) => {{
         use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
-        const target_struct: $struct_type = unsafe {
-            core::mem::transmute::<core::mem::MaybeUninit<$struct_type>, $struct_type>(
-                core::mem::MaybeUninit::<$struct_type>::uninit(),
-            )
-        };
-        const target_member: &PtrLinkedListNode<$struct_type> = &target_struct.$member;
+        let target_struct: core::mem::MaybeUninit<$struct_type> =
+            core::mem::MaybeUninit::<$struct_type>::uninit();
+        let target_struct_ptr: *const $struct_type = target_struct.as_ptr();
+        #[allow(unused_unsafe)]
+        let target_member_ptr: *const PtrLinkedListNode<$struct_type> =
+            unsafe { &raw const ((*target_struct_ptr).$member) };
+        #[allow(unused_unsafe)]
         unsafe {
-            (&target_struct.$member as *const PtrLinkedListNode<$struct_type> as usize as *const u8)
-                .offset_from(&target_struct as *const $struct_type as usize as *const u8)
-                as usize
+            (target_member_ptr as *const u8).offset_from(target_struct_ptr as *const u8) as usize
         }
     }};
 }
@@ -61,7 +60,8 @@ impl<T> PtrLinkedList<T> {
             self.head = NonNull::new(entry);
             self.tail = self.head;
         } else {
-            let current_head = unsafe { self.head.unwrap().as_mut() };
+            let mut current_head_ptr = self.head.clone().unwrap();
+            let current_head = unsafe { current_head_ptr.as_mut() };
             assert!(current_head.prev.is_none());
             entry.unset_prev_and_next();
             current_head.prev = NonNull::new(entry);
@@ -76,7 +76,8 @@ impl<T> PtrLinkedList<T> {
             assert!(self.head.is_none());
             self.insert_head(entry);
         } else {
-            let current_tail = unsafe { self.tail.unwrap().as_mut() };
+            let mut current_tail_ptr = self.tail.clone().unwrap();
+            let current_tail = unsafe { current_tail_ptr.as_mut() };
             assert!(current_tail.next.is_none());
             entry.unset_prev_and_next();
             current_tail.next = NonNull::new(entry);
@@ -120,18 +121,22 @@ impl<T> PtrLinkedList<T> {
                 self.head = None;
                 self.tail = None;
             } else {
-                let new_head = unsafe { list_entry.next.unwrap().as_mut() };
+                let mut new_head_ptr = list_entry.next.clone().unwrap();
+                let new_head = unsafe { new_head_ptr.as_mut() };
                 new_head.prev = None;
                 self.head = list_entry.next;
             }
         } else if list_entry.next.is_none() {
             assert_eq!(self.tail.unwrap().as_ptr(), list_entry as *mut _);
-            let new_tail = unsafe { list_entry.prev.unwrap().as_mut() };
+            let mut new_tail_ptr = list_entry.prev.clone().unwrap();
+            let new_tail = unsafe { new_tail_ptr.as_mut() };
             new_tail.next = None;
             self.tail = list_entry.prev;
         } else {
-            let prev = unsafe { list_entry.prev.unwrap().as_mut() };
-            let next = unsafe { list_entry.next.unwrap().as_mut() };
+            let mut prev_ptr = list_entry.prev.clone().unwrap();
+            let mut next_ptr = list_entry.next.clone().unwrap();
+            let prev = unsafe { prev_ptr.as_mut() };
+            let next = unsafe { next_ptr.as_mut() };
             prev.next = list_entry.next;
             next.prev = list_entry.prev;
         }
@@ -143,7 +148,8 @@ impl<T> PtrLinkedList<T> {
             None
         } else {
             let result = self.get_first_entry_mut(offset).unwrap();
-            let head = self.head.unwrap().as_mut();
+            let mut head_ptr = self.head.clone().unwrap();
+            let head = head_ptr.as_mut();
             self.remove(head);
             Some(result)
         }
@@ -152,7 +158,7 @@ impl<T> PtrLinkedList<T> {
     pub unsafe fn get_first_entry(&self, offset: usize) -> Option<&'static T> {
         if let Some(e) = self.head {
             let head = e.as_ptr();
-            Some(unsafe { &*((head as usize - offset) as *const T) })
+            Some(&*((head as usize - offset) as *const T))
         } else {
             None
         }

@@ -266,11 +266,9 @@ pub fn setup_cpu_manager_cluster(
         )
     };
     cpu_manager.list = PtrLinkedListNode::new();
-    unsafe {
-        cpu_manager
-            .list
-            .set_ptr_from_usize(cpu_manager_address.to_usize())
-    };
+    get_kernel_manager_cluster()
+        .cpu_list
+        .insert_tail(&mut cpu_manager.list);
     cpu_manager
 }
 

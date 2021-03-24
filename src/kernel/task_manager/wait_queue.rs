@@ -37,7 +37,7 @@ impl WaitQueue {
             self.list
                 .get_last_entry_mut(offset_of!(ThreadEntry, sleep_list))
         } {
-            let last_thread_lock = last_thread
+            let _last_thread_lock = last_thread
                 .lock
                 .try_lock()
                 .or(Err(TaskError::ThreadLockError))?;
