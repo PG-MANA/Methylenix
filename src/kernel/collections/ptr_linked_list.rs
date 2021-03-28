@@ -16,7 +16,7 @@ macro_rules! offset_of {
         let target_struct_ptr: *const $struct_type = target_struct.as_ptr();
         #[allow(unused_unsafe)]
         let target_member_ptr: *const PtrLinkedListNode<$struct_type> =
-            unsafe { &raw const ((*target_struct_ptr).$member) };
+            unsafe { core::ptr::addr_of!((*target_struct_ptr).$member) };
         #[allow(unused_unsafe)]
         unsafe {
             (target_member_ptr as *const u8).offset_from(target_struct_ptr as *const u8) as usize
