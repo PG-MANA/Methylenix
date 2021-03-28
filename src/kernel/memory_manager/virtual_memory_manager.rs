@@ -1240,7 +1240,7 @@ impl VirtualMemoryManager {
                 continue;
             }
             kprintln!(
-                "Virtual Address:{:#X} Size:{:#X} W:{}, U:{}, EXE:{}",
+                "Virtual Address:{:>#16X}, Size:{:>#16X}, W:{:>5}, U:{:>5}, E:{:>5}",
                 entry.get_vm_start_address().to_usize(),
                 MSize::from_address(entry.get_vm_start_address(), entry.get_vm_end_address())
                     .to_usize(),
@@ -1272,14 +1272,14 @@ impl VirtualMemoryManager {
                         continue;
                     } else if omitted {
                         kprintln!(
-                            "...\n - {} Physical Address:{:#X}",
+                            "...\n - {} Physical Address:{:>#16X}",
                             i.to_usize() - 1,
                             last_address.to_usize()
                         );
                         omitted = false;
                     }
                     kprintln!(
-                        " - {} Physical Address:{:#X}",
+                        " - {} Physical Address:{:>#16X}",
                         i.to_usize(),
                         p.get_physical_address().to_usize()
                     );
@@ -1294,7 +1294,7 @@ impl VirtualMemoryManager {
                 kprintln!("...\n - {} Not Found(fin)", last_p_index.to_usize() - 1);
             } else if omitted {
                 kprintln!(
-                    "...\n - {} Physical Address:{:#X} (fin)",
+                    "...\n - {} Physical Address:{:>#16X} (fin)",
                     last_p_index.to_usize() - 1,
                     last_address.to_usize()
                 );

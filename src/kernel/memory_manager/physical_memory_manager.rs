@@ -480,14 +480,14 @@ impl PhysicalMemoryManager {
             return;
         }
         kprintln!(
-            "Start:{:#X} Size:{:#X}",
+            "Start:{:>#16X}, Size:{:>#16X}",
             entry.get_start_address().to_usize(),
             MSize::from_address(entry.get_start_address(), entry.get_end_address()).to_usize()
         );
         while let Some(t) = entry.get_next_entry() {
             entry = t;
             kprintln!(
-                "Start:{:#X} Size:{:#X}",
+                "Start:{:>#16X}, Size:{:>#16X}",
                 entry.get_start_address().to_usize(),
                 MSize::from_address(entry.get_start_address(), entry.get_end_address()).to_usize()
             );
@@ -498,10 +498,10 @@ impl PhysicalMemoryManager {
                 continue;
             }
             let first_entry = unsafe { &*self.free_list[order].unwrap() };
-            kprintln!("order {}:", order);
+            kprintln!("Order {}:", order);
             for entry in first_entry.list_iter() {
                 kprintln!(
-                    " Start:{:#X} Size:{:#X}",
+                    " Start:{:>#16X}, Size:{:>#16X}",
                     entry.get_start_address().to_usize(),
                     MSize::from_address(entry.get_start_address(), entry.get_end_address())
                         .to_usize()
