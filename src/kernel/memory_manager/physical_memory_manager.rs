@@ -165,7 +165,7 @@ impl PhysicalMemoryManager {
             } else {
                 let old_size = entry.get_size();
                 entry.set_range(start_address + size, entry.get_end_address());
-                self.chain_entry_to_free_list(entry, old_size, false);
+                self.chain_entry_to_free_list(entry, Some(old_size));
             }
         } else if entry.get_end_address() == start_address {
             if size.to_usize() != 1 {
@@ -173,11 +173,11 @@ impl PhysicalMemoryManager {
             }
             /* Allocate 1 byte of end_address */
             entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
-            self.chain_entry_to_free_list(entry, entry.get_size() + size, false);
+            self.chain_entry_to_free_list(entry, Some(entry.get_size() + size));
         } else if entry.get_end_address() == size.to_end_address(start_address) {
             let old_size = entry.get_size();
             entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
-            self.chain_entry_to_free_list(entry, old_size, false);
+            self.chain_entry_to_free_list(entry, Some(old_size));
         } else {
             let new_entry = if let Some(t) = self.create_memory_entry() {
                 t
@@ -192,8 +192,8 @@ impl PhysicalMemoryManager {
                 new_entry.chain_after_me(next);
             }
             entry.chain_after_me(new_entry);
-            self.chain_entry_to_free_list(entry, old_size, false);
-            self.chain_entry_to_free_list(new_entry, new_entry.get_size(), true);
+            self.chain_entry_to_free_list(entry, Some(old_size));
+            self.chain_entry_to_free_list(new_entry, None);
         }
         self.free_memory_size -= size;
         true
@@ -253,7 +253,7 @@ impl PhysicalMemoryManager {
                 }
                 if processed {
                     self.free_memory_size += size;
-                    self.chain_entry_to_free_list(entry, old_size, false);
+                    self.chain_entry_to_free_list(entry, Some(old_size));
                     return true;
                 }
                 let new_entry = if let Some(t) = self.create_memory_entry() {
@@ -274,12 +274,12 @@ impl PhysicalMemoryManager {
                     entry.chain_after_me(new_entry);
                 }
                 self.free_memory_size += size;
-                self.chain_entry_to_free_list(new_entry, new_entry.get_size(), true);
+                self.chain_entry_to_free_list(new_entry, None);
                 true
             } else {
                 if processed {
                     self.free_memory_size += size;
-                    self.chain_entry_to_free_list(entry, old_size, false);
+                    self.chain_entry_to_free_list(entry, Some(old_size));
                     return true;
                 }
                 let new_entry = if let Some(t) = self.create_memory_entry() {
@@ -292,7 +292,7 @@ impl PhysicalMemoryManager {
                 new_entry.unset_next_entry();
                 entry.chain_after_me(new_entry);
                 self.free_memory_size += size;
-                self.chain_entry_to_free_list(new_entry, new_entry.get_size(), true);
+                self.chain_entry_to_free_list(new_entry, None);
                 true
             }
         }
@@ -364,7 +364,7 @@ impl PhysicalMemoryManager {
             first_entry.init();
             first_entry.set_range(start_address, size.to_end_address(start_address));
             first_entry.set_enabled();
-            self.chain_entry_to_free_list(first_entry, first_entry.get_size(), true);
+            self.chain_entry_to_free_list(first_entry, None);
             self.memory_size = size;
             self.free_memory_size = size;
         } else {
@@ -386,15 +386,10 @@ impl PhysicalMemoryManager {
         entry.unchain_from_freelist();
     }
 
-    fn chain_entry_to_free_list(
-        &mut self,
-        entry: &mut MemoryEntry,
-        old_size: MSize,
-        entry_is_new: bool,
-    ) {
-        let old_order = Self::size_to_order(old_size);
+    fn chain_entry_to_free_list(&mut self, entry: &mut MemoryEntry, old_size: Option<MSize>) {
         let new_order = Self::size_to_order(entry.get_size());
-        if !entry_is_new {
+        if let Some(old_size) = old_size {
+            let old_order = Self::size_to_order(old_size);
             if old_order == new_order {
                 return;
             }
