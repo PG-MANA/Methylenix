@@ -6,7 +6,7 @@
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
-use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress};
+use crate::kernel::memory_manager::data_type::{Address, MOrder, MPageOrder, MSize, PAddress};
 
 const MEMORY_ENTRY_SIZE: usize = core::mem::size_of::<MemoryEntry>();
 
@@ -110,10 +110,11 @@ impl PhysicalMemoryManager {
             if let Some(t) = entry.get_next_entry() {
                 entry = t;
             } else {
-                if entry.get_end_address() <= address {
-                    return Some(entry);
-                }
-                return None;
+                return if entry.get_end_address() <= address {
+                    Some(entry)
+                } else {
+                    entry.get_prev_entry()
+                };
             }
         }
         entry.get_prev_entry()
@@ -165,19 +166,20 @@ impl PhysicalMemoryManager {
             } else {
                 let old_size = entry.get_size();
                 entry.set_range(start_address + size, entry.get_end_address());
-                self.chain_entry_to_free_list(entry, old_size, false);
+
+                self.chain_entry_to_free_list(entry, Some(old_size));
             }
         } else if entry.get_end_address() == start_address {
             if size.to_usize() != 1 {
                 return false;
             }
             /* Allocate 1 byte of end_address */
-            entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
-            self.chain_entry_to_free_list(entry, entry.get_size() + size, false);
+            entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
+            self.chain_entry_to_free_list(entry, Some(entry.get_size() + size));
         } else if entry.get_end_address() == size.to_end_address(start_address) {
             let old_size = entry.get_size();
-            entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
-            self.chain_entry_to_free_list(entry, old_size, false);
+            entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
+            self.chain_entry_to_free_list(entry, Some(old_size));
         } else {
             let new_entry = if let Some(t) = self.create_memory_entry() {
                 t
@@ -187,13 +189,13 @@ impl PhysicalMemoryManager {
             };
             let old_size = entry.get_size();
             new_entry.set_range(start_address + size, entry.get_end_address());
-            entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
+            entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
             if let Some(next) = entry.get_next_entry() {
                 new_entry.chain_after_me(next);
             }
             entry.chain_after_me(new_entry);
-            self.chain_entry_to_free_list(entry, old_size, false);
-            self.chain_entry_to_free_list(new_entry, new_entry.get_size(), true);
+            self.chain_entry_to_free_list(entry, Some(old_size));
+            self.chain_entry_to_free_list(new_entry, None);
         }
         self.free_memory_size -= size;
         true
@@ -215,9 +217,9 @@ impl PhysicalMemoryManager {
         } else if entry.get_end_address() >= start_address && !entry.is_first_entry() {
             /* Free duplicated area */
             self.define_free_memory(
-                entry.get_end_address() + MSize::from(1),
+                entry.get_end_address() + MSize::new(1),
                 MSize::from_address(
-                    entry.get_end_address() + MSize::from(1),
+                    entry.get_end_address() + MSize::new(1),
                     size.to_end_address(start_address),
                 ),
             )
@@ -228,7 +230,7 @@ impl PhysicalMemoryManager {
         } else {
             let mut processed = false;
             let old_size = entry.get_size();
-            if entry.get_end_address() + MSize::from(1) == start_address {
+            if entry.get_end_address() + MSize::new(1) == start_address {
                 entry.set_range(
                     entry.get_start_address(),
                     size.to_end_address(start_address),
@@ -236,24 +238,44 @@ impl PhysicalMemoryManager {
                 processed = true;
             }
             if entry.is_first_entry()
-                && entry.get_start_address() == size.to_end_address(start_address) + MSize::from(1)
+                && entry.get_start_address() == size.to_end_address(start_address) + MSize::new(1)
             {
                 entry.set_range(start_address, entry.get_end_address());
                 processed = true;
             }
             if let Some(next) = entry.get_next_entry() {
-                if next.get_start_address() == size.to_end_address(start_address) + MSize::from(1) {
+                if next.get_start_address() <= start_address {
+                    assert!(!processed);
+                    return if next.get_end_address() >= size.to_end_address(start_address) {
+                        false /* already freed */
+                    } else {
+                        self.define_free_memory(
+                            next.get_end_address() + MSize::new(1),
+                            size.to_end_address(start_address) - next.get_end_address(),
+                        )
+                    };
+                }
+                if next.get_start_address() == size.to_end_address(start_address) + MSize::new(1) {
+                    let next_old_size = next.get_size();
                     next.set_range(start_address, next.get_end_address());
+                    self.chain_entry_to_free_list(next, Some(next_old_size));
                     processed = true;
                 }
-                if next.get_start_address() == entry.get_end_address() + MSize::from(1) {
-                    entry.set_range(entry.get_start_address(), next.get_end_address());
+                if (next.get_start_address() == entry.get_end_address() + MSize::new(1))
+                    || (processed
+                        && (entry.get_end_address() + MSize::new(1)) >= next.get_start_address())
+                {
+                    entry.set_range(
+                        entry.get_start_address(),
+                        core::cmp::max(entry.get_end_address(), next.get_end_address()),
+                    );
+
                     self.unchain_entry_from_free_list(next);
                     next.delete();
                 }
                 if processed {
                     self.free_memory_size += size;
-                    self.chain_entry_to_free_list(entry, old_size, false);
+                    self.chain_entry_to_free_list(entry, Some(old_size));
                     return true;
                 }
                 let new_entry = if let Some(t) = self.create_memory_entry() {
@@ -274,12 +296,13 @@ impl PhysicalMemoryManager {
                     entry.chain_after_me(new_entry);
                 }
                 self.free_memory_size += size;
-                self.chain_entry_to_free_list(new_entry, new_entry.get_size(), true);
+                self.chain_entry_to_free_list(entry, Some(old_size));
+                self.chain_entry_to_free_list(new_entry, None);
                 true
             } else {
                 if processed {
                     self.free_memory_size += size;
-                    self.chain_entry_to_free_list(entry, old_size, false);
+                    self.chain_entry_to_free_list(entry, Some(old_size));
                     return true;
                 }
                 let new_entry = if let Some(t) = self.create_memory_entry() {
@@ -292,7 +315,8 @@ impl PhysicalMemoryManager {
                 new_entry.unset_next_entry();
                 entry.chain_after_me(new_entry);
                 self.free_memory_size += size;
-                self.chain_entry_to_free_list(new_entry, new_entry.get_size(), true);
+                self.chain_entry_to_free_list(entry, Some(old_size));
+                self.chain_entry_to_free_list(new_entry, None);
                 true
             }
         }
@@ -302,8 +326,8 @@ impl PhysicalMemoryManager {
         if size.is_zero() || self.free_memory_size <= size {
             return None;
         }
-        let order = Self::size_to_order(size);
-        for i in order.to_usize()..Self::NUM_OF_FREE_LIST {
+        let page_order = Self::size_to_page_order(size);
+        for i in page_order.to_usize()..Self::NUM_OF_FREE_LIST {
             let first_entry = if let Some(t) = self.free_list[i] {
                 unsafe { &mut *t }
             } else {
@@ -329,7 +353,7 @@ impl PhysicalMemoryManager {
                     return if self.define_used_memory(
                         address_to_allocate,
                         size,
-                        0.into(),
+                        MOrder::new(0),
                         Some(entry),
                     ) {
                         Some(address_to_allocate)
@@ -364,7 +388,7 @@ impl PhysicalMemoryManager {
             first_entry.init();
             first_entry.set_range(start_address, size.to_end_address(start_address));
             first_entry.set_enabled();
-            self.chain_entry_to_free_list(first_entry, first_entry.get_size(), true);
+            self.chain_entry_to_free_list(first_entry, None);
             self.memory_size = size;
             self.free_memory_size = size;
         } else {
@@ -379,25 +403,20 @@ impl PhysicalMemoryManager {
     }
 
     fn unchain_entry_from_free_list(&mut self, entry: &mut MemoryEntry) {
-        let order = Self::size_to_order(entry.get_size());
+        let order = Self::size_to_page_order(entry.get_size());
         if self.free_list[order.to_usize()] == Some(entry as *mut _) {
             self.free_list[order.to_usize()] = entry.list_next;
         }
         entry.unchain_from_freelist();
     }
 
-    fn chain_entry_to_free_list(
-        &mut self,
-        entry: &mut MemoryEntry,
-        old_size: MSize,
-        entry_is_new: bool,
-    ) {
-        let old_order = Self::size_to_order(old_size);
-        let new_order = Self::size_to_order(entry.get_size());
-        if !entry_is_new {
-            if old_order == new_order {
+    fn chain_entry_to_free_list(&mut self, entry: &mut MemoryEntry, old_size: Option<MSize>) {
+        let new_order = Self::size_to_page_order(entry.get_size());
+        if let Some(old_size) = old_size {
+            if old_size == entry.get_size() {
                 return;
             }
+            let old_order = Self::size_to_page_order(old_size);
             if self.free_list[old_order.to_usize()] == Some(entry as *mut _) {
                 self.free_list[old_order.to_usize()] = entry.list_next;
             }
@@ -409,18 +428,38 @@ impl PhysicalMemoryManager {
         if self.free_list[new_order.to_usize()].is_none() {
             self.free_list[new_order.to_usize()] = Some(entry as *mut _);
         } else {
-            let mut tail_entry = unsafe { &mut *self.free_list[new_order.to_usize()].unwrap() };
-            while let Some(next_entry) = tail_entry.list_next {
-                tail_entry = unsafe { &mut *next_entry };
+            let mut list_entry: &mut MemoryEntry =
+                unsafe { &mut *self.free_list[new_order.to_usize()].unwrap() };
+            if list_entry.get_size() >= entry.get_size() {
+                list_entry.list_prev = Some(entry as *mut _);
+                entry.list_next = Some(list_entry as *mut _);
+                self.free_list[new_order.to_usize()] = Some(entry as *mut _);
+            } else {
+                loop {
+                    if let Some(next_entry) =
+                        list_entry.list_next.and_then(|n| Some(unsafe { &mut *n }))
+                    {
+                        if next_entry.get_size() >= entry.get_size() {
+                            list_entry.list_next = Some(entry as *mut _);
+                            entry.list_prev = Some(list_entry as *mut _);
+                            entry.list_next = Some(next_entry as *mut _);
+                            next_entry.list_prev = Some(entry as *mut _);
+                            break;
+                        }
+                        list_entry = next_entry;
+                    } else {
+                        list_entry.list_next = Some(entry as *mut _);
+                        entry.list_prev = Some(list_entry as *mut _);
+                        break;
+                    }
+                }
             }
-            tail_entry.list_next = Some(entry as *mut _);
-            entry.list_prev = Some(tail_entry as *mut _);
         }
     }
 
     #[inline]
-    fn size_to_order(size: MSize) -> MOrder {
-        size.to_order(Some(MOrder::new(Self::NUM_OF_FREE_LIST - 1)))
+    fn size_to_page_order(size: MSize) -> MPageOrder {
+        MPageOrder::from_offset(size, MPageOrder::new(Self::NUM_OF_FREE_LIST - 1))
     }
 
     #[inline]
@@ -480,14 +519,14 @@ impl PhysicalMemoryManager {
             return;
         }
         kprintln!(
-            "Start:{:#X} Size:{:#X}",
+            "Start:{:>#16X}, Size:{:>#16X}",
             entry.get_start_address().to_usize(),
             MSize::from_address(entry.get_start_address(), entry.get_end_address()).to_usize()
         );
         while let Some(t) = entry.get_next_entry() {
             entry = t;
             kprintln!(
-                "Start:{:#X} Size:{:#X}",
+                "Start:{:>#16X}, Size:{:>#16X}",
                 entry.get_start_address().to_usize(),
                 MSize::from_address(entry.get_start_address(), entry.get_end_address()).to_usize()
             );
@@ -498,10 +537,10 @@ impl PhysicalMemoryManager {
                 continue;
             }
             let first_entry = unsafe { &*self.free_list[order].unwrap() };
-            kprintln!("order {}:", order);
+            kprintln!("Order {}:", order);
             for entry in first_entry.list_iter() {
                 kprintln!(
-                    " Start:{:#X} Size:{:#X}",
+                    " Start:{:>#16X}, Size:{:>#16X}",
                     entry.get_start_address().to_usize(),
                     MSize::from_address(entry.get_start_address(), entry.get_end_address())
                         .to_usize()
@@ -532,6 +571,8 @@ impl MemoryEntry {
         } else {
             pr_warn!("Not chained entry was deleted.");
         }
+        self.previous = None;
+        self.next = None;
     }
 
     pub fn set_enabled(&mut self) {

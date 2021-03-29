@@ -1,5 +1,5 @@
 /*
- * boot entry code for application processors
+ * Boot entry for application processors
  */
 
 
@@ -41,12 +41,12 @@ ap_entry:
     /* Long JMP */
     .byte 0x66, 0xea                            /* opcode and 32bit address prefix(?) */
 ljmpl_32_address:
-    .long (ap_init_long_mode - ap_entry)        /* offset (base will be added before) */
+    .long (ap_setup_long_mode - ap_entry)       /* offset (base will be added before) */
     .word gdt_32bit_code_segment_descriptor     /* code segment */
 
 
 .code32
-ap_init_long_mode:
+ap_setup_long_mode:
     mov     $gdt_32bit_data_segment_descriptor, %ax
     mov     %ax, %ds
 
@@ -71,12 +71,12 @@ ap_init_long_mode:
     /* Long JMP */
     .byte   0xea                        /* opcode */
 ljmpl_64_address:
-    .long (ap_init_x86_64 - ap_entry)   /* offset (base will be added before) */
+    .long (ap_init_long_mode - ap_entry)/* offset (base will be added before) */
     .word main_code_segment_descriptor  /* code segment */
 
 
 .code64
-ap_init_x86_64:
+ap_init_long_mode:
     xor     %ax, %ax
     mov     %ax, %es
     mov     %ax, %ss

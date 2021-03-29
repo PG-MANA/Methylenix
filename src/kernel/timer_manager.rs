@@ -21,6 +21,7 @@ pub trait Timer {
     fn get_difference(&self, earlier: usize, later: usize) -> usize;
     fn get_ending_count_value(&self, start: usize, difference: usize) -> usize;
     fn get_max_counter_value(&self) -> usize;
+
     #[inline(always)]
     fn busy_wait_ms(&self, ms: usize) {
         let start = self.get_count();
@@ -29,8 +30,9 @@ pub trait Timer {
             panic!("Cannot count more than max_counter_value");
         }
         let end = self.get_ending_count_value(start, difference);
-        self.wait_until(end);
+        self.wait_until(start, end);
     }
+
     #[inline(always)]
     fn busy_wait_us(&self, us: usize) {
         let start = self.get_count();
@@ -41,16 +43,27 @@ pub trait Timer {
             panic!("Cannot count less than the resolution");
         }
         let end = self.get_ending_count_value(start, difference);
-        self.wait_until(end);
+        self.wait_until(start, end);
     }
+
     #[inline(always)]
-    fn wait_until(&self, end_counter_value: usize) {
+    fn wait_until(&self, start_counter_value: usize, end_counter_value: usize) {
         use core::hint::spin_loop;
         if self.is_count_up_timer() {
+            if start_counter_value > end_counter_value {
+                while self.get_count() >= start_counter_value {
+                    spin_loop();
+                }
+            }
             while self.get_count() < end_counter_value {
                 spin_loop();
             }
         } else {
+            if start_counter_value < end_counter_value {
+                while self.get_count() <= start_counter_value {
+                    spin_loop();
+                }
+            }
             while self.get_count() > end_counter_value {
                 spin_loop();
             }

@@ -658,6 +658,16 @@ impl PageManager {
             VAddress::from(0), /* virtual address */
             PAddress::from(0), /* physical address */
         );
+        let print_normal = |v: usize, p: usize, w: bool, e: bool, a: bool, s: &str| {
+            kprintln!("Linear addresses: {:>#16X} => Physical Address: {:>#16X}, W:{:>5}, E:{:>5}, A:{:>5} {}", v, p, w, e, a, s);
+        };
+        let print_omitted = |v: usize, p: usize| {
+            kprintln!(
+                "...               {:>#16X}                      {:>#16X} (fin)",
+                v,
+                p
+            );
+        };
 
         let pml4_table = unsafe { &*(self.pml4.to_usize() as *const [PML4E; PML4_MAX_ENTRY]) };
         for pml4 in pml4_table.iter() {
@@ -687,20 +697,16 @@ impl PageManager {
                         continue;
                     }
                     if omitted {
-                        kprintln!(
-                            " ~{:#X}: {:#X}",
-                            last_address.0.to_usize(),
-                            last_address.1.to_usize()
-                        );
+                        print_omitted(last_address.0.to_usize(), last_address.1.to_usize());
                         omitted = false;
                     }
-                    kprintln!(
-                        "{:#X}: {:#X} W:{}, EXE:{}, A:{} 1G",
+                    print_normal(
                         virtual_address.to_usize(),
                         pdpte.get_address().unwrap().to_usize(),
                         pdpte.is_writable(),
                         !pdpte.is_no_execute(),
-                        pdpte.is_accessed()
+                        pdpte.is_accessed(),
+                        "1G",
                     );
                     if end.is_some() && virtual_address >= end.unwrap() {
                         return;
@@ -734,20 +740,16 @@ impl PageManager {
                             continue;
                         }
                         if omitted {
-                            kprintln!(
-                                " ~{:#X}: {:#X}",
-                                last_address.0.to_usize(),
-                                last_address.1.to_usize()
-                            );
+                            print_omitted(last_address.0.to_usize(), last_address.1.to_usize());
                             omitted = false;
                         }
-                        kprintln!(
-                            "{:#X}: {:#X} W:{}, EXE:{}, A:{} 2M",
+                        print_normal(
                             virtual_address.to_usize(),
                             pde.get_address().unwrap().to_usize(),
                             pdpte.is_writable(),
                             !pdpte.is_no_execute(),
                             pdpte.is_accessed(),
+                            "2M",
                         );
                         if end.is_some() && virtual_address >= end.unwrap() {
                             return;
@@ -781,20 +783,16 @@ impl PageManager {
                             continue;
                         }
                         if omitted {
-                            kprintln!(
-                                " ~ {:#X}: {:#X}",
-                                last_address.0.to_usize(),
-                                last_address.1.to_usize()
-                            );
+                            print_omitted(last_address.0.to_usize(), last_address.1.to_usize());
                             omitted = false;
                         }
-                        kprintln!(
-                            "{:#X}: {:#X} W:{}, EXE:{}, A:{} 4K",
+                        print_normal(
                             virtual_address.to_usize(),
                             pte.get_address().unwrap().to_usize(),
                             pte.is_writable(),
                             !pte.is_no_execute(),
-                            pte.is_accessed()
+                            pte.is_accessed(),
+                            "4K",
                         );
                         if end.is_some() && virtual_address >= end.unwrap() {
                             return;

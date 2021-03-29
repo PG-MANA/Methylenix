@@ -8,7 +8,7 @@ use crate::arch::target_arch::device::cpu;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
-    Address, MemoryPermissionFlags, PAddress, VAddress,
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
 
 pub struct LocalApicManager {
@@ -80,8 +80,12 @@ impl LocalApicManager {
                 .memory_manager
                 .lock()
                 .unwrap()
-                .mmap_dev(base_address, 0x1000.into(), MemoryPermissionFlags::data())
-            {
+                .mmap_dev(
+                    base_address,
+                    MSize::new(0x1000),
+                    MemoryPermissionFlags::data(),
+                    Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
+                ) {
                 Ok(address) => {
                     self.base_address = address;
                 }

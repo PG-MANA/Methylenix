@@ -72,6 +72,6 @@ xen_pae_end:
 .long XEN_ELFNOTE_PHYS32_ENTRY
 .asciz "Xen"
 /* .align 4 */
-.long boot_from_xen
+.long boot_xen
 
 .align 4

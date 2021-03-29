@@ -11,7 +11,7 @@ mod memory;
 
 pub use self::elf::{ElfInfo, ElfSection};
 pub use self::frame_buffer::FrameBufferInfo;
-pub use self::memory::{MemoryMapEntry, MemoryMapInfo};
+pub use self::memory::{EfiMemoryMapInfo, MemoryMapInfo};
 
 use core::{mem, slice, str};
 
@@ -46,6 +46,7 @@ pub struct ModuleInfo {
 pub struct MultiBootInformation {
     pub elf_info: ElfInfo,
     pub memory_map_info: MemoryMapInfo,
+    pub efi_memory_map_info: EfiMemoryMapInfo,
     pub framebuffer_info: FrameBufferInfo,
     pub efi_table_pointer: Option<usize>,
     pub address: usize,
@@ -106,6 +107,9 @@ impl MultiBootInformation {
                 }
                 MultiBootInformation::TAG_TYPE_MMAP => {
                     mbi.memory_map_info = MemoryMapInfo::new(unsafe { &*(tag as *const _) });
+                }
+                MultiBootInformation::TAG_TYPE_EFI_MMAP => {
+                    mbi.efi_memory_map_info = EfiMemoryMapInfo::new(unsafe { &*(tag as *const _) })
                 }
                 MultiBootInformation::TAG_TYPE_ACPI_OLD => {
                     mbi.old_acpi_rsdp_ptr = Some(tag + 8);

@@ -4,6 +4,9 @@
 //! This manager handles EFI services.
 //! Currently, this is not used.
 
+pub mod boot_service {
+    pub mod memory_map;
+}
 pub mod table;
 pub mod text;
 

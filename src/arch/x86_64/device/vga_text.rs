@@ -9,7 +9,7 @@ use crate::arch::target_arch::device::crt;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::graphic_manager::text_buffer_driver::TextBufferDriver;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags};
 
 /// VgaTextDriver
 ///
@@ -95,8 +95,9 @@ impl VgaTextDriver {
                 .unwrap()
                 .mmap_dev(
                     self.address.into(),
-                    (self.width * self.height * 2 as usize).into(),
+                    MSize::new(self.width * self.height * 2 as usize),
                     MemoryPermissionFlags::data(),
+                    None,
                 ) {
                 Ok(address) => {
                     self.address = address.to_usize();

@@ -244,6 +244,7 @@ impl MemoryManager {
         physical_address: PAddress,
         size: MSize,
         permission: MemoryPermissionFlags,
+        option: Option<MemoryOptionFlags>,
     ) -> Result<VAddress, MemoryError> {
         /* For IO map */
         /* should remake...? */
@@ -263,6 +264,7 @@ impl MemoryManager {
             None,
             aligned_size,
             permission,
+            option,
             &mut pm_manager,
         )?;
         Ok(virtual_address + (physical_address - aligned_physical_address))

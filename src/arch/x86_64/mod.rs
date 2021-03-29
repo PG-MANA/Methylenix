@@ -19,6 +19,7 @@ use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
@@ -58,6 +59,7 @@ pub extern "C" fn multiboot_main(
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
     /* Setup BSP CPU Manager Cluster */
+    get_kernel_manager_cluster().cpu_list = PtrLinkedList::new();
     setup_cpu_manager_cluster(Some(VAddress::new(
         &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
     )));
@@ -124,14 +126,14 @@ pub extern "C" fn multiboot_main(
         idle,
     );
 
-    /* Setup the interrupt work queue system */
-    init_interrupt_work_queue_manager();
+    /* Setup work queue system */
+    init_work_queue();
 
     /* Setup APs if the processor is multicore-processor */
     init_multiple_processors_ap();
 
     /* Switch to main process */
-    get_cpu_manager_cluster().run_queue_manager.start()
+    get_cpu_manager_cluster().run_queue.start()
     /* Never return to here */
 }
 
@@ -146,11 +148,8 @@ fn main_process() -> ! {
         .arch_depend_data
         .local_apic_timer
         .start_interrupt(
-            get_kernel_manager_cluster()
-                .boot_strap_cpu_manager
+            get_cpu_manager_cluster()
                 .interrupt_manager
-                .lock()
-                .unwrap()
                 .get_local_apic_manager(),
         );
     pr_info!("All init are done!");
@@ -164,19 +163,13 @@ fn main_process() -> ! {
         pr_err!("Cannot init ACPI devices.");
     }
 
+    let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
-        get_cpu_manager_cluster().run_queue_manager.sleep();
-        while let Some(c) = get_kernel_manager_cluster()
-            .serial_port_manager
-            .dequeue_key()
-        {
-            print!("{}", c as char);
+        let c = tty.getc(true);
+        if c.is_some() {
+            print!("{}", c.unwrap() as char);
         }
-        if get_kernel_manager_cluster()
-            .kernel_tty_manager
-            .flush()
-            .is_err()
-        {
+        if tty.flush().is_err() {
             pr_err!("Cannot flush text.");
         }
     }
@@ -227,6 +220,7 @@ fn draw_boot_logo() {
             boot_logo_physical_address.unwrap(),
             original_map_size,
             MemoryPermissionFlags::rodata(),
+            None,
         );
     if result.is_err() {
         pr_err!(
@@ -361,14 +355,6 @@ pub extern "C" fn ap_boot_main() -> ! {
 
     /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
-    let mut cpu_manager_list = &mut get_kernel_manager_cluster().boot_strap_cpu_manager.list;
-    loop {
-        if cpu_manager_list.get_next_as_ptr().is_none() {
-            cpu_manager_list.insert_after(&mut cpu_manager.list);
-            break;
-        }
-        cpu_manager_list = &mut unsafe { cpu_manager_list.get_next_mut() }.unwrap().list;
-    }
 
     /* Setup memory management system */
     let mut object_allocator = ObjectAllocator::new();
@@ -386,18 +372,16 @@ pub extern "C" fn ap_boot_main() -> ! {
     interrupt_manager.init_ap(
         &mut get_kernel_manager_cluster()
             .boot_strap_cpu_manager
-            .interrupt_manager
-            .lock()
-            .unwrap(),
+            .interrupt_manager,
     );
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
-    cpu_manager.interrupt_manager = Mutex::new(interrupt_manager);
+    cpu_manager.interrupt_manager = interrupt_manager;
 
     cpu_manager.arch_depend_data.local_apic_timer = init_timer();
     init_task_ap(ap_idle);
-    init_interrupt_work_queue_manager();
+    init_work_queue();
     /* Switch to ap_idle task with own stack */
-    cpu_manager.run_queue_manager.start()
+    cpu_manager.run_queue.start()
 }
 
 fn ap_idle() -> ! {

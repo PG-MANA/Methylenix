@@ -178,6 +178,9 @@ macro_rules! make_context_switch_interrupt_handler {
                 mov     rdi, rsp
                 call    {0}
                 mov     rsp, rbp
+                mov     rdi, rbp
+                call    {2}
+                mov     rsp, rbp
                 mov     rax, cs
                 cmp     [rsp + 512 +  ({1} + 1) * 8 + 8], rax
                 je      2f
@@ -204,6 +207,7 @@ macro_rules! make_context_switch_interrupt_handler {
                 add     rsp, ({1} + 1) * 8
                 iretq", sym $handler_func,
                 const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS,
+                sym crate::arch::target_arch::interrupt::InterruptManager::post_interrupt_handler,
                 options(noreturn));
         }
     };
