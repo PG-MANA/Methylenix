@@ -408,12 +408,32 @@ impl PhysicalMemoryManager {
         if self.free_list[new_order.to_usize()].is_none() {
             self.free_list[new_order.to_usize()] = Some(entry as *mut _);
         } else {
-            let mut tail_entry = unsafe { &mut *self.free_list[new_order.to_usize()].unwrap() };
-            while let Some(next_entry) = tail_entry.list_next {
-                tail_entry = unsafe { &mut *next_entry };
+            let mut list_entry: &mut MemoryEntry =
+                unsafe { &mut *self.free_list[new_order.to_usize()].unwrap() };
+            if list_entry.get_size() >= entry.get_size() {
+                list_entry.list_prev = Some(entry as *mut _);
+                entry.list_next = Some(list_entry as *mut _);
+                self.free_list[new_order.to_usize()] = Some(entry as *mut _);
+            } else {
+                loop {
+                    if let Some(next_entry) =
+                        list_entry.list_next.and_then(|n| Some(unsafe { &mut *n }))
+                    {
+                        if next_entry.get_size() > entry.get_size() {
+                            list_entry.list_next = Some(entry as *mut _);
+                            entry.list_prev = Some(list_entry as *mut _);
+                            entry.list_next = Some(next_entry as *mut _);
+                            next_entry.list_prev = Some(entry as *mut _);
+                            break;
+                        }
+                        list_entry = next_entry;
+                    } else {
+                        list_entry.list_next = Some(entry as *mut _);
+                        entry.list_prev = Some(list_entry as *mut _);
+                        break;
+                    }
+                }
             }
-            tail_entry.list_next = Some(entry as *mut _);
-            entry.list_prev = Some(tail_entry as *mut _);
         }
     }
 
