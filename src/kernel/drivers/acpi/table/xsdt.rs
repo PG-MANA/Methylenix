@@ -12,7 +12,7 @@ use crate::kernel::drivers::acpi::INITIAL_MMAP_SIZE;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
 
 pub struct XsdtManager {
@@ -40,6 +40,7 @@ impl XsdtManager {
                 xsdt_physical_address,
                 MSize::new(INITIAL_MMAP_SIZE),
                 MemoryPermissionFlags::rodata(),
+                Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
             ) {
             a
         } else {
@@ -82,6 +83,7 @@ impl XsdtManager {
                     entry_physical_address,
                     MSize::new(INITIAL_MMAP_SIZE),
                     MemoryPermissionFlags::rodata(),
+                    Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
                 ) {
                 a
             } else {
@@ -121,6 +123,7 @@ impl XsdtManager {
                     self.fadt_manager.get_dsdt_address(),
                     MSize::new(INITIAL_MMAP_SIZE),
                     MemoryPermissionFlags::rodata(),
+                    Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
                 ) {
                 a
             } else {
@@ -203,6 +206,7 @@ impl XsdtManager {
                 entry_physical_address,
                 MSize::new(INITIAL_MMAP_SIZE),
                 MemoryPermissionFlags::rodata(),
+                Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
             ) {
                 if unsafe { &*(v_address.to_usize() as *const [u8; 4]) } == signature {
                     return Some(v_address);

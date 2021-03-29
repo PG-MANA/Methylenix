@@ -9,7 +9,9 @@
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MemoryPermissionFlags, VAddress};
+use crate::kernel::memory_manager::data_type::{
+    Address, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+};
 
 pub struct IoApicManager {
     base_address: VAddress,
@@ -37,9 +39,10 @@ impl IoApicManager {
             .lock()
             .unwrap()
             .mmap_dev(
-                0xfec00000.into(),
+                PAddress::new(0xfec00000),
                 PAGE_SIZE, /* is it ok?*/
                 MemoryPermissionFlags::data(),
+                Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
             ) {
             Ok(address) => {
                 self.base_address = address;

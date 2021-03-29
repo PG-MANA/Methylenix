@@ -220,6 +220,7 @@ fn draw_boot_logo() {
             boot_logo_physical_address.unwrap(),
             original_map_size,
             MemoryPermissionFlags::rodata(),
+            None,
         );
     if result.is_err() {
         pr_err!(

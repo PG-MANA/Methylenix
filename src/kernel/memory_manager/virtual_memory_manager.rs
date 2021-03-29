@@ -505,6 +505,7 @@ impl VirtualMemoryManager {
         virtual_address: Option<VAddress>,
         size: MSize,
         permission: MemoryPermissionFlags,
+        option: Option<MemoryOptionFlags>,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<VAddress, MemoryError> {
         assert_eq!(permission.is_executable(), false); /* Disallow executing code on device mapping */
@@ -513,7 +514,7 @@ impl VirtualMemoryManager {
             virtual_address,
             size,
             permission,
-            MemoryOptionFlags::DEV_MAP,
+            option.unwrap_or(MemoryOptionFlags::NORMAL) | MemoryOptionFlags::DEV_MAP,
             pm_manager,
         )
     }
@@ -905,6 +906,7 @@ impl VirtualMemoryManager {
                 .get_physical_address();
             /* Assume: p_index is the first of mapping address */
             let option = entry.get_memory_option_flags();
+            entry.set_memory_option_flags(option | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS);
             self._free_address(entry, pm_manager)?;
             self.map_address(
                 physical_address,
