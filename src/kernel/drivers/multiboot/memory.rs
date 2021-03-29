@@ -2,6 +2,8 @@
 //! Multiboot Memory Map Information
 //!
 
+use crate::kernel::drivers::efi::boot_service::memory_map::EfiMemoryDescriptor;
+
 use core::mem;
 
 #[derive(Clone)]
@@ -20,25 +22,41 @@ pub struct MultibootTagMemoryMap {
     size: u32,
     entry_size: u32,
     entry_version: u32,
-    entries: MemoryMapEntry,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MemoryMapInfo {
     pub address: usize,
-    pub num_of_entry: usize,
+    pub num_of_entries: usize,
     pub entry_size: usize,
-    cnt: usize,
+    count: usize,
+}
+
+#[repr(C)]
+pub struct MultibootTagEfiMemoryMap {
+    s_type: u32,
+    size: u32,
+    descriptor_size: u32,
+    descriptor_version: u32,
+}
+
+#[derive(Clone, Default)]
+pub struct EfiMemoryMapInfo {
+    pub address: usize,
+    pub num_of_entries: usize,
+    pub entry_size: usize,
+    count: usize,
 }
 
 impl MemoryMapInfo {
     pub fn new(map: &MultibootTagMemoryMap) -> Self {
         Self {
-            num_of_entry: ((map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
+            num_of_entries: ((map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
                 / map.entry_size as usize),
-            address: &map.entries as *const MemoryMapEntry as usize,
+            address: map as *const MultibootTagMemoryMap as usize
+                + mem::size_of::<MultibootTagMemoryMap>(),
             entry_size: map.entry_size as usize,
-            cnt: 0,
+            count: 0,
         }
     }
 }
@@ -46,24 +64,42 @@ impl MemoryMapInfo {
 impl Iterator for MemoryMapInfo {
     type Item = &'static MemoryMapEntry;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cnt == self.num_of_entry {
+        if self.count == self.num_of_entries {
             None
         } else {
-            let entry =
-                unsafe { &*((self.address + self.cnt * self.entry_size) as *const MemoryMapEntry) };
-            self.cnt += 1;
+            let entry = unsafe {
+                &*((self.address + self.count * self.entry_size) as *const MemoryMapEntry)
+            };
+            self.count += 1;
             Some(entry)
         }
     }
 }
 
-impl Default for MemoryMapInfo {
-    fn default() -> Self {
+impl EfiMemoryMapInfo {
+    pub fn new(map: &MultibootTagEfiMemoryMap) -> Self {
         Self {
-            address: 0,
-            num_of_entry: 0,
-            entry_size: 0,
-            cnt: 0,
+            num_of_entries: ((map.size as usize - mem::size_of::<MultibootTagEfiMemoryMap>())
+                / map.descriptor_size as usize),
+            address: map as *const MultibootTagEfiMemoryMap as usize
+                + mem::size_of::<MultibootTagMemoryMap>(),
+            entry_size: map.descriptor_size as usize,
+            count: 0,
+        }
+    }
+}
+
+impl Iterator for EfiMemoryMapInfo {
+    type Item = &'static EfiMemoryDescriptor;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count == self.num_of_entries {
+            None
+        } else {
+            let entry = unsafe {
+                &*((self.address + self.count * self.entry_size) as *const EfiMemoryDescriptor)
+            };
+            self.count += 1;
+            Some(entry)
         }
     }
 }

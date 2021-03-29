@@ -7,10 +7,11 @@ use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
+use crate::kernel::drivers::efi::boot_service::memory_map::EfiMemoryType;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress, VAddress};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
@@ -63,13 +64,44 @@ pub fn init_memory_by_multiboot_information(
             area_name
         );
     }
+
+    /* Reserve EFI Memory Area */
+    for entry in multiboot_information.efi_memory_map_info.clone() {
+        match entry.memory_type {
+            EfiMemoryType::EfiReservedMemoryType|
+            EfiMemoryType::EfiLoaderData|
+            EfiMemoryType::EfiBootServicesData/* for BGRT */ |
+            EfiMemoryType::EfiRuntimeServicesCode |
+            EfiMemoryType::EfiRuntimeServicesData |
+            EfiMemoryType::EfiUnusableMemory |
+            EfiMemoryType::EfiACPIReclaimMemory|
+            EfiMemoryType::EfiACPIMemoryNVS |
+            EfiMemoryType::EfiMemoryMappedIO |
+            EfiMemoryType::EfiMemoryMappedIOPortSpace |
+            EfiMemoryType::EfiPalCode |
+            EfiMemoryType::EfiPersistentMemory => {
+                physical_memory_manager.reserve_memory(PAddress::new(entry.physical_start),MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT),MOrder::new(0));
+
+            }
+            _=>{}
+        }
+        pr_info!(
+            "[{:#016X}~{:#016X}] {}",
+            entry.physical_start,
+            MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT)
+                .to_end_address(PAddress::new(entry.physical_start as usize))
+                .to_usize(),
+            entry.memory_type
+        );
+    }
+
     /* Reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
         if section.should_allocate() && section.align_size() == PAGE_SIZE_USIZE {
             physical_memory_manager.reserve_memory(
                 PAddress::new(section.address()),
                 MSize::new(section.size()),
-                PAGE_SHIFT.into(),
+                MOrder::new(PAGE_SHIFT),
             );
         }
     }
