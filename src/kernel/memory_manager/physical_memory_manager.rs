@@ -314,8 +314,8 @@ impl PhysicalMemoryManager {
         if size.is_zero() || self.free_memory_size <= size {
             return None;
         }
-        let order = Self::size_to_order(size);
-        for i in order.to_usize()..Self::NUM_OF_FREE_LIST {
+        let page_order = Self::size_to_page_order(size);
+        for i in page_order.to_usize()..Self::NUM_OF_FREE_LIST {
             let first_entry = if let Some(t) = self.free_list[i] {
                 unsafe { &mut *t }
             } else {
@@ -391,7 +391,7 @@ impl PhysicalMemoryManager {
     }
 
     fn unchain_entry_from_free_list(&mut self, entry: &mut MemoryEntry) {
-        let order = Self::size_to_order(entry.get_size());
+        let order = Self::size_to_page_order(entry.get_size());
         if self.free_list[order.to_usize()] == Some(entry as *mut _) {
             self.free_list[order.to_usize()] = entry.list_next;
         }
@@ -399,9 +399,9 @@ impl PhysicalMemoryManager {
     }
 
     fn chain_entry_to_free_list(&mut self, entry: &mut MemoryEntry, old_size: Option<MSize>) {
-        let new_order = Self::size_to_order(entry.get_size());
+        let new_order = Self::size_to_page_order(entry.get_size());
         if let Some(old_size) = old_size {
-            let old_order = Self::size_to_order(old_size);
+            let old_order = Self::size_to_page_order(old_size);
             if old_order == new_order {
                 return;
             }
@@ -446,8 +446,8 @@ impl PhysicalMemoryManager {
     }
 
     #[inline]
-    fn size_to_order(size: MSize) -> MOrder {
-        size.to_order(Some(MOrder::new(Self::NUM_OF_FREE_LIST - 1)))
+    fn size_to_page_order(size: MSize) -> MPageOrder {
+        MPageOrder::from_offset(size, MPageOrder::new(Self::NUM_OF_FREE_LIST - 1))
     }
 
     #[inline]
