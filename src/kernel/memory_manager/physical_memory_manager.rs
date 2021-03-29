@@ -165,6 +165,7 @@ impl PhysicalMemoryManager {
             } else {
                 let old_size = entry.get_size();
                 entry.set_range(start_address + size, entry.get_end_address());
+
                 self.chain_entry_to_free_list(entry, Some(old_size));
             }
         } else if entry.get_end_address() == start_address {
@@ -248,8 +249,15 @@ impl PhysicalMemoryManager {
                     self.chain_entry_to_free_list(next, Some(next_old_size));
                     processed = true;
                 }
-                if next.get_start_address() == entry.get_end_address() + MSize::from(1) {
-                    entry.set_range(entry.get_start_address(), next.get_end_address());
+                if (next.get_start_address() == entry.get_end_address() + MSize::from(1))
+                    || (processed
+                        && (entry.get_end_address() + MSize::from(1)) >= next.get_start_address())
+                {
+                    entry.set_range(
+                        entry.get_start_address(),
+                        core::cmp::max(entry.get_end_address(), next.get_end_address()),
+                    );
+
                     self.unchain_entry_from_free_list(next);
                     next.delete();
                 }
@@ -333,7 +341,7 @@ impl PhysicalMemoryManager {
                     return if self.define_used_memory(
                         address_to_allocate,
                         size,
-                        0.into(),
+                        MOrder::new(0),
                         Some(entry),
                     ) {
                         Some(address_to_allocate)
@@ -551,6 +559,8 @@ impl MemoryEntry {
         } else {
             pr_warn!("Not chained entry was deleted.");
         }
+        self.previous = None;
+        self.next = None;
     }
 
     pub fn set_enabled(&mut self) {
