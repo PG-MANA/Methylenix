@@ -6,7 +6,7 @@
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
-use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress};
+use crate::kernel::memory_manager::data_type::{Address, MOrder, MPageOrder, MSize, PAddress};
 
 const MEMORY_ENTRY_SIZE: usize = core::mem::size_of::<MemoryEntry>();
 
@@ -243,7 +243,9 @@ impl PhysicalMemoryManager {
             }
             if let Some(next) = entry.get_next_entry() {
                 if next.get_start_address() == size.to_end_address(start_address) + MSize::from(1) {
+                    let next_old_size = next.get_size();
                     next.set_range(start_address, next.get_end_address());
+                    self.chain_entry_to_free_list(next, Some(next_old_size));
                     processed = true;
                 }
                 if next.get_start_address() == entry.get_end_address() + MSize::from(1) {
@@ -274,6 +276,7 @@ impl PhysicalMemoryManager {
                     entry.chain_after_me(new_entry);
                 }
                 self.free_memory_size += size;
+                self.chain_entry_to_free_list(entry, Some(old_size));
                 self.chain_entry_to_free_list(new_entry, None);
                 true
             } else {
@@ -292,6 +295,7 @@ impl PhysicalMemoryManager {
                 new_entry.unset_next_entry();
                 entry.chain_after_me(new_entry);
                 self.free_memory_size += size;
+                self.chain_entry_to_free_list(entry, Some(old_size));
                 self.chain_entry_to_free_list(new_entry, None);
                 true
             }
