@@ -413,10 +413,10 @@ impl PhysicalMemoryManager {
     fn chain_entry_to_free_list(&mut self, entry: &mut MemoryEntry, old_size: Option<MSize>) {
         let new_order = Self::size_to_page_order(entry.get_size());
         if let Some(old_size) = old_size {
-            let old_order = Self::size_to_page_order(old_size);
-            if old_order == new_order {
+            if old_size == entry.get_size() {
                 return;
             }
+            let old_order = Self::size_to_page_order(old_size);
             if self.free_list[old_order.to_usize()] == Some(entry as *mut _) {
                 self.free_list[old_order.to_usize()] = entry.list_next;
             }
@@ -439,7 +439,7 @@ impl PhysicalMemoryManager {
                     if let Some(next_entry) =
                         list_entry.list_next.and_then(|n| Some(unsafe { &mut *n }))
                     {
-                        if next_entry.get_size() > entry.get_size() {
+                        if next_entry.get_size() >= entry.get_size() {
                             list_entry.list_next = Some(entry as *mut _);
                             entry.list_prev = Some(list_entry as *mut _);
                             entry.list_next = Some(next_entry as *mut _);
