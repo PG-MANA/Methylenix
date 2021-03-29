@@ -110,10 +110,11 @@ impl PhysicalMemoryManager {
             if let Some(t) = entry.get_next_entry() {
                 entry = t;
             } else {
-                if entry.get_end_address() <= address {
-                    return Some(entry);
-                }
-                return None;
+                return if entry.get_end_address() <= address {
+                    Some(entry)
+                } else {
+                    entry.get_prev_entry()
+                };
             }
         }
         entry.get_prev_entry()
@@ -173,11 +174,11 @@ impl PhysicalMemoryManager {
                 return false;
             }
             /* Allocate 1 byte of end_address */
-            entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
+            entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
             self.chain_entry_to_free_list(entry, Some(entry.get_size() + size));
         } else if entry.get_end_address() == size.to_end_address(start_address) {
             let old_size = entry.get_size();
-            entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
+            entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
             self.chain_entry_to_free_list(entry, Some(old_size));
         } else {
             let new_entry = if let Some(t) = self.create_memory_entry() {
@@ -188,7 +189,7 @@ impl PhysicalMemoryManager {
             };
             let old_size = entry.get_size();
             new_entry.set_range(start_address + size, entry.get_end_address());
-            entry.set_range(entry.get_start_address(), start_address - MSize::from(1));
+            entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
             if let Some(next) = entry.get_next_entry() {
                 new_entry.chain_after_me(next);
             }
@@ -216,9 +217,9 @@ impl PhysicalMemoryManager {
         } else if entry.get_end_address() >= start_address && !entry.is_first_entry() {
             /* Free duplicated area */
             self.define_free_memory(
-                entry.get_end_address() + MSize::from(1),
+                entry.get_end_address() + MSize::new(1),
                 MSize::from_address(
-                    entry.get_end_address() + MSize::from(1),
+                    entry.get_end_address() + MSize::new(1),
                     size.to_end_address(start_address),
                 ),
             )
@@ -229,7 +230,7 @@ impl PhysicalMemoryManager {
         } else {
             let mut processed = false;
             let old_size = entry.get_size();
-            if entry.get_end_address() + MSize::from(1) == start_address {
+            if entry.get_end_address() + MSize::new(1) == start_address {
                 entry.set_range(
                     entry.get_start_address(),
                     size.to_end_address(start_address),
@@ -237,21 +238,32 @@ impl PhysicalMemoryManager {
                 processed = true;
             }
             if entry.is_first_entry()
-                && entry.get_start_address() == size.to_end_address(start_address) + MSize::from(1)
+                && entry.get_start_address() == size.to_end_address(start_address) + MSize::new(1)
             {
                 entry.set_range(start_address, entry.get_end_address());
                 processed = true;
             }
             if let Some(next) = entry.get_next_entry() {
-                if next.get_start_address() == size.to_end_address(start_address) + MSize::from(1) {
+                if next.get_start_address() <= start_address {
+                    assert!(!processed);
+                    return if next.get_end_address() >= size.to_end_address(start_address) {
+                        false /* already freed */
+                    } else {
+                        self.define_free_memory(
+                            next.get_end_address() + MSize::new(1),
+                            size.to_end_address(start_address) - next.get_end_address(),
+                        )
+                    };
+                }
+                if next.get_start_address() == size.to_end_address(start_address) + MSize::new(1) {
                     let next_old_size = next.get_size();
                     next.set_range(start_address, next.get_end_address());
                     self.chain_entry_to_free_list(next, Some(next_old_size));
                     processed = true;
                 }
-                if (next.get_start_address() == entry.get_end_address() + MSize::from(1))
+                if (next.get_start_address() == entry.get_end_address() + MSize::new(1))
                     || (processed
-                        && (entry.get_end_address() + MSize::from(1)) >= next.get_start_address())
+                        && (entry.get_end_address() + MSize::new(1)) >= next.get_start_address())
                 {
                     entry.set_range(
                         entry.get_start_address(),
