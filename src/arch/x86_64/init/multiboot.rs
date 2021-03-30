@@ -148,7 +148,7 @@ pub fn init_memory_by_multiboot_information(
             Some(VAddress::new(section.address())),
             aligned_size,
             permission,
-            MemoryOptionFlags::NORMAL,
+            MemoryOptionFlags::KERNEL,
             &mut physical_memory_manager,
         ) {
             Ok(address) => {

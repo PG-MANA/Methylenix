@@ -108,7 +108,7 @@ impl VirtualMemoryManager {
                 cache_address.to_direct_mapped_v_address(),
                 PAGE_SIZE.to_end_address(cache_address.to_direct_mapped_v_address()),
                 MemoryPermissionFlags::data(),
-                MemoryOptionFlags::WIRED,
+                MemoryOptionFlags::KERNEL | MemoryOptionFlags::WIRED,
             );
             self._map_address(
                 &mut entry,
@@ -153,7 +153,7 @@ impl VirtualMemoryManager {
                 address,
                 size.to_end_address(address),
                 MemoryPermissionFlags::data(),
-                MemoryOptionFlags::NORMAL,
+                MemoryOptionFlags::KERNEL | MemoryOptionFlags::WIRED,
             );
             if let Err(e) = vm_manager._map_address(
                 &mut entry,
@@ -305,7 +305,7 @@ impl VirtualMemoryManager {
             Some(vm_start_address),
             size,
             permission,
-            MemoryOptionFlags::NORMAL,
+            option,
             pm_manager,
         )
     }
@@ -405,7 +405,7 @@ impl VirtualMemoryManager {
         virtual_address: Option<VAddress>,
         size: MSize,
         permission: MemoryPermissionFlags,
-        option: MemoryOptionFlags,
+        mut option: MemoryOptionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<VAddress, MemoryError> {
         if physical_address & !PAGE_MASK != 0 {
@@ -413,6 +413,11 @@ impl VirtualMemoryManager {
         } else if size & !PAGE_MASK != 0 {
             return Err(MemoryError::SizeNotAligned);
         }
+
+        if !option.is_for_kernel() && !option.is_for_user() {
+            option = option | MemoryOptionFlags::KERNEL;
+        }
+
         let mut entry = if let Some(vm_start_address) = virtual_address {
             if vm_start_address.to_usize() & !PAGE_MASK != 0 {
                 return Err(MemoryError::AddressNotAligned);
@@ -515,7 +520,7 @@ impl VirtualMemoryManager {
             virtual_address,
             size,
             permission,
-            option.unwrap_or(MemoryOptionFlags::NORMAL) | MemoryOptionFlags::IO_MAP,
+            option.unwrap_or(MemoryOptionFlags::KERNEL) | MemoryOptionFlags::IO_MAP,
             pm_manager,
         )
     }
