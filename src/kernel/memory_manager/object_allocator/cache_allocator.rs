@@ -76,11 +76,12 @@ impl<T> CacheAllocator<T> {
     }
 
     pub fn add_pool(&mut self, memory_manager: &mut MemoryManager) -> Result<(), MemoryError> {
-        let num_page = MSize::new(self.cache_threshold * core::mem::size_of::<T>())
+        let num_of_pages = MSize::new(self.cache_threshold * core::mem::size_of::<T>())
             .to_order(None)
             .to_page_order();
-        let page = memory_manager.alloc_nonlinear_pages(num_page, MemoryPermissionFlags::data())?;
-        self.add_free_area(page, num_page.to_offset());
+        let page =
+            memory_manager.alloc_nonlinear_pages(num_of_pages, MemoryPermissionFlags::data())?;
+        self.add_free_area(page, num_of_pages.to_offset());
         Ok(())
     }
 
