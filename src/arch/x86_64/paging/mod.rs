@@ -41,7 +41,7 @@ pub const PAGE_SIZE_USIZE: usize = 0x1000;
 pub const PAGE_SHIFT: usize = 12;
 
 /// if !PAGE_MASK & address !=0 => address is not page aligned.
-pub const PAGE_MASK: usize = 0x001F_FFFF_FFFF_F000;
+pub const PAGE_MASK: usize = !0xFFF;
 
 /// Default page cache size for paging
 pub const PAGING_CACHE_LENGTH: usize = 64;
@@ -50,7 +50,7 @@ pub const PAGING_CACHE_LENGTH: usize = 64;
 pub const MAX_VIRTUAL_ADDRESS: VAddress = VAddress::new(MAX_VIRTUAL_ADDRESS_USIZE);
 
 /// Max virtual address of x86_64(Type = usize)
-pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0x0000_7FFF_FFFF_FFFF;
+pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0xFFFF_FFFF_FFFF_FFFF;
 
 /// PageManager
 ///
@@ -72,6 +72,7 @@ pub enum PagingError {
     MemoryCacheOverflowed,
     EntryIsNotFound,
     AddressIsNotAligned,
+    AddressIsNotCanonical,
     SizeIsNotAligned,
 }
 
@@ -165,8 +166,8 @@ impl PageManager {
 
         let pml4_table = unsafe { &mut *(self.pml4.to_usize() as *mut [PML4E; PML4_MAX_ENTRY]) };
 
-        let number_of_pml4e = (virtual_address.to_usize() >> ((4 * 3) + 9 * 3)) & (0x1FF);
-        let number_of_pdpte = (virtual_address.to_usize() >> ((4 * 3) + 9 * 2)) & (0x1FF);
+        let number_of_pml4e = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 3)) & (0x1FF);
+        let number_of_pdpte = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 2)) & (0x1FF);
 
         if !pml4_table[number_of_pml4e].is_address_set() {
             if !should_create_entry {
@@ -212,7 +213,7 @@ impl PageManager {
         should_create_entry: bool,
         pdpte: Option<&'static mut PDPTE>,
     ) -> Result<&'static mut PDE, PagingError> {
-        let number_of_pde = (virtual_address.to_usize() >> ((4 * 3) + 9 * 1)) & (0x1FF);
+        let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 1)) & (0x1FF);
 
         let pdpte = pdpte.unwrap_or(self.get_target_pdpte(
             cache_memory_list,
@@ -261,7 +262,7 @@ impl PageManager {
         should_create_entry: bool,
         pde: Option<&'static mut PDE>,
     ) -> Result<&'static mut PTE, PagingError> {
-        let number_of_pte = (virtual_address.to_usize() >> ((4 * 3) + 9 * 0)) & (0x1FF);
+        let number_of_pte = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 0)) & (0x1FF);
 
         let pde = pde.unwrap_or(self.get_target_pde(
             cache_memory_list,
@@ -373,6 +374,14 @@ impl PageManager {
         {
             return Err(PagingError::AddressIsNotAligned);
         }
+        if (virtual_address.to_usize() >> 48) != 0 {
+            if (virtual_address.to_usize() >> 48) != 0xffff
+                || ((virtual_address.to_usize() >> 47) & 1) == 0
+            {
+                return Err(PagingError::AddressIsNotCanonical);
+            }
+        }
+
         let pte = self.get_target_pte(cache_memory_list, virtual_address, true, true, None)?;
         pte.init();
         pte.set_address(physical_address);
@@ -668,9 +677,24 @@ impl PageManager {
                 p
             );
         };
+        let calculate_virtual_address = |pml4_count: usize,
+                                         pdpte_count: usize,
+                                         pde_count: usize,
+                                         pte_count: usize|
+         -> VAddress {
+            let address = (pml4_count << (PAGE_SHIFT + 9 * 3))
+                | (pdpte_count << (PAGE_SHIFT + 9 * 2))
+                | (pde_count << (PAGE_SHIFT + 9 * 1))
+                | (pte_count << (PAGE_SHIFT + 9 * 0));
+            VAddress::new(if (address & (1 << 47)) != 0 {
+                (0xffff << 48) | address
+            } else {
+                address
+            })
+        };
 
         let pml4_table = unsafe { &*(self.pml4.to_usize() as *const [PML4E; PML4_MAX_ENTRY]) };
-        for pml4 in pml4_table.iter() {
+        for (pml4_count, pml4) in pml4_table.iter().enumerate() {
             if !pml4.is_address_set() {
                 continue;
             }
@@ -682,12 +706,13 @@ impl PageManager {
                     continue;
                 }
                 if pdpte.is_huge() {
-                    let virtual_address = VAddress::from(0x40000000 * pdpte_count);
+                    let virtual_address = calculate_virtual_address(pml4_count, pdpte_count, 0, 0);
                     if start.is_some() && virtual_address < start.unwrap() {
                         continue;
                     }
-                    if last_address.0 + MSize::from(0x40000000) == virtual_address
-                        && last_address.1 + MSize::from(0x40000000) == pdpte.get_address().unwrap()
+                    if last_address.0 + MSize::new(1 << (PAGE_SHIFT + 9 * 2)) == virtual_address
+                        && last_address.1 + MSize::new(1 << (PAGE_SHIFT + 9 * 2))
+                            == pdpte.get_address().unwrap()
                         && permission.0 == pdpte.is_writable()
                         && permission.1 == pdpte.is_no_execute()
                     {
@@ -725,12 +750,13 @@ impl PageManager {
                     }
                     if pde.is_huge() {
                         let virtual_address =
-                            VAddress::from(0x40000000 * pdpte_count + 0x200000 * pde_count);
+                            calculate_virtual_address(pml4_count, pdpte_count, pde_count, 0);
                         if start.is_some() && virtual_address < start.unwrap() {
                             continue;
                         }
-                        if last_address.0 + MSize::from(0x200000) == virtual_address
-                            && last_address.1 + MSize::from(0x200000) == pde.get_address().unwrap()
+                        if last_address.0 + MSize::new(1 << (PAGE_SHIFT + 9 * 1)) == virtual_address
+                            && last_address.1 + MSize::from(1 << (PAGE_SHIFT + 9 * 1))
+                                == pde.get_address().unwrap()
                             && permission.0 == pde.is_writable()
                             && permission.1 == pde.is_no_execute()
                         {
@@ -766,14 +792,18 @@ impl PageManager {
                         if !pte.is_present() {
                             continue;
                         }
-                        let virtual_address = VAddress::from(
-                            0x40000000 * pdpte_count + 0x200000 * pde_count + 0x1000 * pte_count,
+                        let virtual_address = calculate_virtual_address(
+                            pml4_count,
+                            pdpte_count,
+                            pde_count,
+                            pte_count,
                         );
                         if start.is_some() && virtual_address < start.unwrap() {
                             continue;
                         }
-                        if last_address.0 + MSize::from(0x1000) == virtual_address
-                            && last_address.1 + MSize::from(0x1000) == pte.get_address().unwrap()
+                        if last_address.0 + MSize::new(1 << (PAGE_SHIFT + 9 * 0)) == virtual_address
+                            && last_address.1 + MSize::new(1 << (PAGE_SHIFT + 9 * 0))
+                                == pte.get_address().unwrap()
                             && permission.0 == pte.is_writable()
                             && permission.1 == pte.is_no_execute()
                         {
