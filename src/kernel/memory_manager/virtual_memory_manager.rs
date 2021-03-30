@@ -23,6 +23,10 @@ use super::physical_memory_manager::PhysicalMemoryManager;
 use super::pool_allocator::PoolAllocator;
 use super::MemoryError;
 
+use crate::arch::target_arch::context::memory_layout::{
+    adjust_start_address_to_be_canonical, is_address_canonical, MALLOC_END_ADDRESS,
+    MALLOC_START_ADDRESS,
+};
 use crate::arch::target_arch::paging::{
     PageManager, PagingError, MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE,
     PAGE_SIZE_USIZE, PAGING_CACHE_LENGTH,
@@ -279,6 +283,7 @@ impl VirtualMemoryManager {
         size: MSize,
         physical_address: PAddress,
         permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<VAddress, MemoryError> {
         /* NOTE: ページキャッシュの更新は行わない */
@@ -289,13 +294,7 @@ impl VirtualMemoryManager {
             pr_err!("Size is not aligned.");
             return Err(MemoryError::SizeNotAligned);
         }
-        let vm_start_address = if self.check_usable_address_range(
-            physical_address.to_direct_mapped_v_address(),
-            size.to_end_address(physical_address)
-                .to_direct_mapped_v_address(),
-        ) {
-            VAddress::new(physical_address.to_usize())
-        } else if let Some(address) = self.find_usable_memory_area(size) {
+        let vm_start_address = if let Some(address) = self.find_usable_memory_area(size, option) {
             address
         } else {
             pr_warn!("Virtual Address is not available.");
@@ -323,7 +322,7 @@ impl VirtualMemoryManager {
             pr_err!("Size is not aligned.");
             return Err(MemoryError::SizeNotAligned);
         }
-        let entry = if let Some(address) = self.find_usable_memory_area(size) {
+        let entry = if let Some(address) = self.find_usable_memory_area(size, option) {
             VirtualMemoryEntry::new(address, size.to_end_address(address), permission, option)
         } else {
             pr_warn!("Virtual Address is not available.");
@@ -428,7 +427,7 @@ impl VirtualMemoryManager {
                 permission,
                 option,
             )
-        } else if let Some(vm_start_address) = self.find_usable_memory_area(size) {
+        } else if let Some(vm_start_address) = self.find_usable_memory_area(size, option) {
             VirtualMemoryEntry::new(
                 vm_start_address,
                 size.to_end_address(vm_start_address),
@@ -451,7 +450,9 @@ impl VirtualMemoryManager {
 
         let entry = self.insert_vm_map_entry(entry, pm_manager)?;
 
-        if entry.get_memory_option_flags().is_dev_map() {
+        if entry.get_memory_option_flags().is_io_map()
+            || entry.get_memory_option_flags().is_memory_map()
+        {
             if self
                 .associate_address_with_size(
                     physical_address,
@@ -499,7 +500,7 @@ impl VirtualMemoryManager {
         Ok(vm_start_address)
     }
 
-    pub fn mmap_dev(
+    pub fn io_map(
         &mut self,
         physical_address: PAddress,
         virtual_address: Option<VAddress>,
@@ -514,7 +515,7 @@ impl VirtualMemoryManager {
             virtual_address,
             size,
             permission,
-            option.unwrap_or(MemoryOptionFlags::NORMAL) | MemoryOptionFlags::DEV_MAP,
+            option.unwrap_or(MemoryOptionFlags::NORMAL) | MemoryOptionFlags::IO_MAP,
             pm_manager,
         )
     }
@@ -891,8 +892,10 @@ impl VirtualMemoryManager {
             return Err(MemoryError::InsertEntryFailed); /* Is it ok? */
         }
         if let Some(entry) = self.find_entry_mut(virtual_address) {
-            if !entry.get_memory_option_flags().is_dev_map() {
-                pr_err!("Not dev_mapped entry.");
+            if !(entry.get_memory_option_flags().is_io_map()
+                || entry.get_memory_option_flags().is_memory_map())
+            {
+                pr_err!("Not mapped entry.");
                 return Err(MemoryError::InvalidVirtualAddress);
             }
             if self.try_expand_size(entry, new_size, pm_manager) {
@@ -934,6 +937,7 @@ impl VirtualMemoryManager {
                     Self::VM_MAP_ENTRY_POOL_SIZE,
                     p_address,
                     MemoryPermissionFlags::data(),
+                    MemoryOptionFlags::ALLOC,
                     pm_manager,
                 ) {
                     Ok(v_address) => {
@@ -977,6 +981,7 @@ impl VirtualMemoryManager {
                     alloc_size,
                     p_address,
                     MemoryPermissionFlags::data(),
+                    MemoryOptionFlags::ALLOC,
                     pm_manager,
                 ) {
                     Ok(v_address) => {
@@ -1160,12 +1165,28 @@ impl VirtualMemoryManager {
         true
     }
 
-    pub fn find_usable_memory_area(&self, size: MSize) -> Option<VAddress> {
+    pub fn find_usable_memory_area(
+        &self,
+        size: MSize,
+        option: MemoryOptionFlags,
+    ) -> Option<VAddress> {
         let direct_map_start_address = self.direct_mapped_area.as_ref().unwrap().start_address;
         let direct_map_end_address = self.direct_mapped_area.as_ref().unwrap().end_address;
         let direct_map_area = direct_map_start_address..=direct_map_end_address;
         const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
+        let limit = if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
+            MALLOC_END_ADDRESS
+        } else {
+            MAX_VIRTUAL_ADDRESS
+        };
         for e in unsafe { self.vm_map_entry.iter(OFFSET) } {
+            if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
+                if e.get_vm_end_address() < MALLOC_START_ADDRESS {
+                    continue;
+                } else if e.get_vm_start_address() > MALLOC_END_ADDRESS {
+                    return None;
+                }
+            }
             if let Some(prev) = unsafe { e.list.get_prev(OFFSET) } {
                 if e.get_vm_start_address() - (prev.get_vm_end_address() + MSize::new(1)) >= size {
                     let start_address = prev.get_vm_end_address() + MSize::new(1);
@@ -1175,36 +1196,101 @@ impl VirtualMemoryManager {
                         if e.get_vm_start_address() - (direct_map_end_address + MSize::new(1))
                             >= size
                         {
-                            return Some(direct_map_end_address + MSize::new(1));
+                            let start_address = direct_map_end_address + MSize::new(1);
+                            let end_address = size.to_end_address(start_address);
+
+                            if option.is_alloc_area()
+                                || option.is_io_map()
+                                || option.is_memory_map()
+                            {
+                                if !((MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS)
+                                    .contains(&start_address)
+                                    && (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS)
+                                        .contains(&end_address))
+                                {
+                                    continue;
+                                }
+                            }
+                            if is_address_canonical(start_address, end_address) {
+                                return Some(start_address);
+                            } else {
+                                continue;
+                            }
                         } else {
                             continue;
                         }
                     }
-                    return Some(prev.get_vm_end_address() + MSize::new(1));
+                    let end_address = size.to_end_address(start_address);
+                    if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
+                        if !((MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&start_address)
+                            && (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&end_address))
+                        {
+                            continue;
+                        }
+                    }
+                    if is_address_canonical(start_address, end_address) {
+                        return Some(start_address);
+                    }
                 }
             }
-            if !e.list.has_next() {
-                return if e.get_vm_end_address() + MSize::new(1) + size >= MAX_VIRTUAL_ADDRESS {
-                    None
-                } else {
-                    let start_address = e.get_vm_end_address() + MSize::new(1);
-                    let end_address = size.to_end_address(start_address);
-                    let memory_area = start_address..=end_address;
+        }
+        if let Some(e) = unsafe { self.vm_map_entry.get_last_entry(OFFSET) } {
+            if e.get_vm_end_address() + MSize::new(1) + size >= limit {
+                None
+            } else {
+                let start_address = e.get_vm_end_address() + MSize::new(1);
+                let end_address = size.to_end_address(start_address);
+                let memory_area = start_address..=end_address;
+                if Self::is_overlapped(&direct_map_area, &memory_area) {
+                    if (direct_map_end_address + MSize::new(1) + size) >= limit {
+                        None
+                    } else {
+                        let start_address = direct_map_end_address + MSize::new(1);
+                        let end_address = size.to_end_address(start_address);
 
-                    if Self::is_overlapped(&direct_map_area, &memory_area) {
-                        return if (direct_map_end_address + MSize::new(1) + size)
-                            >= MAX_VIRTUAL_ADDRESS
-                        {
-                            None
+                        if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
+                            if (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&start_address)
+                                && (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS)
+                                    .contains(&end_address)
+                            {
+                                Some(start_address)
+                            } else {
+                                Some(MALLOC_START_ADDRESS)
+                            }
                         } else {
-                            Some(direct_map_end_address + MSize::new(1))
-                        };
+                            if is_address_canonical(start_address, end_address) {
+                                Some(start_address)
+                            } else {
+                                adjust_start_address_to_be_canonical(start_address, end_address)
+                            }
+                        }
                     }
-                    Some(e.get_vm_end_address() + MSize::new(1))
-                };
+                } else {
+                    let end_address = size.to_end_address(start_address);
+                    if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
+                        if (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&start_address)
+                            && (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&end_address)
+                        {
+                            Some(start_address)
+                        } else {
+                            Some(MALLOC_START_ADDRESS)
+                        }
+                    } else {
+                        if is_address_canonical(start_address, end_address) {
+                            Some(start_address)
+                        } else {
+                            adjust_start_address_to_be_canonical(start_address, end_address)
+                        }
+                    }
+                }
+            }
+        } else {
+            if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
+                Some(MALLOC_START_ADDRESS)
+            } else {
+                Some(PAGE_SIZE.to_end_address(VAddress::new(0)))
             }
         }
-        unreachable!()
     }
 
     fn adjust_vm_entries(&mut self) {

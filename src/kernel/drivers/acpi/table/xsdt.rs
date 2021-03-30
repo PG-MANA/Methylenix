@@ -36,11 +36,13 @@ impl XsdtManager {
             .memory_manager
             .lock()
             .unwrap()
-            .mmap_dev(
+            .mmap(
                 xsdt_physical_address,
                 MSize::new(INITIAL_MMAP_SIZE),
                 MemoryPermissionFlags::rodata(),
-                Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
+                MemoryOptionFlags::PRE_RESERVED
+                    | MemoryOptionFlags::MEMORY_MAP
+                    | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
             ) {
             a
         } else {
@@ -79,11 +81,13 @@ impl XsdtManager {
                 .memory_manager
                 .lock()
                 .unwrap()
-                .mmap_dev(
+                .mmap(
                     entry_physical_address,
                     MSize::new(INITIAL_MMAP_SIZE),
                     MemoryPermissionFlags::rodata(),
-                    Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
+                    MemoryOptionFlags::PRE_RESERVED
+                        | MemoryOptionFlags::MEMORY_MAP
+                        | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
                 ) {
                 a
             } else {
@@ -119,11 +123,13 @@ impl XsdtManager {
                 .memory_manager
                 .lock()
                 .unwrap()
-                .mmap_dev(
+                .mmap(
                     self.fadt_manager.get_dsdt_address(),
                     MSize::new(INITIAL_MMAP_SIZE),
                     MemoryPermissionFlags::rodata(),
-                    Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
+                    MemoryOptionFlags::PRE_RESERVED
+                        | MemoryOptionFlags::MEMORY_MAP
+                        | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
                 ) {
                 a
             } else {
@@ -202,11 +208,13 @@ impl XsdtManager {
         let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
         let mut index = 0;
         while let Some(entry_physical_address) = self.get_entry(index) {
-            if let Ok(v_address) = memory_manager.mmap_dev(
+            if let Ok(v_address) = memory_manager.mmap(
                 entry_physical_address,
                 MSize::new(INITIAL_MMAP_SIZE),
                 MemoryPermissionFlags::rodata(),
-                Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
+                MemoryOptionFlags::PRE_RESERVED
+                    | MemoryOptionFlags::MEMORY_MAP
+                    | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
             ) {
                 if unsafe { &*(v_address.to_usize() as *const [u8; 4]) } == signature {
                     return Some(v_address);

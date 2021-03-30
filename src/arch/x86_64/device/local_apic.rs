@@ -80,7 +80,7 @@ impl LocalApicManager {
                 .memory_manager
                 .lock()
                 .unwrap()
-                .mmap_dev(
+                .io_map(
                     base_address,
                     MSize::new(0x1000),
                     MemoryPermissionFlags::data(),

@@ -16,7 +16,8 @@ use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
 use crate::kernel::memory_manager::{
-    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags, SystemMemoryManager,
+    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags, MemoryManager,
+    SystemMemoryManager,
 };
 use crate::kernel::sync::spin_lock::Mutex;
 
@@ -173,10 +174,25 @@ pub fn init_memory_by_multiboot_information(
             Some(VAddress::new(0)),
             PAGE_SIZE,
             MemoryPermissionFlags::data(),
-            MemoryOptionFlags::NORMAL,
+            MemoryOptionFlags::MEMORY_MAP,
             &mut physical_memory_manager,
         )
         .expect("Cannot associate memory for boot code of Application Processors.");
+
+    let aligned_multiboot = MemoryManager::page_align(
+        PAddress::new(multiboot_information.address),
+        MSize::new(multiboot_information.size),
+    );
+    let mapped_multiboot_address_base = virtual_memory_manager
+        .map_address(
+            aligned_multiboot.0,
+            None,
+            aligned_multiboot.1,
+            MemoryPermissionFlags::rodata(),
+            MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
+            &mut physical_memory_manager,
+        )
+        .expect("Cannot map multiboot information");
 
     /* Set up Memory Manager */
     get_kernel_manager_cluster().system_memory_manager =
@@ -184,6 +200,9 @@ pub fn init_memory_by_multiboot_information(
     let mut memory_manager = get_kernel_manager_cluster()
         .system_memory_manager
         .create_new_memory_manager(virtual_memory_manager);
+
+    /* Apply paging */
+    memory_manager.set_paging_table();
 
     /* Set up Kernel Memory Alloc Manager */
     let mut object_allocator = ObjectAllocator::new();
@@ -199,19 +218,23 @@ pub fn init_memory_by_multiboot_information(
         .expect("Cannot alloc memory for Multiboot Information.");
     unsafe {
         core::ptr::copy_nonoverlapping(
-            multiboot_information.address as *const u8,
+            (mapped_multiboot_address_base.to_usize()
+                + (aligned_multiboot.0.to_usize() - multiboot_information.address))
+                as *const u8,
             new_mbi_address.to_usize() as *mut u8,
             multiboot_information.size,
         )
     };
     /* Free old MultiBootInformation area */
+    mutex_memory_manager
+        .lock()
+        .unwrap()
+        .free(mapped_multiboot_address_base)
+        .expect("Cannot free the map of multiboot information.");
     mutex_memory_manager.lock().unwrap().free_physical_memory(
         multiboot_information.address.into(),
         multiboot_information.size.into(),
     ); /* It may be already freed */
-
-    /* Apply paging */
-    mutex_memory_manager.lock().unwrap().set_paging_table();
 
     /* Store managers to cluster */
     get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
@@ -239,8 +262,7 @@ pub fn init_graphic(multiboot_information: &MultiBootInformation) {
                     module.start_address.into(),
                     (module.end_address - module.start_address).into(),
                     MemoryPermissionFlags::rodata(),
-                    MemoryOptionFlags::NORMAL,
-                    false,
+                    MemoryOptionFlags::PRE_RESERVED | MemoryOptionFlags::MEMORY_MAP,
                 );
             if let Ok(vm_address) = vm_address {
                 let result = get_kernel_manager_cluster().graphic_manager.load_font(

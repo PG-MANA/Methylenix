@@ -93,7 +93,7 @@ impl VgaTextDriver {
                 .memory_manager
                 .lock()
                 .unwrap()
-                .mmap_dev(
+                .io_map(
                     self.address.into(),
                     MSize::new(self.width * self.height * 2 as usize),
                     MemoryPermissionFlags::data(),

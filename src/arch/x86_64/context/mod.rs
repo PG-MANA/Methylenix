@@ -6,6 +6,7 @@
 //!
 
 pub mod context_data;
+pub mod memory_layout;
 
 use self::context_data::ContextData;
 

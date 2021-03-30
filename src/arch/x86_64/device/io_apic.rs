@@ -38,7 +38,7 @@ impl IoApicManager {
             .memory_manager
             .lock()
             .unwrap()
-            .mmap_dev(
+            .io_map(
                 PAddress::new(0xfec00000),
                 PAGE_SIZE, /* is it ok?*/
                 MemoryPermissionFlags::data(),

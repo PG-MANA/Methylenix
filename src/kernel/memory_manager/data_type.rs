@@ -519,8 +519,10 @@ impl MemoryOptionFlags {
     pub const PRE_RESERVED: Self = Self(1 << 0);
     pub const DO_NOT_FREE_PHYSICAL_ADDRESS: Self = Self(1 << 1);
     pub const WIRED: Self = Self(1 << 2);
-    pub const DEV_MAP: Self = Self(1 << 3);
+    pub const IO_MAP: Self = Self(1 << 3);
     pub const DIRECT_MAP: Self = Self(1 << 4);
+    pub const MEMORY_MAP: Self = Self(1 << 5);
+    pub const ALLOC: Self = Self(1 << 6);
 
     pub fn is_pre_reserved(&self) -> bool {
         (*self & Self::PRE_RESERVED).0 != 0
@@ -534,12 +536,20 @@ impl MemoryOptionFlags {
         (*self & Self::WIRED).0 != 0
     }
 
-    pub fn is_dev_map(&self) -> bool {
-        (*self & Self::DEV_MAP).0 != 0
+    pub fn is_io_map(&self) -> bool {
+        (*self & Self::IO_MAP).0 != 0
     }
 
     pub fn is_direct_mapped(&self) -> bool {
         (*self & Self::DIRECT_MAP).0 != 0
+    }
+
+    pub fn is_memory_map(&self) -> bool {
+        (*self & Self::MEMORY_MAP).0 != 0
+    }
+
+    pub fn is_alloc_area(&self) -> bool {
+        (*self & Self::ALLOC).0 != 0
     }
 }
 
