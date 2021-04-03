@@ -13,7 +13,7 @@ use self::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize};
 use crate::kernel::memory_manager::MemoryError;
 
 /// This manager contains system/user stack/code segment pointer.
@@ -31,6 +31,7 @@ impl ContextManager {
     pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x200000;
     pub const IDLE_THREAD_STACK_SIZE: MSize = PAGE_SIZE;
     pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x8000;
+    pub const DEFAULT_INTERRUPT_STACK_ORDER: MPageOrder = MPageOrder::new(0);
     pub const STACK_ALIGN_ORDER: usize = 6; /*size = 2^6 = 64*/
 
     /// Create Context Manager with invalid data.

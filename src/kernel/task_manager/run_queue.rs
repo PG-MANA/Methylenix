@@ -41,6 +41,7 @@ pub struct RunQueue {
     run_list_allocator: PoolAllocator<RunList>,
     should_recheck_priority: bool,
     should_reschedule: bool,
+    number_of_threads: usize,
 }
 
 impl RunQueue {
@@ -53,6 +54,7 @@ impl RunQueue {
             run_list_allocator: PoolAllocator::new(),
             should_recheck_priority: false,
             should_reschedule: false,
+            number_of_threads: 0,
         }
     }
 
@@ -88,6 +90,14 @@ impl RunQueue {
         panic!("Switching to the kernel process was failed.");
     }
 
+    /// Get the number of running threads.
+    ///
+    /// This function returns the number of running threads in this run queue.
+    /// This does not lock `Self::lock`.
+    pub fn get_number_of_running_threads(&self) -> usize {
+        self.number_of_threads
+    }
+
     fn get_highest_priority_thread(
         run_list: &mut PtrLinkedList<RunList>,
     ) -> Option<&mut ThreadEntry> {
@@ -120,6 +130,7 @@ impl RunQueue {
         for list in unsafe { self.run_list.iter_mut(offset_of!(RunList, chain)) } {
             if list.priority_level == priority {
                 list.thread_list.remove(&mut thread.run_list);
+                self.number_of_threads -= 1;
                 return Ok(());
             }
         }
@@ -206,75 +217,105 @@ impl RunQueue {
         return result;
     }
 
+    fn _add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+        assert!(self.lock.is_locked());
+        let priority = thread.get_priority_level();
+        if let Some(mut list) = unsafe {
+            self.run_list
+                .get_first_entry_mut(offset_of!(RunList, chain))
+        } {
+            loop {
+                if list.priority_level == priority {
+                    if let Some(last_entry) = unsafe {
+                        list.thread_list
+                            .get_last_entry_mut(offset_of!(ThreadEntry, run_list))
+                    } {
+                        let _last_thread_lock = last_entry
+                            .lock
+                            .try_lock()
+                            .or(Err(TaskError::ThreadLockError))?;
+                        list.thread_list.insert_tail(&mut thread.run_list);
+                    } else {
+                        list.thread_list.insert_head(&mut thread.run_list);
+                    }
+                    break;
+                }
+                if list.priority_level > priority {
+                    let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
+                    run_list.thread_list.insert_head(&mut thread.run_list);
+                    self.run_list
+                        .insert_before(&mut list.chain, &mut run_list.chain);
+                    break;
+                }
+                if let Some(next) = unsafe { list.chain.get_next_mut(offset_of!(RunList, chain)) } {
+                    list = next;
+                } else {
+                    let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
+                    run_list.thread_list.insert_head(&mut thread.run_list);
+                    self.run_list.insert_tail(&mut run_list.chain);
+                    break;
+                }
+            }
+        } else {
+            let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
+            run_list.thread_list.insert_head(&mut thread.run_list);
+            self.run_list.insert_head(&mut run_list.chain);
+        }
+        thread.set_task_status(TaskStatus::Running);
+        if self
+            .running_thread
+            .and_then(|r| Some(thread.get_priority_level() > unsafe { &*r }.get_priority_level()))
+            .unwrap_or(false)
+        {
+            self.should_recheck_priority = true;
+            self.should_reschedule = true;
+        }
+        thread.time_slice = 5; /*Temporary*/
+        self.number_of_threads += 1;
+        return Ok(());
+    }
+
     /// Add thread into this run queue.
     ///
     /// `thread` must be locked.
+    ///
     /// **Be careful that other threads in this run queue must be unlocked.**
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(thread.lock.is_locked());
         let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
-        let result = try {
-            let priority = thread.get_priority_level();
-            if let Some(mut list) = unsafe {
-                self.run_list
-                    .get_first_entry_mut(offset_of!(RunList, chain))
-            } {
-                loop {
-                    if list.priority_level == priority {
-                        if let Some(last_entry) = unsafe {
-                            list.thread_list
-                                .get_last_entry_mut(offset_of!(ThreadEntry, run_list))
-                        } {
-                            let _last_thread_lock = last_entry
-                                .lock
-                                .try_lock()
-                                .or(Err(TaskError::ThreadLockError))?;
-                            list.thread_list.insert_tail(&mut thread.run_list);
-                        } else {
-                            list.thread_list.insert_head(&mut thread.run_list);
-                        }
-                        break;
-                    }
-                    if list.priority_level > priority {
-                        let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
-                        run_list.thread_list.insert_head(&mut thread.run_list);
-                        self.run_list
-                            .insert_before(&mut list.chain, &mut run_list.chain);
-                        break;
-                    }
-                    if let Some(next) =
-                        unsafe { list.chain.get_next_mut(offset_of!(RunList, chain)) }
-                    {
-                        list = next;
-                    } else {
-                        let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
-                        run_list.thread_list.insert_head(&mut thread.run_list);
-                        self.run_list.insert_tail(&mut run_list.chain);
-                        break;
-                    }
-                }
-            } else {
-                let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
-                run_list.thread_list.insert_head(&mut thread.run_list);
-                self.run_list.insert_head(&mut run_list.chain);
-            }
-            thread.set_task_status(TaskStatus::Running);
-            if self
-                .running_thread
-                .and_then(|r| {
-                    Some(thread.get_priority_level() > unsafe { &*r }.get_priority_level())
-                })
-                .unwrap_or(false)
-            {
-                self.should_recheck_priority = true;
-                self.should_reschedule = true;
-            }
-            thread.time_slice = 5; /*Temporary*/
-        };
+        let result = self._add_thread(thread);
         drop(_lock);
         InterruptManager::restore_local_irq(interrupt_flag);
         return result;
+    }
+
+    /// Add thread into this run queue from other cpus.
+    ///
+    /// This function will add the thread into this run queue.
+    /// The return value indicates if should notify the cpu having this run queue to reschedule.
+    ///
+    /// `thread` must be locked.
+    pub fn assign_thread(&mut self, thread: &mut ThreadEntry) -> Result<bool, TaskError> {
+        assert!(thread.lock.is_locked());
+        let _lock = self.lock.lock();
+        self._add_thread(thread)?;
+        let thread_priority = thread.get_priority_level();
+        let should_reschedule =
+            if let Some(running_thread) = self.running_thread.and_then(|r| Some(unsafe { &*r })) {
+                let _running_thread_lock = running_thread.lock.lock();
+                let running_thread_priority = running_thread.get_priority_level();
+                if thread_priority < running_thread_priority {
+                    self.should_reschedule = true;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+        drop(_lock);
+        return Ok(should_reschedule);
     }
 
     pub fn tick(&mut self) {

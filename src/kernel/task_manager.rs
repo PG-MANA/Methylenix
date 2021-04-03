@@ -21,7 +21,9 @@ use crate::arch::target_arch::context::{context_data::ContextData, ContextManage
 use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::manager_cluster::{
+    get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
+};
 use crate::kernel::memory_manager::data_type::MSize;
 use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
 use crate::kernel::memory_manager::MemoryError;
@@ -286,10 +288,31 @@ impl TaskManager {
     ///
     /// `thread` must be unlocked.
     pub fn wake_up_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _thread_lock = thread.lock.lock();
         thread.time_slice = 5; /* Temporary */
-        /* Currently, add this cpu's run queue. */
-        get_cpu_manager_cluster().run_queue.add_thread(thread)?;
-        return Ok(());
+        let current_cpu_load = get_cpu_manager_cluster()
+            .run_queue
+            .get_number_of_running_threads();
+        let result: Result<(), TaskError> = try {
+            for cpu in unsafe {
+                get_kernel_manager_cluster()
+                    .cpu_list
+                    .iter_mut(offset_of!(CpuManagerCluster, list))
+            } {
+                let load = cpu.run_queue.get_number_of_running_threads();
+                if load < current_cpu_load {
+                    let should_interrupt_cpu = cpu.run_queue.assign_thread(thread)?;
+                    if should_interrupt_cpu {
+                        get_cpu_manager_cluster()
+                            .interrupt_manager
+                            .send_reschedule_ipi(cpu.cpu_id);
+                    }
+                    break;
+                }
+            }
+        };
+        InterruptManager::restore_local_irq(interrupt_flag);
+        return result;
     }
 }

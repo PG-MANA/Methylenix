@@ -2,6 +2,8 @@
 //! Arch-depended ACPI support
 //!
 
+use crate::arch::target_arch::interrupt::IstIndex;
+
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
@@ -12,7 +14,13 @@ pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
     make_device_interrupt_handler!(handler, acpi_event_handler);
     get_cpu_manager_cluster()
         .interrupt_manager
-        .set_device_interrupt_function(handler, Some(irq as u8), None, 0x20 + irq, 0);
+        .set_device_interrupt_function(
+            handler,
+            Some(irq as u8),
+            IstIndex::NormalInterrupt,
+            0x20 + irq,
+            0,
+        );
 
     return true;
 }

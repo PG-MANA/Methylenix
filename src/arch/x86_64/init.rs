@@ -11,8 +11,8 @@ use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
-use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex};
-use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex, IstIndex};
+use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::AcpiManager;
@@ -221,14 +221,10 @@ pub fn init_timer() -> LocalApicTimer {
 
     get_cpu_manager_cluster()
         .interrupt_manager
-        .set_ist(1, PAGE_SIZE);
-
-    get_cpu_manager_cluster()
-        .interrupt_manager
         .set_device_interrupt_function(
             local_apic_timer_handler,
             None,
-            Some(1),
+            IstIndex::TaskSwitch,
             InterruptionIndex::LocalApicTimer as u16,
             0,
         );
@@ -309,6 +305,7 @@ pub fn init_multiple_processors_ap() {
         .get_local_apic_manager()
         .get_apic_id();
     cpu_manager.cpu_id = bsp_apic_id as usize;
+    cpu_manager.interrupt_manager.init_ipi();
 
     /* Extern Assembly Symbols */
     extern "C" {
