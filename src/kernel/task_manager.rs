@@ -116,6 +116,7 @@ impl TaskManager {
             .init(Self::NUM_OF_INITIAL_THREAD_ENTRIES, &mut memory_manager)
             .expect("Allocating the pool was failed: {:?}");
 
+        drop(memory_manager);
         let memory_manager = &get_kernel_manager_cluster().memory_manager;
 
         /* Create the kernel process and threads */
@@ -165,6 +166,7 @@ impl TaskManager {
     /// Init idle thread for additional processors.
     ///
     /// This function forks idle thread and sets it to run_queue_manager.
+    /// This will be used for application processors' initialization.
     pub fn init_idle(&mut self, idle_fn: fn() -> !, run_queue: &mut RunQueue) {
         let idle_thread = unsafe { &mut *self.idle_thread };
         let forked_thread = self
@@ -218,6 +220,10 @@ impl TaskManager {
         return Ok(new_thread);
     }
 
+    /// Create kernel thread and set into kernel process.
+    ///
+    /// This function forks `Self::idle_thread` and returns it.
+    /// This will be used to make threads before RunQueue starts.
     pub fn create_kernel_thread_for_init(
         &mut self,
         entry_address: fn() -> !,
@@ -243,6 +249,9 @@ impl TaskManager {
     }
 
     /// Fork current thread and create new thread.
+    ///
+    /// This function forks current thread and adds into RunQueue if needed.
+    /// This function assumes RunQueue::running_thread.is_some() == TRUE.
     pub fn create_kernel_thread(
         &mut self,
         entry_address: fn() -> !,
@@ -281,6 +290,37 @@ impl TaskManager {
         &self.context_manager
     }
 
+    /// Add thread into RunQueue with checking each CPU's load.
+    ///
+    /// `thread` must be unlocked.
+    fn add_thread_into_run_queue(&self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+        let _thread_lock = thread.lock.lock();
+        let current_cpu_load = get_cpu_manager_cluster()
+            .run_queue
+            .get_number_of_running_threads();
+        for cpu in unsafe {
+            get_kernel_manager_cluster()
+                .cpu_list
+                .iter_mut(offset_of!(CpuManagerCluster, list))
+        } {
+            let load = cpu.run_queue.get_number_of_running_threads();
+            if load < current_cpu_load {
+                let should_interrupt_cpu = cpu.run_queue.assign_thread(thread)?;
+                drop(_thread_lock);
+                if should_interrupt_cpu {
+                    get_cpu_manager_cluster()
+                        .interrupt_manager
+                        .send_reschedule_ipi(cpu.cpu_id);
+                }
+                return Ok(());
+            }
+        }
+
+        /* Add into Current CPU */
+        let result = get_cpu_manager_cluster().run_queue.add_thread(thread);
+        return result;
+    }
+
     /// Set `thread` to `RunQueueManager`.
     ///
     /// This function sets `thread` to `RunQueueManager`(it may different cpu's).
@@ -288,31 +328,6 @@ impl TaskManager {
     ///
     /// `thread` must be unlocked.
     pub fn wake_up_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
-        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
-        let _thread_lock = thread.lock.lock();
-        thread.time_slice = 5; /* Temporary */
-        let current_cpu_load = get_cpu_manager_cluster()
-            .run_queue
-            .get_number_of_running_threads();
-        let result: Result<(), TaskError> = try {
-            for cpu in unsafe {
-                get_kernel_manager_cluster()
-                    .cpu_list
-                    .iter_mut(offset_of!(CpuManagerCluster, list))
-            } {
-                let load = cpu.run_queue.get_number_of_running_threads();
-                if load < current_cpu_load {
-                    let should_interrupt_cpu = cpu.run_queue.assign_thread(thread)?;
-                    if should_interrupt_cpu {
-                        get_cpu_manager_cluster()
-                            .interrupt_manager
-                            .send_reschedule_ipi(cpu.cpu_id);
-                    }
-                    break;
-                }
-            }
-        };
-        InterruptManager::restore_local_irq(interrupt_flag);
-        return result;
+        self.add_thread_into_run_queue(thread)
     }
 }
