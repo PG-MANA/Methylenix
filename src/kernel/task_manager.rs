@@ -6,15 +6,14 @@
 
 mod process_entry;
 pub mod run_queue;
+mod scheduling_class;
 mod thread_entry;
 pub mod wait_queue;
 pub mod work_queue;
-pub mod scheduling_class {
-    pub mod kernel;
-}
 
 use self::process_entry::ProcessEntry;
-use self::scheduling_class::kernel::KernelSchedulingClass;
+use self::run_queue::RunQueue;
+use self::scheduling_class::{kernel::KernelSchedulingClass, SchedulingClass};
 use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
@@ -28,7 +27,6 @@ use crate::kernel::memory_manager::data_type::MSize;
 use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
 use crate::kernel::memory_manager::MemoryError;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-use crate::kernel::task_manager::run_queue::RunQueue;
 
 pub struct TaskManager {
     lock: SpinLockFlag,
@@ -128,12 +126,14 @@ impl TaskManager {
             kernel_process,
             0,
             KernelSchedulingClass::get_normal_priority(),
+            SchedulingClass::KernelThread(KernelSchedulingClass::new()),
             kernel_main_context,
         );
         idle_thread.init(
             kernel_process,
             0,
             KernelSchedulingClass::get_idle_thread_priority(),
+            SchedulingClass::KernelThread(KernelSchedulingClass::new()),
             idle_context,
         );
 
@@ -203,15 +203,9 @@ impl TaskManager {
             entry_address,
             stack_size,
         )?;
-        let parent_process = thread.get_process_mut();
-        new_thread.init(
-            parent_process as *mut _,
-            thread.get_privilege_level(),
-            thread.get_priority_level(),
-            new_context,
-        );
+        new_thread.fork_data(&thread, new_context);
         drop(_original_thread_lock);
-        new_thread.time_slice = 5; /* Temporary */
+        let parent_process = new_thread.get_process_mut();
         let _process_lock = parent_process
             .lock
             .try_lock()
