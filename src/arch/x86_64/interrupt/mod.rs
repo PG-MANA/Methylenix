@@ -138,8 +138,8 @@ impl InterruptManager {
         self.init_idt(&mut memory_manager);
         self.tss_manager.load_current_tss();
         self.init_ist(&mut memory_manager);
-        self.local_apic.init();
         drop(memory_manager);
+        self.local_apic.init();
         drop(_lock);
         Self::restore_local_irq(flag);
         return;
