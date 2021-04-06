@@ -17,6 +17,7 @@ use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
 use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag, SpinLockFlagHolder};
+use crate::kernel::timer_manager::TimerManager;
 
 struct RunList {
     priority_level: u8,
@@ -270,8 +271,8 @@ impl RunQueue {
             self.should_recheck_priority = true;
             self.should_reschedule = true;
         }
-        thread.time_slice = 5; /*Temporary*/
         self.number_of_threads += 1;
+        thread.set_time_slice(self.number_of_threads, TimerManager::TIMER_INTERVAL_MS);
         return Ok(());
     }
 
@@ -323,7 +324,7 @@ impl RunQueue {
         let _lock = self.lock.lock();
         let running_thread = self.get_running_thread();
         if running_thread.time_slice < 1 {
-            running_thread.time_slice = 5; /*Temporary*/
+            running_thread.time_slice = 0;
             self.should_reschedule = true;
         } else {
             running_thread.time_slice -= 1;
@@ -383,17 +384,22 @@ impl RunQueue {
                 Self::get_highest_priority_thread(&mut self.run_list)
                     .expect("Cannot get thread to run")
             }
-        } else if self.should_recheck_priority {
-            self.should_recheck_priority = false;
-            Self::get_highest_priority_thread(&mut self.run_list).expect("Cannot get thread to run")
-        } else if let Some(next_thread) = unsafe {
-            running_thread
-                .run_list
-                .get_next_mut(offset_of!(ThreadEntry, run_list))
-        } {
-            next_thread
         } else {
-            Self::get_highest_priority_thread(&mut self.run_list).expect("Cannot get thread to run")
+            running_thread.set_time_slice(self.number_of_threads, TimerManager::TIMER_INTERVAL_MS);
+            if self.should_recheck_priority {
+                self.should_recheck_priority = false;
+                Self::get_highest_priority_thread(&mut self.run_list)
+                    .expect("Cannot get thread to run")
+            } else if let Some(next_thread) = unsafe {
+                running_thread
+                    .run_list
+                    .get_next_mut(offset_of!(ThreadEntry, run_list))
+            } {
+                next_thread
+            } else {
+                Self::get_highest_priority_thread(&mut self.run_list)
+                    .expect("Cannot get thread to run")
+            }
         };
 
         let running_thread_t_id = running_thread.get_t_id();
