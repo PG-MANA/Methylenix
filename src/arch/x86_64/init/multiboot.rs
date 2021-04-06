@@ -70,7 +70,6 @@ pub fn init_memory_by_multiboot_information(
     for entry in multiboot_information.efi_memory_map_info.clone() {
         match entry.memory_type {
             EfiMemoryType::EfiReservedMemoryType|
-            EfiMemoryType::EfiLoaderData|
             EfiMemoryType::EfiBootServicesData/* for BGRT */ |
             EfiMemoryType::EfiRuntimeServicesCode |
             EfiMemoryType::EfiRuntimeServicesData |
@@ -178,7 +177,6 @@ pub fn init_memory_by_multiboot_information(
             &mut physical_memory_manager,
         )
         .expect("Cannot associate memory for boot code of Application Processors.");
-
     let aligned_multiboot = MemoryManager::page_align(
         PAddress::new(multiboot_information.address),
         MSize::new(multiboot_information.size),
