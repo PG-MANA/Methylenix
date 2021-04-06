@@ -358,7 +358,8 @@ impl NameString {
 
     pub fn from_string(s: &str) -> Option<Self> {
         let is_absolute = s.starts_with('\\');
-        let split = s.as_bytes().split(|c| *c == b'\\');
+        let s = if is_absolute { s.split_at(1).1 } else { s };
+        let split = s.as_bytes().split(|c| *c == b'.');
         let to_u8_4_array = |e: &[u8]| -> [u8; 4] {
             let mut result = [0u8; 4];
             for i in 0..e.len() {
@@ -368,11 +369,7 @@ impl NameString {
             result
         };
 
-        let count = if is_absolute {
-            split.clone().count() - 1
-        } else {
-            split.clone().count()
-        };
+        let count = split.clone().count();
         if count >= 7 {
             let mut vec: Vec<[u8; 4]> = Vec::with_capacity(count);
             for e in split.into_iter() {

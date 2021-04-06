@@ -269,7 +269,7 @@ impl AcpiManager {
     pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
         if (self.get_fadt_manager().get_flags() & (1 << 4)) != 0 {
             pr_info!("PowerButton is the control method power button.");
-            if self.search_device(None, "\\_SB\\PWRB", b"PNP0C0C") {
+            if self.search_device(None, "\\_SB.PWRB", b"PNP0C0C") {
                 pr_info!("This computer has power button.");
             }
             false /* Usually it is controlled by SMBus */
