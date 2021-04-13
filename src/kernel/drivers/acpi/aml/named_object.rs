@@ -188,6 +188,22 @@ impl External {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+pub enum OperationRegionType {
+    SystemMemory = 0,
+    SystemIO = 1,
+    PciConfig,
+    EmbeddedControl,
+    SMBus,
+    SystemCMOS,
+    PciBarTarget,
+    IPMI,
+    GeneralPurposeIO,
+    GenericSerialBus,
+    PCC,
+}
+
 #[derive(Debug, Clone)]
 pub struct OpRegion {
     name: NameString,
@@ -217,6 +233,22 @@ impl OpRegion {
 
     pub fn get_name(&self) -> &NameString {
         &self.name
+    }
+
+    pub fn get_operation_type(&self) -> Result<OperationRegionType, AmlError> {
+        if self.region_scope > 0x0A {
+            Err(AmlError::UnsupportedType)
+        } else {
+            Ok(unsafe { core::mem::transmute::<u8, OperationRegionType>(self.region_scope) })
+        }
+    }
+
+    pub fn get_region_offset(&self) -> &TermArg {
+        &self.region_offset
+    }
+
+    pub fn get_region_length(&self) -> &TermArg {
+        &self.region_len
     }
 }
 
@@ -386,6 +418,46 @@ impl Field {
             field_flags,
             field_list,
         })
+    }
+
+    pub fn get_source_region_name(&self) -> &NameString {
+        &self.region_name
+    }
+
+    pub fn convert_to_access_size(flags: u8) -> usize {
+        match flags & 0b111 {
+            0 => {
+                0 /*Any Access*/
+            }
+            1 => 1,
+            2 => 2,
+            3 => 4,
+            4 => 8,
+            5 => {
+                pr_warn!("Buffer Access was not supported.");
+                0
+            }
+            _ => {
+                pr_warn!("Unknown Access Type.");
+                0
+            }
+        }
+    }
+
+    pub fn get_access_size(&self) -> usize {
+        Self::convert_to_access_size(self.field_flags)
+    }
+
+    pub fn should_lock(&self) -> bool {
+        (self.field_flags & (1 << 4)) != 0
+    }
+
+    pub fn get_update_rule(&self) -> u8 {
+        (self.field_flags >> 5) & 0b11
+    }
+
+    pub fn get_field_list(&self) -> &FieldList {
+        &self.field_list
     }
 }
 

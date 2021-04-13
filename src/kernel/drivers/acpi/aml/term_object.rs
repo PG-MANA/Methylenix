@@ -172,7 +172,7 @@ impl TermArg {
 
 #[derive(Debug, Clone)]
 pub struct TermArgList {
-    list: Vec<TermArg>,
+    pub list: Vec<TermArg>,
 }
 
 impl TermArgList {
