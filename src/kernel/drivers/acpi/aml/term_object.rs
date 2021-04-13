@@ -225,4 +225,12 @@ impl MethodInvocation {
             }
         }
     }
+
+    pub fn get_name(&self) -> &NameString {
+        &self.name
+    }
+
+    pub fn get_ter_arg_list(&self) -> &TermArgList {
+        &self.term_arg_list
+    }
 }

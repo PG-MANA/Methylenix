@@ -48,12 +48,12 @@ impl BankField {
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-enum CreateFieldType {
+pub enum CreateFieldType {
     Bit,
-    Byte,
-    Word,
-    DWord,
-    QWord,
+    Byte = 0x1,
+    Word = 0x2,
+    DWord = 0x4,
+    QWord = 0x8,
     Other,
 }
 
@@ -93,6 +93,32 @@ impl CreateField {
 
     pub fn get_name(&self) -> &NameString {
         &self.name
+    }
+
+    pub fn get_source_buffer(&self) -> &TermArg {
+        &self.source_buffer
+    }
+
+    pub fn get_index(&self) -> &TermArg {
+        &self.index
+    }
+
+    pub fn is_bit_field(&self) -> bool {
+        self.size == CreateFieldType::Bit || self.size == CreateFieldType::Other
+    }
+
+    pub fn get_source_size(&self) -> Option<usize> {
+        if self.size == CreateFieldType::Other {
+            None
+        } else if self.size == CreateFieldType::Bit {
+            Some(1)
+        } else {
+            Some(self.size.clone() as usize)
+        }
+    }
+
+    pub fn get_source_size_term_arg(&self) -> &Option<TermArg> {
+        &self.optional_size
     }
 }
 
@@ -265,7 +291,7 @@ impl Device {
                         ComputationalData::ConstData(d),
                     )) = n.get_data_ref_object()
                     {
-                        return Ok(Some(*d as u32));
+                        return Ok(Some(d.to_int() as u32));
                     }
                 }
             }
@@ -307,10 +333,7 @@ pub struct Method {
 }
 
 impl Method {
-    pub(crate) fn parse(
-        stream: &mut AmlStream,
-        current_scope: &NameString,
-    ) -> Result<Self, AmlError> {
+    pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* MethodOp was read */
         let pkg_length = PkgLength::parse(stream)?;
         let mut method_stream = stream.clone();
@@ -334,6 +357,10 @@ impl Method {
     pub fn get_argument_count(&self) -> AcpiInt {
         (self.method_flags & 0b111) as _
     }
+
+    pub fn get_term_list(&self) -> &TermList {
+        &self.term_list
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -344,10 +371,7 @@ pub struct Field {
 }
 
 impl Field {
-    pub(crate) fn parse(
-        stream: &mut AmlStream,
-        current_scope: &NameString,
-    ) -> Result<Self, AmlError> {
+    pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* FieldOp was read */
         let pkg_length = PkgLength::parse(stream)?;
         let mut field_stream = stream.clone();
