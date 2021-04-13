@@ -427,6 +427,7 @@ pub enum ExpressionOpcode {
     DefMid(Mid),
     DefNot((Operand, Target)),
     DefObjectType(SuperName),
+    DefPackage(Package),
     DefVarPackage(VarPackage),
     DefSizeOf(SuperName),
     DefStore((TermArg, SuperName)),
@@ -683,6 +684,10 @@ impl ExpressionOpcode {
             opcode::VAR_PACKAGE_OP => {
                 /* OpCode will be read in VarPackage::try_parse */
                 Ok(Self::DefVarPackage(VarPackage::try_parse(stream)?))
+            }
+            opcode::PACKAGE_OP => {
+                /* OpCode will be read in Package::try_parse */
+                Ok(Self::DefPackage(Package::try_parse(stream)?))
             }
             opcode::SIZE_OF_OP => {
                 stream.seek(1)?;
