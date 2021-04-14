@@ -6,11 +6,13 @@ use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 
+#[derive(Debug)]
 pub struct Mutex<T: ?Sized> {
     lock_flag: SpinLockFlag,
     data: UnsafeCell<T>,
 }
 
+#[derive(Debug)]
 pub struct SpinLockFlag {
     flag: AtomicBool,
 }
