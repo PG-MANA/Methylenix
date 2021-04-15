@@ -149,7 +149,7 @@ impl AmlVariable {
         num_of_bits: usize,
     ) -> Result<(), AmlError> {
         assert!(!self.is_constant_data());
-        assert!(data.is_constant_data());
+        assert!(data.is_constant_data(), "data is not constant({:?})", data);
 
         match self {
             Self::Io((port, limit)) => {
@@ -262,7 +262,7 @@ impl AmlVariable {
             Self::MMIo(_) => false,
             Self::BitField(_) => false,
             Self::ByteField(_) => false,
-            Self::Package(_) => false,
+            Self::Package(_) => true,
             Self::Uninitialized => true,
             Self::Method(_) => false,
             Self::Reference(_) => false,
@@ -423,11 +423,7 @@ impl AmlVariable {
             }
         } else if let Self::Package(v) = self {
             if index < v.len() {
-                drop(v); /* To call Self::to_aml_package */
-                let package_element = self.to_aml_package()?;
-                if let Self::Package(v) = self {
-                    v[index] = package_element;
-                }
+                v[index] = data.convert_to_aml_package()?;
                 return Ok(());
             } else {
                 pr_err!("index({}) is out of package(len: {}).", index, v.len());
@@ -521,19 +517,19 @@ impl AmlVariable {
         }
     }
 
-    fn to_aml_package(&self) -> Result<AmlPackage, AmlError> {
+    fn convert_to_aml_package(self) -> Result<AmlPackage, AmlError> {
         match self {
             Self::Uninitialized => Err(AmlError::InvalidType),
-            Self::ConstData(c) => Ok(AmlPackage::ConstData(c.clone())),
-            Self::String(s) => Ok(AmlPackage::String(s.clone())),
-            Self::Buffer(b) => Ok(AmlPackage::Buffer(b.clone())),
-            Self::Io(_) => self.get_constant_data()?.to_aml_package(),
-            Self::MMIo(_) => self.get_constant_data()?.to_aml_package(),
-            Self::BitField(_) => self.get_constant_data()?.to_aml_package(),
-            Self::ByteField(_) => self.get_constant_data()?.to_aml_package(),
-            Self::Package(p) => Ok(AmlPackage::Package(p.clone())),
+            Self::ConstData(c) => Ok(AmlPackage::ConstData(c)),
+            Self::String(s) => Ok(AmlPackage::String(s)),
+            Self::Buffer(b) => Ok(AmlPackage::Buffer(b)),
+            Self::Io(_) => self.get_constant_data()?.convert_to_aml_package(),
+            Self::MMIo(_) => self.get_constant_data()?.convert_to_aml_package(),
+            Self::BitField(_) => self.get_constant_data()?.convert_to_aml_package(),
+            Self::ByteField(_) => self.get_constant_data()?.convert_to_aml_package(),
+            Self::Package(p) => Ok(AmlPackage::Package(p)),
             Self::Method(_) => Err(AmlError::InvalidType),
-            Self::Reference(_) => self.get_constant_data()?.to_aml_package(),
+            Self::Reference(_) => self.get_constant_data()?.convert_to_aml_package(),
         }
     }
 }
