@@ -103,7 +103,7 @@ pub enum ObjReference {
 
 #[derive(Debug, Clone)]
 pub struct Index {
-    buffer_pkg_str_obj: TermArg,
+    source: TermArg,
     index: TermArg,
     target: Target,
 }
@@ -115,18 +115,18 @@ impl Index {
         parse_helper: &mut ParseHelper,
     ) -> Result<Self, AmlError> {
         /* IndexOp was read */
-        let buffer_pkg_str_obj = TermArg::try_parse(stream, current_scope, parse_helper)?;
+        let source = TermArg::try_parse(stream, current_scope, parse_helper)?;
         let index = TermArg::parse_integer(stream, current_scope, parse_helper)?;
         let target = Target::parse(stream, current_scope, parse_helper)?;
         Ok(Self {
-            buffer_pkg_str_obj,
+            source,
             index,
             target,
         })
     }
 
     pub const fn get_source(&self) -> &TermArg {
-        &self.buffer_pkg_str_obj
+        &self.source
     }
 
     pub const fn get_index(&self) -> &TermArg {

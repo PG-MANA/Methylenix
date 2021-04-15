@@ -1616,9 +1616,48 @@ impl Evaluator {
             ExpressionOpcode::DefToString(_) => {
                 unimplemented!()
             }
-            ExpressionOpcode::ReferenceTypeOpcode(_) => {
-                unimplemented!()
-            }
+            ExpressionOpcode::ReferenceTypeOpcode(r_o) => match r_o {
+                ReferenceTypeOpcode::DefRefOf(_) => {
+                    unimplemented!()
+                }
+                ReferenceTypeOpcode::DefDerefOf(reference) => self.get_aml_variable_from_term_arg(
+                    reference.clone(),
+                    current_scope,
+                    local_variables,
+                    argument_variables,
+                ),
+                ReferenceTypeOpcode::DefIndex(i) => {
+                    let buffer = self.get_aml_variable_reference_from_term_arg(
+                        i.get_source().clone(),
+                        current_scope,
+                        local_variables,
+                        argument_variables,
+                    )?;
+                    let index = self
+                        .get_aml_variable_from_term_arg(
+                            i.get_index().clone(),
+                            current_scope,
+                            local_variables,
+                            argument_variables,
+                        )?
+                        .to_int()?;
+                    let aml_variable = AmlVariable::Reference((buffer, Some(index)));
+                    if !i.get_destination().is_null() {
+                        self.write_data_into_target(
+                            aml_variable.clone(),
+                            i.get_destination(),
+                            local_variables,
+                            argument_variables,
+                            current_scope,
+                        )?;
+                    }
+                    Ok(aml_variable)
+                }
+                ReferenceTypeOpcode::UserTermObj => {
+                    pr_err!("UserTermObj is not supported.");
+                    return Err(AmlError::InvalidType);
+                }
+            },
             ExpressionOpcode::MethodInvocation(method_invocation) => {
                 let obj = self.get_aml_variable(
                     method_invocation.get_name(),
