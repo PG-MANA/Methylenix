@@ -147,7 +147,7 @@ impl Iterator for IntIter {
 impl AmlVariable {
     fn _write(
         &self,
-        data: AmlVariable,
+        data: Self,
         byte_index: usize,
         bit_index: usize,
         should_lock: bool,
@@ -158,8 +158,8 @@ impl AmlVariable {
         assert!(data.is_constant_data());
 
         match self {
-            AmlVariable::Io((port, limit)) => {
-                if let AmlVariable::ConstData(c) = data {
+            Self::Io((port, limit)) => {
+                if let Self::ConstData(c) = data {
                     let byte_offset = byte_index + (bit_index >> 3);
                     let bit_index = bit_index >> 3;
                     if byte_offset > *limit {
@@ -178,8 +178,8 @@ impl AmlVariable {
                     Err(AmlError::InvalidOperation)
                 }
             }
-            AmlVariable::MMIo((address, limit)) => {
-                if let AmlVariable::ConstData(c) = data {
+            Self::MMIo((address, limit)) => {
+                if let Self::ConstData(c) = data {
                     let byte_offset = byte_index + (bit_index >> 3);
                     let bit_index = bit_index >> 3;
                     if byte_offset > *limit {
@@ -208,35 +208,30 @@ impl AmlVariable {
                     Err(AmlError::InvalidOperation)
                 }
             }
-            AmlVariable::ConstData(_)
-            | AmlVariable::String(_)
-            | AmlVariable::Buffer(_)
-            | AmlVariable::Uninitialized => unreachable!(),
-            AmlVariable::Method(m) => {
+            Self::ConstData(_) | Self::String(_) | Self::Buffer(_) | Self::Uninitialized => {
+                unreachable!()
+            }
+            Self::Method(m) => {
                 pr_err!("Writing data into Method({}) is invalid.", m.get_name());
                 Err(AmlError::InvalidOperation)
             }
-            AmlVariable::BitField(b_f) => {
-                b_f.source.try_lock().or(Err(AmlError::MutexError))?._write(
-                    data,
-                    byte_index,
-                    bit_index + b_f.bit_index,
-                    b_f.should_lock_global_lock | should_lock,
-                    b_f.access_align.max(access_align),
-                    b_f.num_of_bits,
-                )
-            }
-            AmlVariable::ByteField(b_f) => {
-                b_f.source.try_lock().or(Err(AmlError::MutexError))?._write(
-                    data,
-                    byte_index + b_f.byte_index,
-                    bit_index,
-                    b_f.should_lock_global_lock | should_lock,
-                    b_f.num_of_bytes.max(access_align),
-                    b_f.num_of_bytes << 3,
-                )
-            }
-            AmlVariable::Package(_) => {
+            Self::BitField(b_f) => b_f.source.try_lock().or(Err(AmlError::MutexError))?._write(
+                data,
+                byte_index,
+                bit_index + b_f.bit_index,
+                b_f.should_lock_global_lock | should_lock,
+                b_f.access_align.max(access_align),
+                b_f.num_of_bits,
+            ),
+            Self::ByteField(b_f) => b_f.source.try_lock().or(Err(AmlError::MutexError))?._write(
+                data,
+                byte_index + b_f.byte_index,
+                bit_index,
+                b_f.should_lock_global_lock | should_lock,
+                b_f.num_of_bytes.max(access_align),
+                b_f.num_of_bytes << 3,
+            ),
+            Self::Package(_) => {
                 pr_err!(
                     "Writing data({:?}) into Package({:?}) without index is invalid.",
                     data,
@@ -244,7 +239,7 @@ impl AmlVariable {
                 );
                 Err(AmlError::InvalidOperation)
             }
-            AmlVariable::Reference((source, index)) => {
+            Self::Reference((source, index)) => {
                 if let Some(index) = index {
                     source
                         .try_lock()
@@ -266,17 +261,17 @@ impl AmlVariable {
 
     pub fn is_constant_data(&self) -> bool {
         match self {
-            AmlVariable::ConstData(_) => true,
-            AmlVariable::String(_) => true,
-            AmlVariable::Buffer(_) => true,
-            AmlVariable::Io(_) => false,
-            AmlVariable::MMIo(_) => false,
-            AmlVariable::BitField(_) => false,
-            AmlVariable::ByteField(_) => false,
-            AmlVariable::Package(_) => false,
-            AmlVariable::Uninitialized => true,
-            AmlVariable::Method(_) => false,
-            AmlVariable::Reference(_) => false,
+            Self::ConstData(_) => true,
+            Self::String(_) => true,
+            Self::Buffer(_) => true,
+            Self::Io(_) => false,
+            Self::MMIo(_) => false,
+            Self::BitField(_) => false,
+            Self::ByteField(_) => false,
+            Self::Package(_) => false,
+            Self::Uninitialized => true,
+            Self::Method(_) => false,
+            Self::Reference(_) => false,
         }
     }
 
@@ -287,10 +282,10 @@ impl AmlVariable {
         should_lock: bool,
         access_align: usize,
         num_of_bits: usize,
-    ) -> Result<AmlVariable, AmlError> {
+    ) -> Result<Self, AmlError> {
         assert!(!self.is_constant_data());
         match self {
-            AmlVariable::Io((port, limit)) => {
+            Self::Io((port, limit)) => {
                 let byte_offset = byte_index + (bit_index >> 3);
                 let bit_index = bit_index >> 3;
                 if byte_offset > *limit {
@@ -302,7 +297,7 @@ impl AmlVariable {
                     );
                     Err(AmlError::InvalidOperation)
                 } else {
-                    Ok(AmlVariable::ConstData(read_io(
+                    Ok(Self::ConstData(read_io(
                         *port + byte_offset,
                         bit_index,
                         access_align,
@@ -310,7 +305,7 @@ impl AmlVariable {
                     )?))
                 }
             }
-            AmlVariable::MMIo((address, limit)) => {
+            Self::MMIo((address, limit)) => {
                 let byte_offset = byte_index + (bit_index >> 3);
                 let bit_index = bit_index >> 3;
                 if byte_offset > *limit {
@@ -330,7 +325,7 @@ impl AmlVariable {
                         access_align,
                         num_of_bits
                     );
-                    Ok(AmlVariable::ConstData(read_memory(
+                    Ok(Self::ConstData(read_memory(
                         PAddress::new(*address + byte_offset),
                         bit_index,
                         access_align,
@@ -338,38 +333,34 @@ impl AmlVariable {
                     )?))
                 }
             }
-            AmlVariable::ConstData(_)
-            | AmlVariable::String(_)
-            | AmlVariable::Buffer(_)
-            | AmlVariable::Uninitialized
-            | AmlVariable::Method(_) => unreachable!(),
+            Self::ConstData(_)
+            | Self::String(_)
+            | Self::Buffer(_)
+            | Self::Uninitialized
+            | Self::Method(_) => unreachable!(),
 
-            AmlVariable::BitField(b_f) => {
-                b_f.source.try_lock().or(Err(AmlError::MutexError))?._read(
-                    byte_index,
-                    bit_index + b_f.bit_index,
-                    b_f.should_lock_global_lock | should_lock,
-                    b_f.access_align.max(access_align),
-                    b_f.num_of_bits,
-                )
-            }
-            AmlVariable::ByteField(b_f) => {
-                b_f.source.try_lock().or(Err(AmlError::MutexError))?._read(
-                    byte_index + b_f.byte_index,
-                    bit_index,
-                    b_f.should_lock_global_lock | should_lock,
-                    b_f.num_of_bytes.max(access_align),
-                    b_f.num_of_bytes << 3,
-                )
-            }
-            AmlVariable::Package(_) => {
+            Self::BitField(b_f) => b_f.source.try_lock().or(Err(AmlError::MutexError))?._read(
+                byte_index,
+                bit_index + b_f.bit_index,
+                b_f.should_lock_global_lock | should_lock,
+                b_f.access_align.max(access_align),
+                b_f.num_of_bits,
+            ),
+            Self::ByteField(b_f) => b_f.source.try_lock().or(Err(AmlError::MutexError))?._read(
+                byte_index + b_f.byte_index,
+                bit_index,
+                b_f.should_lock_global_lock | should_lock,
+                b_f.num_of_bytes.max(access_align),
+                b_f.num_of_bytes << 3,
+            ),
+            Self::Package(_) => {
                 pr_err!(
                     "Reading data from Package({:?}) without index is invalid.",
                     self
                 );
                 Err(AmlError::InvalidOperation)
             }
-            AmlVariable::Reference((source, index)) => {
+            Self::Reference((source, index)) => {
                 if let Some(index) = index {
                     source
                         .try_lock()
@@ -388,26 +379,26 @@ impl AmlVariable {
         }
     }
 
-    pub fn get_constant_data(&self) -> Result<AmlVariable, AmlError> {
+    pub fn get_constant_data(&self) -> Result<Self, AmlError> {
         match self {
-            AmlVariable::Uninitialized
-            | AmlVariable::ConstData(_)
-            | AmlVariable::String(_)
-            | AmlVariable::Buffer(_)
-            | AmlVariable::Package(_) => Ok(self.clone()),
-            AmlVariable::Io(_)
-            | AmlVariable::MMIo(_)
-            | AmlVariable::BitField(_)
-            | AmlVariable::ByteField(_)
-            | AmlVariable::Reference(_) => self._read(0, 0, false, 0, 0),
-            AmlVariable::Method(m) => {
+            Self::Uninitialized
+            | Self::ConstData(_)
+            | Self::String(_)
+            | Self::Buffer(_)
+            | Self::Package(_) => Ok(self.clone()),
+            Self::Io(_)
+            | Self::MMIo(_)
+            | Self::BitField(_)
+            | Self::ByteField(_)
+            | Self::Reference(_) => self._read(0, 0, false, 0, 0),
+            Self::Method(m) => {
                 pr_err!("Reading Method({}) is invalid.", m.get_name());
                 Err(AmlError::InvalidOperation)
             }
         }
     }
 
-    pub fn write(&mut self, data: AmlVariable) -> Result<(), AmlError> {
+    pub fn write(&mut self, data: Self) -> Result<(), AmlError> {
         let constant_data = if data.is_constant_data() {
             data
         } else {
@@ -421,18 +412,14 @@ impl AmlVariable {
         }
     }
 
-    pub fn write_buffer_with_index(
-        &mut self,
-        data: AmlVariable,
-        index: usize,
-    ) -> Result<(), AmlError> {
-        if let AmlVariable::Buffer(s) = self {
+    pub fn write_buffer_with_index(&mut self, data: Self, index: usize) -> Result<(), AmlError> {
+        if let Self::Buffer(s) = self {
             let const_data = if data.is_constant_data() {
                 data
             } else {
                 data.get_constant_data()?
             };
-            if let AmlVariable::ConstData(ConstData::Byte(byte)) = const_data {
+            if let Self::ConstData(ConstData::Byte(byte)) = const_data {
                 if s.len() <= index {
                     pr_err!("index({}) is out of buffer(len: {}).", index, s.len());
                     return Err(AmlError::InvalidOperation);
@@ -446,10 +433,10 @@ impl AmlVariable {
         return Err(AmlError::InvalidOperation);
     }
 
-    pub fn read_buffer_with_index(&mut self, index: usize) -> Result<AmlVariable, AmlError> {
-        if let AmlVariable::Buffer(s) = self {
+    pub fn read_buffer_with_index(&self, index: usize) -> Result<Self, AmlError> {
+        if let Self::Buffer(s) = self {
             if index < s.len() {
-                Ok(AmlVariable::ConstData(ConstData::Byte(s[index])))
+                Ok(Self::ConstData(ConstData::Byte(s[index])))
             } else {
                 pr_err!("index({}) is out of buffer(len: {}).", index, s.len());
                 Err(AmlError::InvalidOperation)
@@ -462,33 +449,33 @@ impl AmlVariable {
 
     pub fn to_int(&self) -> Result<AcpiInt, AmlError> {
         match self {
-            AmlVariable::ConstData(c) => Ok(c.to_int()),
-            AmlVariable::String(_) => Err(AmlError::InvalidType),
-            AmlVariable::Buffer(_) => Err(AmlError::InvalidType),
-            AmlVariable::Io(_) => self.get_constant_data()?.to_int(),
-            AmlVariable::MMIo(_) => self.get_constant_data()?.to_int(),
-            AmlVariable::BitField(_) => self.get_constant_data()?.to_int(),
-            AmlVariable::ByteField(_) => self.get_constant_data()?.to_int(),
-            AmlVariable::Package(_) => self.get_constant_data()?.to_int(),
-            AmlVariable::Uninitialized => Err(AmlError::InvalidType),
-            AmlVariable::Method(_) => Err(AmlError::InvalidType),
-            AmlVariable::Reference(_) => self.get_constant_data()?.to_int(),
+            Self::ConstData(c) => Ok(c.to_int()),
+            Self::String(_) => Err(AmlError::InvalidType),
+            Self::Buffer(_) => Err(AmlError::InvalidType),
+            Self::Io(_) => self.get_constant_data()?.to_int(),
+            Self::MMIo(_) => self.get_constant_data()?.to_int(),
+            Self::BitField(_) => self.get_constant_data()?.to_int(),
+            Self::ByteField(_) => self.get_constant_data()?.to_int(),
+            Self::Package(_) => self.get_constant_data()?.to_int(),
+            Self::Uninitialized => Err(AmlError::InvalidType),
+            Self::Method(_) => Err(AmlError::InvalidType),
+            Self::Reference(_) => self.get_constant_data()?.to_int(),
         }
     }
 
     pub fn get_byte_size(&self) -> Result<usize, AmlError> {
         match self {
-            AmlVariable::ConstData(c) => Ok(c.get_byte_size()),
-            AmlVariable::String(s) => Ok(s.len()),
-            AmlVariable::Buffer(b) => Ok(b.len()),
-            AmlVariable::Io(_) => self.get_constant_data()?.get_byte_size(),
-            AmlVariable::MMIo(_) => self.get_constant_data()?.get_byte_size(),
-            AmlVariable::BitField(_) => self.get_constant_data()?.get_byte_size(),
-            AmlVariable::ByteField(_) => self.get_constant_data()?.get_byte_size(),
-            AmlVariable::Package(_) => self.get_constant_data()?.get_byte_size(),
-            AmlVariable::Uninitialized => Err(AmlError::InvalidType),
-            AmlVariable::Method(_) => Err(AmlError::InvalidType),
-            AmlVariable::Reference((_, index)) => {
+            Self::ConstData(c) => Ok(c.get_byte_size()),
+            Self::String(s) => Ok(s.len()),
+            Self::Buffer(b) => Ok(b.len()),
+            Self::Io(_) => self.get_constant_data()?.get_byte_size(),
+            Self::MMIo(_) => self.get_constant_data()?.get_byte_size(),
+            Self::BitField(_) => self.get_constant_data()?.get_byte_size(),
+            Self::ByteField(_) => self.get_constant_data()?.get_byte_size(),
+            Self::Package(_) => self.get_constant_data()?.get_byte_size(),
+            Self::Uninitialized => Err(AmlError::InvalidType),
+            Self::Method(_) => Err(AmlError::InvalidType),
+            Self::Reference((_, index)) => {
                 if index.is_some() {
                     Ok(8) /*Vec<u8>*/
                 } else {
