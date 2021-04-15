@@ -427,6 +427,24 @@ impl AmlVariable {
                 s[index] = byte;
                 return Ok(());
             }
+        } else if let Self::Package(v) = self {
+            if index < v.len() {
+                drop(v); /* To call Self::to_aml_package */
+                let package_element = self.to_aml_package()?;
+                if let Self::Package(v) = self {
+                    v[index] = package_element;
+                }
+                return Ok(());
+            } else {
+                pr_err!("index({}) is out of package(len: {}).", index, v.len());
+            }
+        } else if let Self::String(s) = self {
+            if index < s.len() {
+                unsafe { s.as_bytes_mut()[index] = data.to_int()? as u8 };
+                return Ok(());
+            } else {
+                pr_err!("index({}) is out of string(len: {}).", index, s.len());
+            }
         } else {
             pr_err!("Invalid Data Type: {:?} <- {:?}", self, data);
         }
@@ -439,6 +457,20 @@ impl AmlVariable {
                 Ok(Self::ConstData(ConstData::Byte(s[index])))
             } else {
                 pr_err!("index({}) is out of buffer(len: {}).", index, s.len());
+                Err(AmlError::InvalidOperation)
+            }
+        } else if let Self::Package(v) = self {
+            if index < v.len() {
+                Self::from_aml_package(v[index].clone())
+            } else {
+                pr_err!("index({}) is out of package(len: {}).", index, v.len());
+                Err(AmlError::InvalidOperation)
+            }
+        } else if let Self::String(s) = self {
+            if index < s.len() {
+                Ok(Self::ConstData(ConstData::Byte(s.as_bytes()[index])))
+            } else {
+                pr_err!("index({}) is out of string(len: {}).", index, s.len());
                 Err(AmlError::InvalidOperation)
             }
         } else {
@@ -482,6 +514,32 @@ impl AmlVariable {
                     self.get_constant_data()?.get_byte_size()
                 }
             }
+        }
+    }
+
+    fn from_aml_package(p: AmlPackage) -> Result<Self, AmlError> {
+        match p {
+            AmlPackage::ConstData(c) => Ok(Self::ConstData(c)),
+            AmlPackage::String(s) => Ok(Self::String(s)),
+            AmlPackage::Buffer(b) => Ok(Self::Buffer(b)),
+            AmlPackage::NameString(_) => Err(AmlError::InvalidType),
+            AmlPackage::Package(child_p) => Ok(Self::Package(child_p)),
+        }
+    }
+
+    fn to_aml_package(&self) -> Result<AmlPackage, AmlError> {
+        match self {
+            Self::Uninitialized => Err(AmlError::InvalidType),
+            Self::ConstData(c) => Ok(AmlPackage::ConstData(c.clone())),
+            Self::String(s) => Ok(AmlPackage::String(s.clone())),
+            Self::Buffer(b) => Ok(AmlPackage::Buffer(b.clone())),
+            Self::Io(_) => self.get_constant_data()?.to_aml_package(),
+            Self::MMIo(_) => self.get_constant_data()?.to_aml_package(),
+            Self::BitField(_) => self.get_constant_data()?.to_aml_package(),
+            Self::ByteField(_) => self.get_constant_data()?.to_aml_package(),
+            Self::Package(p) => Ok(AmlPackage::Package(p.clone())),
+            Self::Method(_) => Err(AmlError::InvalidType),
+            Self::Reference(_) => self.get_constant_data()?.to_aml_package(),
         }
     }
 }
