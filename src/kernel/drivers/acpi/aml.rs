@@ -4,6 +4,7 @@
 //! This is the parser for AML.
 
 mod data_object;
+mod evaluator;
 mod expression_opcode;
 mod name_object;
 mod named_object;
@@ -13,15 +14,23 @@ mod parser;
 mod statement_opcode;
 mod term_object;
 
-pub use self::data_object::{eisa_id_to_dword, DataRefObject};
+pub use self::data_object::{eisa_id_to_dword, ConstData, DataRefObject};
+use self::evaluator::Evaluator;
 pub use self::name_object::NameString;
-use self::named_object::{Device, NamedObject};
+use self::named_object::{Device, Method, NamedObject};
 use self::namespace_modifier_object::NamespaceModifierObject;
 use self::parser::{ContentObject, ParseHelper};
 use self::statement_opcode::StatementOpcode;
 use self::term_object::{TermList, TermObj};
 
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::arch::target_arch::device::acpi::{read_io, read_memory, write_io, write_memory};
+
+use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
+use crate::kernel::sync::spin_lock::Mutex;
+
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 type AcpiInt = usize;
 type AcpiData = u64;
@@ -45,6 +54,7 @@ pub enum AmlError {
     InvalidType,
     InvalidMethodName(NameString),
     InvalidScope(NameString),
+    InvalidOperation,
     MutexError,
     ObjectTreeError,
     NestedSearch,
@@ -54,6 +64,51 @@ pub enum AmlError {
 pub struct IntIter {
     stream: AmlStream,
     remaining_elements: usize,
+}
+
+pub struct DataRefObjIter {
+    stream: AmlStream,
+    remaining_elements: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct AmlBitFiled {
+    pub source: Arc<Mutex<AmlVariable>>,
+    pub bit_index: usize,
+    pub num_of_bits: usize,
+    pub access_align: usize,
+    pub should_lock_global_lock: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AmlByteFiled {
+    pub source: Arc<Mutex<AmlVariable>>,
+    pub byte_index: usize,
+    pub num_of_bytes: usize,
+    pub should_lock_global_lock: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum AmlPackage {
+    ConstData(ConstData),
+    String(String),
+    Buffer(Vec<u8>),
+    NameString(NameString),
+    Package(Vec<AmlPackage>),
+}
+
+#[derive(Debug, Clone)]
+pub enum AmlVariable {
+    Uninitialized,
+    ConstData(ConstData),
+    String(String),
+    Buffer(Vec<u8>),
+    Io((usize, usize)),
+    MMIo((usize, usize)),
+    BitField(AmlBitFiled),
+    ByteField(AmlByteFiled),
+    Package(Vec<AmlPackage>),
+    Method(Method),
 }
 
 impl IntIter {
@@ -84,6 +139,304 @@ impl Iterator for IntIter {
                 pr_err!("{:?}", e);
                 None
             }
+        }
+    }
+}
+
+impl AmlVariable {
+    fn _write(
+        &self,
+        data: AmlVariable,
+        byte_index: usize,
+        bit_index: usize,
+        should_lock: bool,
+        access_align: usize,
+        num_of_bits: usize,
+    ) -> Result<(), AmlError> {
+        assert!(!self.is_constant_data());
+        assert!(data.is_constant_data());
+
+        match self {
+            AmlVariable::Io((port, limit)) => {
+                if let AmlVariable::ConstData(c) = data {
+                    let byte_offset = byte_index + (bit_index >> 3);
+                    let bit_index = bit_index >> 3;
+                    if byte_offset > *limit {
+                        pr_err!(
+                            "Offset({}) is out of I/O area(Port: {:#X}, Limit:{:#X}).",
+                            byte_offset,
+                            port,
+                            limit
+                        );
+                        Err(AmlError::InvalidOperation)
+                    } else {
+                        write_io(*port + byte_offset, bit_index, access_align, c)
+                    }
+                } else {
+                    pr_err!("Writing {:?} into I/O({}) is invalid.", data, port);
+                    Err(AmlError::InvalidOperation)
+                }
+            }
+            AmlVariable::MMIo((address, limit)) => {
+                if let AmlVariable::ConstData(c) = data {
+                    let byte_offset = byte_index + (bit_index >> 3);
+                    let bit_index = bit_index >> 3;
+                    if byte_offset > *limit {
+                        pr_err!(
+                            "Offset({}) is out of Memory area(Address: {:#X}, Limit:{:#X}).",
+                            byte_offset,
+                            address,
+                            limit
+                        );
+                        Err(AmlError::InvalidOperation)
+                    } else {
+                        write_memory(
+                            PAddress::new(*address + byte_offset),
+                            bit_index,
+                            access_align,
+                            c,
+                            num_of_bits,
+                        )
+                    }
+                } else {
+                    pr_err!(
+                        "Writing {:?} into Memory area({}) is invalid.",
+                        data,
+                        address
+                    );
+                    Err(AmlError::InvalidOperation)
+                }
+            }
+            AmlVariable::ConstData(_)
+            | AmlVariable::String(_)
+            | AmlVariable::Buffer(_)
+            | AmlVariable::Uninitialized => unreachable!(),
+            AmlVariable::Method(m) => {
+                pr_err!("Writing data into Method({}) is invalid.", m.get_name());
+                Err(AmlError::InvalidOperation)
+            }
+            AmlVariable::BitField(b_f) => {
+                b_f.source.try_lock().or(Err(AmlError::MutexError))?._write(
+                    data,
+                    byte_index,
+                    bit_index + b_f.bit_index,
+                    b_f.should_lock_global_lock | should_lock,
+                    b_f.access_align.max(access_align),
+                    b_f.num_of_bits,
+                )
+            }
+            AmlVariable::ByteField(b_f) => {
+                b_f.source.try_lock().or(Err(AmlError::MutexError))?._write(
+                    data,
+                    byte_index + b_f.byte_index,
+                    bit_index,
+                    b_f.should_lock_global_lock | should_lock,
+                    b_f.num_of_bytes.max(access_align),
+                    b_f.num_of_bytes << 3,
+                )
+            }
+            AmlVariable::Package(_) => {
+                pr_err!(
+                    "Writing data({:?}) into Package({:?}) without index is invalid.",
+                    data,
+                    self
+                );
+                Err(AmlError::InvalidOperation)
+            }
+        }
+    }
+
+    pub fn is_constant_data(&self) -> bool {
+        match self {
+            AmlVariable::ConstData(_) => true,
+            AmlVariable::String(_) => true,
+            AmlVariable::Buffer(_) => true,
+            AmlVariable::Io(_) => false,
+            AmlVariable::MMIo(_) => false,
+            AmlVariable::BitField(_) => false,
+            AmlVariable::ByteField(_) => false,
+            AmlVariable::Package(_) => false,
+            AmlVariable::Uninitialized => true,
+            AmlVariable::Method(_) => false,
+        }
+    }
+
+    fn _read(
+        &self,
+        byte_index: usize,
+        bit_index: usize,
+        should_lock: bool,
+        access_align: usize,
+        num_of_bits: usize,
+    ) -> Result<AmlVariable, AmlError> {
+        assert!(!self.is_constant_data());
+        match self {
+            AmlVariable::Io((port, limit)) => {
+                let byte_offset = byte_index + (bit_index >> 3);
+                let bit_index = bit_index >> 3;
+                if byte_offset > *limit {
+                    pr_err!(
+                        "Offset({}) is out of I/O area(port: {:#X}, Limit:{:#X}).",
+                        byte_offset,
+                        port,
+                        limit
+                    );
+                    Err(AmlError::InvalidOperation)
+                } else {
+                    Ok(AmlVariable::ConstData(read_io(
+                        *port + byte_offset,
+                        bit_index,
+                        access_align,
+                        num_of_bits,
+                    )?))
+                }
+            }
+            AmlVariable::MMIo((address, limit)) => {
+                let byte_offset = byte_index + (bit_index >> 3);
+                let bit_index = bit_index >> 3;
+                if byte_offset > *limit {
+                    pr_err!(
+                        "Offset({}) is out of Memory area(Address: {:#X}, Limit:{:#X}).",
+                        byte_offset,
+                        address,
+                        limit
+                    );
+                    Err(AmlError::InvalidOperation)
+                } else {
+                    pr_info!(
+                        "ReadAddress:{:#X}, Offset:{}, BitIndex: {}, Align:{}, NumberOfBits:{}",
+                        *address,
+                        byte_offset,
+                        bit_index,
+                        access_align,
+                        num_of_bits
+                    );
+                    Ok(AmlVariable::ConstData(read_memory(
+                        PAddress::new(*address + byte_offset),
+                        bit_index,
+                        access_align,
+                        num_of_bits,
+                    )?))
+                }
+            }
+            AmlVariable::ConstData(_)
+            | AmlVariable::String(_)
+            | AmlVariable::Buffer(_)
+            | AmlVariable::Uninitialized
+            | AmlVariable::Method(_) => unreachable!(),
+
+            AmlVariable::BitField(b_f) => {
+                b_f.source.try_lock().or(Err(AmlError::MutexError))?._read(
+                    byte_index,
+                    bit_index + b_f.bit_index,
+                    b_f.should_lock_global_lock | should_lock,
+                    b_f.access_align.max(access_align),
+                    b_f.num_of_bits,
+                )
+            }
+            AmlVariable::ByteField(b_f) => {
+                b_f.source.try_lock().or(Err(AmlError::MutexError))?._read(
+                    byte_index + b_f.byte_index,
+                    bit_index,
+                    b_f.should_lock_global_lock | should_lock,
+                    b_f.num_of_bytes.max(access_align),
+                    b_f.num_of_bytes << 3,
+                )
+            }
+            AmlVariable::Package(_) => {
+                pr_err!(
+                    "Reading data from Package({:?}) without index is invalid.",
+                    self
+                );
+                Err(AmlError::InvalidOperation)
+            }
+        }
+    }
+
+    pub fn get_constant_data(&self) -> Result<AmlVariable, AmlError> {
+        match self {
+            AmlVariable::Uninitialized
+            | AmlVariable::ConstData(_)
+            | AmlVariable::String(_)
+            | AmlVariable::Buffer(_)
+            | AmlVariable::Package(_) => Ok(self.clone()),
+            AmlVariable::Io(_)
+            | AmlVariable::MMIo(_)
+            | AmlVariable::BitField(_)
+            | AmlVariable::ByteField(_) => self._read(0, 0, false, 0, 0),
+            AmlVariable::Method(m) => {
+                pr_err!("Reading Method({}) is invalid.", m.get_name());
+                Err(AmlError::InvalidOperation)
+            }
+        }
+    }
+
+    pub fn write(&mut self, data: AmlVariable) -> Result<(), AmlError> {
+        let constant_data = if data.is_constant_data() {
+            data
+        } else {
+            data.get_constant_data()?
+        };
+        if self.is_constant_data() {
+            *self = constant_data;
+            Ok(())
+        } else {
+            self._write(constant_data, 0, 0, false, 0, 1 /*Is it ok?*/)
+        }
+    }
+
+    pub fn write_buffer_with_index(
+        &mut self,
+        data: AmlVariable,
+        index: usize,
+    ) -> Result<(), AmlError> {
+        if let AmlVariable::Buffer(s) = self {
+            let const_data = if data.is_constant_data() {
+                data
+            } else {
+                data.get_constant_data()?
+            };
+            if let AmlVariable::ConstData(ConstData::Byte(byte)) = const_data {
+                if s.len() <= index {
+                    pr_err!("index({}) is out of buffer(len: {}).", index, s.len());
+                    return Err(AmlError::InvalidOperation);
+                }
+                s[index] = byte;
+                return Ok(());
+            }
+        } else {
+            pr_err!("Invalid Data Type: {:?} <- {:?}", self, data);
+        }
+        return Err(AmlError::InvalidOperation);
+    }
+
+    pub fn to_int(&self) -> Result<AcpiInt, AmlError> {
+        match self {
+            AmlVariable::ConstData(c) => Ok(c.to_int()),
+            AmlVariable::String(_) => Err(AmlError::InvalidType),
+            AmlVariable::Buffer(_) => Err(AmlError::InvalidType),
+            AmlVariable::Io(_) => self.get_constant_data()?.to_int(),
+            AmlVariable::MMIo(_) => self.get_constant_data()?.to_int(),
+            AmlVariable::BitField(_) => self.get_constant_data()?.to_int(),
+            AmlVariable::ByteField(_) => self.get_constant_data()?.to_int(),
+            AmlVariable::Package(_) => self.get_constant_data()?.to_int(),
+            AmlVariable::Uninitialized => Err(AmlError::InvalidType),
+            AmlVariable::Method(_) => Err(AmlError::InvalidType),
+        }
+    }
+
+    pub fn get_byte_size(&self) -> Result<usize, AmlError> {
+        match self {
+            AmlVariable::ConstData(c) => Ok(c.get_byte_size()),
+            AmlVariable::String(_) => Err(AmlError::InvalidType),
+            AmlVariable::Buffer(_) => Err(AmlError::InvalidType),
+            AmlVariable::Io(_) => self.get_constant_data()?.get_byte_size(),
+            AmlVariable::MMIo(_) => self.get_constant_data()?.get_byte_size(),
+            AmlVariable::BitField(_) => self.get_constant_data()?.get_byte_size(),
+            AmlVariable::ByteField(_) => self.get_constant_data()?.get_byte_size(),
+            AmlVariable::Package(_) => self.get_constant_data()?.get_byte_size(),
+            AmlVariable::Uninitialized => Err(AmlError::InvalidType),
+            AmlVariable::Method(_) => Err(AmlError::InvalidType),
         }
     }
 }
@@ -203,6 +556,43 @@ impl AmlParser {
             }
         }
         return None;
+    }
+
+    pub fn evaluate_method(&mut self, method_name: &NameString) {
+        if self.parse_helper.is_none() {
+            return;
+        }
+        if method_name.is_null_name() {
+            pr_warn!("NullName");
+            return;
+        }
+        match self
+            .parse_helper
+            .as_mut()
+            .unwrap()
+            .search_object_from_list_with_parsing_term_list(method_name)
+        {
+            Ok(Some(ContentObject::NamedObject(NamedObject::DefMethod(method)))) => {
+                let mut evaluator = Evaluator::new(self.parse_helper.as_ref().unwrap().clone());
+                match evaluator.eval_method(&method) {
+                    Ok(v) => {
+                        pr_info!("Returned {:?}", v);
+                    }
+                    Err(e) => {
+                        pr_err!("Evaluation Error: {:?}", e)
+                    }
+                }
+            }
+            Ok(Some(c)) => {
+                pr_err!("Expected Method, found {:?}", c);
+            }
+            Ok(None) => {
+                pr_err!("{} was not found.", method_name);
+            }
+            Err(e) => {
+                pr_err!("AML Parser Error: {:?}", e);
+            }
+        }
     }
 
     pub fn get_parse_helper(&mut self) -> &mut ParseHelper {
