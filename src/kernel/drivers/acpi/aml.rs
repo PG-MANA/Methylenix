@@ -109,6 +109,7 @@ pub enum AmlVariable {
     ByteField(AmlByteFiled),
     Package(Vec<AmlPackage>),
     Method(Method),
+    Reference((Arc<Mutex<Self>>, Option<usize /* For Index Of */>)),
 }
 
 impl IntIter {
@@ -243,6 +244,23 @@ impl AmlVariable {
                 );
                 Err(AmlError::InvalidOperation)
             }
+            AmlVariable::Reference((source, index)) => {
+                if let Some(index) = index {
+                    source
+                        .try_lock()
+                        .or(Err(AmlError::MutexError))?
+                        .write_buffer_with_index(data, *index)
+                } else {
+                    source.try_lock().or(Err(AmlError::MutexError))?._write(
+                        data,
+                        byte_index,
+                        bit_index,
+                        should_lock,
+                        access_align,
+                        num_of_bits,
+                    )
+                }
+            }
         }
     }
 
@@ -258,6 +276,7 @@ impl AmlVariable {
             AmlVariable::Package(_) => false,
             AmlVariable::Uninitialized => true,
             AmlVariable::Method(_) => false,
+            AmlVariable::Reference(_) => false,
         }
     }
 
@@ -350,6 +369,22 @@ impl AmlVariable {
                 );
                 Err(AmlError::InvalidOperation)
             }
+            AmlVariable::Reference((source, index)) => {
+                if let Some(index) = index {
+                    source
+                        .try_lock()
+                        .or(Err(AmlError::MutexError))?
+                        .read_buffer_with_index(*index)
+                } else {
+                    source.try_lock().or(Err(AmlError::MutexError))?._read(
+                        byte_index,
+                        bit_index,
+                        should_lock,
+                        access_align,
+                        num_of_bits,
+                    )
+                }
+            }
         }
     }
 
@@ -363,7 +398,8 @@ impl AmlVariable {
             AmlVariable::Io(_)
             | AmlVariable::MMIo(_)
             | AmlVariable::BitField(_)
-            | AmlVariable::ByteField(_) => self._read(0, 0, false, 0, 0),
+            | AmlVariable::ByteField(_)
+            | AmlVariable::Reference(_) => self._read(0, 0, false, 0, 0),
             AmlVariable::Method(m) => {
                 pr_err!("Reading Method({}) is invalid.", m.get_name());
                 Err(AmlError::InvalidOperation)
@@ -410,6 +446,20 @@ impl AmlVariable {
         return Err(AmlError::InvalidOperation);
     }
 
+    pub fn read_buffer_with_index(&mut self, index: usize) -> Result<AmlVariable, AmlError> {
+        if let AmlVariable::Buffer(s) = self {
+            if index < s.len() {
+                Ok(AmlVariable::ConstData(ConstData::Byte(s[index])))
+            } else {
+                pr_err!("index({}) is out of buffer(len: {}).", index, s.len());
+                Err(AmlError::InvalidOperation)
+            }
+        } else {
+            pr_err!("Invalid Data Type: {:?}[{}]", self, index);
+            Err(AmlError::InvalidOperation)
+        }
+    }
+
     pub fn to_int(&self) -> Result<AcpiInt, AmlError> {
         match self {
             AmlVariable::ConstData(c) => Ok(c.to_int()),
@@ -422,14 +472,15 @@ impl AmlVariable {
             AmlVariable::Package(_) => self.get_constant_data()?.to_int(),
             AmlVariable::Uninitialized => Err(AmlError::InvalidType),
             AmlVariable::Method(_) => Err(AmlError::InvalidType),
+            AmlVariable::Reference(_) => self.get_constant_data()?.to_int(),
         }
     }
 
     pub fn get_byte_size(&self) -> Result<usize, AmlError> {
         match self {
             AmlVariable::ConstData(c) => Ok(c.get_byte_size()),
-            AmlVariable::String(_) => Err(AmlError::InvalidType),
-            AmlVariable::Buffer(_) => Err(AmlError::InvalidType),
+            AmlVariable::String(s) => Ok(s.len()),
+            AmlVariable::Buffer(b) => Ok(b.len()),
             AmlVariable::Io(_) => self.get_constant_data()?.get_byte_size(),
             AmlVariable::MMIo(_) => self.get_constant_data()?.get_byte_size(),
             AmlVariable::BitField(_) => self.get_constant_data()?.get_byte_size(),
@@ -437,6 +488,13 @@ impl AmlVariable {
             AmlVariable::Package(_) => self.get_constant_data()?.get_byte_size(),
             AmlVariable::Uninitialized => Err(AmlError::InvalidType),
             AmlVariable::Method(_) => Err(AmlError::InvalidType),
+            AmlVariable::Reference((_, index)) => {
+                if index.is_some() {
+                    Ok(8) /*Vec<u8>*/
+                } else {
+                    self.get_constant_data()?.get_byte_size()
+                }
+            }
         }
     }
 }

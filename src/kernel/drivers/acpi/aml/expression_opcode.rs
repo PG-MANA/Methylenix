@@ -105,7 +105,7 @@ pub enum ObjReference {
 pub struct Index {
     buffer_pkg_str_obj: TermArg,
     index: TermArg,
-    target: SuperName,
+    target: Target,
 }
 
 impl Index {
@@ -117,12 +117,24 @@ impl Index {
         /* IndexOp was read */
         let buffer_pkg_str_obj = TermArg::try_parse(stream, current_scope, parse_helper)?;
         let index = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let target = SuperName::try_parse(stream, current_scope, parse_helper)?;
+        let target = Target::parse(stream, current_scope, parse_helper)?;
         Ok(Self {
             buffer_pkg_str_obj,
             index,
             target,
         })
+    }
+
+    pub const fn get_source(&self) -> &TermArg {
+        &self.buffer_pkg_str_obj
+    }
+
+    pub const fn get_index(&self) -> &TermArg {
+        &self.index
+    }
+
+    pub const fn get_destination(&self) -> &Target {
+        &self.target
     }
 }
 

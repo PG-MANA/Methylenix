@@ -5,7 +5,7 @@
 use super::data_object::{
     parse_integer_from_buffer, ComputationalData, ConstData, DataObject, PackageElement,
 };
-use super::expression_opcode::{ExpressionOpcode, Package, VarPackage};
+use super::expression_opcode::{ExpressionOpcode, Package, ReferenceTypeOpcode, VarPackage};
 use super::name_object::{NameString, SimpleName, SuperName, Target};
 use super::named_object::{Field, FieldElement, Method, NamedObject, OperationRegionType};
 use super::parser::{ContentObject, ParseHelper};
@@ -392,6 +392,64 @@ impl Evaluator {
         }
     }
 
+    fn get_aml_variable_reference_from_term_arg(
+        &mut self,
+        term_arg: TermArg,
+        current_scope: &NameString,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut LocalVariables,
+    ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
+        match term_arg {
+            TermArg::ExpressionOpcode(e) => Ok(Arc::new(Mutex::new(self.eval_expression(
+                *e,
+                local_variables,
+                argument_variables,
+                current_scope,
+            )?))),
+            TermArg::DataObject(data_object) => match data_object {
+                DataObject::ComputationalData(computational_data) => match computational_data {
+                    ComputationalData::ConstData(const_data) => {
+                        Ok(Arc::new(Mutex::new(AmlVariable::ConstData(const_data))))
+                    }
+                    ComputationalData::StringData(s) => {
+                        Ok(Arc::new(Mutex::new(AmlVariable::String(String::from(s)))))
+                    }
+                    ComputationalData::ConstObj(c) => Ok(Arc::new(Mutex::new(
+                        AmlVariable::ConstData(ConstData::Byte(c)),
+                    ))),
+                    ComputationalData::Revision => Ok(Arc::new(Mutex::new(
+                        AmlVariable::ConstData(ConstData::Byte(Self::AML_EVALUATOR_REVISION)),
+                    ))),
+                    ComputationalData::DefBuffer(mut byte_list) => {
+                        let buffer_size_term_arg =
+                            byte_list.get_buffer_size(&mut self.parse_helper)?;
+                        let buffer_size = self
+                            .eval_integer_expression(
+                                &buffer_size_term_arg,
+                                local_variables,
+                                argument_variables,
+                                current_scope,
+                            )?
+                            .to_int()?;
+                        let mut buffer = Vec::<u8>::with_capacity(buffer_size);
+                        for _ in 0..buffer_size {
+                            buffer.push(byte_list.read_next()?);
+                        }
+                        Ok(Arc::new(Mutex::new(AmlVariable::Buffer(buffer))))
+                    }
+                },
+                DataObject::DefPackage(p) => Ok(Arc::new(Mutex::new(AmlVariable::Package(
+                    self.eval_package(p, current_scope, local_variables, argument_variables)?,
+                )))),
+                DataObject::DefVarPackage(p) => Ok(Arc::new(Mutex::new(AmlVariable::Package(
+                    self.eval_var_package(p, current_scope, local_variables, argument_variables)?,
+                )))),
+            },
+            TermArg::ArgObj(c) => Ok(argument_variables[c as usize].clone()),
+            TermArg::LocalObj(c) => Ok(local_variables[c as usize].clone()),
+        }
+    }
+
     fn eval_package(
         &mut self,
         mut p: Package,
@@ -402,9 +460,9 @@ impl Evaluator {
         let num = p.get_number_of_remaining_elements();
         let mut v = Vec::<AmlPackage>::with_capacity(num);
 
-        for _ in 0..num {
-            if let Some(element) = p.get_next_element(current_scope)? {
-                match element {
+        for i in 0..num {
+            match p.get_next_element(current_scope) {
+                Ok(Some(element)) => match element {
                     PackageElement::DataRefObject(d) => match d {
                         DataRefObject::DataObject(o) => match o {
                             DataObject::ComputationalData(c_d) => match c_d {
@@ -465,9 +523,14 @@ impl Evaluator {
                     PackageElement::NameString(n) => {
                         v.push(AmlPackage::NameString(n));
                     }
+                },
+                Ok(None) | Err(AmlError::AccessOutOfRange) => {
+                    for _ in i..num {
+                        v.push(AmlPackage::ConstData(ConstData::Byte(0)))
+                    }
+                    break;
                 }
-            } else {
-                break;
+                Err(e) => Err(e)?,
             }
         }
         return Ok(v);
@@ -510,14 +573,14 @@ impl Evaluator {
                     }
                     SimpleName::ArgObj(l) => {
                         if argument_variables.len() <= *l as usize {
-                            pr_err!("Writing ArgObj({}) was invalid.", l);
+                            pr_err!("Writing ArgObj({}) is invalid.", l);
                             return Err(AmlError::InvalidOperation);
                         }
                         argument_variables[*l as usize] = Arc::new(Mutex::new(data));
                     }
                     SimpleName::LocalObj(l) => {
                         if (*l as usize) > Self::NUMBER_OF_LOCAL_VARIABLES {
-                            pr_err!("Writing LocalObj({}) was invalid.", l);
+                            pr_err!("Writing LocalObj({}) is invalid.", l);
                             return Err(AmlError::InvalidOperation);
                         }
                         local_variables[*l as usize] = Arc::new(Mutex::new(data));
@@ -526,9 +589,52 @@ impl Evaluator {
                 SuperName::DebugObj => {
                     pr_info!("Writing {:?} into Debug Object.", data);
                 }
-                SuperName::ReferenceTypeOpcode(_) => {
-                    unimplemented!()
-                }
+                SuperName::ReferenceTypeOpcode(r) => match &**r {
+                    ReferenceTypeOpcode::DefRefOf(d) => {
+                        pr_info!("Writing {:?} into DefRefOf({:?}) is invalid.", data, d);
+                        return Err(AmlError::InvalidOperation);
+                    }
+                    ReferenceTypeOpcode::DefDerefOf(reference) => {
+                        self.get_aml_variable_from_term_arg(
+                            reference.clone(),
+                            current_scope,
+                            local_variables,
+                            argument_variables,
+                        )?
+                        .write(data)?;
+                    }
+                    ReferenceTypeOpcode::DefIndex(i) => {
+                        let buffer = self.get_aml_variable_reference_from_term_arg(
+                            i.get_source().clone(),
+                            current_scope,
+                            local_variables,
+                            argument_variables,
+                        )?;
+                        let index = self
+                            .get_aml_variable_from_term_arg(
+                                i.get_index().clone(),
+                                current_scope,
+                                local_variables,
+                                argument_variables,
+                            )?
+                            .to_int()?;
+                        let mut aml_variable = AmlVariable::Reference((buffer, Some(index)));
+                        aml_variable.write(data)?;
+                        if !i.get_destination().is_null() {
+                            self.write_data_into_target(
+                                aml_variable,
+                                i.get_destination(),
+                                local_variables,
+                                argument_variables,
+                                current_scope,
+                            )?;
+                        }
+                    }
+                    ReferenceTypeOpcode::UserTermObj => {
+                        pr_err!("UserTermObj is not supported.");
+                        return Err(AmlError::InvalidType);
+                    }
+                },
             },
         }
         return Ok(());
@@ -565,20 +671,39 @@ impl Evaluator {
                                 Ok(false)
                             }
                         }
-                        SimpleName::ArgObj(_) => {
-                            unimplemented!()
+                        SimpleName::ArgObj(c) => {
+                            if let AmlVariable::Uninitialized = *argument_variables[*c as usize]
+                                .try_lock()
+                                .or(Err(AmlError::MutexError))?
+                            {
+                                Ok(false)
+                            } else {
+                                Ok(true)
+                            }
                         }
-                        SimpleName::LocalObj(_) => {
-                            unimplemented!()
+                        SimpleName::LocalObj(c) => {
+                            if let AmlVariable::Uninitialized = *local_variables[*c as usize]
+                                .try_lock()
+                                .or(Err(AmlError::MutexError))?
+                            {
+                                Ok(false)
+                            } else {
+                                Ok(true)
+                            }
                         }
                     },
                     SuperName::DebugObj => {
                         pr_info!("CondRef DebugObj");
                         Ok(false)
                     }
-                    SuperName::ReferenceTypeOpcode(_) => {
-                        unimplemented!()
-                    }
+                    SuperName::ReferenceTypeOpcode(r) => self.eval_bool_expression(
+                        &TermArg::ExpressionOpcode(Box::new(
+                            ExpressionOpcode::ReferenceTypeOpcode((**r).clone()),
+                        )),
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    ),
                 },
                 ExpressionOpcode::DefLAnd((left, right)) => Ok(self
                     .eval_integer_expression(
@@ -726,6 +851,25 @@ impl Evaluator {
                 ExpressionOpcode::DefWait(_) => {
                     unimplemented!()
                 }
+                ExpressionOpcode::ReferenceTypeOpcode(r_e) => match r_e {
+                    ReferenceTypeOpcode::DefDerefOf(reference) => Ok(self
+                        .get_aml_variable_from_term_arg(
+                            reference.clone(),
+                            current_scope,
+                            local_variables,
+                            argument_variables,
+                        )?
+                        .to_int()?
+                        != 0),
+                    ReferenceTypeOpcode::UserTermObj => {
+                        pr_err!("UserTermObj is not supported.");
+                        return Err(AmlError::InvalidType);
+                    }
+                    _ => {
+                        pr_warn!("Expected Boolean, but found {:?}", e);
+                        Err(AmlError::InvalidType)
+                    }
+                },
                 _ => {
                     pr_warn!("Expected Boolean, but found {:?}", e);
                     Err(AmlError::InvalidType)
@@ -932,7 +1076,14 @@ impl Evaluator {
                         pr_info!("DebugObj--");
                         Err(AmlError::UnsupportedType)
                     }
-                    SuperName::ReferenceTypeOpcode(_) => Err(AmlError::UnsupportedType),
+                    SuperName::ReferenceTypeOpcode(r_o) => self.eval_integer_expression(
+                        &TermArg::ExpressionOpcode(Box::new(
+                            ExpressionOpcode::ReferenceTypeOpcode((**r_o).clone()),
+                        )),
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    ),
                 },
 
                 ExpressionOpcode::DefIncrement(increment) => match increment {
@@ -1168,9 +1319,13 @@ impl Evaluator {
                         AmlVariable::MMIo(_) => Err(AmlError::InvalidOperation)?,
                         AmlVariable::BitField(b) => b.access_align.max(b.num_of_bits >> 3),
                         AmlVariable::ByteField(b) => b.num_of_bytes,
-                        AmlVariable::Package(p) => p.len(),
+                        AmlVariable::Package(p) => p.len(), /* OK? */
                         AmlVariable::Method(_) => Err(AmlError::InvalidOperation)?,
                         AmlVariable::Uninitialized => Err(AmlError::InvalidOperation)?,
+                        AmlVariable::Reference((s, _)) => s
+                            .try_lock()
+                            .or(Err(AmlError::MutexError))?
+                            .get_byte_size()?,
                     };
                     Ok(AmlVariable::ConstData(ConstData::QWord(byte_size as _)))
                 }
@@ -1260,7 +1415,23 @@ impl Evaluator {
                 ExpressionOpcode::DefTimer => {
                     unimplemented!()
                 }
-                ExpressionOpcode::ReferenceTypeOpcode(_) => unimplemented!(),
+                ExpressionOpcode::ReferenceTypeOpcode(r_o) => match r_o {
+                    ReferenceTypeOpcode::DefDerefOf(reference) => self
+                        .get_aml_variable_from_term_arg(
+                            reference.clone(),
+                            current_scope,
+                            local_variables,
+                            argument_variables,
+                        ),
+                    ReferenceTypeOpcode::UserTermObj => {
+                        pr_err!("UserTermObj is not supported.");
+                        return Err(AmlError::InvalidType);
+                    }
+                    _ => {
+                        pr_warn!("Expected Boolean, but found {:?}", e);
+                        Err(AmlError::InvalidType)
+                    }
+                },
                 ExpressionOpcode::MethodInvocation(method_invocation) => {
                     let obj = self.get_aml_variable(
                         method_invocation.get_name(),
@@ -1283,6 +1454,7 @@ impl Evaluator {
                         | AmlVariable::ByteField(_)
                         | AmlVariable::BitField(_)
                         | AmlVariable::MMIo(_)
+                        | AmlVariable::Reference(_)
                         | AmlVariable::Io(_) => {
                             let const_obj = locked_obj.get_constant_data()?;
                             if const_obj.to_int().is_err() {
