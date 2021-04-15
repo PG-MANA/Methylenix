@@ -245,7 +245,11 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
                     val <<= 4; /* val *= 0x10 */
                     val += c as usize - 0x61/* 'a' */ + 0xa;
                 } else {
-                    return Ok(val);
+                    return if val == 0 {
+                        Err(AmlError::InvalidType)
+                    } else {
+                        Ok(val)
+                    };
                 }
                 stream.seek(1)?;
             }
@@ -259,7 +263,11 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
                     val <<= 4; /* val *= 0x10 */
                     val += c as usize - 0x41/* 'A' */ + 0xa;
                 } else {
-                    return Ok(val);
+                    return if val == 0 {
+                        Err(AmlError::InvalidType)
+                    } else {
+                        Ok(val)
+                    };
                 }
                 stream.seek(1)?;
             }
@@ -270,7 +278,11 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
                     val <<= 3; /* val *= 0o10 */
                     val += c as usize - 0x30 /* '0' */;
                 } else {
-                    return Ok(val);
+                    return if val == 0 {
+                        Err(AmlError::InvalidType)
+                    } else {
+                        Ok(val)
+                    };
                 }
                 stream.seek(1)?;
             }
@@ -282,7 +294,11 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
                 val *= 10;
                 val += c as usize - 0x30/* '0' */;
             } else {
-                return Ok(val);
+                return if val == 0 {
+                    Err(AmlError::InvalidType)
+                } else {
+                    Ok(val)
+                };
             }
             stream.seek(1)?;
         }
