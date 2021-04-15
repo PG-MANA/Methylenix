@@ -868,6 +868,55 @@ impl Evaluator {
                         Err(AmlError::InvalidType)
                     }
                 },
+                ExpressionOpcode::MethodInvocation(method_invocation) => {
+                    let obj = self.get_aml_variable(
+                        method_invocation.get_name(),
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    )?;
+                    let locked_obj = &*obj.try_lock().or(Err(AmlError::MutexError))?;
+                    match locked_obj {
+                        AmlVariable::ConstData(c) => Ok(c.to_int() != 0),
+                        AmlVariable::String(s) => {
+                            pr_err!("Expected Boolean, but found {:?}", s);
+                            Err(AmlError::InvalidType)
+                        }
+                        AmlVariable::Buffer(b) => {
+                            pr_err!("Expected Boolean, but found {:?}", b);
+                            Err(AmlError::InvalidType)
+                        }
+                        AmlVariable::Package(_)
+                        | AmlVariable::ByteField(_)
+                        | AmlVariable::BitField(_)
+                        | AmlVariable::MMIo(_)
+                        | AmlVariable::Reference(_)
+                        | AmlVariable::Io(_) => {
+                            let const_obj = locked_obj.get_constant_data()?;
+                            if let Ok(i) = const_obj.to_int() {
+                                Ok(i != 0)
+                            } else {
+                                pr_err!("Expected Integer, but found {:?}", const_obj);
+                                Err(AmlError::InvalidType)
+                            }
+                        }
+                        AmlVariable::Method(method) => {
+                            let value = self.eval_method_with_method_invocation(
+                                method_invocation,
+                                method,
+                                &mut Some(local_variables),
+                                &mut Some(argument_variables),
+                            )?;
+                            if let Ok(i) = value.to_int() {
+                                Ok(i != 0)
+                            } else {
+                                pr_err!("Expected Integer, but found {:?}", value);
+                                Err(AmlError::InvalidType)
+                            }
+                        }
+                        AmlVariable::Uninitialized => Err(AmlError::InvalidType),
+                    }
+                }
                 _ => {
                     pr_warn!("Expected Boolean, but found {:?}", e);
                     Err(AmlError::InvalidType)
