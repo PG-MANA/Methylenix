@@ -5,7 +5,12 @@
 //! <https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf>
 //!
 
-use self::aml::{AmlParser, NameString};
+pub mod acpi_pm_timer;
+pub mod aml;
+pub mod event;
+pub mod table;
+
+use self::aml::{AmlPackage, AmlParser, AmlVariable, NameString};
 use self::event::{AcpiEventManager, AcpiFixedEvent};
 use self::table::dsdt::DsdtManager;
 use self::table::fadt::FadtManager;
@@ -14,11 +19,6 @@ use self::table::xsdt::XsdtManager;
 use crate::arch::target_arch::device::cpu::{disable_interrupt, in_byte, out_byte, out_word};
 
 use crate::kernel::memory_manager::data_type::PAddress;
-
-pub mod acpi_pm_timer;
-pub mod aml;
-pub mod event;
-pub mod table;
 
 pub struct AcpiManager {
     enabled: bool,
@@ -276,6 +276,88 @@ impl AcpiManager {
         } else {
             pr_info!("PowerButton is the fixed hardware power button.");
             acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton)
+        }
+    }
+
+    pub fn search_int_number_with_evaluation_aml(
+        &mut self,
+        bus: u8,
+        device: u8,
+        int_pin: u8,
+    ) -> Option<u8> {
+        let debug_and_return_none = |e: Option<AmlVariable>| -> Option<u8> {
+            pr_err!("Invalid PCI Routing Table: {:?}", e.unwrap());
+            return None;
+        };
+        let mut aml_parser = self.get_aml_parler();
+        let routing_table_method_name = NameString::from_array(
+            &[
+                [b'_', b'S', b'B', 0],
+                [b'P', b'C', b'I', bus + b'0'],
+                [b'_', b'P', b'R', b'T'],
+            ],
+            true,
+        ); /* \\_SB.PCI(BusNumber)._PRT */
+        let evaluation_result = aml_parser.evaluate_method(&routing_table_method_name);
+        if evaluation_result.is_none() {
+            pr_err!("Cannot evaluate {}.", routing_table_method_name);
+            return None;
+        }
+        if let Some(AmlVariable::Package(vector)) = &evaluation_result {
+            for element in vector.iter() {
+                if let AmlPackage::Package(device_element) = element {
+                    if let Some(AmlPackage::ConstData(c)) = device_element.get(0) {
+                        let target = c.to_int();
+                        let target_device = ((target >> 0x10) & 0xFFFF) as u16;
+                        let target_function = (target & 0xFFFF) as u16;
+                        if target_device != device as u16 {
+                            continue;
+                        }
+                        if target_function != 0xFFFF || device_element.len() != 4 {
+                            return debug_and_return_none(evaluation_result);
+                        }
+                        if let AmlPackage::ConstData(c) = device_element[1] {
+                            if c.to_int() != int_pin as _ {
+                                continue;
+                            }
+                        } else {
+                            return debug_and_return_none(evaluation_result);
+                        }
+                        if let AmlPackage::ConstData(c) = device_element[3] {
+                            if c.to_int() != 0 {
+                                return Some(c.to_int() as _);
+                            }
+                        } else {
+                            return debug_and_return_none(evaluation_result);
+                        }
+                        return if let AmlPackage::NameString(link_device) = &device_element[2] {
+                            pr_info!("Detect: {}", link_device);
+                            let crs_function_name =
+                                NameString::from_array(&[[b'_', b'C', b'R', b'S']], false)
+                                    .get_full_name_path(link_device);
+                            let link_device_evaluation_result =
+                                aml_parser.evaluate_method(&crs_function_name);
+                            if link_device_evaluation_result.is_none() {
+                                pr_err!("Cannot evaluate {}.", crs_function_name);
+                                return None;
+                            }
+                            if let Some(AmlVariable::ConstData(c)) = link_device_evaluation_result {
+                                Some(c.to_int() as _)
+                            } else {
+                                debug_and_return_none(link_device_evaluation_result)
+                            }
+                        } else {
+                            debug_and_return_none(evaluation_result)
+                        };
+                    }
+                } else {
+                    return debug_and_return_none(evaluation_result);
+                }
+            }
+            pr_err!("Device Specific Table Entry was not found.");
+            None
+        } else {
+            debug_and_return_none(evaluation_result)
         }
     }
 }

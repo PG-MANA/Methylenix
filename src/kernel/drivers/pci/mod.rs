@@ -5,6 +5,7 @@
 use crate::arch::target_arch::device::pci::{
     read_config_data_register, write_config_address_register, write_config_data_register,
 };
+use crate::arch::target_arch::device::sm_bus::setup_sm_bus;
 
 #[derive(Debug)]
 struct ClassCode {
@@ -14,6 +15,7 @@ struct ClassCode {
     revision: u8,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum BaseAddressType {
     IO,
@@ -81,6 +83,7 @@ impl PciManager {
         }
     }
 
+    #[allow(dead_code)]
     fn read_base_address_header_type_0(
         &self,
         bus: u8,
@@ -134,6 +137,10 @@ impl PciManager {
             header_type,
             class_code
         );
+        if class_code.base == 0x0c && class_code.sub == 0x05 {
+            pr_info!("Detect: SMBus");
+            setup_sm_bus(self, bus, device, function, header_type); /* Temporary */
+        }
     }
 
     fn scan_device(&self, bus: u8, device: u8) {

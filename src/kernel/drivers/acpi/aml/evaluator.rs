@@ -2047,10 +2047,6 @@ impl Evaluator {
             method.get_name(),
         );
 
-        for (index, e) in local_variables.iter().enumerate() {
-            pr_info!("Local Variables[{}]: {:?}", index, *e.lock().unwrap());
-        }
-
         if let Err(e) = result {
             self.parse_helper.move_out_from_current_term_list()?;
             Err(e)

@@ -651,13 +651,13 @@ impl AmlParser {
         return None;
     }
 
-    pub fn evaluate_method(&mut self, method_name: &NameString) {
+    pub fn evaluate_method(&mut self, method_name: &NameString) -> Option<AmlVariable> {
         if self.parse_helper.is_none() {
-            return;
+            return None;
         }
         if method_name.is_null_name() {
             pr_warn!("NullName");
-            return;
+            return None;
         }
         match self
             .parse_helper
@@ -669,7 +669,7 @@ impl AmlParser {
                 let mut evaluator = Evaluator::new(self.parse_helper.as_ref().unwrap().clone());
                 match evaluator.eval_method(&method) {
                     Ok(v) => {
-                        pr_info!("Returned {:?}", v);
+                        return Some(v);
                     }
                     Err(e) => {
                         pr_err!("Evaluation Error: {:?}", e)
@@ -686,6 +686,7 @@ impl AmlParser {
                 pr_err!("AML Parser Error: {:?}", e);
             }
         }
+        return None;
     }
 
     pub fn get_parse_helper(&mut self) -> &mut ParseHelper {
