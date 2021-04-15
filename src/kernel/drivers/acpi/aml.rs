@@ -33,7 +33,6 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 type AcpiInt = usize;
-type AcpiData = u64;
 
 pub struct AmlParser {
     base_address: VAddress,
@@ -62,11 +61,6 @@ pub enum AmlError {
 }
 
 pub struct IntIter {
-    stream: AmlStream,
-    remaining_elements: usize,
-}
-
-pub struct DataRefObjIter {
     stream: AmlStream,
     remaining_elements: usize,
 }
