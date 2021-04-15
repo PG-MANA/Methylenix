@@ -35,6 +35,7 @@ pub enum ContentObject {
     Scope(NameString),
 }
 
+#[derive(Clone)]
 pub struct ParseHelper {
     root_term_list: TermList,
     root_object_list: Arc<Mutex<ObjectList>>,
@@ -729,18 +730,18 @@ impl ParseHelper {
         if method_name.is_null_name() {
             return Ok(Some(0));
         }
-        let result = self.search_object_from_list_with_parsing_term_list(method_name)?;
-        if result.is_none() {
-            return Ok(None);
+        if let Some(result) = self.search_object_from_list_with_parsing_term_list(method_name)? {
+            Ok(match result {
+                ContentObject::DataRefObject(d_r) => match d_r {
+                    DataRefObject::ObjectReference(_) => unimplemented!(),
+                    DataRefObject::DataObject(_) => Some(0),
+                },
+                ContentObject::NamedObject(n_o) => n_o.get_argument_count(),
+                ContentObject::Scope(_) => Some(0),
+            })
+        } else {
+            Ok(None)
         }
-        Ok(match result.unwrap() {
-            ContentObject::DataRefObject(d_r) => match d_r {
-                DataRefObject::ObjectReference(_) => unimplemented!(),
-                DataRefObject::DataObject(_) => Some(0),
-            },
-            ContentObject::NamedObject(n_o) => n_o.get_argument_count(),
-            ContentObject::Scope(_) => Some(0),
-        })
     }
 }
 
