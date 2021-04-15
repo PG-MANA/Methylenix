@@ -22,6 +22,7 @@ use self::interrupt::{idt::GateDescriptor, InterruptManager};
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
+use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
@@ -164,6 +165,9 @@ fn main_process() -> ! {
     if !init_acpi_later() {
         pr_err!("Cannot init ACPI devices.");
     }
+
+    let pci_manager = PciManager::new();
+    pci_manager.scan_root_bus();
 
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
