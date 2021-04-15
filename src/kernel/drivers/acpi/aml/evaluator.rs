@@ -5,7 +5,9 @@
 use super::data_object::{
     parse_integer_from_buffer, ComputationalData, ConstData, DataObject, PackageElement,
 };
-use super::expression_opcode::{ExpressionOpcode, Package, ReferenceTypeOpcode, VarPackage};
+use super::expression_opcode::{
+    ByteList, ExpressionOpcode, Package, ReferenceTypeOpcode, VarPackage,
+};
 use super::name_object::{NameString, SimpleName, SuperName, Target};
 use super::named_object::{Field, FieldElement, Method, NamedObject, OperationRegionType};
 use super::parser::{ContentObject, ParseHelper};
@@ -265,22 +267,13 @@ impl Evaluator {
                             ComputationalData::Revision => AmlVariable::ConstData(ConstData::Byte(
                                 Self::AML_EVALUATOR_REVISION,
                             )),
-                            ComputationalData::DefBuffer(mut b) => {
-                                let buffer_size_term_arg =
-                                    b.get_buffer_size(&mut self.parse_helper)?;
-                                let buffer_size = self
-                                    .eval_integer_expression(
-                                        &buffer_size_term_arg,
-                                        local_variables,
-                                        argument_variables,
-                                        current_scope,
-                                    )?
-                                    .to_int()?;
-                                let mut buffer = Vec::<u8>::with_capacity(buffer_size);
-                                for _ in 0..buffer_size {
-                                    buffer.push(b.read_next()?);
-                                }
-                                AmlVariable::Buffer(buffer)
+                            ComputationalData::DefBuffer(byte_list) => {
+                                AmlVariable::Buffer(self.eval_byte_list(
+                                    byte_list,
+                                    current_scope,
+                                    local_variables,
+                                    argument_variables,
+                                )?)
                             }
                         }));
                         self.variables.push((name.clone(), variable.clone()));
@@ -350,22 +343,13 @@ impl Evaluator {
                     ComputationalData::Revision => Ok(AmlVariable::ConstData(ConstData::Byte(
                         Self::AML_EVALUATOR_REVISION,
                     ))),
-                    ComputationalData::DefBuffer(mut byte_list) => {
-                        let buffer_size_term_arg =
-                            byte_list.get_buffer_size(&mut self.parse_helper)?;
-                        let buffer_size = self
-                            .eval_integer_expression(
-                                &buffer_size_term_arg,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
-                            .to_int()?;
-                        let mut buffer = Vec::<u8>::with_capacity(buffer_size);
-                        for _ in 0..buffer_size {
-                            buffer.push(byte_list.read_next()?);
-                        }
-                        Ok(AmlVariable::Buffer(buffer))
+                    ComputationalData::DefBuffer(byte_list) => {
+                        Ok(AmlVariable::Buffer(self.eval_byte_list(
+                            byte_list,
+                            current_scope,
+                            local_variables,
+                            argument_variables,
+                        )?))
                     }
                 },
                 DataObject::DefPackage(p) => Ok(AmlVariable::Package(self.eval_package(
@@ -420,23 +404,14 @@ impl Evaluator {
                     ComputationalData::Revision => Ok(Arc::new(Mutex::new(
                         AmlVariable::ConstData(ConstData::Byte(Self::AML_EVALUATOR_REVISION)),
                     ))),
-                    ComputationalData::DefBuffer(mut byte_list) => {
-                        let buffer_size_term_arg =
-                            byte_list.get_buffer_size(&mut self.parse_helper)?;
-                        let buffer_size = self
-                            .eval_integer_expression(
-                                &buffer_size_term_arg,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
-                            .to_int()?;
-                        let mut buffer = Vec::<u8>::with_capacity(buffer_size);
-                        for _ in 0..buffer_size {
-                            buffer.push(byte_list.read_next()?);
-                        }
-                        Ok(Arc::new(Mutex::new(AmlVariable::Buffer(buffer))))
-                    }
+                    ComputationalData::DefBuffer(byte_list) => Ok(Arc::new(Mutex::new(
+                        AmlVariable::Buffer(self.eval_byte_list(
+                            byte_list,
+                            current_scope,
+                            local_variables,
+                            argument_variables,
+                        )?),
+                    ))),
                 },
                 DataObject::DefPackage(p) => Ok(Arc::new(Mutex::new(AmlVariable::Package(
                     self.eval_package(p, current_scope, local_variables, argument_variables)?,
@@ -480,22 +455,13 @@ impl Evaluator {
                                         Self::AML_EVALUATOR_REVISION,
                                     )));
                                 }
-                                ComputationalData::DefBuffer(mut byte_list) => {
-                                    let buffer_size_term_arg =
-                                        byte_list.get_buffer_size(&mut self.parse_helper)?;
-                                    let buffer_size = self
-                                        .eval_integer_expression(
-                                            &buffer_size_term_arg,
-                                            local_variables,
-                                            argument_variables,
-                                            current_scope,
-                                        )?
-                                        .to_int()?;
-                                    let mut buffer = Vec::<u8>::with_capacity(buffer_size);
-                                    for _ in 0..buffer_size {
-                                        buffer.push(byte_list.read_next()?);
-                                    }
-                                    v.push(AmlPackage::Buffer(buffer));
+                                ComputationalData::DefBuffer(byte_list) => {
+                                    v.push(AmlPackage::Buffer(self.eval_byte_list(
+                                        byte_list,
+                                        current_scope,
+                                        local_variables,
+                                        argument_variables,
+                                    )?));
                                 }
                             },
                             DataObject::DefPackage(package) => {
@@ -544,6 +510,38 @@ impl Evaluator {
         _argument_variables: &mut LocalVariables,
     ) -> Result<Vec<AmlPackage>, AmlError> {
         unimplemented!()
+    }
+
+    fn eval_byte_list(
+        &mut self,
+        mut byte_list: ByteList,
+        current_scope: &NameString,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut LocalVariables,
+    ) -> Result<Vec<u8>, AmlError> {
+        let buffer_size_term_arg = byte_list.get_buffer_size(&mut self.parse_helper)?;
+        let buffer_size = self
+            .eval_integer_expression(
+                &buffer_size_term_arg,
+                local_variables,
+                argument_variables,
+                current_scope,
+            )?
+            .to_int()?;
+        let mut buffer = Vec::<u8>::with_capacity(buffer_size);
+        for i in 0..buffer_size {
+            match byte_list.read_next() {
+                Ok(d) => buffer.push(d),
+                Err(AmlError::AccessOutOfRange) => {
+                    for _ in i..buffer_size {
+                        buffer.push(0)
+                    }
+                    break;
+                }
+                Err(e) => Err(e)?,
+            }
+        }
+        Ok(buffer)
     }
 
     fn write_data_into_target(
@@ -1511,21 +1509,13 @@ impl Evaluator {
             ExpressionOpcode::DefAcquire(_) => {
                 unimplemented!()
             }
-            ExpressionOpcode::DefBuffer(mut byte_list) => {
-                let buffer_size_term_arg = byte_list.get_buffer_size(&mut self.parse_helper)?;
-                let buffer_size = self
-                    .eval_integer_expression(
-                        &buffer_size_term_arg,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?
-                    .to_int()?;
-                let mut buffer = Vec::<u8>::with_capacity(buffer_size);
-                for _ in 0..buffer_size {
-                    buffer.push(byte_list.read_next()?);
-                }
-                Ok(AmlVariable::Buffer(buffer))
+            ExpressionOpcode::DefBuffer(byte_list) => {
+                Ok(AmlVariable::Buffer(self.eval_byte_list(
+                    byte_list,
+                    current_scope,
+                    local_variables,
+                    argument_variables,
+                )?))
             }
             ExpressionOpcode::DefPackage(p) => Ok(AmlVariable::Package(self.eval_package(
                 p,
