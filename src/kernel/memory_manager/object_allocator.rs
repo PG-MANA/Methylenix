@@ -44,7 +44,7 @@ impl ObjectAllocator {
         if size.is_zero() {
             Err(MemoryError::InvalidSize)
         } else if size > PAGE_SIZE {
-            memory_manager.lock().unwrap().alloc_nonlinear_pages(
+            memory_manager.lock().unwrap().alloc_pages(
                 size.to_order(None).to_page_order(),
                 MemoryPermissionFlags::data(),
             )
