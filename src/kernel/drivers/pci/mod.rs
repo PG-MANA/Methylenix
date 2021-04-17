@@ -129,7 +129,7 @@ impl PciManager {
             header_type.unwrap_or_else(|| self.read_header_type(bus, device, function));
         let class_code = self.read_class_code(bus, device, function);
         pr_info!(
-            "{}:{}.{} VendorId: {:#X}, HeaderType: {}, {:?}",
+            "{:X}:{:X}.{:X} VendorId: {:#X}, HeaderType: {}, {:?}",
             bus,
             device,
             function,

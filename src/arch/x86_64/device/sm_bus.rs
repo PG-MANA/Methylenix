@@ -21,15 +21,20 @@ pub fn setup_sm_bus(pci_manager: &PciManager, bus: u8, device: u8, function: u8,
     pci_manager.write_config_address_register(bus, device, function, 0x20);
     let smbus_base_address = pci_manager.read_config_data_register();
     pr_info!("Base address of SMBus: {:#X}", smbus_base_address & !0b1);
-    pci_manager.write_config_address_register(bus, device, function, 0x3c);
 
+    pci_manager.write_config_address_register(bus, device, function, 0x3c);
     let interrupt_pin = ((pci_manager.read_config_data_register() >> 8) & 0xFF) as u8;
-    pr_info!("Interrupt Pin: {:#X}", interrupt_pin);
+    if interrupt_pin == 0 || interrupt_pin > 5 {
+        pr_err!("SMBus interrupt is disabled.");
+        return;
+    }
+    let int_pin = interrupt_pin - 1;
+    pr_info!("Interrupt Pin: INT{}#", (int_pin + b'A') as char);
     let irq = get_kernel_manager_cluster()
         .acpi_manager
         .lock()
         .unwrap()
-        .search_int_number_with_evaluation_aml(bus, device, interrupt_pin);
+        .search_int_number_with_evaluation_aml(bus, device, int_pin);
     if irq.is_none() {
         pr_err!("Cannot detect irq.");
         return;
