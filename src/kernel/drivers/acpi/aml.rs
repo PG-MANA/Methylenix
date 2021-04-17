@@ -712,34 +712,23 @@ impl AmlParser {
             pr_warn!("NullName");
             return None;
         }
-        match self
-            .parse_helper
-            .as_mut()
-            .unwrap()
-            .search_object_from_list_with_parsing_term_list(method_name)
-        {
-            Ok(Some(ContentObject::NamedObject(NamedObject::DefMethod(method)))) => {
-                let mut evaluator = Evaluator::new(self.parse_helper.as_ref().unwrap().clone());
-                match evaluator.eval_method(&method) {
-                    Ok(v) => {
-                        return Some(v);
-                    }
+        let mut method_parser = self.parse_helper.as_ref().unwrap().clone();
+        match method_parser.setup_for_method_evaluation(method_name) {
+            Ok(m) => {
+                let mut evaluator = Evaluator::new(method_parser);
+                match evaluator.eval_method(&m) {
+                    Ok(v) => Some(v),
                     Err(e) => {
-                        pr_err!("Evaluation Error: {:?}", e)
+                        pr_err!("AML Evaluator Error: {:?}", e);
+                        None
                     }
                 }
             }
-            Ok(Some(c)) => {
-                pr_err!("Expected Method, found {:?}", c);
-            }
-            Ok(None) => {
-                pr_err!("{} was not found.", method_name);
-            }
             Err(e) => {
                 pr_err!("AML Parser Error: {:?}", e);
+                None
             }
         }
-        return None;
     }
 
     pub fn get_parse_helper(&mut self) -> &mut ParseHelper {
