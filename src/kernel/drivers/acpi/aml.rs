@@ -140,7 +140,7 @@ impl Iterator for IntIter {
 
 impl AmlVariable {
     fn _write(
-        &self,
+        &mut self,
         data: Self,
         byte_index: usize,
         bit_index: usize,
@@ -148,7 +148,6 @@ impl AmlVariable {
         access_align: usize,
         num_of_bits: usize,
     ) -> Result<(), AmlError> {
-        assert!(!self.is_constant_data());
         assert!(data.is_constant_data(), "data is not constant({:?})", data);
 
         match self {
@@ -202,8 +201,8 @@ impl AmlVariable {
                     Err(AmlError::InvalidOperation)
                 }
             }
-            Self::ConstData(_) | Self::String(_) | Self::Buffer(_) | Self::Uninitialized => {
-                unreachable!()
+            Self::ConstData(_) | Self::String(_) | Self::Uninitialized => {
+                unreachable!() /* FIX: BitFiled may contain those objects. */
             }
             Self::Method(m) => {
                 pr_err!("Writing data into Method({}) is invalid.", m.get_name());
@@ -225,6 +224,60 @@ impl AmlVariable {
                 b_f.num_of_bytes.max(access_align),
                 b_f.num_of_bytes << 3,
             ),
+            Self::Buffer(b) => {
+                let byte_offset = byte_index + (bit_index >> 3);
+                let adjusted_bit_index = bit_index % 8;
+                if (byte_offset + (num_of_bits >> 3)) > b.len() {
+                    pr_err!(
+                        "Offset({}) is out of Buffer(Limit:{:#X}).",
+                        byte_offset,
+                        b.len()
+                    );
+                    return Err(AmlError::InvalidOperation);
+                }
+                let mut bit_mask = 0usize;
+                for _ in 0..num_of_bits {
+                    bit_mask <<= 1;
+                    bit_mask |= 1;
+                }
+                let write_address = b.as_mut_ptr() as usize + byte_offset;
+
+                match num_of_bits >> 3 {
+                    1 => {
+                        let mut original_data = unsafe { *(write_address as *const u8) };
+                        original_data &= !(bit_mask as u8) << adjusted_bit_index;
+                        original_data |=
+                            ((data.to_int()? & (bit_mask as usize)) << adjusted_bit_index) as u8;
+                        unsafe { *(write_address as *mut u8) = original_data };
+                    }
+                    2 => {
+                        let mut original_data = unsafe { *(write_address as *const u16) };
+                        original_data &= !(bit_mask as u16) << adjusted_bit_index;
+                        original_data |=
+                            ((data.to_int()? & (bit_mask as usize)) << adjusted_bit_index) as u16;
+                        unsafe { *(write_address as *mut u16) = original_data };
+                    }
+                    4 => {
+                        let mut original_data = unsafe { *(write_address as *const u32) };
+                        original_data &= !(bit_mask as u32) << adjusted_bit_index;
+                        original_data |=
+                            ((data.to_int()? & (bit_mask as usize)) << adjusted_bit_index) as u32;
+                        unsafe { *(write_address as *mut u32) = original_data };
+                    }
+                    8 => {
+                        let mut original_data = unsafe { *(write_address as *const u64) };
+                        original_data &= !(bit_mask as u64) << adjusted_bit_index;
+                        original_data |=
+                            ((data.to_int()? & (bit_mask as usize)) << adjusted_bit_index) as u64;
+                        unsafe { *(write_address as *mut u64) = original_data };
+                    }
+                    _ => {
+                        pr_err!("Invalid memory operation.");
+                        return Err(AmlError::InvalidOperation);
+                    }
+                }
+                Ok(())
+            }
             Self::Package(_) => {
                 pr_err!(
                     "Writing data({:?}) into Package({:?}) without index is invalid.",
