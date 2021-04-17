@@ -366,7 +366,7 @@ impl Evaluator {
             }
             SuperName::ReferenceTypeOpcode(r) => self
                 .get_aml_variable_reference_from_expression_opcode(
-                    ExpressionOpcode::ReferenceTypeOpcode(**r),
+                    ExpressionOpcode::ReferenceTypeOpcode((**r).clone()),
                     local_variables,
                     argument_variables,
                     current_scope,
