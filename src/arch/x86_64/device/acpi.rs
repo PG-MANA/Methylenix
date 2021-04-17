@@ -345,6 +345,5 @@ pub fn read_memory(
         .unwrap()
         .free(virtual_address)
         .or(Err(AmlError::InvalidOperation))?;
-    pr_info!("Result: {:?}", result);
     return result;
 }

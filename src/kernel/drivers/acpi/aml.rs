@@ -148,8 +148,6 @@ impl AmlVariable {
         access_align: usize,
         num_of_bits: usize,
     ) -> Result<(), AmlError> {
-        assert!(data.is_constant_data(), "data is not constant({:?})", data);
-
         match self {
             Self::Io((port, limit)) => {
                 if let Self::ConstData(c) = data {
@@ -201,9 +199,12 @@ impl AmlVariable {
                     Err(AmlError::InvalidOperation)
                 }
             }
-            Self::ConstData(_) | Self::String(_) | Self::Uninitialized => {
-                unreachable!() /* FIX: BitFiled may contain those objects. */
+            Self::Uninitialized => {
+                *self = data;
+                Ok(())
             }
+
+            Self::ConstData(_) | Self::String(_) => Err(AmlError::UnsupportedType),
             Self::Method(m) => {
                 pr_err!("Writing data into Method({}) is invalid.", m.get_name());
                 Err(AmlError::InvalidOperation)
@@ -227,7 +228,7 @@ impl AmlVariable {
             Self::Buffer(b) => {
                 let byte_offset = byte_index + (bit_index >> 3);
                 let adjusted_bit_index = bit_index % 8;
-                if (byte_offset + (num_of_bits >> 3)) > b.len() {
+                if (byte_offset + (num_of_bits >> 3)) >= b.len() {
                     pr_err!(
                         "Offset({}) is out of Buffer(Limit:{:#X}).",
                         byte_offset,
@@ -330,7 +331,10 @@ impl AmlVariable {
         access_align: usize,
         num_of_bits: usize,
     ) -> Result<Self, AmlError> {
-        assert!(!self.is_constant_data());
+        if self.is_constant_data() {
+            return Ok(self.clone());
+        }
+
         match self {
             Self::Io((port, limit)) => {
                 let byte_offset = byte_index + (bit_index >> 3);
@@ -364,14 +368,6 @@ impl AmlVariable {
                     );
                     Err(AmlError::InvalidOperation)
                 } else {
-                    pr_info!(
-                        "ReadAddress:{:#X}, Offset:{}, BitIndex: {}, Align:{}, NumberOfBits:{}",
-                        *address,
-                        byte_offset,
-                        adjusted_bit_index,
-                        access_align,
-                        num_of_bits
-                    );
                     Ok(Self::ConstData(read_memory(
                         PAddress::new(*address + byte_offset),
                         adjusted_bit_index,
