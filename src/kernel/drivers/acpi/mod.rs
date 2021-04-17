@@ -331,21 +331,59 @@ impl AcpiManager {
                             return debug_and_return_none(evaluation_result);
                         }
                         return if let AmlPackage::NameString(link_device) = &device_element[2] {
+                            let link_device = link_device
+                                .get_element_as_name_string(link_device.len() - 1)
+                                .unwrap();
                             pr_info!("Detect: {}", link_device);
                             let crs_function_name =
                                 NameString::from_array(&[[b'_', b'C', b'R', b'S']], false)
-                                    .get_full_name_path(link_device);
+                                    .get_full_name_path(&link_device.get_full_name_path(
+                                        &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
+                                    )); /* \\_SB.(DEVICE)._CRS */
                             let link_device_evaluation_result =
                                 aml_parser.evaluate_method(&crs_function_name);
                             if link_device_evaluation_result.is_none() {
                                 pr_err!("Cannot evaluate {}.", crs_function_name);
                                 return None;
                             }
-                            if let Some(AmlVariable::ConstData(c)) = link_device_evaluation_result {
-                                Some(c.to_int() as _)
+                            return if let Some(AmlVariable::Buffer(v)) =
+                                &link_device_evaluation_result
+                            {
+                                let small_resource_type_tag = match v.get(0) {
+                                    Some(c) => *c,
+                                    None => {
+                                        return debug_and_return_none(
+                                            link_device_evaluation_result,
+                                        );
+                                    }
+                                };
+                                if small_resource_type_tag != 0x22
+                                    && small_resource_type_tag != 0x23
+                                {
+                                    /* 0x04 = IRQ */
+                                    pr_err!("Invalid Small Resource Type.");
+                                    return debug_and_return_none(link_device_evaluation_result);
+                                }
+
+                                if v[1] != 0 {
+                                    let mask = v[1];
+                                    for i in 0..8 {
+                                        if ((mask >> i) & 1) != 0 {
+                                            return Some(i);
+                                        }
+                                    }
+                                } else if v[2] != 0 {
+                                    let mask = v[2];
+                                    for i in 0..8 {
+                                        if ((mask >> i) & 1) != 0 {
+                                            return Some(i + 8);
+                                        }
+                                    }
+                                }
+                                return debug_and_return_none(link_device_evaluation_result);
                             } else {
                                 debug_and_return_none(link_device_evaluation_result)
-                            }
+                            };
                         } else {
                             debug_and_return_none(evaluation_result)
                         };
