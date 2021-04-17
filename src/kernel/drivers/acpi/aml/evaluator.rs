@@ -77,6 +77,27 @@ impl Evaluator {
             .search_object_from_list_with_parsing_term_list(name)?;
         if object.is_none() {
             pr_err!("Cannot find {}.", name);
+            if name.len() > 1 {
+                let relative_name = name.get_element_as_name_string(name.len() - 1).unwrap();
+                let sb_name = relative_name
+                    .get_full_name_path(&NameString::from_array(&[[b'_', b'S', b'B', 0]], true));
+                if &sb_name != name {
+                    pr_info!("Temporary fix: Search {} instead.", sb_name);
+                    return self.search_aml_variable(
+                        &sb_name,
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    );
+                }
+                pr_info!("Temporary fix: Search {} instead.", relative_name);
+                return self.search_aml_variable(
+                    &relative_name,
+                    local_variables,
+                    argument_variables,
+                    current_scope,
+                );
+            }
             return Err(AmlError::InvalidOperation);
         }
 
@@ -1458,7 +1479,6 @@ impl Evaluator {
                 self.parse_helper.move_out_from_current_term_list()?;
                 return Ok(None);
             }
-            let mut t = term_list.clone();
 
             match self._eval_term_list(
                 term_list.clone(),
