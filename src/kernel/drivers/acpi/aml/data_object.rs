@@ -190,7 +190,7 @@ impl DataRefObject {
             DataRefObject::DataObject(d) => match d {
                 DataObject::ComputationalData(c_d) => c_d.to_int_iter(),
                 DataObject::DefPackage(d_p) => Some(d_p.to_int_iter()),
-                DataObject::DefVarPackage(d_v) => Some(d_v.to_int_iter()),
+                DataObject::DefVarPackage(_) => None,
             },
             DataRefObject::ObjectReference(_) => None,
         }

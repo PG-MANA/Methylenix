@@ -4,7 +4,7 @@
 
 use super::data_object::{ComputationalData, DataObject, DataRefObject};
 use super::name_object::NameString;
-use super::named_object::{External, FieldElement, NamedObject};
+use super::named_object::{External, FieldElement, Method, NamedObject};
 use super::namespace_modifier_object::NamespaceModifierObject;
 use super::term_object::{TermList, TermObj};
 use super::{AcpiInt, AmlError};
@@ -14,7 +14,7 @@ use crate::kernel::sync::spin_lock::Mutex;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum ObjectListItem {
     DefScope(Arc<Mutex<ObjectList>>),
     DefName(DataRefObject),
@@ -22,6 +22,7 @@ enum ObjectListItem {
     NamedObject(NamedObject),
 }
 
+#[derive(Debug)]
 struct ObjectList {
     scope_name: NameString,
     parent: Option<Weak<Mutex<Self>>>,
@@ -247,7 +248,7 @@ impl ParseHelper {
     }
 
     pub fn move_out_from_current_term_list(&mut self) -> Result<(), AmlError> {
-        self.term_list_hierarchy.pop();
+        self.term_list_hierarchy.pop(); /* Maybe wrong */
 
         if let Some(name) = self
             .term_list_hierarchy

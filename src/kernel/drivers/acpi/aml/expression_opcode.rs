@@ -90,8 +90,19 @@ impl VarPackage {
         }
     }
 
-    pub fn to_int_iter(&self) -> IntIter {
-        unimplemented!()
+    pub fn get_number_of_elements(
+        &mut self,
+        parse_helper: &mut ParseHelper,
+        current_scope: &NameString,
+    ) -> Result<TermArg, AmlError> {
+        TermArg::parse_integer(&mut self.stream, current_scope, parse_helper)
+    }
+
+    pub fn convert_to_package(self, num_elements: usize) -> Package {
+        Package {
+            stream: self.stream,
+            num_elements,
+        }
     }
 }
 
