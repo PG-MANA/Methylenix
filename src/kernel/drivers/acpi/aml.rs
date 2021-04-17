@@ -281,7 +281,7 @@ impl AmlVariable {
         match self {
             Self::Io((port, limit)) => {
                 let byte_offset = byte_index + (bit_index >> 3);
-                let bit_index = bit_index >> 3;
+                let adjusted_bit_index = bit_index % 8;
                 if byte_offset > *limit {
                     pr_err!(
                         "Offset({}) is out of I/O area(port: {:#X}, Limit:{:#X}).",
@@ -293,7 +293,7 @@ impl AmlVariable {
                 } else {
                     Ok(Self::ConstData(read_io(
                         *port + byte_offset,
-                        bit_index,
+                        adjusted_bit_index,
                         access_align,
                         num_of_bits,
                     )?))
@@ -301,7 +301,7 @@ impl AmlVariable {
             }
             Self::MMIo((address, limit)) => {
                 let byte_offset = byte_index + (bit_index >> 3);
-                let bit_index = bit_index >> 3;
+                let adjusted_bit_index = bit_index % 8;
                 if byte_offset > *limit {
                     pr_err!(
                         "Offset({}) is out of Memory area(Address: {:#X}, Limit:{:#X}).",
@@ -315,13 +315,13 @@ impl AmlVariable {
                         "ReadAddress:{:#X}, Offset:{}, BitIndex: {}, Align:{}, NumberOfBits:{}",
                         *address,
                         byte_offset,
-                        bit_index,
+                        adjusted_bit_index,
                         access_align,
                         num_of_bits
                     );
                     Ok(Self::ConstData(read_memory(
                         PAddress::new(*address + byte_offset),
-                        bit_index,
+                        adjusted_bit_index,
                         access_align,
                         num_of_bits,
                     )?))

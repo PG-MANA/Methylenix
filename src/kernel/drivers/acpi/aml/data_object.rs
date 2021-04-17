@@ -60,9 +60,27 @@ impl ConstData {
 
     pub fn from_usize(data: usize, byte_size: usize) -> Result<Self, AmlError> {
         match byte_size {
-            1 => Ok(ConstData::Byte(data as _)),
-            2 => Ok(ConstData::Word(data as _)),
-            4 => Ok(ConstData::DWord(data as _)),
+            1 => {
+                if data > u8::MAX as _ {
+                    Self::from_usize(data, 2)
+                } else {
+                    Ok(ConstData::Byte(data as _))
+                }
+            }
+            2 => {
+                if data > u16::MAX as _ {
+                    Self::from_usize(data, 4)
+                } else {
+                    Ok(ConstData::Word(data as _))
+                }
+            }
+            4 => {
+                if data > u32::MAX as _ {
+                    Self::from_usize(data, 8)
+                } else {
+                    Ok(ConstData::DWord(data as _))
+                }
+            }
             8 => Ok(ConstData::QWord(data as _)),
             _ => Err(AmlError::InvalidType),
         }
