@@ -652,12 +652,16 @@ impl ParseHelper {
         let back_up = self.back_up();
         let mut term_list_hierarchy_back_up: Vec<TermList> =
             Vec::with_capacity(self.term_list_hierarchy.len());
+        let mut search_name_list: Vec<NameString> =
+            Vec::with_capacity(self.term_list_hierarchy.len());
 
         for index in (0..self.term_list_hierarchy.len()).rev() {
             let term_list = self.term_list_hierarchy.get(index).unwrap().clone();
-            let search_name = relative_target_name
-                .as_ref()
-                .and_then(|r| Some(r.get_full_name_path(term_list.get_scope_name())));
+            let search_name = relative_target_name.as_ref().and_then(|r| {
+                let full_name = r.get_full_name_path(term_list.get_scope_name());
+                search_name_list.push(full_name.clone());
+                Some(full_name)
+            });
 
             match self.parse_term_list_recursive(
                 search_name.as_ref().unwrap_or(name),
@@ -695,6 +699,38 @@ impl ParseHelper {
         self.restore(back_up.clone());
 
         /* Search from root */
+        for search_name in search_name_list.iter() {
+            match self.parse_term_list_recursive(
+                search_name,
+                self.root_term_list.clone(),
+                relative_target_name.as_ref(),
+                false,
+            ) {
+                Ok(Some(o_i)) => {
+                    self.restore(back_up.clone());
+                    self.term_list_hierarchy.clear();
+                    while let Some(e) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(e);
+                    }
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    return self.convert_object_list_item_list_to_content_object(o_i);
+                }
+                Err(AmlError::NestedSearch) | Ok(None) => {}
+                Err(e) => {
+                    self.restore(back_up.clone());
+                    self.term_list_hierarchy.clear();
+                    while let Some(e) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(e);
+                    }
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    return Err(e);
+                }
+            }
+            self.restore(back_up.clone());
+        }
+
+        drop(search_name_list);
+
         match self.parse_term_list_recursive(
             name,
             self.root_term_list.clone(),
