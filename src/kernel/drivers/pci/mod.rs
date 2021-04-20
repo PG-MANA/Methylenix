@@ -3,16 +3,16 @@
 //!
 
 use crate::arch::target_arch::device::pci::{
-    read_config_data_register, write_config_address_register, write_config_data_register,
+    read_config_data_register, setup_arch_depend_pci_device, write_config_address_register,
+    write_config_data_register,
 };
-use crate::arch::target_arch::device::sm_bus::setup_sm_bus;
 
-#[derive(Debug)]
-struct ClassCode {
-    base: u8,
-    sub: u8,
-    programming_interface: u8,
-    revision: u8,
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct ClassCode {
+    pub base: u8,
+    pub sub: u8,
+    pub programming_interface: u8,
+    pub revision: u8,
 }
 
 #[allow(dead_code)]
@@ -128,19 +128,8 @@ impl PciManager {
         let header_type =
             header_type.unwrap_or_else(|| self.read_header_type(bus, device, function));
         let class_code = self.read_class_code(bus, device, function);
-        pr_info!(
-            "{:X}:{:X}.{:X} VendorId: {:#X}, HeaderType: {}, {:?}",
-            bus,
-            device,
-            function,
-            vendor_id,
-            header_type,
-            class_code
-        );
-        if class_code.base == 0x0c && class_code.sub == 0x05 {
-            pr_info!("Detect: SMBus");
-            setup_sm_bus(self, bus, device, function, header_type); /* Temporary */
-        }
+
+        setup_arch_depend_pci_device(self, bus, device, function, header_type, class_code);
     }
 
     fn scan_device(&self, bus: u8, device: u8) {
@@ -167,7 +156,6 @@ impl PciManager {
 
     pub fn scan_root_bus(&self) {
         let root_bus_header_type = self.read_header_type(0, 0, 0);
-        pr_info!("Root Header Type: {}", root_bus_header_type);
         if (root_bus_header_type & (1 << 7)) != 0 {
             for function in 0..8 {
                 if self.read_vendor_id(0, 0, function) == Self::INVALID_VENDOR_ID {

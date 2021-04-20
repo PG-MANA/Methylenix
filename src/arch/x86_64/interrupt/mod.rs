@@ -299,6 +299,11 @@ impl InterruptManager {
         );
     }
 
+    /// Convert IRQ to Interrupt Index
+    pub const fn irq_to_index(irq: u8) -> u16 {
+        irq as u16 + 0x20
+    }
+
     /// Dummy handler to init IDT
     ///
     /// This function does nothing.
