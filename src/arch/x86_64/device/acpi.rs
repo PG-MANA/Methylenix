@@ -27,9 +27,7 @@ pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
             IstIndex::NormalInterrupt,
             0x20 + irq,
             0,
-        );
-
-    return true;
+        )
 }
 
 extern "C" fn acpi_event_handler() {
