@@ -700,7 +700,11 @@ impl AmlParser {
         return None;
     }
 
-    pub fn evaluate_method(&mut self, method_name: &NameString) -> Option<AmlVariable> {
+    pub fn evaluate_method(
+        &mut self,
+        method_name: &NameString,
+        arguments: &[AmlVariable],
+    ) -> Option<AmlVariable> {
         if self.parse_helper.is_none() {
             return None;
         }
@@ -712,7 +716,7 @@ impl AmlParser {
         match method_parser.setup_for_method_evaluation(method_name) {
             Ok(m) => {
                 let mut evaluator = Evaluator::new(method_parser);
-                match evaluator.eval_method(&m) {
+                match evaluator.eval_method(&m, arguments) {
                     Ok(v) => Some(v),
                     Err(e) => {
                         pr_err!("AML Evaluator Error: {:?}", e);

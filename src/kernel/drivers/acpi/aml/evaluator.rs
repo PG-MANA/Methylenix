@@ -1581,16 +1581,24 @@ impl Evaluator {
         return Ok(None);
     }
 
-    pub fn eval_method(&mut self, method: &Method) -> Result<AmlVariable, AmlError> {
+    pub fn eval_method(
+        &mut self,
+        method: &Method,
+        arguments: &[AmlVariable],
+    ) -> Result<AmlVariable, AmlError> {
         let (mut local_variables, mut argument_variables) =
             Self::init_local_variables_and_argument_variables();
         let current_scope = method.get_name();
-        if method.get_argument_count() != 0 {
+        if method.get_argument_count() != arguments.len() {
             pr_err!(
-                "Expected {} arguments(TODO: give arguments...).",
-                method.get_argument_count()
+                "Expected {} arguments, but found {}.",
+                method.get_argument_count(),
+                arguments.len()
             );
             return Err(AmlError::InvalidOperation);
+        }
+        for (index, arg) in arguments.iter().enumerate() {
+            argument_variables[index] = Arc::new(Mutex::new(arg.clone()));
         }
         self.parse_helper
             .move_into_term_list(method.get_term_list().clone())?;

@@ -279,7 +279,7 @@ impl AcpiManager {
         }
     }
 
-    pub fn search_int_number_with_evaluation_aml(
+    pub fn search_intr_number_with_evaluation_aml(
         &mut self,
         bus: u8,
         device: u8,
@@ -298,7 +298,7 @@ impl AcpiManager {
             ],
             true,
         ); /* \\_SB.PCI(BusNumber)._PRT */
-        let evaluation_result = aml_parser.evaluate_method(&routing_table_method_name);
+        let evaluation_result = aml_parser.evaluate_method(&routing_table_method_name, &[]);
         if evaluation_result.is_none() {
             pr_err!("Cannot evaluate {}.", routing_table_method_name);
             return None;
@@ -341,7 +341,7 @@ impl AcpiManager {
                                         &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
                                     )); /* \\_SB.(DEVICE)._CRS */
                             let link_device_evaluation_result =
-                                aml_parser.evaluate_method(&crs_function_name);
+                                aml_parser.evaluate_method(&crs_function_name, &[]);
                             if link_device_evaluation_result.is_none() {
                                 pr_err!("Cannot evaluate {}.", crs_function_name);
                                 return None;
