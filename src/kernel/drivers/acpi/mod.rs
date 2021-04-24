@@ -7,6 +7,7 @@
 
 pub mod acpi_pm_timer;
 pub mod aml;
+pub mod ec;
 pub mod event;
 pub mod table;
 
