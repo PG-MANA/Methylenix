@@ -16,7 +16,6 @@ impl LpcManager {
 
     const ACPI_ENABLE: u32 = 1 << 7;
     const GPIO_ENABLE: u32 = 1 << 4;
-    const EC_ENABLE: u32 = 1 << 11;
     const MC_LPC_EN: u32 = 1 << 11;
 
     pub fn setup(pci_manager: &PciManager, bus: u8, device: u8, function: u8, _header_type: u8) {

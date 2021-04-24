@@ -50,7 +50,7 @@ impl PitManager {
     /// Stop PIT.
     ///
     /// This function set reload_value to zero and PIT will stop counting.
-    /// `get_count` will return zero and the timer interruption will stop.
+    /// `get_count` will return zero and the timer interrupt will stop.
     pub fn stop_counting(&mut self) {
         let _lock = self.lock.lock();
         unsafe { cpu::out_byte(0x43, 0) };
