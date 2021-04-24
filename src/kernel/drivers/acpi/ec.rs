@@ -88,4 +88,8 @@ impl EmbeddedControllerManager {
 
         return result;
     }
+
+    pub fn is_sci_pending(&self) -> bool {
+        (read_io_byte(self.ec_sc) & (Self::SCI_EVT)) != 0
+    }
 }
