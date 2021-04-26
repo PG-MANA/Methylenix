@@ -127,10 +127,6 @@ pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
         return false;
     }
 
-    if let Some(oem) = acpi_manager.get_oem_id() {
-        pr_info!("OEM ID: {}", oem,);
-    }
-
     get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
     return true;
 }
@@ -179,25 +175,20 @@ pub fn init_timer() -> LocalApicTimer {
             .get_local_apic_manager(),
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
-    } else if get_kernel_manager_cluster()
+    } else if let Some(pm_timer) = get_kernel_manager_cluster()
         .acpi_manager
         .lock()
         .unwrap()
-        .is_available()
+        .get_device_manager()
+        .get_pm_timer()
     {
-        let pm_timer = get_kernel_manager_cluster()
-            .acpi_manager
-            .lock()
-            .unwrap()
-            .get_fadt_manager()
-            .get_acpi_pm_timer();
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
         local_apic_timer.set_up_interrupt(
             InterruptionIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
                 .get_local_apic_manager(),
-            &pm_timer,
+            pm_timer,
         );
     } else {
         pr_info!("Using PIT to calculate frequency of Local APIC Timer.");
@@ -348,8 +339,10 @@ pub fn init_multiple_processors_ap() {
         .acpi_manager
         .lock()
         .unwrap()
-        .get_fadt_manager()
-        .get_acpi_pm_timer();
+        .get_device_manager()
+        .get_pm_timer()
+        .expect("This computer has no ACPI PM Timer.")
+        .clone();
 
     let mut num_of_cpu = 1usize;
     'ap_init_loop: for apic_id in apic_id_list_iter {

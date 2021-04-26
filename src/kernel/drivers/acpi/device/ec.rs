@@ -3,13 +3,17 @@
 //!
 
 use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte};
+use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
+use crate::kernel::drivers::acpi::aml::{AmlVariable, ConstData, NameString};
+use crate::kernel::drivers::acpi::event::gpe::GpeManager;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 
-pub struct EmbeddedControllerManager {
+pub struct EmbeddedController {
     ec_sc: usize,
     ec_data: usize,
 }
 
-impl EmbeddedControllerManager {
+impl EmbeddedController {
     const RD_EC: u8 = 0x80;
     const WR_EC: u8 = 0x81;
     const BE_EC: u8 = 0x82;
@@ -80,8 +84,9 @@ impl EmbeddedControllerManager {
         self.wait_input_buffer();
 
         write_io_byte(self.ec_sc, Self::QR_EC);
-        self.wait_output_buffer();
+        self.wait_input_buffer();
 
+        self.wait_output_buffer();
         let result = read_io_byte(self.ec_data);
 
         write_io_byte(self.ec_sc, Self::BD_EC);

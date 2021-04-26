@@ -5,13 +5,13 @@
 //! <https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf>
 //!
 
-pub mod acpi_pm_timer;
 pub mod aml;
-pub mod ec;
+pub mod device;
 pub mod event;
 pub mod table;
 
 use self::aml::{AmlPackage, AmlParser, AmlVariable, NameString};
+use self::device::AcpiDeviceManager;
 use self::event::{AcpiEventManager, AcpiFixedEvent};
 use self::table::dsdt::DsdtManager;
 use self::table::fadt::FadtManager;
@@ -23,8 +23,8 @@ use crate::kernel::memory_manager::data_type::PAddress;
 
 pub struct AcpiManager {
     enabled: bool,
-    oem_id: [u8; 6],
     xsdt_manager: XsdtManager,
+    device_manager: AcpiDeviceManager,
 }
 
 #[repr(C, packed)]
@@ -46,8 +46,8 @@ impl AcpiManager {
     pub const fn new() -> Self {
         Self {
             enabled: false,
-            oem_id: [0; 6],
             xsdt_manager: XsdtManager::new(),
+            device_manager: AcpiDeviceManager::new(),
         }
     }
 
@@ -64,7 +64,6 @@ impl AcpiManager {
             return false;
         }
         //ADD: checksum verification
-        self.oem_id = rsdp.oem_id.clone();
         if !self
             .xsdt_manager
             .init(PAddress::new(rsdp.xsdt_address as usize))
@@ -73,6 +72,9 @@ impl AcpiManager {
             return false;
         }
         self.enabled = true;
+
+        self.device_manager.pm_timer = self.get_fadt_manager().get_acpi_pm_timer();
+
         return true;
     }
 
@@ -89,15 +91,6 @@ impl AcpiManager {
         self.enabled
     }
 
-    pub fn get_oem_id(&self) -> Option<&str> {
-        use core::str::from_utf8;
-        if self.enabled {
-            from_utf8(&self.oem_id).ok()
-        } else {
-            None
-        }
-    }
-
     fn get_aml_parler(&self) -> AmlParser {
         let mut p = self.get_dsdt_manager().get_aml_parser();
         assert!(p.init());
@@ -106,6 +99,10 @@ impl AcpiManager {
 
     pub fn get_xsdt_manager(&self) -> &XsdtManager {
         &self.xsdt_manager
+    }
+
+    pub const fn get_device_manager(&self) -> &AcpiDeviceManager {
+        &self.device_manager
     }
 
     /* FADT must exists */
@@ -234,11 +231,12 @@ impl AcpiManager {
 
         /* for debug */
         unsafe { disable_interrupt() };
-        let timer = self.get_fadt_manager().get_acpi_pm_timer();
-        for i in (1..=3).rev() {
-            println!("System will shutdown after {}s...", i);
-            for _ in 0..1000 {
-                timer.busy_wait_ms(1);
+        if let Some(timer) = self.get_device_manager().get_pm_timer() {
+            for i in (1..=3).rev() {
+                println!("System will shutdown after {}s...", i);
+                for _ in 0..1000 {
+                    timer.busy_wait_ms(1);
+                }
             }
         }
         self.shutdown(None)

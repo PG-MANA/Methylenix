@@ -4,10 +4,10 @@
 //! This manager contains the information of FADT
 //! FADT has the information about ACPI PowerManagement Timer.
 
+use super::super::device::pm_timer::AcpiPmTimer;
 use super::super::GeneralAddress;
 use super::super::INITIAL_MMAP_SIZE;
 
-use crate::kernel::drivers::acpi::acpi_pm_timer::AcpiPmTimer;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
 
@@ -106,17 +106,17 @@ impl FadtManager {
         return true;
     }
 
-    pub fn get_acpi_pm_timer(&self) -> AcpiPmTimer {
+    pub fn get_acpi_pm_timer(&self) -> Option<AcpiPmTimer> {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
         let address = GeneralAddress::new(&fadt.x_pm_tmr_block).address;
-        AcpiPmTimer::new(
-            if address != 0 {
-                address as usize
-            } else {
-                fadt.pm_tmr_block as usize
-            },
-            ((fadt.flags >> 8) & 1) != 0,
-        )
+        let pm_block = if address != 0 {
+            address as usize
+        } else if fadt.pm_tmr_block != 0 {
+            fadt.pm_tmr_block as usize
+        } else {
+            return None;
+        };
+        Some(AcpiPmTimer::new(pm_block, ((fadt.flags >> 8) & 1) != 0))
     }
 
     pub fn get_flags(&self) -> u32 {
