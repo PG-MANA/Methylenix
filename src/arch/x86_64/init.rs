@@ -25,7 +25,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;
-use crate::kernel::timer_manager::Timer;
+use crate::kernel::timer_manager::{Timer, TimerManager};
 
 use core::sync::atomic::AtomicBool;
 
@@ -219,6 +219,10 @@ pub fn init_timer() -> LocalApicTimer {
             InterruptionIndex::LocalApicTimer as u16,
             0,
         );
+
+    /* Setup TimerManager */
+    get_cpu_manager_cluster().timer_manager = TimerManager::new();
+
     local_apic_timer
 }
 
