@@ -46,7 +46,7 @@ impl TimerManager {
     }
 
     pub fn get_current_tick_without_lock(&self) -> usize {
-        self.tick
+        unsafe { core::ptr::read_volatile(&self.tick as *const _) }
     }
 
     pub fn get_difference_ms(&self, tick: usize) -> usize {
