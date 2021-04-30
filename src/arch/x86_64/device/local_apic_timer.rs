@@ -74,6 +74,7 @@ impl LocalApicTimer {
             .arch_depend_data
             .local_apic_timer
             .reset_deadline();
+        get_cpu_manager_cluster().timer_manager.timer_handler();
         get_cpu_manager_cluster().run_queue.tick();
         get_cpu_manager_cluster().interrupt_manager.send_eoi();
     }
