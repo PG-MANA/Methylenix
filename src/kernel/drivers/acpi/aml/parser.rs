@@ -732,10 +732,13 @@ impl ParseHelper {
 
         drop(search_name_list);
 
+        let temp_relative_name = name.get_element_as_name_string(name.len() - 1);
         match self.parse_term_list_recursive(
             name,
             self.root_term_list.clone(),
-            relative_target_name.as_ref(),
+            relative_target_name
+                .as_ref()
+                .or(temp_relative_name.as_ref()),
             false,
         ) {
             Ok(Some(o_i)) => {
@@ -810,11 +813,11 @@ impl ParseHelper {
         hid: u32,
         mut term_list: TermList,
     ) -> Result<Option<Device>, AmlError> {
-        while let Some(obj) = term_list.next(&mut self)? {
+        while let Some(obj) = term_list.next(self)? {
             match obj {
                 TermObj::NamespaceModifierObj(n_o) => match n_o {
                     NamespaceModifierObject::DefScope(scope) => {
-                        self.move_into_term_list(scope.get_term_list().clone());
+                        self.move_into_term_list(scope.get_term_list().clone())?;
                         if let Some(d) = self._search_device(hid, scope.get_term_list().clone())? {
                             return Ok(Some(d));
                         }
@@ -824,13 +827,13 @@ impl ParseHelper {
                 },
                 TermObj::NamedObj(n_o) => {
                     if let NamedObject::DefDevice(d) = n_o {
-                        self.move_into_term_list(d.get_term_list().clone());
+                        self.move_into_term_list(d.get_term_list().clone())?;
                         if d.get_hid(self)? == Some(hid) {
                             return Ok(Some(d));
                         }
                     } else {
                         if let Some(t) = n_o.get_term_list() {
-                            self.move_into_term_list(t.clone());
+                            self.move_into_term_list(t.clone())?;
                             if let Some(d) = self._search_device(hid, t)? {
                                 return Ok(Some(d));
                             }
@@ -862,8 +865,7 @@ impl ParseHelper {
                  term_list: TermList,
                  relative_name: Option<&NameString>|
          -> Result<Option<Method>, AmlError> {
-            match p.parse_term_list_recursive(method_name, self.root_term_list.clone(), None, true)
-            {
+            match p.parse_term_list_recursive(method_name, term_list, relative_name, true) {
                 Ok(Some(o_i)) => {
                     if let ObjectListItem::NamedObject(NamedObject::DefMethod(m)) = o_i {
                         Ok(Some(m))
@@ -879,11 +881,8 @@ impl ParseHelper {
 
         /* Search from Current Scope */
         if let Some(t) = term_list {
-            if let Some(m) = f(
-                self,
-                t,
-                method_name.get_relative_name(t.get_scope_name()).as_ref(),
-            )? {
+            let relative_name = method_name.get_relative_name(t.get_scope_name());
+            if let Some(m) = f(self, t, relative_name.as_ref())? {
                 return Ok(m);
             }
         }
@@ -900,7 +899,7 @@ impl ParseHelper {
 }
 
 impl core::fmt::Debug for ParseHelper {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         if let Ok(l) = self.current_object_list.try_lock() {
             f.write_fmt(format_args!("ParseHelper(Scope:{})", l.scope_name))
         } else {
