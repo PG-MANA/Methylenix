@@ -251,12 +251,7 @@ impl AcpiManager {
         self.shutdown(None)
     }
 
-    pub fn search_device(
-        &mut self,
-        aml_parser: Option<&mut AmlParser>,
-        name: &str,
-        hid: &[u8; 7],
-    ) -> bool {
+    pub fn search_device(&mut self, aml_parser: Option<&mut AmlParser>, hid: &[u8; 7]) -> bool {
         let mut default_aml_parser = if aml_parser.is_none() {
             Some(self.get_aml_parler())
         } else {
@@ -264,10 +259,7 @@ impl AcpiManager {
         };
         let aml_parser = aml_parser.or(default_aml_parser.as_mut()).unwrap();
 
-        if let Some(_) = aml_parser.get_device(
-            &NameString::from_string(name).expect("Invalid NameString"),
-            hid,
-        ) {
+        if let Some(_) = aml_parser.get_device(hid) {
             true
         } else {
             false
@@ -277,7 +269,7 @@ impl AcpiManager {
     pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
         if (self.get_fadt_manager().get_flags() & (1 << 4)) != 0 {
             pr_info!("PowerButton is the control method power button.");
-            if self.search_device(None, "\\_SB.PWRB", b"PNP0C0C") {
+            if self.search_device(None, b"PNP0C0C") {
                 pr_info!("This computer has power button.");
             }
             false

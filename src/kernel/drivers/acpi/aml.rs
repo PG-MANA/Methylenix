@@ -707,45 +707,17 @@ impl AmlParser {
         }
     }
 
-    pub fn get_device(&mut self, name: &NameString, hid: &[u8; 7]) -> Option<Device> {
-        let hid = eisa_id_to_dword(hid);
-        if let Some(c) = self.get_content_object(name) {
-            match c {
-                ContentObject::NamedObject(n) => {
-                    if let NamedObject::DefDevice(d) = n {
-                        match d.get_hid(self.parse_helper.as_mut().unwrap()) {
-                            Ok(Some(d_id)) => {
-                                if d_id == hid {
-                                    return Some(d);
-                                } else {
-                                    pr_info!(
-                                        "Miss matched HID: Searching({}):{}, Found: {}",
-                                        d.get_name(),
-                                        hid,
-                                        d_id
-                                    );
-                                }
-                            }
-                            Ok(None) => {
-                                pr_info!("{} has no HID", d.get_name());
-                            }
-                            Err(e) => {
-                                pr_err!("Parsing AML was failed: {:?}", e)
-                            }
-                        }
-                    } else {
-                        pr_err!("Expected Device, but found NamedObject: {:?}", n);
-                    }
-                }
-                ContentObject::DataRefObject(d) => {
-                    pr_err!("Expected Device, but found DataRefObject: {:?}", d);
-                }
-                ContentObject::Scope(s) => {
-                    pr_err!("Expected Device, but found Scope: {:?}", s);
-                }
+    pub fn get_device(&mut self, hid: &[u8; 7]) -> Option<Device> {
+        if self.parse_helper.is_none() {
+            return None;
+        }
+        match self.parse_helper.as_mut().unwrap().move_into_device(hid) {
+            Ok(d) => d,
+            Err(e) => {
+                pr_err!("Parsing AML was failed: {:?}", e);
+                None
             }
         }
-        return None;
     }
 
     pub fn evaluate_method(
@@ -761,7 +733,7 @@ impl AmlParser {
             return None;
         }
         let mut method_parser = self.parse_helper.as_ref().unwrap().clone();
-        match method_parser.setup_for_method_evaluation(method_name) {
+        match method_parser.setup_for_method_evaluation(method_name, None) {
             Ok(m) => {
                 let mut evaluator = Evaluator::new(method_parser);
                 match evaluator.eval_method(&m, arguments) {

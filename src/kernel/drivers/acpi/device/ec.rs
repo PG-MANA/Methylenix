@@ -2,10 +2,14 @@
 //! ACPI Embedded Controller Driver
 //!
 
+use super::super::aml::AmlParser;
+use super::super::aml::{AmlVariable, ConstData, NameString};
+use super::super::device::AcpiDeviceManager;
+use super::super::event::gpe::GpeManager;
+
 use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte};
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
-use crate::kernel::drivers::acpi::aml::{AmlVariable, ConstData, NameString};
-use crate::kernel::drivers::acpi::event::gpe::GpeManager;
+
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 
 pub struct EmbeddedController {
@@ -14,6 +18,8 @@ pub struct EmbeddedController {
 }
 
 impl EmbeddedController {
+    pub const HID: [u8; 7] = *b"PNP0C09";
+
     const RD_EC: u8 = 0x80;
     const WR_EC: u8 = 0x81;
     const BE_EC: u8 = 0x82;

@@ -694,11 +694,17 @@ impl Evaluator {
         argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
-        let data = self.eval_term_arg(e, local_variables, argument_variables, current_scope)?;
+        let data = self.eval_term_arg(
+            e.clone(),
+            local_variables,
+            argument_variables,
+            current_scope,
+        )?;
         if data.to_int().is_ok() {
             Ok(data)
         } else {
             pr_err!("Expected Integer, but found {:?}.", data);
+            pr_info!("{:?}", e);
             Err(AmlError::InvalidType)
         }
     }
@@ -824,22 +830,22 @@ impl Evaluator {
                     argument_variables,
                     current_scope,
                 )?;
+                let left_value = left.to_int()?;
+                let right_value = right.to_int()?;
                 use super::opcode;
                 let result = match b_o.get_opcode() {
-                    opcode::ADD_OP => left.to_int().unwrap() + right.to_int().unwrap(),
-                    opcode::AND_OP => left.to_int().unwrap() & right.to_int().unwrap(),
-                    opcode::MULTIPLY_OP => left.to_int().unwrap() * right.to_int().unwrap(),
-                    opcode::NAND_OP => !left.to_int().unwrap() | !right.to_int().unwrap(),
-                    opcode::MOD_OP => left.to_int().unwrap() % right.to_int().unwrap(),
-                    opcode::NOR_OP => !left.to_int().unwrap() & !right.to_int().unwrap(),
-                    opcode::OR_OP => left.to_int().unwrap() | right.to_int().unwrap(),
-                    opcode::SHIFT_LEFT_OP => left.to_int().unwrap() << right.to_int().unwrap(),
-                    opcode::SHIFT_RIGHT_OP => left.to_int().unwrap() >> right.to_int().unwrap(),
-                    opcode::SUBTRACT_OP => left.to_int().unwrap() - right.to_int().unwrap(),
-                    opcode::XOR_OP => left.to_int().unwrap() ^ right.to_int().unwrap(),
-                    _ => {
-                        unreachable!()
-                    }
+                    opcode::ADD_OP => left_value + right_value,
+                    opcode::AND_OP => left_value & right_value,
+                    opcode::MULTIPLY_OP => left_value * right_value,
+                    opcode::NAND_OP => !left_value | !right_value,
+                    opcode::MOD_OP => left_value % right_value,
+                    opcode::NOR_OP => !left_value & !right_value,
+                    opcode::OR_OP => left_value | right_value,
+                    opcode::SHIFT_LEFT_OP => left_value << right_value,
+                    opcode::SHIFT_RIGHT_OP => left_value >> right_value,
+                    opcode::SUBTRACT_OP => left_value - right_value,
+                    opcode::XOR_OP => left_value ^ right_value,
+                    _ => Err(AmlError::InvalidOperation)?,
                 };
                 let result_aml_variable = AmlVariable::ConstData(ConstData::from_usize(
                     result,
@@ -1376,8 +1382,8 @@ impl Evaluator {
                     AmlVariable::Method(method) => Ok(self.eval_method_with_method_invocation(
                         &method_invocation,
                         method,
-                        &mut Some(local_variables),
-                        &mut Some(argument_variables),
+                        local_variables,
+                        argument_variables,
                         current_scope,
                     )?),
 
@@ -1642,52 +1648,36 @@ impl Evaluator {
         &mut self,
         method_invocation: &MethodInvocation,
         method: &Method,
-        original_local_variables: &mut Option<&mut LocalVariables>,
-        original_argument_variables: &mut Option<&mut ArgumentVariables>,
+        original_local_variables: &mut LocalVariables,
+        original_argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         /* TODO: adjust parse_helper's term list */
         let (mut local_variables, mut argument_variables) =
             Self::init_local_variables_and_argument_variables();
-        let mut default_argument_variables = if original_argument_variables.is_none() {
-            Some(argument_variables.clone())
-        } else {
-            None
-        };
+
         if method_invocation.get_ter_arg_list().list.len() != method.get_argument_count() {
             pr_err!(
                 "Expected {} arguments, but found {} arguments.",
+                method.get_argument_count(),
                 method_invocation.get_ter_arg_list().list.len(),
-                method.get_argument_count()
-            );
-            return Err(AmlError::InvalidOperation);
-        } else if method_invocation.get_ter_arg_list().list.len()
-            > Self::NUMBER_OF_ARGUMENT_VARIABLES
-        {
-            pr_err!(
-                "Too many arguments: {:?}.",
-                method_invocation.get_ter_arg_list().list
             );
             return Err(AmlError::InvalidOperation);
         }
-        let mut index = 0;
-        for arg in method_invocation.get_ter_arg_list().list.iter() {
-            argument_variables[index] = Arc::new(Mutex::new(
-                self.eval_term_arg(
-                    arg.clone(),
-                    original_local_variables
-                        .as_deref_mut()
-                        .unwrap_or(&mut local_variables),
-                    original_argument_variables
-                        .as_deref_mut()
-                        .unwrap_or_else(|| default_argument_variables.as_mut().unwrap()),
-                    current_scope,
-                )?,
-            ));
-            index += 1;
+
+        for (index, arg) in method_invocation.get_ter_arg_list().list.iter().enumerate() {
+            argument_variables[index] = Arc::new(Mutex::new(self.eval_term_arg(
+                arg.clone(),
+                original_local_variables,
+                original_argument_variables,
+                current_scope,
+            )?));
         }
+
+        let original_parse_helper = self.parse_helper.clone();
         self.parse_helper
-            .move_into_term_list(method.get_term_list().clone())?;
+            .setup_for_method_evaluation(method.get_name(), None)?;
+
         let result = self._eval_term_list(
             method.get_term_list().clone(),
             &mut local_variables,
@@ -1695,25 +1685,29 @@ impl Evaluator {
             method.get_name(),
         );
 
-        if let Err(e) = result {
-            self.parse_helper.move_out_from_current_term_list()?;
-            Err(e)
-        } else if let Ok(Some(v)) = result {
-            let return_value = match v {
-                StatementOpcode::DefFatal(_) => Err(AmlError::InvalidOperation),
-                StatementOpcode::DefReturn(return_value) => Ok(self.eval_term_arg(
-                    return_value,
-                    &mut local_variables,
-                    &mut argument_variables,
-                    method.get_name(),
-                )?),
-                _ => Err(AmlError::InvalidOperation),
-            };
-            self.parse_helper.move_out_from_current_term_list()?;
-            return_value
-        } else {
-            self.parse_helper.move_out_from_current_term_list()?;
-            Ok(AmlVariable::Uninitialized)
+        match result {
+            Err(e) => {
+                self.parse_helper = original_parse_helper;
+                Err(e)
+            }
+            Ok(Some(v)) => {
+                let return_value = match v {
+                    StatementOpcode::DefFatal(_) => Err(AmlError::InvalidOperation),
+                    StatementOpcode::DefReturn(return_value) => Ok(self.eval_term_arg(
+                        return_value,
+                        &mut local_variables,
+                        &mut argument_variables,
+                        method.get_name(),
+                    )?),
+                    _ => Err(AmlError::InvalidOperation),
+                };
+                self.parse_helper = original_parse_helper;
+                return_value
+            }
+            Ok(None) => {
+                self.parse_helper = original_parse_helper;
+                Ok(AmlVariable::Uninitialized)
+            }
         }
     }
 }

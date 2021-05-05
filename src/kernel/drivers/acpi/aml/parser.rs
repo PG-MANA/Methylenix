@@ -3,8 +3,9 @@
 //!
 
 use super::data_object::{ComputationalData, DataObject, DataRefObject};
+use super::eisa_id_to_dword;
 use super::name_object::NameString;
-use super::named_object::{External, FieldElement, Method, NamedObject};
+use super::named_object::{Device, External, FieldElement, Method, NamedObject};
 use super::namespace_modifier_object::NamespaceModifierObject;
 use super::term_object::{TermList, TermObj};
 use super::{AcpiInt, AmlError};
@@ -804,25 +805,96 @@ impl ParseHelper {
         }
     }
 
+    fn _search_device(
+        &mut self,
+        hid: u32,
+        mut term_list: TermList,
+    ) -> Result<Option<Device>, AmlError> {
+        while let Some(obj) = term_list.next(&mut self)? {
+            match obj {
+                TermObj::NamespaceModifierObj(n_o) => match n_o {
+                    NamespaceModifierObject::DefScope(scope) => {
+                        self.move_into_term_list(scope.get_term_list().clone());
+                        if let Some(d) = self._search_device(hid, scope.get_term_list().clone())? {
+                            return Ok(Some(d));
+                        }
+                        self.move_out_from_current_term_list()?;
+                    }
+                    _ => { /* Ignore */ }
+                },
+                TermObj::NamedObj(n_o) => {
+                    if let NamedObject::DefDevice(d) = n_o {
+                        self.move_into_term_list(d.get_term_list().clone());
+                        if d.get_hid(self)? == Some(hid) {
+                            return Ok(Some(d));
+                        }
+                    } else {
+                        if let Some(t) = n_o.get_term_list() {
+                            self.move_into_term_list(t.clone());
+                            if let Some(d) = self._search_device(hid, t)? {
+                                return Ok(Some(d));
+                            }
+                            self.move_out_from_current_term_list()?;
+                        }
+                    }
+                }
+                TermObj::StatementOpcode(_) => { /* Ignore */ }
+                TermObj::ExpressionOpcode(_) => { /* Ignore */ }
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn move_into_device(&mut self, hid: &[u8; 7]) -> Result<Option<Device>, AmlError> {
+        let u32_hid = eisa_id_to_dword(hid);
+        self.term_list_hierarchy.clear();
+        self.current_object_list = self.root_object_list.clone();
+
+        self._search_device(u32_hid, self.root_term_list.clone())
+    }
+
     pub fn setup_for_method_evaluation(
         &mut self,
         method_name: &NameString,
+        term_list: Option<TermList>,
     ) -> Result<Method, AmlError> {
-        self.current_object_list = self.root_object_list.clone();
-        self.term_list_hierarchy.clear();
+        let f = |p: &mut Self,
+                 term_list: TermList,
+                 relative_name: Option<&NameString>|
+         -> Result<Option<Method>, AmlError> {
+            match p.parse_term_list_recursive(method_name, self.root_term_list.clone(), None, true)
+            {
+                Ok(Some(o_i)) => {
+                    if let ObjectListItem::NamedObject(NamedObject::DefMethod(m)) = o_i {
+                        Ok(Some(m))
+                    } else {
+                        pr_err!("Expected a method, but found {:?}", o_i);
+                        Err(AmlError::InvalidType)
+                    }
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(e),
+            }
+        };
+
+        /* Search from Current Scope */
+        if let Some(t) = term_list {
+            if let Some(m) = f(
+                self,
+                t,
+                method_name.get_relative_name(t.get_scope_name()).as_ref(),
+            )? {
+                return Ok(m);
+            }
+        }
 
         /* Search from root */
-        match self.parse_term_list_recursive(method_name, self.root_term_list.clone(), None, true) {
-            Ok(Some(o_i)) => {
-                if let ObjectListItem::NamedObject(NamedObject::DefMethod(m)) = o_i {
-                    Ok(m)
-                } else {
-                    pr_err!("Expected a method, but found {:?}", o_i);
-                    Err(AmlError::InvalidType)
-                }
-            }
-            Ok(None) => Err(AmlError::InvalidMethodName(method_name.clone())),
-            Err(e) => Err(e),
+        self.current_object_list = self.root_object_list.clone();
+        self.term_list_hierarchy.clear();
+        if let Some(m) = f(self, self.root_term_list.clone(), None)? {
+            Ok(m)
+        } else {
+            Err(AmlError::InvalidMethodName(method_name.clone()))
         }
     }
 }
