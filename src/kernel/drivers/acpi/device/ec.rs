@@ -42,11 +42,56 @@ impl EmbeddedController {
         }
     }
 
-    pub fn setup() -> Self {
-        /* Temporary */
-        Self {
-            ec_sc: 0x66,
-            ec_data: 0x62,
+    pub fn setup(parser: &mut AmlParser, device_manager: &mut AcpiDeviceManager) {
+        let ec_device = if let Some(d) = parser.get_device(&Self::HID) {
+            d
+        } else {
+            return;
+        };
+        pr_info!("ACPI Embedded Controller: {}", ec_device.get_name());
+        device_manager.ec = Some(
+            match parser.evaluate_method(
+                &NameString::from_array(&[*b"_CRS"], false)
+                    .get_full_name_path(ec_device.get_name()),
+                &[],
+            ) {
+                Some(AmlVariable::Buffer(v)) => {
+                    if v.len() < 8 * 2 {
+                        pr_err!("Invalid Resource Descriptors(Size: {})", v.len());
+                        return;
+                    }
+                    if v[0] != 0x47 {
+                        pr_err!("Invalid Resource Descriptors.");
+                        return;
+                    }
+                    let ec_data = v[2] as usize;
+                    if v[8] != 0x47 {
+                        pr_err!("Invalid Resource Descriptors.");
+                        return;
+                    }
+                    let ec_sc = v[10] as usize;
+                    pr_info!("ACPI EC: EC_SC: {:#X}, EC_DATA: {:#X}", ec_sc, ec_data);
+                    Self { ec_sc, ec_data }
+                }
+                Some(d) => {
+                    pr_err!("Unknown Data Type: {:?}", d);
+                    return;
+                }
+                None => return,
+            },
+        );
+
+        let arg = [
+            AmlVariable::ConstData(ConstData::Byte(3)),
+            AmlVariable::ConstData(ConstData::Byte(1)),
+        ];
+        parser.evaluate_method(
+            &NameString::from_array(&[*b"_REG"], false).get_full_name_path(ec_device.get_name()),
+            &arg,
+        );
+        let ec = device_manager.ec.as_ref().unwrap();
+        while ec.is_sci_pending() {
+            pr_info!("EC Query: {:#X}", ec.read_query());
         }
     }
 
