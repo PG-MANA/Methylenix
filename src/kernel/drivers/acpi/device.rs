@@ -28,4 +28,8 @@ impl AcpiDeviceManager {
     pub const fn get_pm_timer(&self) -> Option<&AcpiPmTimer> {
         self.pm_timer.as_ref()
     }
+
+    pub const fn get_embedded_controller(&self) -> Option<&EmbeddedController> {
+        self.ec.as_ref()
+    }
 }

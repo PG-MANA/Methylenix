@@ -308,8 +308,12 @@ impl Device {
         })
     }
 
-    pub fn get_name(&self) -> &NameString {
+    pub const fn get_name(&self) -> &NameString {
         &self.device_name
+    }
+
+    pub const fn get_term_list(&self) -> &TermList {
+        &self.term_list
     }
 
     pub fn get_hid(&self, parse_helper: &mut ParseHelper) -> Result<Option<u32>, AmlError> {
