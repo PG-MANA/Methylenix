@@ -15,6 +15,7 @@ use super::statement_opcode::{Fatal, IfElse, Notify, StatementOpcode, While};
 use super::term_object::{MethodInvocation, TermArg, TermList, TermObj};
 use super::{AmlBitFiled, AmlByteFiled, AmlError, AmlPackage, AmlVariable, DataRefObject};
 
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::sync::spin_lock::Mutex;
 
 use core::mem::MaybeUninit;
@@ -1418,12 +1419,57 @@ impl Evaluator {
         unimplemented!()
     }
 
-    fn eval_sleep(&self, _milli_seconds: &TermArg) -> Result<(), AmlError> {
-        unimplemented!()
+    fn eval_sleep(
+        &mut self,
+        milli_seconds: TermArg,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+        current_scope: &NameString,
+    ) -> Result<(), AmlError> {
+        let seconds = self
+            .eval_integer_expression(
+                milli_seconds,
+                local_variables,
+                argument_variables,
+                current_scope,
+            )?
+            .to_int()?;
+        if get_cpu_manager_cluster()
+            .timer_manager
+            .busy_wait_ms(seconds)
+        {
+            Ok(())
+        } else {
+            pr_info!("Sleeping {}ms was failed.", seconds);
+            Err(AmlError::InvalidOperation)
+        }
     }
 
-    fn eval_stall(&self, _micro_seconds: &TermArg) -> Result<(), AmlError> {
-        unimplemented!()
+    fn eval_stall(
+        &mut self,
+        micro_seconds: TermArg,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+        current_scope: &NameString,
+    ) -> Result<(), AmlError> {
+        let seconds = self
+            .eval_integer_expression(
+                micro_seconds,
+                local_variables,
+                argument_variables,
+                current_scope,
+            )?
+            .to_int()?;
+
+        if get_cpu_manager_cluster()
+            .timer_manager
+            .busy_wait_us(seconds)
+        {
+            Ok(())
+        } else {
+            pr_info!("Sleeping {}us was failed.", seconds);
+            Err(AmlError::InvalidOperation)
+        }
     }
 
     fn eval_if_else(
@@ -1536,10 +1582,10 @@ impl Evaluator {
                         self.eval_signal(&signal)?;
                     }
                     StatementOpcode::DefSleep(sleep) => {
-                        self.eval_sleep(&sleep)?;
+                        self.eval_sleep(sleep, local_variables, argument_variables, current_scope)?;
                     }
                     StatementOpcode::DefStall(sleep) => {
-                        self.eval_stall(&sleep)?;
+                        self.eval_stall(sleep, local_variables, argument_variables, current_scope)?;
                     }
                     StatementOpcode::DefWhile(w) => {
                         let result =

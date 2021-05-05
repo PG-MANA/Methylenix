@@ -77,6 +77,31 @@ impl TimerManager {
         }
         return true;
     }
+
+    pub fn busy_wait_us(&self, us: usize) -> bool {
+        let start_tick = self.get_current_tick_without_lock(); /* get_quickly */
+        if !is_interrupt_enabled() {
+            pr_err!("Interrupt is disabled.");
+            return false;
+        }
+        /* We cannot count higher than TIMER_INTERVAL_MS currently. */
+        let ms = if (us / 1000) < Self::TIMER_INTERVAL_MS {
+            Self::TIMER_INTERVAL_MS
+        } else {
+            us / 1000
+        };
+        let (end_tick, overflowed) = Self::get_end_tick_ms(start_tick, ms);
+        if overflowed {
+            while self.get_current_tick_without_lock() >= start_tick {
+                core::hint::spin_loop();
+            }
+        }
+
+        while self.get_current_tick_without_lock() <= end_tick {
+            core::hint::spin_loop();
+        }
+        return true;
+    }
 }
 
 pub trait Timer {
