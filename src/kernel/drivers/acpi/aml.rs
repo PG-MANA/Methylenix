@@ -620,6 +620,7 @@ impl AmlVariable {
             Self::String(s) => Ok(AmlPackage::String(s)),
             Self::Buffer(b) => Ok(AmlPackage::Buffer(b)),
             Self::Io(_) => self.get_constant_data()?.convert_to_aml_package(),
+            Self::EcIo(_) => self.get_constant_data()?.convert_to_aml_package(),
             Self::MMIo(_) => self.get_constant_data()?.convert_to_aml_package(),
             Self::BitField(_) => self.get_constant_data()?.convert_to_aml_package(),
             Self::ByteField(_) => self.get_constant_data()?.convert_to_aml_package(),

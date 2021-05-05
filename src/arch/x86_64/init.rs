@@ -15,6 +15,7 @@ use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex, I
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
+use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
@@ -118,16 +119,22 @@ pub fn init_interrupt(kernel_selector: u16) {
 /// If succeeded, this will move it into kernel_manager_cluster.
 pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
     let mut acpi_manager = AcpiManager::new();
-    if !acpi_manager.init(rsdp_ptr) {
+    let mut device_manager = AcpiDeviceManager::new();
+    if !acpi_manager.init(rsdp_ptr, &mut device_manager) {
         pr_warn!("Cannot init ACPI.");
+        get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
+        get_kernel_manager_cluster().acpi_device_manager = device_manager;
         return false;
     }
     if !acpi_manager.init_acpi_event_manager(&mut get_kernel_manager_cluster().acpi_event_manager) {
         pr_err!("Cannot init ACPI Event Manager");
+        get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
+        get_kernel_manager_cluster().acpi_device_manager = device_manager;
         return false;
     }
 
     get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
+    get_kernel_manager_cluster().acpi_device_manager = device_manager;
     return true;
 }
 
@@ -143,6 +150,10 @@ pub fn init_acpi_later() -> bool {
     }
     if !super::device::acpi::setup_interrupt(&acpi_manager) {
         pr_err!("Cannot setup ACPI interrupt.");
+        return false;
+    }
+    if !acpi_manager.setup_acpi_devices(&mut get_kernel_manager_cluster().acpi_device_manager) {
+        pr_err!("Cannot setup ACPI devices.");
         return false;
     }
     if !acpi_manager.enable_acpi() {
@@ -176,10 +187,7 @@ pub fn init_timer() -> LocalApicTimer {
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
     } else if let Some(pm_timer) = get_kernel_manager_cluster()
-        .acpi_manager
-        .lock()
-        .unwrap()
-        .get_device_manager()
+        .acpi_device_manager
         .get_pm_timer()
     {
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
@@ -340,10 +348,7 @@ pub fn init_multiple_processors_ap() {
     };
 
     let timer = get_kernel_manager_cluster()
-        .acpi_manager
-        .lock()
-        .unwrap()
-        .get_device_manager()
+        .acpi_device_manager
         .get_pm_timer()
         .expect("This computer has no ACPI PM Timer.")
         .clone();

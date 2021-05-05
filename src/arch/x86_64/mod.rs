@@ -107,7 +107,6 @@ pub extern "C" fn multiboot_main(
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
         if !init_acpi_early(rsdp_address) {
             pr_err!("Failed Init ACPI.");
-            get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
         }
     } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
         pr_warn!("ACPI 1.0 is not supported.");

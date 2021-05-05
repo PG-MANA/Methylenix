@@ -25,7 +25,6 @@ use crate::kernel::memory_manager::data_type::PAddress;
 pub struct AcpiManager {
     enabled: bool,
     xsdt_manager: XsdtManager,
-    device_manager: AcpiDeviceManager,
 }
 
 #[repr(C, packed)]
@@ -48,11 +47,10 @@ impl AcpiManager {
         Self {
             enabled: false,
             xsdt_manager: XsdtManager::new(),
-            device_manager: AcpiDeviceManager::new(),
         }
     }
 
-    pub fn init(&mut self, rsdp_ptr: usize) -> bool {
+    pub fn init(&mut self, rsdp_ptr: usize, device_manager: &mut AcpiDeviceManager) -> bool {
         /* rsdp_ptr is pointer of RSDP. */
         /* *rsdp_ptr must be readable. */
         let rsdp = unsafe { &*(rsdp_ptr as *const RSDP) };
@@ -74,7 +72,7 @@ impl AcpiManager {
         }
         self.enabled = true;
 
-        self.device_manager.pm_timer = self.get_fadt_manager().get_acpi_pm_timer();
+        device_manager.pm_timer = self.get_fadt_manager().get_acpi_pm_timer();
 
         return true;
     }
@@ -82,6 +80,16 @@ impl AcpiManager {
     pub fn init_acpi_event_manager(&self, event_manager: &mut AcpiEventManager) -> bool {
         if self.enabled {
             *event_manager = AcpiEventManager::new(&self.get_xsdt_manager().get_fadt_manager());
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn setup_acpi_devices(&self, device_manager: &mut AcpiDeviceManager) -> bool {
+        if self.enabled {
+            let mut aml_parser = self.get_aml_parler();
+            EmbeddedController::setup(&mut aml_parser, device_manager);
             true
         } else {
             false
@@ -100,10 +108,6 @@ impl AcpiManager {
 
     pub fn get_xsdt_manager(&self) -> &XsdtManager {
         &self.xsdt_manager
-    }
-
-    pub const fn get_device_manager(&self) -> &AcpiDeviceManager {
-        &self.device_manager
     }
 
     /* FADT must exists */
@@ -228,11 +232,15 @@ impl AcpiManager {
     }
 
     pub fn shutdown_test(&mut self) -> ! {
+        use crate::kernel::manager_cluster::get_kernel_manager_cluster;
         use crate::kernel::timer_manager::Timer;
 
         /* for debug */
         unsafe { disable_interrupt() };
-        if let Some(timer) = self.get_device_manager().get_pm_timer() {
+        if let Some(timer) = get_kernel_manager_cluster()
+            .acpi_device_manager
+            .get_pm_timer()
+        {
             for i in (1..=3).rev() {
                 println!("System will shutdown after {}s...", i);
                 for _ in 0..1000 {
