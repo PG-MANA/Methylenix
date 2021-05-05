@@ -290,14 +290,8 @@ impl AcpiManager {
             return None;
         };
         let mut aml_parser = self.get_aml_parler();
-        let routing_table_method_name = NameString::from_array(
-            &[
-                [b'_', b'S', b'B', 0],
-                [b'P', b'C', b'I', bus + b'0'],
-                [b'_', b'P', b'R', b'T'],
-            ],
-            true,
-        ); /* \\_SB.PCI(BusNumber)._PRT */
+        let routing_table_method_name =
+            NameString::from_array(&[*b"_SB\0", [b'P', b'C', b'I', bus + b'0'], *b"_PRT"], true); /* \\_SB.PCI(BusNumber)._PRT */
         let evaluation_result = aml_parser.evaluate_method(&routing_table_method_name, &[]);
         if evaluation_result.is_none() {
             pr_err!("Cannot evaluate {}.", routing_table_method_name);
@@ -335,11 +329,10 @@ impl AcpiManager {
                                 .get_element_as_name_string(link_device.len() - 1)
                                 .unwrap();
                             pr_info!("Detect: {}", link_device);
-                            let crs_function_name =
-                                NameString::from_array(&[[b'_', b'C', b'R', b'S']], false)
-                                    .get_full_name_path(&link_device.get_full_name_path(
-                                        &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
-                                    )); /* \\_SB.(DEVICE)._CRS */
+                            let crs_function_name = NameString::from_array(&[*b"_CRS"], false)
+                                .get_full_name_path(&link_device.get_full_name_path(
+                                    &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
+                                )); /* \\_SB.(DEVICE)._CRS */
                             let link_device_evaluation_result =
                                 aml_parser.evaluate_method(&crs_function_name, &[]);
                             if link_device_evaluation_result.is_none() {
