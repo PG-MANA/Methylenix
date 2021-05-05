@@ -11,6 +11,7 @@ pub mod event;
 pub mod table;
 
 use self::aml::{AmlPackage, AmlParser, AmlVariable, NameString};
+use self::device::ec::EmbeddedController;
 use self::device::AcpiDeviceManager;
 use self::event::{AcpiEventManager, AcpiFixedEvent};
 use self::table::dsdt::DsdtManager;

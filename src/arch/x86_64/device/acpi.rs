@@ -50,6 +50,29 @@ extern "C" fn acpi_event_handler() {
     get_cpu_manager_cluster().interrupt_manager.send_eoi();
 }
 
+pub fn write_embedded_controller(address: u8, data: u8) -> Result<(), AmlError> {
+    if let Some(ec) = get_kernel_manager_cluster()
+        .acpi_device_manager
+        .get_embedded_controller()
+    {
+        ec.write_data(address, data);
+        Ok(())
+    } else {
+        Err(AmlError::InvalidOperation)
+    }
+}
+
+pub fn read_embedded_controller(address: u8) -> Result<u8, AmlError> {
+    if let Some(ec) = get_kernel_manager_cluster()
+        .acpi_device_manager
+        .get_embedded_controller()
+    {
+        Ok(ec.read_data(address))
+    } else {
+        Err(AmlError::InvalidOperation)
+    }
+}
+
 pub fn write_io(
     port: usize,
     bit_index: usize,

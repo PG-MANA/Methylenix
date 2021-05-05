@@ -261,6 +261,7 @@ impl Evaluator {
                     let variable = Arc::new(Mutex::new(match region_type {
                         OperationRegionType::SystemMemory => (AmlVariable::MMIo((offset, length))),
                         OperationRegionType::SystemIO => (AmlVariable::MMIo((offset, length))),
+                        OperationRegionType::EmbeddedControl => AmlVariable::EcIo((offset, length)),
                         _ => {
                             pr_err!("Unsupported Type: {:?}", region_type);
                             return Err(AmlError::UnsupportedType);
@@ -1049,6 +1050,7 @@ impl Evaluator {
                     AmlVariable::String(s) => s.len(),
                     AmlVariable::Buffer(b) => b.len(),
                     AmlVariable::Io(_) => Err(AmlError::InvalidOperation)?,
+                    AmlVariable::EcIo(_) => Err(AmlError::InvalidOperation)?,
                     AmlVariable::MMIo(_) => Err(AmlError::InvalidOperation)?,
                     AmlVariable::BitField(b) => b.access_align.max(b.num_of_bits >> 3),
                     AmlVariable::ByteField(b) => b.num_of_bytes,
@@ -1591,7 +1593,7 @@ impl Evaluator {
         let current_scope = method.get_name();
         if method.get_argument_count() != arguments.len() {
             pr_err!(
-                "Expected {} arguments, but found {}.",
+                "Expected {} arguments, but found {} arguments.",
                 method.get_argument_count(),
                 arguments.len()
             );
