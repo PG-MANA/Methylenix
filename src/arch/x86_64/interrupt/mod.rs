@@ -11,12 +11,13 @@ mod tss;
 use self::idt::GateDescriptor;
 use self::tss::TssManager;
 
-use crate::arch::target_arch::context::context_data::ContextData;
+use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize, MemoryPermissionFlags};
+use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::mem::{size_of, MaybeUninit};
@@ -43,6 +44,14 @@ pub struct InterruptManager {
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum InterruptionIndex {
     LocalApicTimer = 0xef,
+    RescheduleIpi = 0xf8,
+}
+
+/// IST index for each interrupt.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum IstIndex {
+    NormalInterrupt = 0,
+    TaskSwitch = 1,
 }
 
 impl InterruptManager {
@@ -64,15 +73,11 @@ impl InterruptManager {
         }
     }
 
-    fn alloc_and_init_idt(&mut self) {
-        let flag = Self::save_and_disable_local_irq();
-        let _lock = self.lock.lock();
+    /// Allocate memory for idt and init with invalid GateDescriptor.
+    fn init_idt(&mut self, memory_manager: &mut MemoryManager) {
         self.idt.write(unsafe {
-            &mut *(get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .alloc_pages(0.into(), MemoryPermissionFlags::data())
+            &mut *(memory_manager
+                .alloc_pages(MPageOrder::new(0), MemoryPermissionFlags::data())
                 .expect("Cannot alloc memory for interrupt manager.")
                 .to_usize() as *mut [_; Self::IDT_MAX as usize])
         });
@@ -82,8 +87,42 @@ impl InterruptManager {
             }
             self.flush();
         }
-        drop(_lock);
-        Self::restore_local_irq(flag);
+    }
+
+    /// Allocate and setup Interrupt Stack Table.
+    ///
+    /// This function allocates stack and set rsp into TSS.
+    fn init_ist(&mut self, memory_manager: &mut MemoryManager) {
+        let stack_order = ContextManager::DEFAULT_INTERRUPT_STACK_ORDER;
+        let stack = memory_manager
+            .alloc_nonlinear_pages(stack_order, MemoryPermissionFlags::data())
+            .expect("Cannot allocate stack for interrupts.");
+        assert!(self.tss_manager.set_ist(
+            IstIndex::TaskSwitch as u8,
+            (stack + stack_order.to_offset()).to_usize()
+        ));
+    }
+
+    /// Setup RSP(for privilege level 0~2)
+    ///
+    /// This function allocates stack and set rsp into TSS.
+    /// If allocating the stack is failed, this function will panic.
+    /// rsp must be in the range 0 ~ 2.
+    #[allow(dead_code)]
+    fn set_rsp(&mut self, rsp: u8, stack_size: MSize) -> bool {
+        let stack = get_kernel_manager_cluster()
+            .memory_manager
+            .lock()
+            .unwrap()
+            .alloc_pages(
+                stack_size.to_order(None).to_page_order(),
+                MemoryPermissionFlags::data(),
+            )
+            .expect("Cannot allocate pages for rsp.");
+
+        let _lock = self.lock.lock();
+        self.tss_manager
+            .set_rsp(rsp, (stack + stack_size).to_usize())
     }
 
     /// Init this manager.
@@ -91,14 +130,19 @@ impl InterruptManager {
     /// This function alloc page from memory manager and
     /// fills all of IDT converted from the allocated page with a invalid handler.
     /// After that, this also init LocalApicManager.
-    ///
-    /// Currently, this function always returns true.
-    pub fn init(&mut self, selector: u16) -> bool {
+    pub fn init(&mut self, selector: u16) {
+        let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
+        let flag = Self::save_and_disable_local_irq();
+        let _lock = self.lock.lock();
         self.main_selector = selector;
-        self.alloc_and_init_idt();
+        self.init_idt(&mut memory_manager);
         self.tss_manager.load_current_tss();
+        self.init_ist(&mut memory_manager);
+        drop(memory_manager);
         self.local_apic.init();
-        return true;
+        drop(_lock);
+        Self::restore_local_irq(flag);
+        return;
     }
 
     /// Init this manager by copying some data from given manager.
@@ -108,15 +152,37 @@ impl InterruptManager {
     /// After that, this also init LocalApicManager.
     /// This will be used to init the application processors.
     /// GDT and TSS Descriptor must be valid.
-    ///
-    /// Currently, this function always returns true.
-    pub fn init_ap(&mut self, original: &Self) -> bool {
+    pub fn init_ap(&mut self, original: &Self) {
+        let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
+        let flag = Self::save_and_disable_local_irq();
+        let _lock = self.lock.lock();
         self.main_selector = original.main_selector;
-        self.alloc_and_init_idt();
+        self.init_idt(&mut memory_manager);
         self.tss_manager.load_current_tss();
+        self.init_ist(&mut memory_manager);
         self.local_apic
             .init_from_other_manager(original.get_local_apic_manager());
-        return true;
+        drop(memory_manager);
+        drop(_lock);
+        Self::restore_local_irq(flag);
+        return;
+    }
+
+    /// Init Inter Processors Interrupt.
+    ///
+    /// This function makes interrupt handler for ipi.
+    pub fn init_ipi(&mut self) {
+        make_context_switch_interrupt_handler!(
+            reschedule_handler,
+            InterruptManager::reschedule_ipi_handler
+        );
+        self.set_device_interrupt_function(
+            reschedule_handler,
+            None,
+            IstIndex::TaskSwitch,
+            InterruptionIndex::RescheduleIpi as u16,
+            0,
+        );
     }
 
     /// Flush IDT to cpu and apply it.
@@ -167,7 +233,7 @@ impl InterruptManager {
         &mut self,
         function: unsafe extern "C" fn(),
         irq: Option<u8>,
-        ist: Option<u8>,
+        ist: IstIndex,
         index: u16,
         privilege_level: u8,
     ) -> bool {
@@ -183,7 +249,7 @@ impl InterruptManager {
         unsafe {
             self.set_gate_descriptor(
                 index,
-                GateDescriptor::new(function, self.main_selector, ist.unwrap_or(0), type_attr),
+                GateDescriptor::new(function, self.main_selector, ist as u8, type_attr),
             );
         }
         if let Some(irq) = irq {
@@ -197,49 +263,6 @@ impl InterruptManager {
         drop(_lock);
         Self::restore_local_irq(flag);
         return true;
-    }
-
-    /// Setup IST(Interrupt Stack Table)
-    ///
-    /// This function allocates stack and set ist into TSS.
-    /// If allocating the stack is failed, this function will panic.
-    /// ist must be bigger than 0 and smaller than 8.
-    pub fn set_ist(&mut self, ist: u8, stack_size: MSize) -> bool {
-        let stack = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .alloc_pages(
-                stack_size.to_order(None).to_page_order(),
-                MemoryPermissionFlags::data(),
-            )
-            .expect("Cannot allocate pages for ist.");
-
-        let _lock = self.lock.lock();
-        self.tss_manager
-            .set_ist(ist, (stack + stack_size).to_usize())
-    }
-
-    /// Setup RSP(for privilege level 0~2)
-    ///
-    /// This function allocates stack and set rsp into TSS.
-    /// If allocating the stack is failed, this function will panic.
-    /// rsp must be in the range 0 ~ 2.
-    #[allow(dead_code)]
-    pub fn set_rsp(&mut self, rsp: u8, stack_size: MSize) -> bool {
-        let stack = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .alloc_pages(
-                stack_size.to_order(None).to_page_order(),
-                MemoryPermissionFlags::data(),
-            )
-            .expect("Cannot allocate pages for rsp.");
-
-        let _lock = self.lock.lock();
-        self.tss_manager
-            .set_rsp(rsp, (stack + stack_size).to_usize())
     }
 
     pub fn save_and_disable_local_irq() -> StoredIrqData {
@@ -265,10 +288,31 @@ impl InterruptManager {
         &self.local_apic
     }
 
+    /// Send Inter Processor Interrupt to reschedule.
+    pub fn send_reschedule_ipi(&self, cpu_id: usize) {
+        self.local_apic.send_interrupt_command(
+            cpu_id as u32,
+            0,
+            0,
+            false,
+            InterruptionIndex::RescheduleIpi as _,
+        );
+    }
+
+    /// Convert IRQ to Interrupt Index
+    pub const fn irq_to_index(irq: u8) -> u16 {
+        irq as u16 + 0x20
+    }
+
     /// Dummy handler to init IDT
     ///
     /// This function does nothing.
     pub extern "C" fn dummy_handler() {}
+
+    pub extern "C" fn reschedule_ipi_handler() {
+        get_cpu_manager_cluster().interrupt_manager.send_eoi();
+        /* Do nothing */
+    }
 
     /// Post script for interrupt
     ///

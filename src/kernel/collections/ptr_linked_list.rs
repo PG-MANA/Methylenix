@@ -173,6 +173,15 @@ impl<T> PtrLinkedList<T> {
         }
     }
 
+    pub unsafe fn get_last_entry(&self, offset: usize) -> Option<&'static T> {
+        if let Some(e) = self.tail {
+            let tail = e.as_ptr();
+            Some(&*((tail as usize - offset) as *const T))
+        } else {
+            None
+        }
+    }
+
     pub unsafe fn get_last_entry_mut(&mut self, offset: usize) -> Option<&'static mut T> {
         if let Some(e) = self.tail {
             let tail = e.as_ptr();

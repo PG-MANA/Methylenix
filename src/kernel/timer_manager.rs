@@ -8,10 +8,100 @@
 //! After that, the timer should recall this manager.
 //! The member of this manager may be changed.
 
-pub struct TimerManager {}
+use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
+
+use crate::kernel::sync::spin_lock::SpinLockFlag;
+
+pub struct TimerManager {
+    tick: usize,
+    lock: SpinLockFlag,
+}
 
 impl TimerManager {
     pub const TIMER_INTERVAL_MS: usize = 10;
+
+    pub fn new() -> Self {
+        Self {
+            tick: 0,
+            lock: SpinLockFlag::new(),
+        }
+    }
+
+    pub fn timer_handler(&mut self) {
+        if is_interrupt_enabled() {
+            pr_err!("Interrupt is enabled.");
+            return;
+        }
+        let _lock = if let Ok(t) = self.lock.try_lock() {
+            t
+        } else {
+            pr_err!("Cannot lock Timer Manager.");
+            return;
+        };
+        self.tick = self.tick.overflowing_add(1).0;
+    }
+
+    fn get_end_tick_ms(current_tick: usize, ms: usize) -> (usize, bool) {
+        current_tick.overflowing_add(ms / Self::TIMER_INTERVAL_MS)
+    }
+
+    pub fn get_current_tick_without_lock(&self) -> usize {
+        unsafe { core::ptr::read_volatile(&self.tick as *const _) }
+    }
+
+    pub fn get_difference_ms(&self, tick: usize) -> usize {
+        let current_tick = self.get_current_tick_without_lock();
+        let difference = if current_tick < tick {
+            usize::MAX - tick + current_tick
+        } else {
+            current_tick - tick
+        };
+        difference * Self::TIMER_INTERVAL_MS
+    }
+
+    pub fn busy_wait_ms(&self, ms: usize) -> bool {
+        let start_tick = self.get_current_tick_without_lock(); /* get_quickly */
+        if !is_interrupt_enabled() {
+            pr_err!("Interrupt is disabled.");
+            return false;
+        }
+        let (end_tick, overflowed) = Self::get_end_tick_ms(start_tick, ms);
+        if overflowed {
+            while self.get_current_tick_without_lock() >= start_tick {
+                core::hint::spin_loop();
+            }
+        }
+
+        while self.get_current_tick_without_lock() <= end_tick {
+            core::hint::spin_loop();
+        }
+        return true;
+    }
+
+    pub fn busy_wait_us(&self, us: usize) -> bool {
+        let start_tick = self.get_current_tick_without_lock(); /* get_quickly */
+        if !is_interrupt_enabled() {
+            pr_err!("Interrupt is disabled.");
+            return false;
+        }
+        /* We cannot count higher than TIMER_INTERVAL_MS currently. */
+        let ms = if (us / 1000) < Self::TIMER_INTERVAL_MS {
+            Self::TIMER_INTERVAL_MS
+        } else {
+            us / 1000
+        };
+        let (end_tick, overflowed) = Self::get_end_tick_ms(start_tick, ms);
+        if overflowed {
+            while self.get_current_tick_without_lock() >= start_tick {
+                core::hint::spin_loop();
+            }
+        }
+
+        while self.get_current_tick_without_lock() <= end_tick {
+            core::hint::spin_loop();
+        }
+        return true;
+    }
 }
 
 pub trait Timer {

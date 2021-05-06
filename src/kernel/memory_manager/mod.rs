@@ -91,6 +91,7 @@ impl MemoryManager {
                 size,
                 physical_address,
                 permission,
+                MemoryOptionFlags::ALLOC,
                 &mut physical_memory_manager,
             ) {
                 Ok(address) => {
@@ -107,6 +108,7 @@ impl MemoryManager {
         }
     }
 
+    /* TODO: check memory access error(sometimes occurs) */
     pub fn alloc_nonlinear_pages(
         &mut self,
         order: MPageOrder,
@@ -126,7 +128,7 @@ impl MemoryManager {
         let entry = self.virtual_memory_manager.alloc_address_without_mapping(
             size,
             permission,
-            MemoryOptionFlags::NORMAL,
+            MemoryOptionFlags::ALLOC,
             &mut pm_manager,
         )?;
         let vm_start_address = entry.get_vm_start_address();
@@ -213,7 +215,6 @@ impl MemoryManager {
         size: MSize,
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
-        should_reserve_physical_memory: bool,
     ) -> Result<VAddress, MemoryError> {
         /* For some data mapping */
         /* should remake...? */
@@ -225,7 +226,7 @@ impl MemoryManager {
             return Err(MemoryError::MutexError);
         };
 
-        if should_reserve_physical_memory {
+        if !option.is_pre_reserved() {
             pm_manager.reserve_memory(aligned_physical_address, size, 0.into());
         }
         let virtual_address = self.virtual_memory_manager.map_address(
@@ -233,13 +234,13 @@ impl MemoryManager {
             None,
             aligned_size,
             permission,
-            option,
+            option | MemoryOptionFlags::MEMORY_MAP,
             &mut pm_manager,
         )?;
         Ok(virtual_address + (physical_address - aligned_physical_address))
     }
 
-    pub fn mmap_dev(
+    pub fn io_map(
         &mut self,
         physical_address: PAddress,
         size: MSize,
@@ -259,7 +260,7 @@ impl MemoryManager {
         //pm_manager.reserve_memory(aligned_physical_address, size, false);
         /* physical_address must be reserved. */
         /* ADD: check succeeded or failed (failed because of already reserved is ok, but other...) */
-        let virtual_address = self.virtual_memory_manager.mmap_dev(
+        let virtual_address = self.virtual_memory_manager.io_map(
             aligned_physical_address,
             None,
             aligned_size,

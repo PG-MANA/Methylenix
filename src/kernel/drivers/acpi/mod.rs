@@ -5,7 +5,15 @@
 //! <https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf>
 //!
 
-use self::aml::{AmlParser, NameString};
+pub mod aml;
+pub mod device;
+pub mod event;
+pub mod table;
+
+use self::aml::{AmlPackage, AmlParser, AmlVariable, NameString};
+use self::device::ec::EmbeddedController;
+use self::device::AcpiDeviceManager;
+use self::event::gpe::GpeManager;
 use self::event::{AcpiEventManager, AcpiFixedEvent};
 use self::table::dsdt::DsdtManager;
 use self::table::fadt::FadtManager;
@@ -15,14 +23,8 @@ use crate::arch::target_arch::device::cpu::{disable_interrupt, in_byte, out_byte
 
 use crate::kernel::memory_manager::data_type::PAddress;
 
-pub mod acpi_pm_timer;
-pub mod aml;
-pub mod event;
-pub mod table;
-
 pub struct AcpiManager {
     enabled: bool,
-    oem_id: [u8; 6],
     xsdt_manager: XsdtManager,
 }
 
@@ -45,12 +47,11 @@ impl AcpiManager {
     pub const fn new() -> Self {
         Self {
             enabled: false,
-            oem_id: [0; 6],
             xsdt_manager: XsdtManager::new(),
         }
     }
 
-    pub fn init(&mut self, rsdp_ptr: usize) -> bool {
+    pub fn init(&mut self, rsdp_ptr: usize, device_manager: &mut AcpiDeviceManager) -> bool {
         /* rsdp_ptr is pointer of RSDP. */
         /* *rsdp_ptr must be readable. */
         let rsdp = unsafe { &*(rsdp_ptr as *const RSDP) };
@@ -63,7 +64,6 @@ impl AcpiManager {
             return false;
         }
         //ADD: checksum verification
-        self.oem_id = rsdp.oem_id.clone();
         if !self
             .xsdt_manager
             .init(PAddress::new(rsdp.xsdt_address as usize))
@@ -72,12 +72,33 @@ impl AcpiManager {
             return false;
         }
         self.enabled = true;
+
+        device_manager.pm_timer = self.get_fadt_manager().get_acpi_pm_timer();
+
         return true;
     }
 
     pub fn init_acpi_event_manager(&self, event_manager: &mut AcpiEventManager) -> bool {
         if self.enabled {
             *event_manager = AcpiEventManager::new(&self.get_xsdt_manager().get_fadt_manager());
+            let gpe0 = self.get_fadt_manager().get_gp_event0_block();
+            let gpe0_len = self.get_fadt_manager().get_gp_event0_block_len() as usize;
+            let gpe1 = self.get_fadt_manager().get_gp_event1_block();
+            let gpe1_len = self.get_fadt_manager().get_gp_event1_block_len() as usize;
+            GpeManager::init(gpe0, gpe0_len >> 1 /* /2*/);
+            if gpe1 != 0 && gpe1_len != 0 {
+                GpeManager::init(gpe1, gpe1_len >> 1 /* /2*/);
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn setup_acpi_devices(&self, device_manager: &mut AcpiDeviceManager) -> bool {
+        if self.enabled {
+            let mut aml_parser = self.get_aml_parler();
+            EmbeddedController::setup(&mut aml_parser, device_manager);
             true
         } else {
             false
@@ -86,15 +107,6 @@ impl AcpiManager {
 
     pub fn is_available(&self) -> bool {
         self.enabled
-    }
-
-    pub fn get_oem_id(&self) -> Option<&str> {
-        use core::str::from_utf8;
-        if self.enabled {
-            from_utf8(&self.oem_id).ok()
-        } else {
-            None
-        }
     }
 
     fn get_aml_parler(&self) -> AmlParser {
@@ -229,26 +241,26 @@ impl AcpiManager {
     }
 
     pub fn shutdown_test(&mut self) -> ! {
+        use crate::kernel::manager_cluster::get_kernel_manager_cluster;
         use crate::kernel::timer_manager::Timer;
 
         /* for debug */
         unsafe { disable_interrupt() };
-        let timer = self.get_fadt_manager().get_acpi_pm_timer();
-        for i in (1..=3).rev() {
-            println!("System will shutdown after {}s...", i);
-            for _ in 0..1000 {
-                timer.busy_wait_ms(1);
+        if let Some(timer) = get_kernel_manager_cluster()
+            .acpi_device_manager
+            .get_pm_timer()
+        {
+            for i in (1..=3).rev() {
+                println!("System will shutdown after {}s...", i);
+                for _ in 0..1000 {
+                    timer.busy_wait_ms(1);
+                }
             }
         }
         self.shutdown(None)
     }
 
-    pub fn search_device(
-        &mut self,
-        aml_parser: Option<&mut AmlParser>,
-        name: &str,
-        hid: &[u8; 7],
-    ) -> bool {
+    pub fn search_device(&mut self, aml_parser: Option<&mut AmlParser>, hid: &[u8; 7]) -> bool {
         let mut default_aml_parser = if aml_parser.is_none() {
             Some(self.get_aml_parler())
         } else {
@@ -256,10 +268,7 @@ impl AcpiManager {
         };
         let aml_parser = aml_parser.or(default_aml_parser.as_mut()).unwrap();
 
-        if let Some(_) = aml_parser.get_device(
-            &NameString::from_string(name).expect("Invalid NameString"),
-            hid,
-        ) {
+        if let Some(_) = aml_parser.get_device(hid) {
             true
         } else {
             false
@@ -269,13 +278,126 @@ impl AcpiManager {
     pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
         if (self.get_fadt_manager().get_flags() & (1 << 4)) != 0 {
             pr_info!("PowerButton is the control method power button.");
-            if self.search_device(None, "\\_SB\\PWRB", b"PNP0C0C") {
+            if self.search_device(None, b"PNP0C0C") {
                 pr_info!("This computer has power button.");
             }
-            false /* Usually it is controlled by SMBus */
+            false
         } else {
             pr_info!("PowerButton is the fixed hardware power button.");
             acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton)
+        }
+    }
+
+    pub fn search_intr_number_with_evaluation_aml(
+        &mut self,
+        bus: u8,
+        device: u8,
+        int_pin: u8,
+    ) -> Option<u8> {
+        let debug_and_return_none = |e: Option<AmlVariable>| -> Option<u8> {
+            pr_err!("Invalid PCI Routing Table: {:?}", e.unwrap());
+            return None;
+        };
+        let mut aml_parser = self.get_aml_parler();
+        let routing_table_method_name =
+            NameString::from_array(&[*b"_SB\0", [b'P', b'C', b'I', bus + b'0'], *b"_PRT"], true); /* \\_SB.PCI(BusNumber)._PRT */
+        let evaluation_result = aml_parser.evaluate_method(&routing_table_method_name, &[]);
+        if evaluation_result.is_none() {
+            pr_err!("Cannot evaluate {}.", routing_table_method_name);
+            return None;
+        }
+        if let Some(AmlVariable::Package(vector)) = &evaluation_result {
+            for element in vector.iter() {
+                if let AmlPackage::Package(device_element) = element {
+                    if let Some(AmlPackage::ConstData(c)) = device_element.get(0) {
+                        let target = c.to_int();
+                        let target_device = ((target >> 0x10) & 0xFFFF) as u16;
+                        let target_function = (target & 0xFFFF) as u16;
+                        if target_device != device as u16 {
+                            continue;
+                        }
+                        if target_function != 0xFFFF || device_element.len() != 4 {
+                            return debug_and_return_none(evaluation_result);
+                        }
+                        if let AmlPackage::ConstData(c) = device_element[1] {
+                            if c.to_int() != int_pin as _ {
+                                continue;
+                            }
+                        } else {
+                            return debug_and_return_none(evaluation_result);
+                        }
+                        if let AmlPackage::ConstData(c) = device_element[3] {
+                            if c.to_int() != 0 {
+                                return Some(c.to_int() as _);
+                            }
+                        } else {
+                            return debug_and_return_none(evaluation_result);
+                        }
+                        return if let AmlPackage::NameString(link_device) = &device_element[2] {
+                            let link_device = link_device
+                                .get_element_as_name_string(link_device.len() - 1)
+                                .unwrap();
+                            pr_info!("Detect: {}", link_device);
+                            let crs_function_name = NameString::from_array(&[*b"_CRS"], false)
+                                .get_full_name_path(&link_device.get_full_name_path(
+                                    &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
+                                )); /* \\_SB.(DEVICE)._CRS */
+                            let link_device_evaluation_result =
+                                aml_parser.evaluate_method(&crs_function_name, &[]);
+                            if link_device_evaluation_result.is_none() {
+                                pr_err!("Cannot evaluate {}.", crs_function_name);
+                                return None;
+                            }
+                            return if let Some(AmlVariable::Buffer(v)) =
+                                &link_device_evaluation_result
+                            {
+                                let small_resource_type_tag = match v.get(0) {
+                                    Some(c) => *c,
+                                    None => {
+                                        return debug_and_return_none(
+                                            link_device_evaluation_result,
+                                        );
+                                    }
+                                };
+                                if small_resource_type_tag != 0x22
+                                    && small_resource_type_tag != 0x23
+                                {
+                                    /* 0x04 = IRQ */
+                                    pr_err!("Invalid Small Resource Type.");
+                                    return debug_and_return_none(link_device_evaluation_result);
+                                }
+
+                                if v[1] != 0 {
+                                    let mask = v[1];
+                                    for i in 0..8 {
+                                        if ((mask >> i) & 1) != 0 {
+                                            return Some(i);
+                                        }
+                                    }
+                                } else if v[2] != 0 {
+                                    let mask = v[2];
+                                    for i in 0..8 {
+                                        if ((mask >> i) & 1) != 0 {
+                                            return Some(i + 8);
+                                        }
+                                    }
+                                }
+                                return debug_and_return_none(link_device_evaluation_result);
+                            } else {
+                                debug_and_return_none(link_device_evaluation_result)
+                            };
+                        } else {
+                            debug_and_return_none(evaluation_result)
+                        };
+                    }
+                } else {
+                    return debug_and_return_none(evaluation_result);
+                }
+            }
+            pr_err!("Device Specific Table Entry was not found.");
+            None
+        } else {
+            debug_and_return_none(evaluation_result)
         }
     }
 }

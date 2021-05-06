@@ -83,7 +83,25 @@ impl WaitQueue {
         return result;
     }
 
-    pub fn wakeup(&mut self) -> Result<(), TaskError> {
+    pub fn wakeup_one(&mut self) -> Result<(), TaskError> {
+        let _lock = self.lock.lock();
+        if let Some(thread) = unsafe {
+            self.list
+                .get_first_entry_mut(offset_of!(ThreadEntry, sleep_list))
+        } {
+            let _thread_lock = thread.lock.lock();
+            self.list.remove(&mut thread.sleep_list);
+            drop(_thread_lock);
+            get_kernel_manager_cluster()
+                .task_manager
+                .wake_up_thread(thread)?;
+            Ok(())
+        } else {
+            Err(TaskError::InvalidThreadEntry)
+        }
+    }
+
+    pub fn wakeup_all(&mut self) -> Result<(), TaskError> {
         let _lock = self.lock.lock();
         for thread in unsafe { self.list.iter_mut(offset_of!(ThreadEntry, sleep_list)) } {
             let _thread_lock = thread.lock.lock();

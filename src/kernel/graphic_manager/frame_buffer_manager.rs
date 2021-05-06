@@ -45,7 +45,7 @@ impl FrameBufferManager {
             .memory_manager
             .lock()
             .unwrap()
-            .mmap_dev(
+            .io_map(
                 self.frame_buffer_address.into(),
                 MSize::new(
                     self.frame_buffer_width

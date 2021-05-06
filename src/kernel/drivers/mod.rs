@@ -5,3 +5,4 @@
 pub mod acpi;
 pub mod efi;
 pub mod multiboot;
+pub mod pci;

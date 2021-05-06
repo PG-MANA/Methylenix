@@ -74,9 +74,9 @@ pub unsafe fn in_byte_twice(port: u16) -> (u8 /*first*/, u8 /*second*/) {
     let r1: u8;
     let r2: u8;
     asm!("  in  al, dx
-            mov bl, al
+            mov cl, al
             in  al, dx    
-    ", in("dx") port,out("bl") r1,out("al") r2);
+    ", in("dx") port,out("cl") r1,out("al") r2);
     (r1, r2)
 }
 
@@ -85,6 +85,11 @@ pub unsafe fn in_dword(port: u16) -> u32 {
     let result: u32;
     asm!("in eax, dx", in("dx") port, out("eax") result);
     result
+}
+
+#[inline(always)]
+pub unsafe fn out_dword(port: u16, data: u32) {
+    asm!("out dx, eax",in("dx") port, in("eax") data);
 }
 
 #[inline(always)]
@@ -143,11 +148,15 @@ pub unsafe fn wrmsr(ecx: u32, data: u64) {
 /// The result will set into each argument.
 #[inline(always)]
 pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) {
+    /* EBX is used internally by LLVM */
     asm!(
-        "cpuid",
+        "   xchg edi, ebx
+            cpuid
+            xchg edi, ebx
+        ",
         inout("eax") * eax,
         inout("ecx") * ecx,
-        out("ebx") * ebx,
+        out("edi") * ebx,
         out("edx") * edx
     );
 }

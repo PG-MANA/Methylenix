@@ -22,9 +22,12 @@ use self::interrupt::{idt::GateDescriptor, InterruptManager};
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
+use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, VAddress};
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+};
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
@@ -104,7 +107,6 @@ pub extern "C" fn multiboot_main(
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
         if !init_acpi_early(rsdp_address) {
             pr_err!("Failed Init ACPI.");
-            get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
         }
     } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
         pr_warn!("ACPI 1.0 is not supported.");
@@ -163,6 +165,9 @@ fn main_process() -> ! {
         pr_err!("Cannot init ACPI devices.");
     }
 
+    let pci_manager = PciManager::new();
+    pci_manager.scan_root_bus();
+
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
         let c = tty.getc(true);
@@ -216,11 +221,11 @@ fn draw_boot_logo() {
         .memory_manager
         .lock()
         .unwrap()
-        .mmap_dev(
+        .mmap(
             boot_logo_physical_address.unwrap(),
             original_map_size,
             MemoryPermissionFlags::rodata(),
-            None,
+            MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::PRE_RESERVED,
         );
     if result.is_err() {
         pr_err!(
@@ -374,6 +379,7 @@ pub extern "C" fn ap_boot_main() -> ! {
             .boot_strap_cpu_manager
             .interrupt_manager,
     );
+    interrupt_manager.init_ipi();
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
     cpu_manager.interrupt_manager = interrupt_manager;
 
@@ -387,17 +393,14 @@ pub extern "C" fn ap_boot_main() -> ! {
 fn ap_idle() -> ! {
     /* Tell BSP completing of init */
     init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
-    /*get_cpu_manager_cluster()
-    .arch_depend_data
-    .local_apic_timer
-    .start_interruption(
-        get_cpu_manager_cluster()
-            .interrupt_manager
-            .lock()
-            .unwrap()
-            .get_local_apic_manager(),
-    );*/
-    /* For debug, suspend task_switch temporary */
+    get_cpu_manager_cluster()
+        .arch_depend_data
+        .local_apic_timer
+        .start_interrupt(
+            get_cpu_manager_cluster()
+                .interrupt_manager
+                .get_local_apic_manager(),
+        );
     loop {
         unsafe {
             cpu::idle();

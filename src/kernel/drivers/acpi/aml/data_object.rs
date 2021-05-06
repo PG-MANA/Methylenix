@@ -5,10 +5,10 @@
 use super::expression_opcode;
 use super::name_object::NameString;
 use super::opcode;
-use super::{AcpiData, AcpiInt, AmlError, AmlStream, IntIter};
+use super::{AcpiInt, AmlError, AmlStream, IntIter};
 
 use crate::ignore_invalid_type_error;
-use crate::kernel::memory_manager::data_type::Address;
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 #[derive(Clone, Debug)]
 pub struct PkgLength {
@@ -16,13 +16,75 @@ pub struct PkgLength {
     pub actual_length: usize,
 }
 
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Ord, Eq)]
+pub enum ConstData {
+    Byte(u8),
+    Word(u16),
+    DWord(u32),
+    QWord(u64),
+}
+
 #[derive(Debug, Clone)]
 pub enum ComputationalData {
-    ConstData(AcpiData),
+    ConstData(ConstData),
     StringData(&'static str),
     ConstObj(u8),
     Revision,
     DefBuffer(expression_opcode::ByteList),
+}
+
+#[derive(Debug, Clone)]
+pub enum PackageElement {
+    DataRefObject(DataRefObject),
+    NameString(NameString),
+}
+
+impl ConstData {
+    pub fn to_int(&self) -> AcpiInt {
+        match self {
+            ConstData::Byte(b) => *b as AcpiInt,
+            ConstData::Word(w) => *w as AcpiInt,
+            ConstData::DWord(d) => *d as AcpiInt,
+            ConstData::QWord(q) => *q as AcpiInt,
+        }
+    }
+
+    pub fn get_byte_size(&self) -> usize {
+        match self {
+            ConstData::Byte(_) => 1,
+            ConstData::Word(_) => 2,
+            ConstData::DWord(_) => 4,
+            ConstData::QWord(_) => 8,
+        }
+    }
+
+    pub fn from_usize(data: usize, byte_size: usize) -> Result<Self, AmlError> {
+        match byte_size {
+            1 => {
+                if data > u8::MAX as _ {
+                    Self::from_usize(data, 2)
+                } else {
+                    Ok(ConstData::Byte(data as _))
+                }
+            }
+            2 => {
+                if data > u16::MAX as _ {
+                    Self::from_usize(data, 4)
+                } else {
+                    Ok(ConstData::Word(data as _))
+                }
+            }
+            4 => {
+                if data > u32::MAX as _ {
+                    Self::from_usize(data, 8)
+                } else {
+                    Ok(ConstData::DWord(data as _))
+                }
+            }
+            8 => Ok(ConstData::QWord(data as _)),
+            _ => Err(AmlError::InvalidType),
+        }
+    }
 }
 
 impl ComputationalData {
@@ -36,10 +98,10 @@ impl ComputationalData {
     fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* println!("DataObject: {:#X}", stream.peek_byte()?); */
         match stream.read_byte()? {
-            Self::BYTE_PREFIX => Ok(Self::ConstData(stream.read_byte()? as AcpiData)),
-            Self::WORD_PREFIX => Ok(Self::ConstData(stream.read_word()? as AcpiData)),
-            Self::DWORD_PREFIX => Ok(Self::ConstData(stream.read_dword()? as AcpiData)),
-            Self::QWORD_PREFIX => Ok(Self::ConstData(stream.read_qword()? as AcpiData)),
+            Self::BYTE_PREFIX => Ok(Self::ConstData(ConstData::Byte(stream.read_byte()?))),
+            Self::WORD_PREFIX => Ok(Self::ConstData(ConstData::Word(stream.read_word()?))),
+            Self::DWORD_PREFIX => Ok(Self::ConstData(ConstData::DWord(stream.read_dword()?))),
+            Self::QWORD_PREFIX => Ok(Self::ConstData(ConstData::QWord(stream.read_qword()?))),
             Self::STRING_PREFIX => {
                 let start = stream.get_pointer();
                 while stream.read_byte()? != Self::NULL_CHAR && !stream.is_end_of_stream() {}
@@ -128,7 +190,7 @@ impl DataRefObject {
             DataRefObject::DataObject(d) => match d {
                 DataObject::ComputationalData(c_d) => c_d.to_int_iter(),
                 DataObject::DefPackage(d_p) => Some(d_p.to_int_iter()),
-                DataObject::DefVarPackage(d_v) => Some(d_v.to_int_iter()),
+                DataObject::DefVarPackage(_) => None,
             },
             DataRefObject::ObjectReference(_) => None,
         }
@@ -138,7 +200,7 @@ impl DataRefObject {
         match self {
             DataRefObject::DataObject(d) => match d {
                 DataObject::ComputationalData(c) => match c {
-                    ComputationalData::ConstData(c) => Some(*c as AcpiInt),
+                    ComputationalData::ConstData(c) => Some(c.to_int()),
                     ComputationalData::StringData(_) => None,
                     ComputationalData::ConstObj(c) => Some(*c as AcpiInt),
                     ComputationalData::Revision => None,
@@ -179,6 +241,13 @@ impl PkgLength {
     }
 }
 
+pub fn parse_integer_from_buffer(buffer: &[u8]) -> Result<AcpiInt, AmlError> {
+    parse_integer(&mut AmlStream::new(
+        VAddress::new(buffer.as_ptr() as usize),
+        MSize::new(buffer.len()),
+    ))
+}
+
 pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
     let mut val = 0;
     let mut c = stream.read_byte()? as char;
@@ -194,7 +263,11 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
                     val <<= 4; /* val *= 0x10 */
                     val += c as usize - 0x61/* 'a' */ + 0xa;
                 } else {
-                    return Ok(val);
+                    return if val == 0 {
+                        Err(AmlError::InvalidType)
+                    } else {
+                        Ok(val)
+                    };
                 }
                 stream.seek(1)?;
             }
@@ -208,7 +281,11 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
                     val <<= 4; /* val *= 0x10 */
                     val += c as usize - 0x41/* 'A' */ + 0xa;
                 } else {
-                    return Ok(val);
+                    return if val == 0 {
+                        Err(AmlError::InvalidType)
+                    } else {
+                        Ok(val)
+                    };
                 }
                 stream.seek(1)?;
             }
@@ -219,7 +296,11 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
                     val <<= 3; /* val *= 0o10 */
                     val += c as usize - 0x30 /* '0' */;
                 } else {
-                    return Ok(val);
+                    return if val == 0 {
+                        Err(AmlError::InvalidType)
+                    } else {
+                        Ok(val)
+                    };
                 }
                 stream.seek(1)?;
             }
@@ -231,7 +312,11 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
                 val *= 10;
                 val += c as usize - 0x30/* '0' */;
             } else {
-                return Ok(val);
+                return if val == 0 {
+                    Err(AmlError::InvalidType)
+                } else {
+                    Ok(val)
+                };
             }
             stream.seek(1)?;
         }

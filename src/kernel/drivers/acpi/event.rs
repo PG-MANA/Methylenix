@@ -2,6 +2,8 @@
 //! ACPI Event Handler
 //!
 
+pub mod gpe;
+
 use super::table::fadt::FadtManager;
 
 use crate::arch::target_arch::device::cpu::{in_word, out_word};

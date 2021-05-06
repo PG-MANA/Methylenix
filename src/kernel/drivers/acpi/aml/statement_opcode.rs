@@ -115,6 +115,14 @@ impl Notify {
             notify_value,
         })
     }
+
+    pub const fn get_notify_object_name(&self) -> &SuperName {
+        &self.notify_object
+    }
+
+    pub const fn get_notify_value(&self) -> &TermArg {
+        &self.notify_value
+    }
 }
 
 #[derive(Debug)]

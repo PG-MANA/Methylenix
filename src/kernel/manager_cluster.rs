@@ -9,6 +9,7 @@ use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::{ArchDependedCpuManagerCluster, ArchDependedKernelManagerCluster};
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::efi::EfiManager;
@@ -18,6 +19,7 @@ use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::work_queue::WorkQueue;
 use crate::kernel::task_manager::TaskManager;
+use crate::kernel::timer_manager::TimerManager;
 use crate::kernel::tty::TtyManager;
 
 use crate::kernel::sync::spin_lock::Mutex;
@@ -38,6 +40,7 @@ pub struct KernelManagerCluster {
     //input_manager:
     pub acpi_manager: Mutex<AcpiManager>,
     pub acpi_event_manager: AcpiEventManager,
+    pub acpi_device_manager: AcpiDeviceManager,
     pub boot_strap_cpu_manager: CpuManagerCluster,
     pub cpu_list: PtrLinkedList<CpuManagerCluster>, /* may be changed */
     pub arch_depend_data: ArchDependedKernelManagerCluster,
@@ -56,6 +59,7 @@ pub struct CpuManagerCluster {
     pub work_queue: WorkQueue,
     pub object_allocator: Mutex<ObjectAllocator>,
     pub run_queue: RunQueue,
+    pub timer_manager: TimerManager,
     pub arch_depend_data: ArchDependedCpuManagerCluster,
 }
 

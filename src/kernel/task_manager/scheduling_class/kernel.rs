@@ -2,9 +2,14 @@
 //! Scheduling Class for Kernel
 //!
 
+#[derive(Clone, Copy, PartialOrd, PartialEq, Eq, Ord)]
 pub struct KernelSchedulingClass {}
 
 impl KernelSchedulingClass {
+    pub const fn new() -> Self {
+        Self {}
+    }
+
     pub fn get_normal_priority() -> u8 {
         Self::get_custom_priority(20)
     }
@@ -15,5 +20,24 @@ impl KernelSchedulingClass {
     pub fn get_custom_priority(level: u8) -> u8 {
         assert!(level < 40);
         80 + level
+    }
+
+    pub(crate) fn calculate_time_slice(
+        &self,
+        priority_level: u8,
+        number_of_threads: usize,
+        interval_ms: usize,
+    ) -> usize {
+        if priority_level == Self::get_idle_thread_priority() {
+            10
+        } else {
+            assert!(priority_level >= 80 && priority_level <= 120);
+            let slice = 200 * (120 - priority_level) as usize / (number_of_threads * interval_ms);
+            if slice == 0 {
+                1
+            } else {
+                slice
+            }
+        }
     }
 }

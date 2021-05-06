@@ -8,6 +8,7 @@ use crate::arch::target_arch::device::cpu;
 
 use crate::kernel::timer_manager::Timer;
 
+#[derive(Clone)] /* Temporary */
 pub struct AcpiPmTimer {
     port: usize,
     is_32_bit_counter: bool,

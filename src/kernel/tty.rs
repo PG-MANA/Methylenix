@@ -50,7 +50,7 @@ impl TtyManager {
         };
         if self.input_queue.enqueue(data) {
             #[allow(unused_must_use)]
-            if let Err(e) = self.input_wait_queue.wakeup() {
+            if let Err(e) = self.input_wait_queue.wakeup_all() {
                 use core::fmt::Write;
                 writeln!(self, "Cannot wakeup sleeping threads. Error: {:?}", e);
             }
