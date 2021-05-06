@@ -138,8 +138,8 @@ impl InterruptManager {
         self.init_idt(&mut memory_manager);
         self.tss_manager.load_current_tss();
         self.init_ist(&mut memory_manager);
-        self.local_apic.init();
         drop(memory_manager);
+        self.local_apic.init();
         drop(_lock);
         Self::restore_local_irq(flag);
         return;
@@ -297,6 +297,11 @@ impl InterruptManager {
             false,
             InterruptionIndex::RescheduleIpi as _,
         );
+    }
+
+    /// Convert IRQ to Interrupt Index
+    pub const fn irq_to_index(irq: u8) -> u16 {
+        irq as u16 + 0x20
     }
 
     /// Dummy handler to init IDT

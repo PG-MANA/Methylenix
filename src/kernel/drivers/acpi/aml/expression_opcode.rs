@@ -4,12 +4,12 @@
 //!
 #![allow(dead_code)]
 
-use super::data_object::PkgLength;
+use super::data_object::{PackageElement, PkgLength};
 use super::name_object::{NameString, SimpleName, SuperName, Target};
 use super::opcode;
 use super::parser::ParseHelper;
 use super::term_object::{MethodInvocation, TermArg};
-use super::{AcpiInt, AmlError, AmlStream, IntIter};
+use super::{AcpiInt, AmlError, AmlStream, DataRefObject, IntIter};
 
 use crate::ignore_invalid_type_error;
 
@@ -41,6 +41,28 @@ impl Package {
         }
     }
 
+    pub fn get_number_of_remaining_elements(&self) -> usize {
+        self.num_elements
+    }
+
+    pub fn get_next_element(
+        &mut self,
+        current_scope: &NameString,
+    ) -> Result<Option<PackageElement>, AmlError> {
+        if self.num_elements == 0 {
+            return Ok(None);
+        }
+        let backup = self.stream.clone();
+        ignore_invalid_type_error!(DataRefObject::parse(&mut self.stream, current_scope), |e| {
+            self.num_elements -= 1;
+            return Ok(Some(PackageElement::DataRefObject(e)));
+        });
+        self.stream.roll_back(&backup);
+        let name_string = NameString::parse(&mut self.stream, Some(current_scope))?;
+        self.num_elements -= 1;
+        return Ok(Some(PackageElement::NameString(name_string)));
+    }
+
     pub fn to_int_iter(&self) -> IntIter {
         IntIter::new(self.stream.clone(), self.num_elements)
     }
@@ -68,8 +90,19 @@ impl VarPackage {
         }
     }
 
-    pub fn to_int_iter(&self) -> IntIter {
-        unimplemented!()
+    pub fn get_number_of_elements(
+        &mut self,
+        parse_helper: &mut ParseHelper,
+        current_scope: &NameString,
+    ) -> Result<TermArg, AmlError> {
+        TermArg::parse_integer(&mut self.stream, current_scope, parse_helper)
+    }
+
+    pub fn convert_to_package(self, num_elements: usize) -> Package {
+        Package {
+            stream: self.stream,
+            num_elements,
+        }
     }
 }
 
@@ -81,9 +114,9 @@ pub enum ObjReference {
 
 #[derive(Debug, Clone)]
 pub struct Index {
-    buffer_pkg_str_obj: TermArg,
+    source: TermArg,
     index: TermArg,
-    target: SuperName,
+    target: Target,
 }
 
 impl Index {
@@ -93,14 +126,26 @@ impl Index {
         parse_helper: &mut ParseHelper,
     ) -> Result<Self, AmlError> {
         /* IndexOp was read */
-        let buffer_pkg_str_obj = TermArg::try_parse(stream, current_scope, parse_helper)?;
+        let source = TermArg::try_parse(stream, current_scope, parse_helper)?;
         let index = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let target = SuperName::try_parse(stream, current_scope, parse_helper)?;
+        let target = Target::parse(stream, current_scope, parse_helper)?;
         Ok(Self {
-            buffer_pkg_str_obj,
+            source,
             index,
             target,
         })
+    }
+
+    pub const fn get_source(&self) -> &TermArg {
+        &self.source
+    }
+
+    pub const fn get_index(&self) -> &TermArg {
+        &self.index
+    }
+
+    pub const fn get_destination(&self) -> &Target {
+        &self.target
     }
 }
 
@@ -155,10 +200,7 @@ pub struct ByteList {
 }
 
 impl ByteList {
-    pub(crate) fn parse(
-        stream: &mut AmlStream,
-        current_scope: &NameString,
-    ) -> Result<Self, AmlError> {
+    pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* BufferOp was read */
         let pkg_length = PkgLength::parse(stream)?;
         let mut byte_list_stream = stream.clone();
@@ -171,6 +213,14 @@ impl ByteList {
             stream: byte_list_stream,
             current_scope: current_scope.clone(),
         })
+    }
+
+    pub fn get_buffer_size(&mut self, parse_helper: &mut ParseHelper) -> Result<TermArg, AmlError> {
+        TermArg::parse_integer(&mut self.stream, &self.current_scope, parse_helper)
+    }
+
+    pub fn read_next(&mut self) -> Result<u8, AmlError> {
+        self.stream.read_byte()
     }
 }
 
@@ -198,6 +248,22 @@ impl BinaryOperation {
             operand2,
             target,
         })
+    }
+
+    pub const fn get_left_operand(&self) -> &Operand {
+        &self.operand1
+    }
+
+    pub const fn get_right_operand(&self) -> &Operand {
+        &self.operand2
+    }
+
+    pub const fn get_target(&self) -> &Target {
+        &self.target
+    }
+
+    pub const fn get_opcode(&self) -> u8 {
+        self.opcode
     }
 }
 
@@ -249,41 +315,6 @@ impl Concat {
 }
 
 #[derive(Debug, Clone)]
-pub struct CondRefOf {
-    source: SuperName,
-    result: Target,
-}
-
-impl CondRefOf {
-    fn parse(
-        stream: &mut AmlStream,
-        current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
-    ) -> Result<Self, AmlError> {
-        /* CondRefOfOp was read */
-        let source = SuperName::try_parse(stream, current_scope, parse_helper)?;
-        let result = Target::parse(stream, current_scope, parse_helper)?;
-        Ok(Self { source, result })
-    }
-
-    pub fn check_source_exists_with_parsing(
-        &self,
-        parse_helper: &mut ParseHelper,
-    ) -> Result<bool, AmlError> {
-        if let SuperName::SimpleName(s_n) = &self.source {
-            match s_n {
-                SimpleName::NameString(name) => Ok(parse_helper
-                    .search_object_from_list_with_parsing_term_list(name)?
-                    .is_some()),
-                _ => Ok(true),
-            }
-        } else {
-            unimplemented!()
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct Divide {
     dividend: TermArg,
     divisor: TermArg,
@@ -308,6 +339,22 @@ impl Divide {
             remainder,
             quotient,
         })
+    }
+
+    pub fn get_dividend(&self) -> &TermArg {
+        &self.dividend
+    }
+
+    pub fn get_divisor(&self) -> &TermArg {
+        &self.divisor
+    }
+
+    pub fn get_remainder(&self) -> &Target {
+        &self.remainder
+    }
+
+    pub fn get_quotient(&self) -> &Target {
+        &self.quotient
     }
 }
 
@@ -380,7 +427,7 @@ pub enum ExpressionOpcode {
     DefBuffer(ByteList),
     DefConcat(Concat),
     DefConcatRes(Concat),
-    DefCondRefOf(CondRefOf),
+    DefCondRefOf((SuperName, Target)),
     DefCopyObject(TermArg, SimpleName),
     DefDecrement(SuperName),
     DefDivide(Divide),
@@ -403,6 +450,7 @@ pub enum ExpressionOpcode {
     DefMid(Mid),
     DefNot((Operand, Target)),
     DefObjectType(SuperName),
+    DefPackage(Package),
     DefVarPackage(VarPackage),
     DefSizeOf(SuperName),
     DefStore((TermArg, SuperName)),
@@ -440,11 +488,9 @@ impl ExpressionOpcode {
                 }
                 opcode::COND_REF_OF_OP => {
                     stream.seek(2)?;
-                    Ok(Self::DefCondRefOf(CondRefOf::parse(
-                        stream,
-                        current_scope,
-                        parse_helper,
-                    )?))
+                    let source = SuperName::try_parse(stream, current_scope, parse_helper)?;
+                    let result = Target::parse(stream, current_scope, parse_helper)?;
+                    Ok(Self::DefCondRefOf((source, result)))
                 }
                 opcode::FROM_BCD_OP => {
                     stream.seek(2)?;
@@ -661,6 +707,10 @@ impl ExpressionOpcode {
             opcode::VAR_PACKAGE_OP => {
                 /* OpCode will be read in VarPackage::try_parse */
                 Ok(Self::DefVarPackage(VarPackage::try_parse(stream)?))
+            }
+            opcode::PACKAGE_OP => {
+                /* OpCode will be read in Package::try_parse */
+                Ok(Self::DefPackage(Package::try_parse(stream)?))
             }
             opcode::SIZE_OF_OP => {
                 stream.seek(1)?;

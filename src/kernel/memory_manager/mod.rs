@@ -108,6 +108,7 @@ impl MemoryManager {
         }
     }
 
+    /* TODO: check memory access error(sometimes occurs) */
     pub fn alloc_nonlinear_pages(
         &mut self,
         order: MPageOrder,

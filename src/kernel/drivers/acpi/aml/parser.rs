@@ -3,8 +3,9 @@
 //!
 
 use super::data_object::{ComputationalData, DataObject, DataRefObject};
+use super::eisa_id_to_dword;
 use super::name_object::NameString;
-use super::named_object::{External, FieldElement, NamedObject};
+use super::named_object::{Device, External, FieldElement, Method, NamedObject};
 use super::namespace_modifier_object::NamespaceModifierObject;
 use super::term_object::{TermList, TermObj};
 use super::{AcpiInt, AmlError};
@@ -14,7 +15,7 @@ use crate::kernel::sync::spin_lock::Mutex;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum ObjectListItem {
     DefScope(Arc<Mutex<ObjectList>>),
     DefName(DataRefObject),
@@ -22,6 +23,7 @@ enum ObjectListItem {
     NamedObject(NamedObject),
 }
 
+#[derive(Debug)]
 struct ObjectList {
     scope_name: NameString,
     parent: Option<Weak<Mutex<Self>>>,
@@ -35,6 +37,7 @@ pub enum ContentObject {
     Scope(NameString),
 }
 
+#[derive(Clone)]
 pub struct ParseHelper {
     root_term_list: TermList,
     root_object_list: Arc<Mutex<ObjectList>>,
@@ -246,7 +249,7 @@ impl ParseHelper {
     }
 
     pub fn move_out_from_current_term_list(&mut self) -> Result<(), AmlError> {
-        self.term_list_hierarchy.pop();
+        self.term_list_hierarchy.pop(); /* Maybe wrong */
 
         if let Some(name) = self
             .term_list_hierarchy
@@ -305,11 +308,16 @@ impl ParseHelper {
         target_name: &NameString,
         mut term_list: TermList,
         relative_name: Option<&NameString>,
+        should_push_term_list_hierarchy: bool,
     ) -> Result<Option<ObjectListItem>, AmlError> {
         if !term_list.get_scope_name().is_child(target_name) {
             return Ok(None);
         }
-        self.move_current_scope(term_list.get_scope_name())?;
+        if should_push_term_list_hierarchy {
+            self.move_into_term_list(term_list.clone())?;
+        } else {
+            self.move_current_scope(term_list.get_scope_name())?;
+        }
         let mut matched_scope: Option<NameString> = None;
 
         while let Some(term_obj) = term_list.next(self)? {
@@ -348,6 +356,7 @@ impl ParseHelper {
                                     target_name,
                                     s.get_term_list().clone(),
                                     relative_name,
+                                    should_push_term_list_hierarchy,
                                 );
                                 self.move_out_from_current_term_list()?;
                                 match result {
@@ -386,6 +395,7 @@ impl ParseHelper {
                         term_list.get_scope_name(),
                         named_obj,
                         relative_name,
+                        should_push_term_list_hierarchy,
                     ) {
                         Ok(Some(named_obj)) => return Ok(Some(named_obj)),
                         Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
@@ -410,6 +420,9 @@ impl ParseHelper {
                 return Ok(Some(ObjectListItem::DefScope(target_scope_list)));
             }
         }
+        if should_push_term_list_hierarchy {
+            self.term_list_hierarchy.pop();
+        }
         Ok(None)
     }
 
@@ -419,6 +432,7 @@ impl ParseHelper {
         current_scope: &NameString,
         named_object: NamedObject,
         relative_name: Option<&NameString>,
+        should_push_term_list_hierarchy: bool,
     ) -> Result<Option<ObjectListItem>, AmlError> {
         if let Some(name) = named_object.get_name() {
             if name == target_name {
@@ -455,7 +469,12 @@ impl ParseHelper {
             Ok(None)
         } else if let Some(term_list) = named_object.get_term_list() {
             self.move_into_term_list(term_list.clone())?;
-            let result = self.parse_term_list_recursive(target_name, term_list, relative_name);
+            let result = self.parse_term_list_recursive(
+                target_name,
+                term_list,
+                relative_name,
+                should_push_term_list_hierarchy,
+            );
             self.move_out_from_current_term_list()?;
             result
         } else {
@@ -469,6 +488,7 @@ impl ParseHelper {
         name: &NameString,
         relative_name: Option<&NameString>,
         should_check_recursively: bool,
+        should_push_term_list_hierarchy: bool,
     ) -> Result<Option<ContentObject>, AmlError> {
         let mut locked_list = list.try_lock().or(Err(AmlError::MutexError))?;
         let mut list_to_search_later: Option<Arc<Mutex<ObjectList>>> = None;
@@ -515,6 +535,7 @@ impl ParseHelper {
                                 &scope_name,
                                 n_o,
                                 relative_name,
+                                should_push_term_list_hierarchy,
                             )? {
                                 return self.convert_object_list_item_list_to_content_object(o_i);
                             }
@@ -532,6 +553,7 @@ impl ParseHelper {
                 name,
                 relative_name,
                 should_check_recursively,
+                should_push_term_list_hierarchy,
             )
         } else {
             Ok(None)
@@ -587,6 +609,7 @@ impl ParseHelper {
             name,
             relative_target_name.as_ref(),
             false,
+            false,
         )? {
             self.original_name_searching = back_up_of_original_name_searching;
             return Ok(Some(c));
@@ -616,6 +639,7 @@ impl ParseHelper {
                     &search_name,
                     Some(relative_target_name),
                     false,
+                    false,
                 )? {
                     self.restore(back_up.clone());
                     self.original_name_searching = back_up_of_original_name_searching;
@@ -629,17 +653,22 @@ impl ParseHelper {
         let back_up = self.back_up();
         let mut term_list_hierarchy_back_up: Vec<TermList> =
             Vec::with_capacity(self.term_list_hierarchy.len());
+        let mut search_name_list: Vec<NameString> =
+            Vec::with_capacity(self.term_list_hierarchy.len());
 
         for index in (0..self.term_list_hierarchy.len()).rev() {
             let term_list = self.term_list_hierarchy.get(index).unwrap().clone();
-            let search_name = relative_target_name
-                .as_ref()
-                .and_then(|r| Some(r.get_full_name_path(term_list.get_scope_name())));
+            let search_name = relative_target_name.as_ref().and_then(|r| {
+                let full_name = r.get_full_name_path(term_list.get_scope_name());
+                search_name_list.push(full_name.clone());
+                Some(full_name)
+            });
 
             match self.parse_term_list_recursive(
                 search_name.as_ref().unwrap_or(name),
                 term_list,
                 relative_target_name.as_ref(),
+                false,
             ) {
                 Ok(Some(o_i)) => {
                     self.restore(back_up);
@@ -671,10 +700,46 @@ impl ParseHelper {
         self.restore(back_up.clone());
 
         /* Search from root */
+        for search_name in search_name_list.iter() {
+            match self.parse_term_list_recursive(
+                search_name,
+                self.root_term_list.clone(),
+                relative_target_name.as_ref(),
+                false,
+            ) {
+                Ok(Some(o_i)) => {
+                    self.restore(back_up.clone());
+                    self.term_list_hierarchy.clear();
+                    while let Some(e) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(e);
+                    }
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    return self.convert_object_list_item_list_to_content_object(o_i);
+                }
+                Err(AmlError::NestedSearch) | Ok(None) => {}
+                Err(e) => {
+                    self.restore(back_up.clone());
+                    self.term_list_hierarchy.clear();
+                    while let Some(e) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(e);
+                    }
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    return Err(e);
+                }
+            }
+            self.restore(back_up.clone());
+        }
+
+        drop(search_name_list);
+
+        let temp_relative_name = name.get_element_as_name_string(name.len() - 1);
         match self.parse_term_list_recursive(
             name,
             self.root_term_list.clone(),
-            relative_target_name.as_ref(),
+            relative_target_name
+                .as_ref()
+                .or(temp_relative_name.as_ref()),
+            false,
         ) {
             Ok(Some(o_i)) => {
                 self.restore(back_up);
@@ -729,23 +794,112 @@ impl ParseHelper {
         if method_name.is_null_name() {
             return Ok(Some(0));
         }
-        let result = self.search_object_from_list_with_parsing_term_list(method_name)?;
-        if result.is_none() {
-            return Ok(None);
+        if let Some(result) = self.search_object_from_list_with_parsing_term_list(method_name)? {
+            Ok(match result {
+                ContentObject::DataRefObject(d_r) => match d_r {
+                    DataRefObject::ObjectReference(_) => unimplemented!(),
+                    DataRefObject::DataObject(_) => Some(0),
+                },
+                ContentObject::NamedObject(n_o) => n_o.get_argument_count(),
+                ContentObject::Scope(_) => Some(0),
+            })
+        } else {
+            Ok(None)
         }
-        Ok(match result.unwrap() {
-            ContentObject::DataRefObject(d_r) => match d_r {
-                DataRefObject::ObjectReference(_) => unimplemented!(),
-                DataRefObject::DataObject(_) => Some(0),
-            },
-            ContentObject::NamedObject(n_o) => n_o.get_argument_count(),
-            ContentObject::Scope(_) => Some(0),
-        })
+    }
+
+    fn _search_device(
+        &mut self,
+        hid: u32,
+        mut term_list: TermList,
+    ) -> Result<Option<Device>, AmlError> {
+        while let Some(obj) = term_list.next(self)? {
+            match obj {
+                TermObj::NamespaceModifierObj(n_o) => match n_o {
+                    NamespaceModifierObject::DefScope(scope) => {
+                        self.move_into_term_list(scope.get_term_list().clone())?;
+                        if let Some(d) = self._search_device(hid, scope.get_term_list().clone())? {
+                            return Ok(Some(d));
+                        }
+                        self.move_out_from_current_term_list()?;
+                    }
+                    _ => { /* Ignore */ }
+                },
+                TermObj::NamedObj(n_o) => {
+                    if let NamedObject::DefDevice(d) = n_o {
+                        self.move_into_term_list(d.get_term_list().clone())?;
+                        if d.get_hid(self)? == Some(hid) {
+                            return Ok(Some(d));
+                        }
+                    } else {
+                        if let Some(t) = n_o.get_term_list() {
+                            self.move_into_term_list(t.clone())?;
+                            if let Some(d) = self._search_device(hid, t)? {
+                                return Ok(Some(d));
+                            }
+                            self.move_out_from_current_term_list()?;
+                        }
+                    }
+                }
+                TermObj::StatementOpcode(_) => { /* Ignore */ }
+                TermObj::ExpressionOpcode(_) => { /* Ignore */ }
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn move_into_device(&mut self, hid: &[u8; 7]) -> Result<Option<Device>, AmlError> {
+        let u32_hid = eisa_id_to_dword(hid);
+        self.term_list_hierarchy.clear();
+        self.current_object_list = self.root_object_list.clone();
+
+        self._search_device(u32_hid, self.root_term_list.clone())
+    }
+
+    pub fn setup_for_method_evaluation(
+        &mut self,
+        method_name: &NameString,
+        term_list: Option<TermList>,
+    ) -> Result<Method, AmlError> {
+        let f = |p: &mut Self,
+                 term_list: TermList,
+                 relative_name: Option<&NameString>|
+         -> Result<Option<Method>, AmlError> {
+            match p.parse_term_list_recursive(method_name, term_list, relative_name, true) {
+                Ok(Some(o_i)) => {
+                    if let ObjectListItem::NamedObject(NamedObject::DefMethod(m)) = o_i {
+                        Ok(Some(m))
+                    } else {
+                        pr_err!("Expected a method, but found {:?}", o_i);
+                        Err(AmlError::InvalidType)
+                    }
+                }
+                Ok(None) => Ok(None),
+                Err(e) => Err(e),
+            }
+        };
+
+        /* Search from Current Scope */
+        if let Some(t) = term_list {
+            let relative_name = method_name.get_relative_name(t.get_scope_name());
+            if let Some(m) = f(self, t, relative_name.as_ref())? {
+                return Ok(m);
+            }
+        }
+
+        /* Search from root */
+        self.current_object_list = self.root_object_list.clone();
+        self.term_list_hierarchy.clear();
+        if let Some(m) = f(self, self.root_term_list.clone(), None)? {
+            Ok(m)
+        } else {
+            Err(AmlError::InvalidMethodName(method_name.clone()))
+        }
     }
 }
 
 impl core::fmt::Debug for ParseHelper {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         if let Ok(l) = self.current_object_list.try_lock() {
             f.write_fmt(format_args!("ParseHelper(Scope:{})", l.scope_name))
         } else {

@@ -22,6 +22,7 @@ use self::interrupt::{idt::GateDescriptor, InterruptManager};
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
+use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
@@ -106,7 +107,6 @@ pub extern "C" fn multiboot_main(
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
         if !init_acpi_early(rsdp_address) {
             pr_err!("Failed Init ACPI.");
-            get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
         }
     } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
         pr_warn!("ACPI 1.0 is not supported.");
@@ -164,6 +164,9 @@ fn main_process() -> ! {
     if !init_acpi_later() {
         pr_err!("Cannot init ACPI devices.");
     }
+
+    let pci_manager = PciManager::new();
+    pci_manager.scan_root_bus();
 
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {

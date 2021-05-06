@@ -48,12 +48,12 @@ impl BankField {
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-enum CreateFieldType {
+pub enum CreateFieldType {
     Bit,
-    Byte,
-    Word,
-    DWord,
-    QWord,
+    Byte = 0x1,
+    Word = 0x2,
+    DWord = 0x4,
+    QWord = 0x8,
     Other,
 }
 
@@ -93,6 +93,32 @@ impl CreateField {
 
     pub fn get_name(&self) -> &NameString {
         &self.name
+    }
+
+    pub fn get_source_buffer(&self) -> &TermArg {
+        &self.source_buffer
+    }
+
+    pub fn get_index(&self) -> &TermArg {
+        &self.index
+    }
+
+    pub fn is_bit_field(&self) -> bool {
+        self.size == CreateFieldType::Bit || self.size == CreateFieldType::Other
+    }
+
+    pub fn get_source_size(&self) -> Option<usize> {
+        if self.size == CreateFieldType::Other {
+            None
+        } else if self.size == CreateFieldType::Bit {
+            Some(1)
+        } else {
+            Some(self.size.clone() as usize)
+        }
+    }
+
+    pub fn get_source_size_term_arg(&self) -> &Option<TermArg> {
+        &self.optional_size
     }
 }
 
@@ -162,6 +188,22 @@ impl External {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+pub enum OperationRegionType {
+    SystemMemory = 0,
+    SystemIO = 1,
+    PciConfig,
+    EmbeddedControl,
+    SMBus,
+    SystemCMOS,
+    PciBarTarget,
+    IPMI,
+    GeneralPurposeIO,
+    GenericSerialBus,
+    PCC,
+}
+
 #[derive(Debug, Clone)]
 pub struct OpRegion {
     name: NameString,
@@ -191,6 +233,22 @@ impl OpRegion {
 
     pub fn get_name(&self) -> &NameString {
         &self.name
+    }
+
+    pub fn get_operation_type(&self) -> Result<OperationRegionType, AmlError> {
+        if self.region_scope > 0x0A {
+            Err(AmlError::UnsupportedType)
+        } else {
+            Ok(unsafe { core::mem::transmute::<u8, OperationRegionType>(self.region_scope) })
+        }
+    }
+
+    pub fn get_region_offset(&self) -> &TermArg {
+        &self.region_offset
+    }
+
+    pub fn get_region_length(&self) -> &TermArg {
+        &self.region_len
     }
 }
 
@@ -250,8 +308,12 @@ impl Device {
         })
     }
 
-    pub fn get_name(&self) -> &NameString {
+    pub const fn get_name(&self) -> &NameString {
         &self.device_name
+    }
+
+    pub const fn get_term_list(&self) -> &TermList {
+        &self.term_list
     }
 
     pub fn get_hid(&self, parse_helper: &mut ParseHelper) -> Result<Option<u32>, AmlError> {
@@ -265,7 +327,7 @@ impl Device {
                         ComputationalData::ConstData(d),
                     )) = n.get_data_ref_object()
                     {
-                        return Ok(Some(*d as u32));
+                        return Ok(Some(d.to_int() as u32));
                     }
                 }
             }
@@ -307,10 +369,7 @@ pub struct Method {
 }
 
 impl Method {
-    pub(crate) fn parse(
-        stream: &mut AmlStream,
-        current_scope: &NameString,
-    ) -> Result<Self, AmlError> {
+    pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* MethodOp was read */
         let pkg_length = PkgLength::parse(stream)?;
         let mut method_stream = stream.clone();
@@ -334,6 +393,10 @@ impl Method {
     pub fn get_argument_count(&self) -> AcpiInt {
         (self.method_flags & 0b111) as _
     }
+
+    pub fn get_term_list(&self) -> &TermList {
+        &self.term_list
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -344,10 +407,7 @@ pub struct Field {
 }
 
 impl Field {
-    pub(crate) fn parse(
-        stream: &mut AmlStream,
-        current_scope: &NameString,
-    ) -> Result<Self, AmlError> {
+    pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         /* FieldOp was read */
         let pkg_length = PkgLength::parse(stream)?;
         let mut field_stream = stream.clone();
@@ -362,6 +422,46 @@ impl Field {
             field_flags,
             field_list,
         })
+    }
+
+    pub fn get_source_region_name(&self) -> &NameString {
+        &self.region_name
+    }
+
+    pub fn convert_to_access_size(flags: u8) -> usize {
+        match flags & 0b111 {
+            0 => {
+                0 /*Any Access*/
+            }
+            1 => 1,
+            2 => 2,
+            3 => 4,
+            4 => 8,
+            5 => {
+                pr_warn!("Buffer Access was not supported.");
+                0
+            }
+            _ => {
+                pr_warn!("Unknown Access Type.");
+                0
+            }
+        }
+    }
+
+    pub fn get_access_size(&self) -> usize {
+        Self::convert_to_access_size(self.field_flags)
+    }
+
+    pub fn should_lock(&self) -> bool {
+        (self.field_flags & (1 << 4)) != 0
+    }
+
+    pub fn get_update_rule(&self) -> u8 {
+        (self.field_flags >> 5) & 0b11
+    }
+
+    pub fn get_field_list(&self) -> &FieldList {
+        &self.field_list
     }
 }
 

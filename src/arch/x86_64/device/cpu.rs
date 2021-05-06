@@ -88,6 +88,11 @@ pub unsafe fn in_dword(port: u16) -> u32 {
 }
 
 #[inline(always)]
+pub unsafe fn out_dword(port: u16, data: u32) {
+    asm!("out dx, eax",in("dx") port, in("eax") data);
+}
+
+#[inline(always)]
 pub unsafe fn sgdt(gdtr: &mut u128) {
     asm!("sgdt [{}]", in(reg) (gdtr as *const _ as usize));
 }
