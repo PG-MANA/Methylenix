@@ -13,6 +13,7 @@ pub mod table;
 use self::aml::{AmlPackage, AmlParser, AmlVariable, NameString};
 use self::device::ec::EmbeddedController;
 use self::device::AcpiDeviceManager;
+use self::event::gpe::GpeManager;
 use self::event::{AcpiEventManager, AcpiFixedEvent};
 use self::table::dsdt::DsdtManager;
 use self::table::fadt::FadtManager;
@@ -80,6 +81,14 @@ impl AcpiManager {
     pub fn init_acpi_event_manager(&self, event_manager: &mut AcpiEventManager) -> bool {
         if self.enabled {
             *event_manager = AcpiEventManager::new(&self.get_xsdt_manager().get_fadt_manager());
+            let gpe0 = self.get_fadt_manager().get_gp_event0_block();
+            let gpe0_len = self.get_fadt_manager().get_gp_event0_block_len() as usize;
+            let gpe1 = self.get_fadt_manager().get_gp_event1_block();
+            let gpe1_len = self.get_fadt_manager().get_gp_event1_block_len() as usize;
+            GpeManager::init(gpe0, gpe0_len >> 1 /* /2*/);
+            if gpe1 != 0 && gpe1_len != 0 {
+                GpeManager::init(gpe1, gpe1_len >> 1 /* /2*/);
+            }
             true
         } else {
             false
