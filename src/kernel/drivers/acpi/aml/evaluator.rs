@@ -2,6 +2,7 @@
 //! AML Evaluator
 //!
 
+use super::aml_variable::{AmlBitFiled, AmlByteFiled, AmlPackage, AmlVariable};
 use super::data_object::{
     parse_integer_from_buffer, ComputationalData, ConstData, DataObject, PackageElement,
 };
@@ -13,7 +14,7 @@ use super::named_object::{Field, FieldElement, Method, NamedObject, OperationReg
 use super::parser::{ContentObject, ParseHelper};
 use super::statement_opcode::{Fatal, IfElse, Notify, StatementOpcode, While};
 use super::term_object::{MethodInvocation, TermArg, TermList, TermObj};
-use super::{AmlBitFiled, AmlByteFiled, AmlError, AmlPackage, AmlVariable, DataRefObject};
+use super::{AmlError, DataRefObject};
 
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::sync::spin_lock::Mutex;

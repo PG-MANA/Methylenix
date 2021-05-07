@@ -10,7 +10,8 @@ pub mod device;
 pub mod event;
 pub mod table;
 
-use self::aml::{AmlPackage, AmlParser, AmlVariable, NameString};
+use self::aml::aml_variable::{AmlPackage, AmlVariable};
+use self::aml::{AmlParser, NameString};
 use self::device::ec::EmbeddedController;
 use self::device::AcpiDeviceManager;
 use self::event::gpe::GpeManager;

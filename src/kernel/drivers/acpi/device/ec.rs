@@ -2,8 +2,9 @@
 //! ACPI Embedded Controller Driver
 //!
 
+use super::super::aml::aml_variable::AmlVariable;
 use super::super::aml::AmlParser;
-use super::super::aml::{AmlVariable, ConstData, NameString};
+use super::super::aml::{ConstData, NameString};
 use super::super::device::AcpiDeviceManager;
 use super::super::event::gpe::GpeManager;
 
