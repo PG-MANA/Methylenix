@@ -22,6 +22,7 @@ enum NameStringData {
 
 #[derive(Clone, Eq, PartialEq)]
 enum NameStringFlag {
+    SingleRelativePath,
     RelativePath,
     AbsolutePath,
     NullName,
@@ -65,7 +66,7 @@ impl NameString {
             result.flag = NameStringFlag::AbsolutePath;
             c = stream.read_byte()?;
         } else {
-            result.flag = NameStringFlag::AbsolutePath;
+            result.flag = NameStringFlag::RelativePath;
             if let Some(c_s) = current_scope {
                 if !c_s.is_null_name() {
                     result = c_s.clone();
@@ -93,6 +94,9 @@ impl NameString {
             c = stream.read_byte()?;
             seg_count
         } else {
+            if may_be_null_name {
+                result.flag = NameStringFlag::SingleRelativePath;
+            }
             1
         };
         if let NameStringData::Normal((array, count)) = result.data {
@@ -231,8 +235,24 @@ impl NameString {
             array[0] = *e;
             Some(Self {
                 data: NameStringData::Normal((array, 1)),
-                flag: NameStringFlag::RelativePath,
+                flag: NameStringFlag::SingleRelativePath,
             })
+        } else {
+            None
+        }
+    }
+
+    pub const fn is_absolute_path(&self) -> bool {
+        matches!(self.flag, NameStringFlag::AbsolutePath)
+    }
+
+    pub const fn is_single_relative_path_name(&self) -> bool {
+        matches!(self.flag, NameStringFlag::SingleRelativePath)
+    }
+
+    pub fn get_single_name_path(&self) -> Option<Self> {
+        if self.flag == NameStringFlag::SingleRelativePath && self.len() != 0 {
+            self.get_element_as_name_string(self.len() - 1)
         } else {
             None
         }
@@ -290,7 +310,11 @@ impl NameString {
                     } else {
                         NameStringData::Normal((buffer, counter as u8))
                     },
-                    flag: NameStringFlag::RelativePath,
+                    flag: if counter == 1 {
+                        NameStringFlag::SingleRelativePath
+                    } else {
+                        NameStringFlag::RelativePath
+                    },
                 });
             }
             if s1 != s2 {
@@ -327,6 +351,9 @@ impl NameString {
             }
             index += 1;
         }
+        if self.flag == NameStringFlag::SingleRelativePath {
+            result.flag = NameStringFlag::SingleRelativePath;
+        }
         return result;
     }
 
@@ -349,6 +376,8 @@ impl NameString {
                 data: NameStringData::Normal((buf, array.len() as u8)),
                 flag: if is_absolute {
                     NameStringFlag::AbsolutePath
+                } else if array.len() == 1 {
+                    NameStringFlag::SingleRelativePath
                 } else {
                     NameStringFlag::RelativePath
                 },
@@ -406,6 +435,8 @@ impl NameString {
                 data: NameStringData::Normal((buf, index as u8)),
                 flag: if is_absolute {
                     NameStringFlag::AbsolutePath
+                } else if count == 1 {
+                    NameStringFlag::SingleRelativePath
                 } else {
                     NameStringFlag::RelativePath
                 },
