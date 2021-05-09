@@ -275,10 +275,6 @@ impl AmlVariable {
         access_align: usize,
         num_of_bits: usize,
     ) -> Result<Self, AmlError> {
-        if self.is_constant_data() {
-            return Ok(self.clone());
-        }
-
         match self {
             Self::Io((port, limit)) => {
                 let byte_offset = byte_index + (bit_index >> 3);
@@ -320,12 +316,22 @@ impl AmlVariable {
                     )?))
                 }
             }
-            Self::ConstData(_)
-            | Self::String(_)
-            | Self::Buffer(_)
-            | Self::Uninitialized
-            | Self::Method(_) => unreachable!(),
-
+            Self::ConstData(_) | Self::Uninitialized | Self::Method(_) => Ok(self.clone()),
+            Self::String(_) | Self::Buffer(_) | Self::Package(_) => {
+                let adjusted_byte_index = byte_index + (bit_index >> 3);
+                let adjusted_bit_index = bit_index - ((bit_index >> 3) << 3);
+                if adjusted_bit_index != 0 {
+                    pr_err!(
+                        "Reading String, Buffer, or Package with bit_index({}) is invalid.",
+                        adjusted_bit_index
+                    );
+                    Err(AmlError::InvalidOperation)
+                } else if adjusted_byte_index != 0 {
+                    self.read_buffer_with_index(adjusted_byte_index)
+                } else {
+                    Ok(self.clone())
+                }
+            }
             Self::BitField(b_f) => b_f.source.try_lock().or(Err(AmlError::MutexError))?._read(
                 byte_index,
                 bit_index + b_f.bit_index,
@@ -340,13 +346,6 @@ impl AmlVariable {
                 b_f.num_of_bytes.max(access_align),
                 b_f.num_of_bytes << 3,
             ),
-            Self::Package(_) => {
-                pr_err!(
-                    "Reading data from Package({:?}) without index is invalid.",
-                    self
-                );
-                Err(AmlError::InvalidOperation)
-            }
             Self::Reference((source, index)) => {
                 if let Some(index) = index {
                     source
