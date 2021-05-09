@@ -122,6 +122,26 @@ impl AmlVariable {
                     Err(AmlError::InvalidOperation)
                 }
             }
+            Self::EcIo((address, limit)) => {
+                let adjusted_byte_index = byte_index + (bit_index >> 3);
+                if (bit_index % 8) != 0 {
+                    pr_err!("Bit Index is not supported in Embedded Controller.");
+                    Err(AmlError::InvalidOperation)
+                } else if adjusted_byte_index >= *limit {
+                    pr_err!(
+                        "Offset({}) is out of Embedded Controller area(Address: {:#X}, Limit:{:#X}).",
+                        adjusted_byte_index,
+                        address,
+                        limit
+                    );
+                    Err(AmlError::InvalidOperation)
+                } else {
+                    write_embedded_controller(
+                        (*address + adjusted_byte_index) as u8,
+                        data.to_int()? as u8,
+                    )
+                }
+            }
             Self::Uninitialized => {
                 *self = data;
                 Ok(())
@@ -227,26 +247,6 @@ impl AmlVariable {
                     )
                 }
             }
-            Self::EcIo((address, limit)) => {
-                let adjusted_byte_index = byte_index + (bit_index >> 3);
-                if (bit_index % 8) != 0 {
-                    pr_err!("Bit Index is not supported in Embedded Controller.");
-                    Err(AmlError::InvalidOperation)
-                } else if adjusted_byte_index >= *limit {
-                    pr_err!(
-                        "Offset({}) is out of Embedded Controller area(Address: {:#X}, Limit:{:#X}).",
-                        adjusted_byte_index,
-                        address,
-                        limit
-                    );
-                    Err(AmlError::InvalidOperation)
-                } else {
-                    write_embedded_controller(
-                        (*address + adjusted_byte_index) as u8,
-                        data.to_int()? as u8,
-                    )
-                }
-            }
         }
     }
 
@@ -316,6 +316,25 @@ impl AmlVariable {
                     )?))
                 }
             }
+            Self::EcIo((address, limit)) => {
+                let adjusted_byte_index = byte_index + (bit_index >> 3);
+                if (bit_index % 8) != 0 {
+                    pr_err!("Bit Index is not supported in Embedded Controller.");
+                    Err(AmlError::InvalidOperation)
+                } else if adjusted_byte_index >= *limit {
+                    pr_err!(
+                        "Offset({}) is out of Embedded Controller area(Address: {:#X}, Limit:{:#X}).",
+                        adjusted_byte_index,
+                        address,
+                        limit
+                    );
+                    Err(AmlError::InvalidOperation)
+                } else {
+                    Ok(Self::ConstData(ConstData::Byte(read_embedded_controller(
+                        (*address + adjusted_byte_index) as u8,
+                    )?)))
+                }
+            }
             Self::ConstData(_) | Self::Uninitialized | Self::Method(_) => Ok(self.clone()),
             Self::String(_) | Self::Buffer(_) | Self::Package(_) => {
                 let adjusted_byte_index = byte_index + (bit_index >> 3);
@@ -360,25 +379,6 @@ impl AmlVariable {
                         access_align,
                         num_of_bits,
                     )
-                }
-            }
-            Self::EcIo((address, limit)) => {
-                let adjusted_byte_index = byte_index + (bit_index >> 3);
-                if (bit_index % 8) != 0 {
-                    pr_err!("Bit Index is not supported in Embedded Controller.");
-                    Err(AmlError::InvalidOperation)
-                } else if adjusted_byte_index >= *limit {
-                    pr_err!(
-                        "Offset({}) is out of Embedded Controller area(Address: {:#X}, Limit:{:#X}).",
-                        adjusted_byte_index,
-                        address,
-                        limit
-                    );
-                    Err(AmlError::InvalidOperation)
-                } else {
-                    Ok(Self::ConstData(ConstData::Byte(read_embedded_controller(
-                        (*address + adjusted_byte_index) as u8,
-                    )?)))
                 }
             }
         }
@@ -486,15 +486,15 @@ impl AmlVariable {
             Self::ConstData(c) => Ok(c.to_int()),
             Self::String(_) => Err(AmlError::InvalidType),
             Self::Buffer(_) => Err(AmlError::InvalidType),
-            Self::Io(_) => self.get_constant_data()?.to_int(),
-            Self::EcIo(_) => self.get_constant_data()?.to_int(),
-            Self::MMIo(_) => self.get_constant_data()?.to_int(),
-            Self::BitField(_) => self.get_constant_data()?.to_int(),
-            Self::ByteField(_) => self.get_constant_data()?.to_int(),
-            Self::Package(_) => self.get_constant_data()?.to_int(),
+            Self::Io(_)
+            | Self::MMIo(_)
+            | Self::EcIo(_)
+            | Self::BitField(_)
+            | Self::ByteField(_)
+            | Self::Package(_)
+            | Self::Reference(_) => self.get_constant_data()?.to_int(),
             Self::Uninitialized => Err(AmlError::InvalidType),
             Self::Method(_) => Err(AmlError::InvalidType),
-            Self::Reference(_) => self.get_constant_data()?.to_int(),
         }
     }
 
@@ -503,12 +503,12 @@ impl AmlVariable {
             Self::ConstData(c) => Ok(c.get_byte_size()),
             Self::String(s) => Ok(s.len()),
             Self::Buffer(b) => Ok(b.len()),
-            Self::Io(_) => self.get_constant_data()?.get_byte_size(),
-            Self::EcIo(_) => self.get_constant_data()?.get_byte_size(),
-            Self::MMIo(_) => self.get_constant_data()?.get_byte_size(),
-            Self::BitField(_) => self.get_constant_data()?.get_byte_size(),
-            Self::ByteField(_) => self.get_constant_data()?.get_byte_size(),
-            Self::Package(_) => self.get_constant_data()?.get_byte_size(),
+            Self::Io(_)
+            | Self::MMIo(_)
+            | Self::EcIo(_)
+            | Self::BitField(_)
+            | Self::ByteField(_)
+            | Self::Package(_) => self.get_constant_data()?.get_byte_size(),
             Self::Uninitialized => Err(AmlError::InvalidType),
             Self::Method(_) => Err(AmlError::InvalidType),
             Self::Reference((_, index)) => {
@@ -537,14 +537,14 @@ impl AmlVariable {
             Self::ConstData(c) => Ok(AmlPackage::ConstData(c)),
             Self::String(s) => Ok(AmlPackage::String(s)),
             Self::Buffer(b) => Ok(AmlPackage::Buffer(b)),
-            Self::Io(_) => self.get_constant_data()?.convert_to_aml_package(),
-            Self::EcIo(_) => self.get_constant_data()?.convert_to_aml_package(),
-            Self::MMIo(_) => self.get_constant_data()?.convert_to_aml_package(),
-            Self::BitField(_) => self.get_constant_data()?.convert_to_aml_package(),
-            Self::ByteField(_) => self.get_constant_data()?.convert_to_aml_package(),
+            Self::Io(_)
+            | Self::MMIo(_)
+            | Self::EcIo(_)
+            | Self::BitField(_)
+            | Self::ByteField(_)
+            | Self::Reference(_) => self.get_constant_data()?.convert_to_aml_package(),
             Self::Package(p) => Ok(AmlPackage::Package(p)),
             Self::Method(_) => Err(AmlError::InvalidType),
-            Self::Reference(_) => self.get_constant_data()?.convert_to_aml_package(),
         }
     }
 }

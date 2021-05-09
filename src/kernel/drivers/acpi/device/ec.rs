@@ -8,7 +8,7 @@ use super::super::aml::{ConstData, NameString};
 use super::super::device::AcpiDeviceManager;
 use super::super::event::gpe::GpeManager;
 
-use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte, write_memory};
+use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte};
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
