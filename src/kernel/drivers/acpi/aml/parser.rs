@@ -5,7 +5,7 @@
 use super::data_object::{ComputationalData, DataObject, DataRefObject};
 use super::eisa_id_to_dword;
 use super::name_object::NameString;
-use super::named_object::{Device, External, FieldElement, Method, NamedObject};
+use super::named_object::{Device, External, FieldElement, NamedObject};
 use super::namespace_modifier_object::NamespaceModifierObject;
 use super::term_object::{TermList, TermObj};
 use super::{AcpiInt, AmlError};

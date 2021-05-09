@@ -17,6 +17,7 @@ use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
@@ -169,6 +170,21 @@ pub fn init_acpi_later() -> bool {
         return false;
     }
     return true;
+}
+
+/// Init PciManager without scanning all bus
+///
+/// This function should be called before `init_acpi_later`.
+pub fn init_pci_early() -> bool {
+    let pci_manager = PciManager::new();
+    get_kernel_manager_cluster().pci_manager = pci_manager;
+    true
+}
+
+/// Init PciManager with scanning all bus
+pub fn init_pci_later() -> bool {
+    get_kernel_manager_cluster().pci_manager.scan_root_bus();
+    true
 }
 
 /// Init Timer
