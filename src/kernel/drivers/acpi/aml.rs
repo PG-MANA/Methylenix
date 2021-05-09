@@ -19,20 +19,18 @@ use self::aml_variable::AmlVariable;
 pub use self::data_object::{eisa_id_to_dword, ConstData, DataRefObject};
 use self::evaluator::Evaluator;
 pub use self::name_object::NameString;
-use self::named_object::Device;
-use self::namespace_modifier_object::NamespaceModifierObject;
+use self::named_object::{Device, NamedObject};
 use self::parser::{ContentObject, ParseHelper};
-use self::statement_opcode::StatementOpcode;
-use self::term_object::{TermList, TermObj};
+use self::term_object::TermList;
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 type AcpiInt = usize;
 
-pub struct AmlParser {
-    base_address: VAddress,
-    size: MSize,
-    parse_helper: Option<ParseHelper>,
+#[derive(Clone)]
+pub struct AmlInterpreter {
+    parse_helper: ParseHelper,
+    evaluator: Evaluator,
 }
 
 #[derive(Clone)]
@@ -103,45 +101,47 @@ macro_rules! ignore_invalid_type_error {
     };
 }
 
-impl AmlParser {
-    pub const fn new(address: VAddress, size: MSize) -> Self {
-        /* memory area must be accessible. */
-        Self {
-            base_address: address,
-            size,
-            parse_helper: None,
-        }
-    }
+impl AmlInterpreter {
+    pub fn setup(
+        dsdt_term_list_address: (VAddress, MSize),
+        ssdt_term_list_address_list: &[(VAddress, MSize)],
+    ) -> Option<Self> {
+        use alloc::vec::Vec;
 
-    pub fn init(&mut self) -> bool {
-        if self.parse_helper.is_some() {
-            return true;
-        }
-        let root_name = NameString::root();
-        let root_term_list = TermList::new(
-            AmlStream::new(self.base_address, self.size),
-            root_name.clone(),
+        let dsdt = TermList::new(
+            AmlStream::new(dsdt_term_list_address.0, dsdt_term_list_address.1),
+            NameString::root(),
         );
-        let mut parse_helper = ParseHelper::new(root_term_list.clone(), &root_name);
-        if let Err(e) = parse_helper.init() {
-            println!("Cannot Init ParseHelper:{:?}", e);
-            return false;
+        let mut ssdt_list = Vec::with_capacity(ssdt_term_list_address_list.len());
+        for s in ssdt_term_list_address_list {
+            ssdt_list.push(TermList::new(AmlStream::new(s.0, s.1), NameString::root()));
         }
-        self.parse_helper = Some(parse_helper);
-        return true;
-    }
-
-    fn get_content_object(&mut self, name: &NameString) -> Option<ContentObject> {
-        if self.parse_helper.is_none() {
+        let mut parse_helper = ParseHelper::new(dsdt, ssdt_list, &NameString::root());
+        if let Err(e) = parse_helper.init() {
+            pr_err!("Cannot initialize ParseHelper: {:?}", e);
             return None;
         }
-        match self
-            .parse_helper
-            .as_mut()
-            .unwrap()
-            .search_object_from_list_with_parsing_term_list(name)
-        {
-            Ok(Some(d)) => Some(d),
+        let evaluator = Evaluator::new(parse_helper.clone());
+        Some(Self {
+            parse_helper,
+            evaluator,
+        })
+    }
+
+    /* DataRefObject => AmlVariable */
+    pub fn get_data_object(&mut self, name: &NameString) -> Option<DataRefObject> {
+        match self.parse_helper.search_object(name) {
+            Ok(Some(d)) => match d {
+                ContentObject::NamedObject(n) => {
+                    pr_err!("Expected DataRefObject, but found {:?}", n);
+                    None
+                }
+                ContentObject::DataRefObject(d) => Some(d),
+                ContentObject::Scope(s) => {
+                    pr_err!("Expected DataRefObject, but found Scope({})", s);
+                    None
+                }
+            },
             Ok(None) => None,
             Err(e) => {
                 pr_err!("Cannot parse AML: {:?}", e);
@@ -150,33 +150,12 @@ impl AmlParser {
         }
     }
 
-    pub fn get_data_ref_object(&mut self, name: &NameString) -> Option<DataRefObject> {
-        if let Some(c) = self.get_content_object(name) {
-            match c {
-                ContentObject::NamedObject(n) => {
-                    pr_err!("Expected DataRefObject, but found NamedObject: {:?}", n);
-                    None
-                }
-                ContentObject::DataRefObject(d) => Some(d),
-                ContentObject::Scope(s) => {
-                    pr_err!("Expected DataRefObject, but found Scope: {:?}", s);
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn get_device(&mut self, hid: &[u8; 7]) -> Option<Device> {
-        if self.parse_helper.is_none() {
-            return None;
-        }
-        match self.parse_helper.as_mut().unwrap().move_into_device(hid) {
-            Ok(d) => d,
+    pub fn move_into_device(&mut self, hid: &[u8; 7]) -> Result<Option<Device>, ()> {
+        match self.parse_helper.move_into_device(hid) {
+            Ok(d) => Ok(d),
             Err(e) => {
                 pr_err!("Parsing AML was failed: {:?}", e);
-                None
+                Err(())
             }
         }
     }
@@ -185,203 +164,45 @@ impl AmlParser {
         &mut self,
         method_name: &NameString,
         arguments: &[AmlVariable],
-    ) -> Option<AmlVariable> {
-        if self.parse_helper.is_none() {
-            return None;
-        }
+    ) -> Result<Option<AmlVariable>, ()> {
         if method_name.is_null_name() {
-            pr_warn!("NullName");
-            return None;
+            pr_warn!("method_name is NullName.");
+            return Ok(None);
         }
-        let mut method_parser = self.parse_helper.as_ref().unwrap().clone();
-        match method_parser.setup_for_method_evaluation(method_name, None) {
-            Ok(m) => {
-                let mut evaluator = Evaluator::new(method_parser);
-                match evaluator.eval_method(&m, arguments) {
-                    Ok(v) => Some(v),
-                    Err(e) => {
-                        pr_err!("AML Evaluator Error: {:?}", e);
-                        None
-                    }
-                }
-            }
-            Err(e) => {
-                pr_err!("AML Parser Error: {:?}", e);
-                None
-            }
-        }
-    }
-
-    pub fn get_parse_helper(&mut self) -> &mut ParseHelper {
-        self.parse_helper.as_mut().unwrap()
-    }
-
-    #[allow(dead_code)]
-    pub fn debug(&mut self) {
-        if self.parse_helper.is_none() {
-            return;
-        }
-        println!("AML Size: {:#X}", self.size.to_usize());
-        let root_name = NameString::root();
-        let root_term_list = TermList::new(
-            AmlStream::new(self.base_address, self.size),
-            root_name.clone(),
-        );
-        match Self::debug_term_list(root_term_list, &mut self.parse_helper.as_mut().unwrap()) {
-            Ok(_) => {
-                println!("AML End");
-            }
-            Err(e) => {
-                println!("ParseError: {:?}", e);
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    fn debug_term_list(
-        mut term_list: TermList,
-        parse_helper: &mut ParseHelper,
-    ) -> Result<(), AmlError> {
-        while let Some(term_obj) = term_list.next(parse_helper)? {
-            match term_obj {
-                TermObj::NamespaceModifierObj(n) => match n {
-                    NamespaceModifierObject::DefAlias(d_a) => {
-                        println!("DefAlias({} => {})", d_a.get_name(), d_a.get_source());
-                    }
-                    NamespaceModifierObject::DefName(d_n) => {
-                        println!(
-                            "DefName({}) => {:?}",
-                            d_n.get_name(),
-                            d_n.get_data_ref_object()
-                        );
-                    }
-                    NamespaceModifierObject::DefScope(d_s) => {
-                        println!("DefScope({}) => {{", d_s.get_name());
-                        parse_helper.move_into_term_list(d_s.get_term_list().clone())?;
-                        if let Err(e) =
-                            Self::debug_term_list(d_s.get_term_list().clone(), parse_helper)
-                        {
-                            pr_err!(
-                                "Cannot parse {} Error: {:?}. Continue...",
-                                d_s.get_name(),
-                                e
-                            );
+        match self.parse_helper.move_into_object(method_name, None) {
+            Ok(m) => match m {
+                ContentObject::NamedObject(n) => match n {
+                    NamedObject::DefMethod(m) => {
+                        self.evaluator.set_parse_helper(self.parse_helper.clone());
+                        match self.evaluator.eval_method(&m, arguments) {
+                            Ok(v) => Ok(Some(v)),
+                            Err(e) => {
+                                pr_err!("AML Evaluator Error: {:?}", e);
+                                Err(())
+                            }
                         }
-                        parse_helper.move_out_from_current_term_list()?;
-                        println!("}}");
+                    }
+                    NamedObject::DefExternal(_) => {
+                        unimplemented!()
+                    }
+                    _ => {
+                        pr_err!("Expected a method, but found {:?}", n);
+                        Err(())
                     }
                 },
-                TermObj::NamedObj(n_o) => {
-                    println!("{:?}", n_o);
-                    if let Some(mut field_list) = n_o.get_field_list() {
-                        println!(
-                            "FieldList({}) => {{",
-                            n_o.get_name().unwrap_or(term_list.get_scope_name())
-                        );
-                        while let Some(field_element) = field_list.next()? {
-                            println!("{:?}", field_element);
-                        }
-                        println!("}}");
-                    } else if let Some(object_term_list) = n_o.get_term_list() {
-                        let name = n_o.get_name().unwrap();
-                        println!("TermList({}) => {{", name);
-                        parse_helper.move_into_term_list(object_term_list.clone())?;
-                        if let Err(e) = Self::debug_term_list(object_term_list, parse_helper) {
-                            pr_err!("Cannot parse {} Error: {:?}. Continue...", name, e);
-                        }
-                        parse_helper.move_out_from_current_term_list()?;
-                        println!("}}");
-                    }
+                ContentObject::DataRefObject(_) => {
+                    unimplemented!()
                 }
-                TermObj::StatementOpcode(s_o) => {
-                    match s_o {
-                        StatementOpcode::DefBreak => {
-                            println!("break;");
-                        }
-                        StatementOpcode::DefBreakPoint => {
-                            println!("(BreakPoint);");
-                        }
-                        StatementOpcode::DefContinue => {
-                            println!("continue;");
-                        }
-                        StatementOpcode::DefFatal(f) => {
-                            println!("{:?}", f);
-                        }
-                        StatementOpcode::DefIfElse(i_e) => {
-                            println!("if({:?}) {{", i_e.get_predicate());
-                            parse_helper
-                                .move_into_term_list(i_e.get_if_true_term_list().clone())?;
-                            if let Err(e) = Self::debug_term_list(
-                                i_e.get_if_true_term_list().clone(),
-                                parse_helper,
-                            ) {
-                                pr_err!(
-                                    "Cannot parse if statement of {} Error: {:?}. Continue...",
-                                    term_list.get_scope_name(),
-                                    e
-                                );
-                            }
-                            parse_helper.move_out_from_current_term_list()?;
-
-                            if let Some(else_term_list) = i_e.get_if_false_term_list() {
-                                println!("}} else {{");
-                                parse_helper.move_into_term_list(else_term_list.clone())?;
-                                if let Err(e) =
-                                    Self::debug_term_list(else_term_list.clone(), parse_helper)
-                                {
-                                    pr_err!("Cannot parse else statement of {} Error: {:?}. Continue...",term_list.get_scope_name(),e);
-                                }
-                                parse_helper.move_out_from_current_term_list()?;
-                            }
-                            println!("}}");
-                        }
-                        StatementOpcode::DefNoop => {
-                            println!("(Noop);")
-                        }
-                        StatementOpcode::DefNotify(notify) => {
-                            println!("{:?}", notify);
-                        }
-                        StatementOpcode::DefRelease(release) => {
-                            println!("Release(Mutex:{:?});", release);
-                        }
-                        StatementOpcode::DefReset(reset) => {
-                            println!("Reset({:?})", reset)
-                        }
-                        StatementOpcode::DefReturn(return_value) => {
-                            println!("return {:?};", return_value);
-                        }
-                        StatementOpcode::DefSignal(signal) => {
-                            println!("Signal({:?})", signal);
-                        }
-                        StatementOpcode::DefSleep(sleep_time) => {
-                            println!("Sleep(microsecond:{:?});", sleep_time);
-                        }
-                        StatementOpcode::DefStall(u_sec_time) => {
-                            println!("Stall(millisecond:{:?})", u_sec_time);
-                        }
-                        StatementOpcode::DefWhile(w) => {
-                            println!("while({:?}) {{", w.get_predicate());
-                            parse_helper.move_into_term_list(w.get_term_list().clone())?;
-                            if let Err(e) =
-                                Self::debug_term_list(w.get_term_list().clone(), parse_helper)
-                            {
-                                pr_err!(
-                                    "Cannot parse while statement of {} Error: {:?}. Continue...",
-                                    term_list.get_scope_name(),
-                                    e
-                                );
-                            }
-                            parse_helper.move_out_from_current_term_list()?;
-                            println!("}}");
-                        }
-                    }
+                ContentObject::Scope(s) => {
+                    pr_err!("Unexpected Scope({})", s);
+                    Err(())
                 }
-                TermObj::ExpressionOpcode(e_o) => {
-                    println!("{:?}", e_o);
-                }
+            },
+            Err(e) => {
+                pr_err!("Parsing AML was failed: {:?}", e);
+                Err(())
             }
         }
-        Ok(())
     }
 }
 
