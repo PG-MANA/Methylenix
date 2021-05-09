@@ -684,11 +684,13 @@ impl Evaluator {
         current_scope: &NameString,
     ) -> Result<bool, AmlError> {
         let data = self.eval_term_arg(e, local_variables, argument_variables, current_scope)?;
-        if let Ok(boolean) = data.to_int() {
-            Ok(boolean != 0)
-        } else {
-            pr_err!("Expected Boolean, but found {:?}.", data);
-            Err(AmlError::InvalidType)
+        match data.to_int() {
+            Ok(val) => Ok(val != 0),
+            Err(err) => {
+                pr_err!("Expected Boolean, but found {:?}({:?}).", data, err);
+                pr_info!("{:?}", e);
+                Err(AmlError::InvalidType)
+            }
         }
     }
 
@@ -705,12 +707,12 @@ impl Evaluator {
             argument_variables,
             current_scope,
         )?;
-        if data.to_int().is_ok() {
-            Ok(data)
-        } else {
-            pr_err!("Expected Integer, but found {:?}.", data);
+        if let Err(err) = data.to_int() {
+            pr_err!("Expected Integer, but found {:?}({:?}).", data, err);
             pr_info!("{:?}", e);
             Err(AmlError::InvalidType)
+        } else {
+            Ok(data)
         }
     }
 
