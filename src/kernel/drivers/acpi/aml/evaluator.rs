@@ -28,6 +28,7 @@ use alloc::vec::Vec;
 type LocalVariables = [Arc<Mutex<AmlVariable>>; Evaluator::NUMBER_OF_LOCAL_VARIABLES];
 type ArgumentVariables = [Arc<Mutex<AmlVariable>>; Evaluator::NUMBER_OF_ARGUMENT_VARIABLES];
 
+#[derive(Clone)]
 pub struct Evaluator {
     parse_helper: ParseHelper,
     variables: Vec<(NameString, Arc<Mutex<AmlVariable>>)>,
@@ -43,6 +44,10 @@ impl Evaluator {
             parse_helper,
             variables: Vec::with_capacity(64),
         }
+    }
+
+    pub fn set_parse_helper(&mut self, parse_helper: ParseHelper) {
+        self.parse_helper = parse_helper;
     }
 
     fn init_local_variables_and_argument_variables() -> (LocalVariables, ArgumentVariables) {
@@ -74,9 +79,7 @@ impl Evaluator {
         argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
-        let object = self
-            .parse_helper
-            .search_object_from_list_with_parsing_term_list(name)?;
+        let object = self.parse_helper.search_object(name)?;
         if object.is_none() {
             pr_err!("Cannot find {}.", name);
             if name.len() > 1 {
@@ -1723,7 +1726,7 @@ impl Evaluator {
 
         let original_parse_helper = self.parse_helper.clone();
         self.parse_helper
-            .setup_for_method_evaluation(method.get_name(), None)?;
+            .move_into_object(method.get_name(), None)?;
 
         let result = self._eval_term_list(
             method.get_term_list().clone(),

@@ -3,12 +3,12 @@
 //!
 
 use super::super::aml::aml_variable::AmlVariable;
-use super::super::aml::AmlParser;
+use super::super::aml::AmlInterpreter;
 use super::super::aml::{ConstData, NameString};
 use super::super::device::AcpiDeviceManager;
 use super::super::event::gpe::GpeManager;
 
-use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte};
+use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte, write_memory};
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -43,20 +43,20 @@ impl EmbeddedController {
         }
     }
 
-    pub fn setup(parser: &mut AmlParser, device_manager: &mut AcpiDeviceManager) {
-        let ec_device = if let Some(d) = parser.get_device(&Self::HID) {
+    pub fn setup(interpreter: &mut AmlInterpreter, device_manager: &mut AcpiDeviceManager) {
+        let ec_device = if let Ok(Some(d)) = interpreter.move_into_device(&Self::HID) {
             d
         } else {
             return;
         };
         pr_info!("ACPI Embedded Controller: {}", ec_device.get_name());
         device_manager.ec = Some(
-            match parser.evaluate_method(
+            match interpreter.evaluate_method(
                 &NameString::from_array(&[*b"_CRS"], false)
                     .get_full_name_path(ec_device.get_name()),
                 &[],
             ) {
-                Some(AmlVariable::Buffer(v)) => {
+                Ok(Some(AmlVariable::Buffer(v))) => {
                     if v.len() < 8 * 2 {
                         pr_err!("Invalid Resource Descriptors(Size: {})", v.len());
                         return;
@@ -74,22 +74,57 @@ impl EmbeddedController {
                     pr_info!("ACPI EC: EC_SC: {:#X}, EC_DATA: {:#X}", ec_sc, ec_data);
                     Self { ec_sc, ec_data }
                 }
-                Some(d) => {
+                Ok(Some(d)) => {
                     pr_err!("Unknown Data Type: {:?}", d);
                     return;
                 }
-                None => return,
+                Ok(None) => {
+                    pr_err!("Invalid Method.");
+                    return;
+                }
+                Err(_) => return,
             },
         );
+        if let Ok(Some(result)) = interpreter.evaluate_method(
+            &NameString::from_array(&[*b"_STA"], false).get_full_name_path(ec_device.get_name()),
+            &[],
+        ) {
+            match result.to_int() {
+                Ok(t) => {
+                    if t == 0 {
+                        pr_err!("Embedded Controller is disabled.");
+                        device_manager.ec = None;
+                        return;
+                    }
+                }
+                Err(e) => {
+                    pr_err!("Embedded Controller is disabled(_STA: {:?}).", e);
+                    device_manager.ec = None;
+                    return;
+                }
+            }
+        } else {
+            pr_err!("Embedded Controller is disabled.");
+            device_manager.ec = None;
+            return;
+        }
 
         let arg = [
             AmlVariable::ConstData(ConstData::Byte(3)),
             AmlVariable::ConstData(ConstData::Byte(1)),
         ];
-        parser.evaluate_method(
-            &NameString::from_array(&[*b"_REG"], false).get_full_name_path(ec_device.get_name()),
-            &arg,
-        );
+        if interpreter
+            .evaluate_method(
+                &NameString::from_array(&[*b"_REG"], false)
+                    .get_full_name_path(ec_device.get_name()),
+                &arg,
+            )
+            .is_err()
+        {
+            pr_err!("Evaluation _REG was failed.");
+            device_manager.ec = None;
+            return;
+        }
         let ec = device_manager.ec.as_ref().unwrap();
         while ec.is_sci_pending() {
             pr_info!("EC Query: {:#X}", ec.read_query());

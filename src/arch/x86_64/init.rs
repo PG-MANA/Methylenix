@@ -148,6 +148,10 @@ pub fn init_acpi_later() -> bool {
         pr_info!("ACPI is not available.");
         return true;
     }
+    if !acpi_manager.setup_aml_interpreter() {
+        pr_err!("Cannot setup ACPI AML Interpreter.");
+        return false;
+    }
     if !super::device::acpi::setup_interrupt(&acpi_manager) {
         pr_err!("Cannot setup ACPI interrupt.");
         return false;
