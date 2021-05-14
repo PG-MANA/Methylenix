@@ -269,7 +269,7 @@ impl Evaluator {
                         OperationRegionType::EmbeddedControl => AmlVariable::EcIo((offset, length)),
                         _ => {
                             pr_err!("Unsupported Type: {:?}", region_type);
-                            return Err(AmlError::UnsupportedType);
+                            Err(AmlError::UnsupportedType)?
                         }
                     }));
                     self.variables.push((name.clone(), variable.clone()));
@@ -688,7 +688,6 @@ impl Evaluator {
             Ok(val) => Ok(val != 0),
             Err(err) => {
                 pr_err!("Expected Boolean, but found {:?}({:?}).", data, err);
-                pr_info!("{:?}", e);
                 Err(AmlError::InvalidType)
             }
         }
@@ -701,15 +700,9 @@ impl Evaluator {
         argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
-        let data = self.eval_term_arg(
-            e.clone(),
-            local_variables,
-            argument_variables,
-            current_scope,
-        )?;
+        let data = self.eval_term_arg(e, local_variables, argument_variables, current_scope)?;
         if let Err(err) = data.to_int() {
             pr_err!("Expected Integer, but found {:?}({:?}).", data, err);
-            pr_info!("{:?}", e);
             Err(AmlError::InvalidType)
         } else {
             Ok(data)
@@ -1386,13 +1379,17 @@ impl Evaluator {
                 )?;
                 let locked_obj = &*obj.try_lock().or(Err(AmlError::MutexError))?;
                 match locked_obj {
-                    AmlVariable::Method(method) => Ok(self.eval_method_with_method_invocation(
-                        &method_invocation,
-                        method,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?),
+                    AmlVariable::Method(method) => {
+                        let method = method.clone();
+                        drop(locked_obj);
+                        Ok(self.eval_method_with_method_invocation(
+                            &method_invocation,
+                            &method,
+                            local_variables,
+                            argument_variables,
+                            current_scope,
+                        )?)
+                    }
 
                     _ => Ok(AmlVariable::Reference((obj, None))),
                 }
@@ -1641,6 +1638,66 @@ impl Evaluator {
         return Ok(None);
     }
 
+    /// Fork parse_helper and evaluate method
+    fn run_method(
+        &mut self,
+        method: &Method,
+        arguments: &[AmlVariable],
+        search_scope: Option<&NameString>,
+    ) -> Result<AmlVariable, AmlError> {
+        let (mut local_variables, mut argument_variables) =
+            Self::init_local_variables_and_argument_variables();
+
+        if method.get_argument_count() != arguments.len() {
+            pr_err!(
+                "Expected {} arguments, but found {} arguments.",
+                method.get_argument_count(),
+                arguments.len()
+            );
+            return Err(AmlError::InvalidOperation);
+        }
+
+        for (index, arg) in arguments.iter().enumerate() {
+            argument_variables[index] = Arc::new(Mutex::new(arg.clone()));
+        }
+
+        let original_parse_helper = self.parse_helper.clone();
+        self.parse_helper
+            .move_into_object(method.get_name(), None, search_scope)?;
+
+        let result = self._eval_term_list(
+            method.get_term_list().clone(),
+            &mut local_variables,
+            &mut argument_variables,
+            method.get_name(),
+        );
+
+        match result {
+            Err(e) => {
+                self.parse_helper = original_parse_helper;
+                Err(e)
+            }
+            Ok(Some(v)) => {
+                let return_value = match v {
+                    StatementOpcode::DefFatal(_) => Err(AmlError::InvalidOperation),
+                    StatementOpcode::DefReturn(return_value) => Ok(self.eval_term_arg(
+                        return_value,
+                        &mut local_variables,
+                        &mut argument_variables,
+                        method.get_name(),
+                    )?),
+                    _ => Err(AmlError::InvalidOperation),
+                };
+                self.parse_helper = original_parse_helper;
+                return_value
+            }
+            Ok(None) => {
+                self.parse_helper = original_parse_helper;
+                Ok(AmlVariable::Uninitialized)
+            }
+        }
+    }
+
     pub fn eval_method(
         &mut self,
         method: &Method,
@@ -1728,7 +1785,7 @@ impl Evaluator {
 
         let original_parse_helper = self.parse_helper.clone();
         self.parse_helper
-            .move_into_object(method.get_name(), None)?;
+            .move_into_object(method.get_name(), None, Some(current_scope))?;
 
         let result = self._eval_term_list(
             method.get_term_list().clone(),
