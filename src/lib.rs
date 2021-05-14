@@ -1,7 +1,6 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 #![feature(asm)]
-#![feature(const_fn)]
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(const_fn_trait_bound)]
 #![feature(const_maybe_uninit_as_ptr)]
