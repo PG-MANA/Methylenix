@@ -8,8 +8,8 @@ use super::named_object::Method;
 use super::{AcpiInt, AmlError};
 
 use crate::arch::target_arch::device::acpi::{
-    read_embedded_controller, read_io, read_memory, write_embedded_controller, write_io,
-    write_memory,
+    read_embedded_controller, read_io, read_memory, read_pci, write_embedded_controller, write_io,
+    write_memory, write_pci,
 };
 
 use crate::kernel::memory_manager::data_type::PAddress;
@@ -18,6 +18,15 @@ use crate::kernel::sync::spin_lock::Mutex;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+
+#[derive(Debug, Clone)]
+pub struct AmlPciConfig {
+    pub bus: u16,
+    pub device: u16,
+    pub function: u16,
+    pub offset: usize,
+    pub length: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct AmlBitFiled {
@@ -54,6 +63,7 @@ pub enum AmlVariable {
     Io((usize, usize)),
     MMIo((usize, usize)),
     EcIo((usize, usize)),
+    PciConfig(AmlPciConfig),
     BitField(AmlBitFiled),
     ByteField(AmlByteFiled),
     Package(Vec<AmlPackage>),
@@ -140,6 +150,37 @@ impl AmlVariable {
                         (*address + adjusted_byte_index) as u8,
                         data.to_int()? as u8,
                     )
+                }
+            }
+            Self::PciConfig(pci_config) => {
+                if let AmlVariable::ConstData(c) = data {
+                    let byte_offset = byte_index + (bit_index >> 3);
+                    let adjusted_bit_index = bit_index % 8;
+                    if byte_offset > pci_config.length {
+                        pr_err!(
+                            "Offset({}) is out of PciConfig Area({:?}).",
+                            byte_offset,
+                            pci_config
+                        );
+                        Err(AmlError::InvalidOperation)
+                    } else {
+                        write_pci(
+                            pci_config.clone(),
+                            byte_offset,
+                            adjusted_bit_index,
+                            access_align,
+                            num_of_bits,
+                            c,
+                        )?;
+                        Ok(())
+                    }
+                } else {
+                    pr_err!(
+                        "Writing {:?} into Pci_Config({:?}) is invalid.",
+                        data,
+                        pci_config
+                    );
+                    Err(AmlError::InvalidOperation)
                 }
             }
             Self::Uninitialized => {
@@ -257,6 +298,7 @@ impl AmlVariable {
             Self::Buffer(_) => true,
             Self::Io(_) => false,
             Self::MMIo(_) => false,
+            Self::PciConfig(_) => false,
             Self::BitField(_) => false,
             Self::ByteField(_) => false,
             Self::Package(_) => true,
@@ -335,6 +377,26 @@ impl AmlVariable {
                     )?)))
                 }
             }
+            Self::PciConfig(pci_config) => {
+                let byte_offset = byte_index + (bit_index >> 3);
+                let adjusted_bit_index = bit_index % 8;
+                if byte_offset > pci_config.length {
+                    pr_err!(
+                        "Offset({}) is out of PciConfig Area({:?}).",
+                        byte_offset,
+                        pci_config
+                    );
+                    Err(AmlError::InvalidOperation)
+                } else {
+                    Ok(Self::ConstData(read_pci(
+                        pci_config.clone(),
+                        byte_offset,
+                        adjusted_bit_index,
+                        access_align,
+                        num_of_bits,
+                    )?))
+                }
+            }
             Self::ConstData(_) | Self::Uninitialized | Self::Method(_) => Ok(self.clone()),
             Self::String(_) | Self::Buffer(_) | Self::Package(_) => {
                 let adjusted_byte_index = byte_index + (bit_index >> 3);
@@ -394,6 +456,7 @@ impl AmlVariable {
             Self::Io(_)
             | Self::MMIo(_)
             | Self::EcIo(_)
+            | Self::PciConfig(_)
             | Self::BitField(_)
             | Self::ByteField(_)
             | Self::Reference(_) => self._read(0, 0, false, 0, 0),
@@ -489,6 +552,7 @@ impl AmlVariable {
             Self::Io(_)
             | Self::MMIo(_)
             | Self::EcIo(_)
+            | Self::PciConfig(_)
             | Self::BitField(_)
             | Self::ByteField(_)
             | Self::Package(_)
@@ -506,6 +570,7 @@ impl AmlVariable {
             Self::Io(_)
             | Self::MMIo(_)
             | Self::EcIo(_)
+            | Self::PciConfig(_)
             | Self::BitField(_)
             | Self::ByteField(_)
             | Self::Package(_) => self.get_constant_data()?.get_byte_size(),
@@ -540,6 +605,7 @@ impl AmlVariable {
             Self::Io(_)
             | Self::MMIo(_)
             | Self::EcIo(_)
+            | Self::PciConfig(_)
             | Self::BitField(_)
             | Self::ByteField(_)
             | Self::Reference(_) => self.get_constant_data()?.convert_to_aml_package(),

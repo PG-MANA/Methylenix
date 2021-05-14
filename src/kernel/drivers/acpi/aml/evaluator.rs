@@ -2,7 +2,7 @@
 //! AML Evaluator
 //!
 
-use super::aml_variable::{AmlBitFiled, AmlByteFiled, AmlPackage, AmlVariable};
+use super::aml_variable::{AmlBitFiled, AmlByteFiled, AmlPackage, AmlPciConfig, AmlVariable};
 use super::data_object::{
     parse_integer_from_buffer, ComputationalData, ConstData, DataObject, PackageElement,
 };
@@ -267,6 +267,97 @@ impl Evaluator {
                         OperationRegionType::SystemMemory => (AmlVariable::MMIo((offset, length))),
                         OperationRegionType::SystemIO => (AmlVariable::MMIo((offset, length))),
                         OperationRegionType::EmbeddedControl => AmlVariable::EcIo((offset, length)),
+                        OperationRegionType::PciConfig => {
+                            let mut operation_region_scope = operation_region.get_name().clone();
+                            operation_region_scope.up_to_parent_name_space();
+                            let bbn_name = NameString::from_array(&[*b"_BBN"], false)
+                                .get_full_name_path(&operation_region_scope);
+                            let locked_bbn_name = self.get_aml_variable(
+                                &bbn_name,
+                                local_variables,
+                                argument_variables,
+                                current_scope,
+                            )?;
+                            let unlocked_bbn =
+                                locked_bbn_name.try_lock().or(Err(AmlError::MutexError))?;
+                            let bus = (match &*unlocked_bbn {
+                                AmlVariable::ConstData(c) => c.to_int(),
+                                AmlVariable::Method(m) => {
+                                    let method = m.clone();
+                                    drop(unlocked_bbn);
+                                    let eval_result =
+                                        self.run_method(&method, &[], Some(current_scope))?;
+                                    match eval_result.to_int() {
+                                        Ok(b) => b,
+                                        Err(_) => {
+                                            pr_err!(
+                                                "Expected bus number, but found {:?}",
+                                                eval_result
+                                            );
+                                            Err(AmlError::InvalidType)?
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    pr_err!("Expected bus number, but found {:?}", *unlocked_bbn);
+                                    Err(AmlError::InvalidType)?
+                                }
+                            } & 0xFF) as u16;
+                            let adr_name = NameString::from_array(&[*b"_ADR"], false)
+                                .get_full_name_path(&operation_region_scope);
+                            let locked_adr_name = self.get_aml_variable(
+                                &adr_name,
+                                local_variables,
+                                argument_variables,
+                                current_scope,
+                            )?;
+                            let unlocked_adr =
+                                locked_adr_name.try_lock().or(Err(AmlError::MutexError))?;
+                            let addr = match &*unlocked_adr {
+                                AmlVariable::ConstData(c) => c.to_int(),
+                                AmlVariable::Method(m) => {
+                                    let method = m.clone();
+                                    drop(unlocked_adr);
+                                    let eval_result =
+                                        self.run_method(&method, &[], Some(current_scope))?;
+                                    match eval_result.to_int() {
+                                        Ok(b) => b,
+                                        Err(_) => {
+                                            pr_err!(
+                                                "Expected device/function number, but found {:?}",
+                                                eval_result
+                                            );
+                                            Err(AmlError::InvalidType)?
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    pr_err!(
+                                        "Expected device/function number, but found {:?}",
+                                        *unlocked_adr
+                                    );
+                                    Err(AmlError::InvalidType)?
+                                }
+                            };
+                            let device = ((addr >> 16) & 0xFFFF) as u16;
+                            let function = (addr & 0xFFFF) as u16;
+                            pr_info!(
+                                "{}=>bus:{},device:{},function:{},offset:{},length:{}",
+                                operation_region.get_name(),
+                                bus,
+                                device,
+                                function,
+                                offset,
+                                length
+                            );
+                            AmlVariable::PciConfig(AmlPciConfig {
+                                bus,
+                                device,
+                                function,
+                                offset,
+                                length,
+                            })
+                        }
                         _ => {
                             pr_err!("Unsupported Type: {:?}", region_type);
                             Err(AmlError::UnsupportedType)?
@@ -1056,8 +1147,9 @@ impl Evaluator {
                     AmlVariable::String(s) => s.len(),
                     AmlVariable::Buffer(b) => b.len(),
                     AmlVariable::Io(_) => Err(AmlError::InvalidOperation)?,
-                    AmlVariable::EcIo(_) => Err(AmlError::InvalidOperation)?,
                     AmlVariable::MMIo(_) => Err(AmlError::InvalidOperation)?,
+                    AmlVariable::EcIo(_) => Err(AmlError::InvalidOperation)?,
+                    AmlVariable::PciConfig(_) => Err(AmlError::InvalidOperation)?,
                     AmlVariable::BitField(b) => b.access_align.max(b.num_of_bits >> 3),
                     AmlVariable::ByteField(b) => b.num_of_bytes,
                     AmlVariable::Package(p) => p.len(), /* OK? */

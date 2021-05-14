@@ -15,6 +15,7 @@ mod parser;
 mod statement_opcode;
 mod term_object;
 
+pub use self::aml_variable::AmlPciConfig;
 use self::aml_variable::AmlVariable;
 pub use self::data_object::{eisa_id_to_dword, ConstData, DataRefObject};
 use self::evaluator::Evaluator;
@@ -169,12 +170,12 @@ impl AmlInterpreter {
             pr_warn!("method_name is NullName.");
             return Ok(None);
         }
-        match self.parse_helper.move_into_object(method_name, None) {
+        match self.parse_helper.move_into_object(method_name, None, None) {
             Ok(m) => match m {
                 ContentObject::NamedObject(n) => match n {
-                    NamedObject::DefMethod(m) => {
+                    NamedObject::DefMethod(method) => {
                         self.evaluator.set_parse_helper(self.parse_helper.clone());
-                        match self.evaluator.eval_method(&m, arguments) {
+                        match self.evaluator.eval_method(&method, arguments) {
                             Ok(v) => Ok(Some(v)),
                             Err(e) => {
                                 pr_err!("AML Evaluator Error: {:?}", e);
