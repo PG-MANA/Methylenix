@@ -390,6 +390,7 @@ impl AcpiManager {
                                 .get_full_name_path(&link_device.get_full_name_path(
                                     &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
                                 )); /* \\_SB.(DEVICE)._CRS */
+                            let mut interpreter = self.aml_interpreter.as_ref().unwrap().clone();
                             let link_device_evaluation_result =
                                 interpreter.evaluate_method(&crs_function_name, &[]);
                             if link_device_evaluation_result.is_err() {
