@@ -737,8 +737,39 @@ impl ParseHelper {
             return Err(AmlError::InvalidOperation);
         }
 
-        /* Search from root_term_list including SSDT */
+        /* Search from Root Object List */
         self.current_object_list = self.root_object_list.clone();
+
+        if !should_enter_object {
+            match self._search_object_from_list_with_parsing_term_list(
+                self.current_object_list.clone(),
+                name,
+                true,
+                false,
+            ) {
+                Ok(Some(o_i)) => {
+                    self.current_object_list = current_scope_backup;
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    if !should_enter_object {
+                        while let Some(e) = term_list_hierarchy_back_up.pop() {
+                            self.term_list_hierarchy.push(e);
+                        }
+                    }
+                    return Ok(Some(o_i));
+                }
+                Err(AmlError::NestedSearch) | Ok(None) => {}
+                Err(e) => {
+                    self.current_object_list = current_scope_backup;
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    while let Some(e) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(e);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+
+        /* Search from root_term_list including SSDT */
         match self.parse_term_list_recursive(
             name,
             self.current_root_term_list.clone(),
