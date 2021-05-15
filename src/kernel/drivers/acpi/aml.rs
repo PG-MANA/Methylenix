@@ -15,8 +15,7 @@ mod parser;
 mod statement_opcode;
 mod term_object;
 
-pub use self::aml_variable::AmlPciConfig;
-use self::aml_variable::AmlVariable;
+pub use self::aml_variable::{AmlPciConfig, AmlVariable};
 pub use self::data_object::{eisa_id_to_dword, ConstData, DataRefObject};
 use self::evaluator::Evaluator;
 pub use self::name_object::NameString;

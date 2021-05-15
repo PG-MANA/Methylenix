@@ -56,7 +56,7 @@ pub enum AmlPackage {
     Package(Vec<AmlPackage>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum AmlVariable {
     Uninitialized,
     ConstData(ConstData),
@@ -70,6 +70,12 @@ pub enum AmlVariable {
     ByteField(AmlByteFiled),
     Package(Vec<AmlPackage>),
     Method(Method),
+    BuiltInMethod(
+        (
+            fn(&[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError>,
+            u8,
+        ),
+    ),
     Mutex(Arc<(AtomicU8, u8)>),
     Reference((Arc<Mutex<Self>>, Option<usize /* For Index Of */>)),
 }
@@ -196,6 +202,10 @@ impl AmlVariable {
                 pr_err!("Writing data into Method({}) is invalid.", m.get_name());
                 Err(AmlError::InvalidOperation)
             }
+            Self::BuiltInMethod(_) => {
+                pr_err!("Writing data into BuiltInMethod is invalid.");
+                Err(AmlError::InvalidOperation)
+            }
             Self::BitField(b_f) => b_f.source.try_lock().or(Err(AmlError::MutexError))?._write(
                 data,
                 byte_index,
@@ -316,6 +326,7 @@ impl AmlVariable {
             Self::Package(_) => true,
             Self::Uninitialized => true,
             Self::Method(_) => false,
+            Self::BuiltInMethod(_) => false,
             Self::Mutex(_) => true,
             Self::Reference(_) => false,
         }
@@ -409,9 +420,11 @@ impl AmlVariable {
                     )?))
                 }
             }
-            Self::ConstData(_) | Self::Uninitialized | Self::Mutex(_) | Self::Method(_) => {
-                Ok(self.clone())
-            }
+            Self::ConstData(_)
+            | Self::Uninitialized
+            | Self::Mutex(_)
+            | Self::Method(_)
+            | Self::BuiltInMethod(_) => Ok(self.clone()),
             Self::String(_) | Self::Buffer(_) | Self::Package(_) => {
                 let adjusted_byte_index = byte_index + (bit_index >> 3);
                 let adjusted_bit_index = bit_index - ((bit_index >> 3) << 3);
@@ -477,6 +490,10 @@ impl AmlVariable {
             | Self::Reference(_) => self._read(0, 0, false, 0, 0),
             Self::Method(m) => {
                 pr_err!("Reading Method({}) is invalid.", m.get_name());
+                Err(AmlError::InvalidOperation)
+            }
+            Self::BuiltInMethod(_) => {
+                pr_err!("Reading BuiltInMethod is invalid.");
                 Err(AmlError::InvalidOperation)
             }
         }
@@ -574,6 +591,7 @@ impl AmlVariable {
             | Self::Reference(_) => self.get_constant_data()?.to_int(),
             Self::Uninitialized => Err(AmlError::InvalidType),
             Self::Method(_) => Err(AmlError::InvalidType),
+            Self::BuiltInMethod(_) => Err(AmlError::InvalidType),
             Self::Mutex(d) => Ok(d.0.load(Ordering::Relaxed) as usize),
         }
     }
@@ -592,6 +610,7 @@ impl AmlVariable {
             | Self::Package(_) => self.get_constant_data()?.get_byte_size(),
             Self::Uninitialized => Err(AmlError::InvalidType),
             Self::Method(_) => Err(AmlError::InvalidType),
+            Self::BuiltInMethod(_) => Err(AmlError::InvalidType),
             Self::Mutex(_) => Err(AmlError::InvalidType),
             Self::Reference((_, index)) => {
                 if index.is_some() {
@@ -629,6 +648,44 @@ impl AmlVariable {
             Self::Package(p) => Ok(AmlPackage::Package(p)),
             Self::Mutex(_) => Err(AmlError::InvalidType),
             Self::Method(_) => Err(AmlError::InvalidType),
+            Self::BuiltInMethod(_) => Err(AmlError::InvalidType),
+        }
+    }
+}
+
+impl core::fmt::Debug for AmlVariable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            AmlVariable::Uninitialized => f.write_str("Uninitialized"),
+            AmlVariable::ConstData(c) => f.write_fmt(format_args!("ConstantData({})", c.to_int())),
+            AmlVariable::String(s) => f.write_fmt(format_args!("String({})", s)),
+            AmlVariable::Buffer(b) => f.write_fmt(format_args!("Buffer({:?})", b)),
+            AmlVariable::Io((port, limit)) => f.write_fmt(format_args!(
+                "SystemI/O(Port: {:#X}, Limit: {:#X})",
+                port, limit
+            )),
+            AmlVariable::MMIo((port, limit)) => f.write_fmt(format_args!(
+                "MemoryI/O(Port: {:#X}, Limit: {:#X})",
+                port, limit
+            )),
+            AmlVariable::EcIo((port, limit)) => f.write_fmt(format_args!(
+                "EmbeddedControllerI/O(Port: {:#X}, Limit: {:#X})",
+                port, limit
+            )),
+            AmlVariable::PciConfig(p) => f.write_fmt(format_args!("PCI_Config({:?})", p)),
+            AmlVariable::BitField(b) => f.write_fmt(format_args!("{:?}", b)),
+            AmlVariable::ByteField(b) => f.write_fmt(format_args!("{:?}", b)),
+            AmlVariable::Package(p) => f.write_fmt(format_args!("Package({:?}", p)),
+            AmlVariable::Method(m) => f.write_fmt(format_args!("Method({})", m.get_name())),
+            AmlVariable::BuiltInMethod(m) => f.write_fmt(format_args!(
+                "BuiltInMethod({})",
+                core::any::type_name_of_val(m)
+            )),
+            AmlVariable::Mutex(m) => f.write_fmt(format_args!(
+                "Mutex(Current: {:?}, SyncLevel: {})",
+                m.0, m.1
+            )),
+            AmlVariable::Reference(r) => f.write_fmt(format_args!("Reference({:?})", r)),
         }
     }
 }

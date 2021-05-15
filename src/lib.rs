@@ -22,6 +22,7 @@
 #![feature(step_trait)]
 #![feature(step_trait_ext)]
 #![feature(try_blocks)]
+#![feature(type_name_of_val)]
 
 #[allow(unused_imports)]
 #[macro_use]

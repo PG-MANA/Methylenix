@@ -2,6 +2,8 @@
 //! AML Evaluator
 //!
 
+use crate::arch::target_arch::device::acpi::osi;
+
 use super::aml_variable::{AmlBitFiled, AmlByteFiled, AmlPackage, AmlPciConfig, AmlVariable};
 use super::data_object::{
     parse_integer_from_buffer, ComputationalData, ConstData, DataObject, PackageElement,
@@ -41,9 +43,15 @@ impl Evaluator {
     const AML_EVALUATOR_REVISION: u8 = 0;
 
     pub fn new(parse_helper: ParseHelper) -> Self {
+        let mut vec = Vec::with_capacity(64);
+        vec.push((
+            NameString::from_array(&[*b"_OSI"], true),
+            Arc::new(Mutex::new(AmlVariable::BuiltInMethod((osi, 1)))),
+        ));
+
         Self {
             parse_helper,
-            variables: Vec::with_capacity(64),
+            variables: vec,
         }
     }
 
@@ -1219,6 +1227,7 @@ impl Evaluator {
                     AmlVariable::ByteField(b) => b.num_of_bytes,
                     AmlVariable::Package(p) => p.len(), /* OK? */
                     AmlVariable::Method(_) => Err(AmlError::InvalidOperation)?,
+                    AmlVariable::BuiltInMethod(_) => Err(AmlError::InvalidOperation)?,
                     AmlVariable::Uninitialized => Err(AmlError::InvalidOperation)?,
                     AmlVariable::Mutex(_) => Err(AmlError::InvalidOperation)?,
                     AmlVariable::Reference((s, _)) => s
@@ -1540,13 +1549,23 @@ impl Evaluator {
                     AmlVariable::Method(method) => {
                         let method = method.clone();
                         drop(locked_obj);
-                        Ok(self.eval_method_with_method_invocation(
+                        self.eval_method_with_method_invocation(
                             &method_invocation,
                             &method,
                             local_variables,
                             argument_variables,
                             current_scope,
-                        )?)
+                        )
+                    }
+                    AmlVariable::BuiltInMethod((func, _)) => {
+                        drop(locked_obj);
+                        self.eval_builtin_method(
+                            &method_invocation,
+                            *func,
+                            local_variables,
+                            argument_variables,
+                            current_scope,
+                        )
                     }
 
                     _ => Ok(AmlVariable::Reference((obj, None))),
@@ -1868,6 +1887,26 @@ impl Evaluator {
                 Ok(AmlVariable::Uninitialized)
             }
         }
+    }
+
+    fn eval_builtin_method(
+        &mut self,
+        method_invocation: &MethodInvocation,
+        func: fn(&[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError>,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+        current_scope: &NameString,
+    ) -> Result<AmlVariable, AmlError> {
+        let (_, mut new_argument_variables) = Self::init_local_variables_and_argument_variables();
+        for (index, arg) in method_invocation.get_ter_arg_list().list.iter().enumerate() {
+            new_argument_variables[index] = Arc::new(Mutex::new(self.eval_term_arg(
+                arg.clone(),
+                local_variables,
+                argument_variables,
+                current_scope,
+            )?));
+        }
+        func(&new_argument_variables)
     }
 
     pub fn eval_method(

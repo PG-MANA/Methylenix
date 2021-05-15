@@ -7,15 +7,19 @@ use crate::arch::target_arch::device::cpu::{
 };
 use crate::arch::target_arch::interrupt::IstIndex;
 
-use crate::kernel::drivers::acpi::aml::AmlPciConfig;
 use crate::kernel::drivers::acpi::aml::{AmlError, ConstData};
+use crate::kernel::drivers::acpi::aml::{AmlPciConfig, AmlVariable};
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
 };
+
+use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::work_queue::WorkList;
+
+use alloc::sync::Arc;
 
 pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
     let irq = acpi_manager.get_fadt_manager().get_sci_int();
@@ -538,4 +542,19 @@ pub fn write_pci(
     }
 
     Ok(())
+}
+
+pub fn osi(arg: &[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError> {
+    if arg.len() != 1 {
+        pr_err!("Invalid arguments: {:?}", arg);
+        return Err(AmlError::InvalidOperation);
+    }
+    let locked_arg_0 = arg[0].try_lock().or(Err(AmlError::MutexError))?;
+    if let AmlVariable::String(s) = &*locked_arg_0 {
+        pr_info!("_OSI: {}", s);
+        Ok(AmlVariable::ConstData(ConstData::Byte(1)))
+    } else {
+        pr_err!("Invalid arguments: {:?}", arg);
+        Err(AmlError::InvalidOperation)
+    }
 }
