@@ -20,6 +20,7 @@ use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::sync::spin_lock::Mutex;
 
 use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicU8, Ordering};
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -239,8 +240,13 @@ impl Evaluator {
                     self.variables.push((name.clone(), variable.clone()));
                     Ok(variable)
                 }
-                NamedObject::DefMutex(_) => {
-                    unimplemented!()
+                NamedObject::DefMutex(m) => {
+                    let variable = Arc::new(Mutex::new(AmlVariable::Mutex(Arc::new((
+                        AtomicU8::new(0),
+                        m.1,
+                    )))));
+                    self.variables.push((m.0, variable.clone()));
+                    Ok(variable)
                 }
                 NamedObject::DefExternal(_) => {
                     unimplemented!()
@@ -518,6 +524,34 @@ impl Evaluator {
             TermArg::ArgObj(c) => Ok(argument_variables[c as usize].clone()),
             TermArg::LocalObj(c) => Ok(local_variables[c as usize].clone()),
         }
+    }
+
+    fn get_mutex_object(
+        &mut self,
+        mutex_name: &SuperName,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut LocalVariables,
+        current_scope: &NameString,
+    ) -> Result<Arc<(AtomicU8, u8)>, AmlError> {
+        let aml_variable = &self.get_aml_variable_reference_from_super_name(
+            &mutex_name,
+            local_variables,
+            argument_variables,
+            current_scope,
+        )?;
+        let locked_aml_variable = aml_variable.try_lock().or(Err(AmlError::MutexError))?;
+        let mutex_object = if let AmlVariable::Mutex(m) = &*locked_aml_variable {
+            m.clone()
+        } else if let AmlVariable::Mutex(m) = locked_aml_variable.get_constant_data()? {
+            m.clone()
+        } else {
+            pr_err!(
+                "Invalid Mutex Object Reference: {:?}",
+                &*locked_aml_variable
+            );
+            Err(AmlError::InvalidOperation)?
+        };
+        Ok(mutex_object)
     }
 
     fn eval_package_list(
@@ -876,8 +910,39 @@ impl Evaluator {
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         match e {
-            ExpressionOpcode::DefAcquire(_) => {
-                unimplemented!()
+            ExpressionOpcode::DefAcquire((mutex_name, wait)) => {
+                let mutex_object = self.get_mutex_object(
+                    &mutex_name,
+                    local_variables,
+                    argument_variables,
+                    current_scope,
+                )?;
+
+                let current_tick = get_cpu_manager_cluster()
+                    .timer_manager
+                    .get_current_tick_without_lock();
+                while mutex_object
+                    .0
+                    .fetch_update(Ordering::Acquire, Ordering::Relaxed, |current_level| {
+                        if current_level <= mutex_object.1 {
+                            Some(current_level + 1)
+                        } else {
+                            None
+                        }
+                    })
+                    .is_err()
+                {
+                    if wait != 0xFFFF
+                        && get_cpu_manager_cluster()
+                            .timer_manager
+                            .get_difference_ms(current_tick)
+                            >= wait as usize
+                    {
+                        pr_warn!("Acquiring Mutex({:?}) was timed out.", mutex_name);
+                        return Ok(AmlVariable::ConstData(ConstData::Byte(1)));
+                    }
+                }
+                Ok(AmlVariable::ConstData(ConstData::Byte(0)))
             }
             ExpressionOpcode::DefBuffer(byte_list) => {
                 Ok(AmlVariable::Buffer(self.byte_list_to_vec(
@@ -1155,6 +1220,7 @@ impl Evaluator {
                     AmlVariable::Package(p) => p.len(), /* OK? */
                     AmlVariable::Method(_) => Err(AmlError::InvalidOperation)?,
                     AmlVariable::Uninitialized => Err(AmlError::InvalidOperation)?,
+                    AmlVariable::Mutex(_) => Err(AmlError::InvalidOperation)?,
                     AmlVariable::Reference((s, _)) => s
                         .try_lock()
                         .or(Err(AmlError::MutexError))?
@@ -1493,8 +1559,22 @@ impl Evaluator {
         unimplemented!()
     }
 
-    fn release_mutex(&mut self, _mutex_object: &SuperName) -> Result<(), AmlError> {
-        unimplemented!()
+    fn release_mutex(
+        &mut self,
+        mutex_name: &SuperName,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+        current_scope: &NameString,
+    ) -> Result<(), AmlError> {
+        self.get_mutex_object(
+            &mutex_name,
+            local_variables,
+            argument_variables,
+            current_scope,
+        )?
+        .0
+        .fetch_sub(1, Ordering::Release);
+        return Ok(());
     }
 
     fn reset_event(&mut self, _event: &SuperName) -> Result<(), AmlError> {
@@ -1665,7 +1745,7 @@ impl Evaluator {
                         self.eval_notify(n)?;
                     }
                     StatementOpcode::DefRelease(m) => {
-                        self.release_mutex(&m)?;
+                        self.release_mutex(&m, local_variables, argument_variables, current_scope)?;
                     }
                     StatementOpcode::DefReset(event) => {
                         self.reset_event(&event)?;

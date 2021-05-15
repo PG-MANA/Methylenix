@@ -15,6 +15,8 @@ use crate::arch::target_arch::device::acpi::{
 use crate::kernel::memory_manager::data_type::PAddress;
 use crate::kernel::sync::spin_lock::Mutex;
 
+use core::sync::atomic::{AtomicU8, Ordering};
+
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -68,6 +70,7 @@ pub enum AmlVariable {
     ByteField(AmlByteFiled),
     Package(Vec<AmlPackage>),
     Method(Method),
+    Mutex(Arc<(AtomicU8, u8)>),
     Reference((Arc<Mutex<Self>>, Option<usize /* For Index Of */>)),
 }
 
@@ -271,6 +274,14 @@ impl AmlVariable {
                 );
                 Err(AmlError::InvalidOperation)
             }
+            Self::Mutex(_) => {
+                pr_err!(
+                    "Writing data({:?}) into Mutex({:?}) is invalid.",
+                    data,
+                    self
+                );
+                Err(AmlError::InvalidOperation)
+            }
             Self::Reference((source, index)) => {
                 if let Some(index) = index {
                     source
@@ -298,14 +309,15 @@ impl AmlVariable {
             Self::Buffer(_) => true,
             Self::Io(_) => false,
             Self::MMIo(_) => false,
+            Self::EcIo(_) => false,
             Self::PciConfig(_) => false,
             Self::BitField(_) => false,
             Self::ByteField(_) => false,
             Self::Package(_) => true,
             Self::Uninitialized => true,
             Self::Method(_) => false,
+            Self::Mutex(_) => true,
             Self::Reference(_) => false,
-            Self::EcIo(_) => false,
         }
     }
 
@@ -397,7 +409,9 @@ impl AmlVariable {
                     )?))
                 }
             }
-            Self::ConstData(_) | Self::Uninitialized | Self::Method(_) => Ok(self.clone()),
+            Self::ConstData(_) | Self::Uninitialized | Self::Mutex(_) | Self::Method(_) => {
+                Ok(self.clone())
+            }
             Self::String(_) | Self::Buffer(_) | Self::Package(_) => {
                 let adjusted_byte_index = byte_index + (bit_index >> 3);
                 let adjusted_bit_index = bit_index - ((bit_index >> 3) << 3);
@@ -452,6 +466,7 @@ impl AmlVariable {
             | Self::ConstData(_)
             | Self::String(_)
             | Self::Buffer(_)
+            | Self::Mutex(_)
             | Self::Package(_) => Ok(self.clone()),
             Self::Io(_)
             | Self::MMIo(_)
@@ -559,6 +574,7 @@ impl AmlVariable {
             | Self::Reference(_) => self.get_constant_data()?.to_int(),
             Self::Uninitialized => Err(AmlError::InvalidType),
             Self::Method(_) => Err(AmlError::InvalidType),
+            Self::Mutex(d) => Ok(d.0.load(Ordering::Relaxed) as usize),
         }
     }
 
@@ -576,6 +592,7 @@ impl AmlVariable {
             | Self::Package(_) => self.get_constant_data()?.get_byte_size(),
             Self::Uninitialized => Err(AmlError::InvalidType),
             Self::Method(_) => Err(AmlError::InvalidType),
+            Self::Mutex(_) => Err(AmlError::InvalidType),
             Self::Reference((_, index)) => {
                 if index.is_some() {
                     Ok(8) /*Vec<u8>*/
@@ -610,6 +627,7 @@ impl AmlVariable {
             | Self::ByteField(_)
             | Self::Reference(_) => self.get_constant_data()?.convert_to_aml_package(),
             Self::Package(p) => Ok(AmlPackage::Package(p)),
+            Self::Mutex(_) => Err(AmlError::InvalidType),
             Self::Method(_) => Err(AmlError::InvalidType),
         }
     }
