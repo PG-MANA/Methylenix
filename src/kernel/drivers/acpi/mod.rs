@@ -18,7 +18,7 @@ pub mod table {
 }
 
 use self::aml::aml_variable::{AmlPackage, AmlVariable};
-use self::aml::{AmlInterpreter, NameString};
+use self::aml::{AmlInterpreter, ConstData, NameString};
 use self::device::ec::EmbeddedController;
 use self::device::AcpiDeviceManager;
 use self::event::gpe::GpeManager;
@@ -28,7 +28,9 @@ use self::table::fadt::FadtManager;
 use self::table::ssdt::SsdtManager;
 use self::table::xsdt::XsdtManager;
 
-use crate::arch::target_arch::device::cpu::{disable_interrupt, in_byte, out_byte, out_word};
+use crate::arch::target_arch::device::cpu::{
+    disable_interrupt, enable_interrupt, in_byte, in_word, out_byte, out_word,
+};
 
 use crate::kernel::memory_manager::data_type::PAddress;
 
@@ -236,12 +238,21 @@ impl AcpiManager {
         let s_value = s_obj.unwrap();
         unsafe {
             if let Some(s_r) = sleep_register {
-                out_byte(s_r as _, (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8);
-            } else if pm1_b != 0 {
-                out_word(pm1_a as _, (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16);
-                out_word(pm1_b as _, (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16);
+                let mut status = in_byte(s_r as _);
+                status &= !(0b111 << 2);
+                status |= (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8;
+                out_byte(s_r as _, status);
             } else {
-                out_word(pm1_a as _, (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16);
+                let mut status = in_word(pm1_a as _);
+                status &= !(0b111 << 10);
+                status |= (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16;
+                out_word(pm1_a as _, status);
+                if pm1_b != 0 {
+                    let mut status = in_word(pm1_b as _);
+                    status &= !(0b111 << 10);
+                    status |= (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16;
+                    out_word(pm1_b as _, status);
+                }
             }
         }
         return true;
