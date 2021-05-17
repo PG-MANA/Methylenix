@@ -545,14 +545,16 @@ pub fn write_pci(
 }
 
 pub fn osi(arg: &[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError> {
-    if arg.len() != 1 {
-        pr_err!("Invalid arguments: {:?}", arg);
-        return Err(AmlError::InvalidOperation);
-    }
     let locked_arg_0 = arg[0].try_lock().or(Err(AmlError::MutexError))?;
     if let AmlVariable::String(s) = &*locked_arg_0 {
-        pr_info!("_OSI: {}", s);
-        Ok(AmlVariable::ConstData(ConstData::Byte(1)))
+        if s.starts_with("Linux") {
+            Ok(AmlVariable::ConstData(ConstData::Byte(0)))
+        } else if s.starts_with("Windows") {
+            Ok(AmlVariable::ConstData(ConstData::Byte(1)))
+        } else {
+            pr_info!("_OSI: {}", s);
+            Ok(AmlVariable::ConstData(ConstData::Byte(0)))
+        }
     } else {
         pr_err!("Invalid arguments: {:?}", arg);
         Err(AmlError::InvalidOperation)
