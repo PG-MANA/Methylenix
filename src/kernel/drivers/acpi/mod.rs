@@ -230,12 +230,21 @@ impl AcpiManager {
         pm1_b: usize,
         sleep_register: Option<usize>,
     ) -> bool {
-        let s_obj = Self::get_sleep_state_object(interpreter, s);
+        let s_obj = Self::get_sleep_state_object(&mut interpreter.clone(), s);
         if s_obj.is_none() {
             pr_err!("Cannot get _S{} Object.", s);
             return false;
         }
         let s_value = s_obj.unwrap();
+        if interpreter
+            .evaluate_method(
+                &NameString::from_array(&[*b"_PTS"], true),
+                &[AmlVariable::ConstData(ConstData::Byte(s))],
+            )
+            .is_err()
+        {
+            pr_err!("Failed to evaluate _PTS");
+        }
         unsafe {
             if let Some(s_r) = sleep_register {
                 let mut status = in_byte(s_r as _);
@@ -307,6 +316,7 @@ impl AcpiManager {
                 }
             }
         }
+        unsafe { enable_interrupt() };
         self.shutdown()
     }
 
