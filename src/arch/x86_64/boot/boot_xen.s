@@ -3,7 +3,6 @@
  */
 
 .code32
-.att_syntax
 
 .global boot_xen, BOOT_FROM_DIRECTBOOT_MARK
 .extern setup_long_mode, fin                /* at init_long_mode.s */
