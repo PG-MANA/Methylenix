@@ -59,7 +59,8 @@ impl Evaluator {
         self.parse_helper = parse_helper;
     }
 
-    fn init_local_variables_and_argument_variables() -> (LocalVariables, ArgumentVariables) {
+    pub(super) fn init_local_variables_and_argument_variables(
+    ) -> (LocalVariables, ArgumentVariables) {
         let mut local_variables: [MaybeUninit<Arc<Mutex<AmlVariable>>>;
             Self::NUMBER_OF_LOCAL_VARIABLES] = MaybeUninit::uninit_array();
         let mut argument_variables: [MaybeUninit<Arc<Mutex<AmlVariable>>>;
@@ -88,7 +89,7 @@ impl Evaluator {
         argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
-        let object = self.parse_helper.search_object(name)?;
+        let object = self.parse_helper.search_real_object(name)?;
         if object.is_none() {
             pr_err!("Cannot find {}.", name);
             if name.len() > 1 {
@@ -256,8 +257,9 @@ impl Evaluator {
                     self.variables.push((m.0, variable.clone()));
                     Ok(variable)
                 }
-                NamedObject::DefExternal(_) => {
-                    unimplemented!()
+                NamedObject::DefExternal(e) => {
+                    pr_err!("Cannot get real object of {}.", e.get_name());
+                    Err(AmlError::InvalidType)
                 }
                 NamedObject::DefOpRegion(operation_region) => {
                     let region_type = operation_region.get_operation_type()?;
@@ -419,6 +421,8 @@ impl Evaluator {
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         if let Some(v) = self.variables.iter().find(|e| &e.0 == name) {
             Ok(v.1.clone())
+        } else if name.get_single_name_path() == Some(NameString::from_array(&[*b"_OSI"], false)) {
+            Ok(self.variables[0].clone().1)
         } else {
             self.search_aml_variable(name, local_variables, argument_variables, current_scope)
         }
@@ -842,7 +846,7 @@ impl Evaluator {
         }
     }
 
-    fn eval_term_arg(
+    pub(super) fn eval_term_arg(
         &mut self,
         t: TermArg,
         local_variables: &mut LocalVariables,

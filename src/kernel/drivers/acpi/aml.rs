@@ -21,7 +21,7 @@ use self::evaluator::Evaluator;
 pub use self::name_object::NameString;
 use self::named_object::{Device, NamedObject};
 use self::parser::{ContentObject, ParseHelper};
-use self::term_object::TermList;
+use self::term_object::{TermArg, TermList};
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
@@ -190,9 +190,29 @@ impl AmlInterpreter {
                         Err(())
                     }
                 },
-                ContentObject::DataRefObject(_) => {
-                    unimplemented!()
-                }
+                ContentObject::DataRefObject(d) => match d {
+                    DataRefObject::DataObject(data_object) => {
+                        self.evaluator.set_parse_helper(self.parse_helper.clone());
+                        let (mut local, mut arg) =
+                            Evaluator::init_local_variables_and_argument_variables();
+                        match self.evaluator.eval_term_arg(
+                            TermArg::DataObject(data_object),
+                            &mut local,
+                            &mut arg,
+                            method_name,
+                        ) {
+                            Ok(d) => Ok(Some(d)),
+                            Err(e) => {
+                                pr_err!("{:?}", e);
+                                Err(())
+                            }
+                        }
+                    }
+                    DataRefObject::ObjectReference(reference) => {
+                        pr_err!("Unexpected ObjectReference: {}", reference);
+                        Err(())
+                    }
+                },
                 ContentObject::Scope(s) => {
                     pr_err!("Unexpected Scope({})", s);
                     Err(())

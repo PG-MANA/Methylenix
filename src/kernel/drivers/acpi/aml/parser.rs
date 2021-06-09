@@ -581,6 +581,7 @@ impl ParseHelper {
         name: &NameString,
         should_enter_object: bool,
         preferred_search_scope: Option<&NameString>,
+        allow_external: bool,
     ) -> Result<Option<ContentObject>, AmlError> {
         let back_up_of_original_name_searching =
             if let Some(searching) = self.original_name_searching.replace(name.clone()) {
@@ -656,12 +657,20 @@ impl ParseHelper {
                             false,
                         ) {
                             Ok(Some(c)) => {
-                                self.original_name_searching = back_up_of_original_name_searching;
-                                self.current_object_list = current_scope_backup;
-                                while let Some(e) = term_list_hierarchy_back_up.pop() {
-                                    self.term_list_hierarchy.push(e);
+                                if allow_external
+                                    || !matches!(
+                                        c,
+                                        ContentObject::NamedObject(NamedObject::DefExternal(_))
+                                    )
+                                {
+                                    self.original_name_searching =
+                                        back_up_of_original_name_searching;
+                                    self.current_object_list = current_scope_backup;
+                                    while let Some(e) = term_list_hierarchy_back_up.pop() {
+                                        self.term_list_hierarchy.push(e);
+                                    }
+                                    return Ok(Some(c));
                                 }
-                                return Ok(Some(c));
                             }
                             Ok(None) | Err(AmlError::NestedSearch) => {}
                             Err(e) => {
@@ -688,14 +697,21 @@ impl ParseHelper {
                     should_enter_object,
                 ) {
                     Ok(Some(o_i)) => {
-                        self.current_object_list = current_scope_backup;
-                        self.original_name_searching = back_up_of_original_name_searching;
-                        if !should_enter_object {
-                            while let Some(e) = term_list_hierarchy_back_up.pop() {
-                                self.term_list_hierarchy.push(e);
+                        if allow_external
+                            || !matches!(
+                                o_i,
+                                ObjectListItem::NamedObject(NamedObject::DefExternal(_))
+                            )
+                        {
+                            self.current_object_list = current_scope_backup;
+                            self.original_name_searching = back_up_of_original_name_searching;
+                            if !should_enter_object {
+                                while let Some(e) = term_list_hierarchy_back_up.pop() {
+                                    self.term_list_hierarchy.push(e);
+                                }
                             }
+                            return self.convert_object_list_item_list_to_content_object(o_i);
                         }
-                        return self.convert_object_list_item_list_to_content_object(o_i);
                     }
                     Err(AmlError::NestedSearch) | Ok(None) => {}
                     Err(e) => {
@@ -719,9 +735,13 @@ impl ParseHelper {
                 true,
                 false,
             )? {
-                self.original_name_searching = back_up_of_original_name_searching;
-                self.current_object_list = current_scope_backup;
-                return Ok(Some(c));
+                if allow_external
+                    || !matches!(c, ContentObject::NamedObject(NamedObject::DefExternal(_)))
+                {
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    self.current_object_list = current_scope_backup;
+                    return Ok(Some(c));
+                }
             }
             while let Some(t) = self.term_list_hierarchy.pop() {
                 term_list_hierarchy_back_up.push(t);
@@ -748,14 +768,18 @@ impl ParseHelper {
                 false,
             ) {
                 Ok(Some(o_i)) => {
-                    self.current_object_list = current_scope_backup;
-                    self.original_name_searching = back_up_of_original_name_searching;
-                    if !should_enter_object {
-                        while let Some(e) = term_list_hierarchy_back_up.pop() {
-                            self.term_list_hierarchy.push(e);
+                    if allow_external
+                        || !matches!(o_i, ContentObject::NamedObject(NamedObject::DefExternal(_)))
+                    {
+                        self.current_object_list = current_scope_backup;
+                        self.original_name_searching = back_up_of_original_name_searching;
+                        if !should_enter_object {
+                            while let Some(e) = term_list_hierarchy_back_up.pop() {
+                                self.term_list_hierarchy.push(e);
+                            }
                         }
+                        return Ok(Some(o_i));
                     }
-                    return Ok(Some(o_i));
                 }
                 Err(AmlError::NestedSearch) | Ok(None) => {}
                 Err(e) => {
@@ -777,14 +801,21 @@ impl ParseHelper {
             should_enter_object,
         ) {
             Ok(Some(o_i)) => {
-                self.current_object_list = current_scope_backup;
-                self.original_name_searching = back_up_of_original_name_searching;
-                if !should_enter_object {
-                    while let Some(e) = term_list_hierarchy_back_up.pop() {
-                        self.term_list_hierarchy.push(e);
+                if allow_external
+                    || !matches!(
+                        o_i,
+                        ObjectListItem::NamedObject(NamedObject::DefExternal(_))
+                    )
+                {
+                    self.current_object_list = current_scope_backup;
+                    self.original_name_searching = back_up_of_original_name_searching;
+                    if !should_enter_object {
+                        while let Some(e) = term_list_hierarchy_back_up.pop() {
+                            self.term_list_hierarchy.push(e);
+                        }
                     }
+                    return self.convert_object_list_item_list_to_content_object(o_i);
                 }
-                return self.convert_object_list_item_list_to_content_object(o_i);
             }
             Err(AmlError::NestedSearch) | Ok(None) => {}
             Err(e) => {
@@ -807,14 +838,21 @@ impl ParseHelper {
                 should_enter_object,
             ) {
                 Ok(Some(o_i)) => {
-                    self.current_object_list = current_scope_backup;
-                    self.original_name_searching = back_up_of_original_name_searching;
-                    if !should_enter_object {
-                        while let Some(e) = term_list_hierarchy_back_up.pop() {
-                            self.term_list_hierarchy.push(e);
+                    if allow_external
+                        || !matches!(
+                            o_i,
+                            ObjectListItem::NamedObject(NamedObject::DefExternal(_))
+                        )
+                    {
+                        self.current_object_list = current_scope_backup;
+                        self.original_name_searching = back_up_of_original_name_searching;
+                        if !should_enter_object {
+                            while let Some(e) = term_list_hierarchy_back_up.pop() {
+                                self.term_list_hierarchy.push(e);
+                            }
                         }
+                        return self.convert_object_list_item_list_to_content_object(o_i);
                     }
-                    return self.convert_object_list_item_list_to_content_object(o_i);
                 }
                 Err(AmlError::NestedSearch) | Ok(None) => {}
                 Err(e) => {
@@ -840,7 +878,20 @@ impl ParseHelper {
         if name.is_null_name() {
             return Ok(None);
         }
-        self._search_object(name, false, None)
+        self._search_object(name, false, None, true)
+    }
+
+    /// Search substantial object
+    ///
+    /// This function does not return DefExternal.
+    pub fn search_real_object(
+        &mut self,
+        name: &NameString,
+    ) -> Result<Option<ContentObject>, AmlError> {
+        if name.is_null_name() {
+            return Ok(None);
+        }
+        self._search_object(name, false, None, false)
     }
 
     fn convert_object_list_item_list_to_content_object(
@@ -935,13 +986,10 @@ impl ParseHelper {
         _term_list: Option<TermList>,
         search_scope: Option<&NameString>,
     ) -> Result<ContentObject, AmlError> {
-        match self._search_object(name, true, search_scope) {
+        match self._search_object(name, true, search_scope, false) {
             Ok(Some(o_i)) => {
                 if let ContentObject::Scope(scope) = o_i {
                     pr_err!("Expected a method, but found Scope({}).", scope);
-                    Err(AmlError::InvalidType)
-                } else if let ContentObject::DataRefObject(d) = o_i {
-                    pr_err!("Expected a method, but found {:?}.", d);
                     Err(AmlError::InvalidType)
                 } else {
                     Ok(o_i)
