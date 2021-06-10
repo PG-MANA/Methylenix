@@ -20,6 +20,7 @@ pub struct EfiTableHeader {
 
 #[repr(C)]
 pub struct EfiBootServices {
+    efi_table_header: EfiTableHeader,
     raise_tpl: usize,
     restore_tpl: usize,
     allocate_pages: usize,
