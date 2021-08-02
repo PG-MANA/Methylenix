@@ -9,7 +9,6 @@ use crate::arch::target_arch::interrupt::IstIndex;
 
 use crate::kernel::drivers::acpi::aml::{AmlError, ConstData};
 use crate::kernel::drivers::acpi::aml::{AmlPciConfig, AmlVariable};
-use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
@@ -17,7 +16,6 @@ use crate::kernel::memory_manager::data_type::{
 };
 
 use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::task_manager::work_queue::WorkList;
 
 use alloc::sync::Arc;
 
@@ -36,22 +34,9 @@ pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
 }
 
 extern "C" fn acpi_event_handler() {
-    if let Some(acpi_event) = get_kernel_manager_cluster()
+    get_kernel_manager_cluster()
         .acpi_event_manager
-        .find_occurred_fixed_event()
-    {
-        let work = WorkList::new(AcpiEventManager::acpi_fixed_event_worker, acpi_event as _);
-        get_cpu_manager_cluster().work_queue.add_work(work);
-        if !get_kernel_manager_cluster()
-            .acpi_event_manager
-            .reset_fixed_event_status(acpi_event)
-        {
-            pr_err!("Cannot reset flag: {:?}", acpi_event);
-        }
-    } else {
-        pr_err!("Unknown ACPI Event");
-    }
-
+        .sci_handler();
     get_cpu_manager_cluster().interrupt_manager.send_eoi();
 }
 
