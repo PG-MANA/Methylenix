@@ -21,6 +21,8 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+pub type AmlFunction = fn(&[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError>;
+
 #[derive(Debug, Clone)]
 pub struct AmlPciConfig {
     pub bus: u16,
@@ -70,12 +72,7 @@ pub enum AmlVariable {
     ByteField(AmlByteFiled),
     Package(Vec<AmlPackage>),
     Method(Method),
-    BuiltInMethod(
-        (
-            fn(&[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError>,
-            u8,
-        ),
-    ),
+    BuiltInMethod((AmlFunction, u8)),
     Mutex(Arc<(AtomicU8, u8)>),
     Reference((Arc<Mutex<Self>>, Option<usize /* For Index Of */>)),
 }

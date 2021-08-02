@@ -56,6 +56,11 @@ impl NameString {
         self.flag == NameStringFlag::NullName
     }
 
+    pub fn is_root(&self) -> bool {
+        self.flag == NameStringFlag::AbsolutePath
+            && matches!(self.data, NameStringData::Normal((_, 0)))
+    }
+
     pub fn parse(stream: &mut AmlStream, current_scope: Option<&Self>) -> Result<Self, AmlError> {
         let mut result = Self::root();
         let mut c = stream.read_byte()?;
