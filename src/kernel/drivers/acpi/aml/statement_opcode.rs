@@ -6,9 +6,8 @@
 use super::data_object::PkgLength;
 use super::name_object::{NameString, SuperName};
 use super::opcode;
-use super::parser::ParseHelper;
 use super::term_object::{TermArg, TermList};
-use super::{AmlError, AmlStream};
+use super::{AmlError, AmlStream, Evaluator};
 
 #[derive(Debug)]
 pub struct Fatal {
@@ -21,12 +20,12 @@ impl Fatal {
     pub fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* FatalOp was read */
         let fatal_type = stream.read_byte()?;
         let fatal_code = stream.read_dword()?;
-        let fatal_arg = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+        let fatal_arg = TermArg::parse_integer(stream, current_scope, evaluator)?;
         Ok(Self {
             fatal_type,
             fatal_code,
@@ -46,14 +45,14 @@ impl IfElse {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* IfScope was read */
         let pkg_length = PkgLength::parse(stream)?;
         let mut if_scope_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
         if_scope_stream.change_size(pkg_length.actual_length)?;
-        let predicate = TermArg::parse_integer(&mut if_scope_stream, current_scope, parse_helper)?;
+        let predicate = TermArg::parse_integer(&mut if_scope_stream, current_scope, evaluator)?;
         let term_list = TermList::new(if_scope_stream, current_scope.clone());
         let op = if stream.is_end_of_stream() {
             0
@@ -105,11 +104,11 @@ impl Notify {
     pub fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* NotifyOp was read */
-        let notify_object = SuperName::try_parse(stream, current_scope, parse_helper)?;
-        let notify_value = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+        let notify_object = SuperName::try_parse(stream, current_scope, evaluator)?;
+        let notify_value = TermArg::parse_integer(stream, current_scope, evaluator)?;
         Ok(Self {
             notify_object,
             notify_value,
@@ -135,7 +134,7 @@ impl While {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* WhileOp was read */
         let pkg_length = PkgLength::parse(stream)?;
@@ -143,8 +142,7 @@ impl While {
         stream.seek(pkg_length.actual_length)?;
         drop(stream); /* Avoid using this */
         while_scope_stream.change_size(pkg_length.actual_length)?;
-        let predicate =
-            TermArg::parse_integer(&mut while_scope_stream, current_scope, parse_helper)?;
+        let predicate = TermArg::parse_integer(&mut while_scope_stream, current_scope, evaluator)?;
         let term_list = TermList::new(while_scope_stream, current_scope.clone());
         Ok(Self {
             predicate,
@@ -183,7 +181,7 @@ impl StatementOpcode {
     pub fn try_parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* println!("StatementOpcode: {:#X}", stream.peek_byte()?); */
         let back_up = stream.clone();
@@ -192,32 +190,32 @@ impl StatementOpcode {
                 opcode::SIGNAL_OP => Ok(Self::DefSignal(SuperName::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?)),
                 opcode::RESET_OP => Ok(Self::DefReset(SuperName::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?)),
                 opcode::RELEASE_OP => Ok(Self::DefRelease(SuperName::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?)),
                 opcode::FATAL_OP => Ok(Self::DefFatal(Fatal::parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?)),
                 opcode::SLEEP_OP => Ok(Self::DefSleep(TermArg::parse_integer(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?)),
                 opcode::STALL_OP => Ok(Self::DefStall(TermArg::parse_integer(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?)),
                 _ => {
                     stream.roll_back(&back_up);
@@ -230,23 +228,23 @@ impl StatementOpcode {
             opcode::IF_OP => Ok(Self::DefIfElse(IfElse::parse(
                 stream,
                 current_scope,
-                parse_helper,
+                evaluator,
             )?)),
             opcode::NOOP_OP => Ok(Self::DefNoop),
             opcode::NOTIFY_OP => Ok(Self::DefNotify(Notify::parse(
                 stream,
                 current_scope,
-                parse_helper,
+                evaluator,
             )?)),
             opcode::RETURN_OP => Ok(Self::DefReturn(TermArg::try_parse(
                 stream,
                 current_scope,
-                parse_helper,
+                evaluator,
             )?)),
             opcode::WHILE_OP => Ok(Self::DefWhile(While::parse(
                 stream,
                 current_scope,
-                parse_helper,
+                evaluator,
             )?)),
             _ => {
                 stream.roll_back(&back_up);

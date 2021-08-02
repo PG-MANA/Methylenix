@@ -5,8 +5,7 @@
 use super::data_object::{try_parse_argument_object, try_parse_local_object};
 use super::expression_opcode;
 use super::opcode;
-use super::parser::ParseHelper;
-use super::{AmlError, AmlStream};
+use super::{AmlError, AmlStream, Evaluator};
 
 use crate::ignore_invalid_type_error;
 
@@ -550,7 +549,7 @@ impl Target {
     pub fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         if stream.peek_byte()? == 0 {
             stream.seek(1)?;
@@ -559,7 +558,7 @@ impl Target {
             Ok(Self::SuperName(SuperName::try_parse(
                 stream,
                 current_scope,
-                parse_helper,
+                evaluator,
             )?))
         }
     }
@@ -601,10 +600,10 @@ impl SuperName {
     pub fn try_parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         ignore_invalid_type_error!(
-            expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope, parse_helper),
+            expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope, evaluator),
             |r_n| {
                 return Ok(Self::ReferenceTypeOpcode(Box::new(r_n)));
             }

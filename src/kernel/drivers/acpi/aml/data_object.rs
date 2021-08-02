@@ -5,7 +5,7 @@
 use super::expression_opcode;
 use super::name_object::NameString;
 use super::opcode;
-use super::{AcpiInt, AmlError, AmlStream, IntIter};
+use super::{AcpiInt, AmlError, AmlStream};
 
 use crate::ignore_invalid_type_error;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
@@ -133,18 +133,6 @@ impl ComputationalData {
             _ => Err(AmlError::InvalidType),
         }
     }
-
-    pub fn to_int_iter(&self) -> Option<IntIter> {
-        match self {
-            ComputationalData::ConstData(_) => None,
-            ComputationalData::StringData(_) => None,
-            ComputationalData::ConstObj(_) => None,
-            ComputationalData::Revision => None,
-            ComputationalData::DefBuffer(_) => {
-                unimplemented!()
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -183,17 +171,6 @@ impl DataRefObject {
             Ok(Self::DataObject(d))
         });
         Ok(Self::ObjectReference(parse_integer(stream)?))
-    }
-
-    pub fn to_int_iter(&self) -> Option<IntIter> {
-        match self {
-            DataRefObject::DataObject(d) => match d {
-                DataObject::ComputationalData(c_d) => c_d.to_int_iter(),
-                DataObject::DefPackage(d_p) => Some(d_p.to_int_iter()),
-                DataObject::DefVarPackage(_) => None,
-            },
-            DataRefObject::ObjectReference(_) => None,
-        }
     }
 
     pub fn get_const_data(&self) -> Option<AcpiInt> {

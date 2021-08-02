@@ -107,8 +107,7 @@ impl AcpiManager {
                 return false;
             }
             if let Some(i) = &self.aml_interpreter {
-                let mut interpreter = i.clone();
-                EmbeddedController::setup(&mut interpreter, device_manager);
+                EmbeddedController::setup(i, device_manager);
                 true
             } else {
                 pr_err!("AmlInterpreter is not available.");
@@ -117,6 +116,10 @@ impl AcpiManager {
         } else {
             false
         }
+    }
+
+    pub fn evaluate_all_ini_methods(&self) -> bool {
+        true /* TODO: */
     }
 
     /// Setup Aml Interpreter
@@ -189,28 +192,24 @@ impl AcpiManager {
         return true;
     }
 
-    fn get_sleep_state_object(interpreter: &mut AmlInterpreter, s: u8) -> Option<(usize, usize)> {
+    fn find_sleep_state_object(interpreter: &mut AmlInterpreter, s: u8) -> Option<(usize, usize)> {
         if s > 5 {
             pr_err!("Invalid Sleep State {}", s);
             return None;
         }
         let name = NameString::from_array(&[[b'_', b'S', s + 0x30, 0]], true);
-        if let Some(d) = interpreter.get_data_object(&name) {
-            if let Some(mut iter) = d.to_int_iter() {
-                let pm1_a = iter.next();
-                let pm1_b = iter.next();
-                if pm1_a.is_none() || pm1_b.is_none() {
-                    pr_err!("Invalid _S{} object: {:?}", s, d);
-                    None
-                } else {
-                    Some((pm1_a.unwrap(), pm1_b.unwrap()))
+        if let Some(d) = interpreter.get_aml_variable(&name) {
+            if let AmlVariable::Package(package) = &d {
+                if let Some(AmlPackage::ConstData(pm1_a)) = package.get(0) {
+                    if let Some(AmlPackage::ConstData(pm1_b)) = package.get(1) {
+                        return Some((pm1_a.to_int(), pm1_b.to_int()));
+                    }
                 }
-            } else {
-                pr_err!("Invalid _S{} Object: {:?}", s, d);
-                None
             }
+            pr_err!("Invalid _S{} Object: {:?}", s, d);
+            None
         } else {
-            pr_err!("Cannot find _S{} Object", s);
+            pr_err!("Failed to find _S{} Object", s);
             None
         }
     }
@@ -222,7 +221,7 @@ impl AcpiManager {
         pm1_b: usize,
         sleep_register: Option<usize>,
     ) -> bool {
-        let s_obj = Self::get_sleep_state_object(&mut interpreter.clone(), s);
+        let s_obj = Self::find_sleep_state_object(&mut interpreter.clone(), s);
         if s_obj.is_none() {
             pr_err!("Cannot get _S{} Object.", s);
             return false;
@@ -292,7 +291,6 @@ impl AcpiManager {
     }
 
     pub fn shutdown_test(&mut self) -> ! {
-        use crate::kernel::manager_cluster::get_kernel_manager_cluster;
         use crate::kernel::timer_manager::Timer;
 
         /* for debug */
@@ -316,10 +314,9 @@ impl AcpiManager {
         if (self.get_fadt_manager().get_flags() & (1 << 4)) != 0 {
             pr_info!("PowerButton is the control method power button.");
             if let Some(interpreter) = &self.aml_interpreter {
-                let mut i = interpreter.clone();
-                match i.move_into_device(b"PNP0C0C") {
-                    Ok(Some(d)) => {
-                        pr_info!("This computer has power button: {}", d.get_name());
+                match interpreter.move_into_device(b"PNP0C0C") {
+                    Ok(Some(i)) => {
+                        pr_info!("This computer has power button: {}", i.get_current_scope());
                         true
                     }
                     Ok(None) => {
@@ -458,6 +455,71 @@ impl AcpiManager {
             None
         } else {
             debug_and_return_none(returned_value)
+        }
+    }
+
+    pub fn setup_pci_bus(&mut self, bus: u8) -> bool {
+        let mut interpreter = self.aml_interpreter.as_ref().unwrap().clone();
+        let scope = NameString::from_array(&[*b"_SB\0", [b'P', b'C', b'I', bus + b'0']], true);
+        if interpreter
+            .evaluate_method(
+                &NameString::from_array(&[*b"_INI"], false).get_full_name_path(&scope),
+                &[],
+            )
+            .is_err()
+        {
+            pr_err!("Cannot evaluate _INI.");
+            return false;
+        }
+        drop(interpreter);
+        let mut interpreter = self.aml_interpreter.as_ref().unwrap().clone();
+        if interpreter
+            .evaluate_method(
+                &NameString::from_array(&[*b"RP01", *b"_INI"], false).get_full_name_path(&scope),
+                &[],
+            )
+            .is_err()
+        {
+            pr_err!("Cannot evaluate _INI.");
+            return false;
+        }
+        return true;
+    }
+
+    fn evaluate_query(&self, query: u8) {
+        let interpreter = if let Some(i) = &self.aml_interpreter {
+            i
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            return;
+        };
+        if get_kernel_manager_cluster()
+            .acpi_device_manager
+            .ec
+            .is_some()
+        {
+            if let Ok(Some(mut new_interpreter)) =
+                interpreter.move_into_device(&EmbeddedController::HID)
+            {
+                drop(interpreter);
+                let to_ascii = |x: u8| -> u8 {
+                    if x >= 0xa {
+                        x - 0xa + b'A'
+                    } else {
+                        x + b'0'
+                    }
+                };
+
+                let query_method_name = NameString::from_array(
+                    &[[b'_', b'Q', to_ascii(query >> 4), to_ascii(query & 0xf)]],
+                    false,
+                )
+                .get_full_name_path(new_interpreter.get_current_scope());
+                pr_info!("Evaluate: {}", query_method_name);
+                if let Err(_) = new_interpreter.evaluate_method(&query_method_name, &[]) {
+                    pr_err!("Cannot evaluate: {}", query_method_name);
+                }
+            }
         }
     }
 }

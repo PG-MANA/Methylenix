@@ -2,13 +2,11 @@
 //! ACPI Machine Language Named Objects
 //!
 #![allow(dead_code)]
-use super::data_object::{ComputationalData, DataObject, DataRefObject, PkgLength};
+use super::data_object::PkgLength;
 use super::name_object::NameString;
-use super::namespace_modifier_object::NamespaceModifierObject;
 use super::opcode;
-use super::parser::ParseHelper;
-use super::term_object::{TermArg, TermList, TermObj};
-use super::{AcpiInt, AmlError, AmlStream};
+use super::term_object::{TermArg, TermList};
+use super::{AcpiInt, AmlError, AmlStream, Evaluator};
 
 #[derive(Debug, Clone)]
 pub struct BankField {
@@ -23,7 +21,7 @@ impl BankField {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* BankFieldOp was read */
         let pkg_length = PkgLength::parse(stream)?;
@@ -33,8 +31,7 @@ impl BankField {
         bank_field_stream.change_size(pkg_length.actual_length)?;
         let region_name = NameString::parse(&mut bank_field_stream, Some(&current_scope))?;
         let bank_name = NameString::parse(&mut bank_field_stream, Some(&current_scope))?;
-        let bank_value =
-            TermArg::parse_integer(&mut bank_field_stream, current_scope, parse_helper)?;
+        let bank_value = TermArg::parse_integer(&mut bank_field_stream, current_scope, evaluator)?;
         let field_flags = bank_field_stream.read_byte()?;
         let field_list = FieldList::new(bank_field_stream, current_scope)?;
         Ok(Self {
@@ -71,13 +68,13 @@ impl CreateField {
         stream: &mut AmlStream,
         current_scope: &NameString,
         field_type: CreateFieldType,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* Op was read */
-        let source_buffer = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let index = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+        let source_buffer = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let index = TermArg::parse_integer(stream, current_scope, evaluator)?;
         let optional_size = if field_type == CreateFieldType::Other {
-            Some(TermArg::parse_integer(stream, current_scope, parse_helper)?)
+            Some(TermArg::parse_integer(stream, current_scope, evaluator)?)
         } else {
             None
         };
@@ -132,13 +129,13 @@ impl DataRegion {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* DataRegionOp was read */
         let name = NameString::parse(stream, Some(current_scope))?;
-        let term_arg1 = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let term_arg2 = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let term_arg3 = TermArg::try_parse(stream, current_scope, parse_helper)?;
+        let term_arg1 = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let term_arg2 = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let term_arg3 = TermArg::try_parse(stream, current_scope, evaluator)?;
         Ok(Self {
             name,
             term_args: [term_arg1, term_arg2, term_arg3],
@@ -216,13 +213,13 @@ impl OpRegion {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* OpRegionOp was read */
         let name = NameString::parse(stream, Some(current_scope))?;
         let region_scope = stream.read_byte()?;
-        let region_offset = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let region_len = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+        let region_offset = TermArg::parse_integer(stream, current_scope, evaluator)?;
+        let region_len = TermArg::parse_integer(stream, current_scope, evaluator)?;
         Ok(Self {
             name,
             region_scope,
@@ -314,25 +311,6 @@ impl Device {
 
     pub const fn get_term_list(&self) -> &TermList {
         &self.term_list
-    }
-
-    pub fn get_hid(&self, parse_helper: &mut ParseHelper) -> Result<Option<u32>, AmlError> {
-        let hid_name = NameString::from_array(&[*b"_HID"], false)
-            .get_full_name_path(self.term_list.get_scope_name());
-        let mut term_list = self.term_list.clone();
-        while let Some(term_obj) = term_list.next(parse_helper)? {
-            if let TermObj::NamespaceModifierObj(NamespaceModifierObject::DefName(n)) = term_obj {
-                if n.get_name() == &hid_name {
-                    if let DataRefObject::DataObject(DataObject::ComputationalData(
-                        ComputationalData::ConstData(d),
-                    )) = n.get_data_ref_object()
-                    {
-                        return Ok(Some(d.to_int() as u32));
-                    }
-                }
-            }
-        }
-        return Ok(None);
     }
 }
 
@@ -518,7 +496,7 @@ impl NamedObject {
     pub fn try_parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         let first_byte = stream.peek_byte()?;
         /* println!("NamedObject: {:#X}", first_byte); */
@@ -531,7 +509,7 @@ impl NamedObject {
                         Ok(Self::DefBankField(BankField::parse(
                             stream,
                             current_scope,
-                            parse_helper,
+                            evaluator,
                         )?))
                     }
                     opcode::CREATE_FIELD_OP => {
@@ -541,7 +519,7 @@ impl NamedObject {
                             stream,
                             current_scope,
                             CreateFieldType::Other,
-                            parse_helper,
+                            evaluator,
                         )?))
                     }
                     opcode::DATA_REGION_OP => {
@@ -550,7 +528,7 @@ impl NamedObject {
                         Ok(Self::DefDataRegion(DataRegion::parse(
                             stream,
                             current_scope,
-                            parse_helper,
+                            evaluator,
                         )?))
                     }
                     opcode::DEVICE_OP => {
@@ -587,7 +565,7 @@ impl NamedObject {
                         Ok(Self::DefOpRegion(OpRegion::parse(
                             stream,
                             current_scope,
-                            parse_helper,
+                            evaluator,
                         )?))
                     }
                     opcode::POWER_RES_OP => {
@@ -613,7 +591,7 @@ impl NamedObject {
                     stream,
                     current_scope,
                     CreateFieldType::Bit,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::CREATE_BYTE_FIELD_OP => {
@@ -623,7 +601,7 @@ impl NamedObject {
                     stream,
                     current_scope,
                     CreateFieldType::Byte,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::CREATE_WORD_FIELD_OP => {
@@ -633,7 +611,7 @@ impl NamedObject {
                     stream,
                     current_scope,
                     CreateFieldType::Word,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::CREATE_DOUBLE_WORD_FIELD_OP => {
@@ -643,7 +621,7 @@ impl NamedObject {
                     stream,
                     current_scope,
                     CreateFieldType::DWord,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::CREATE_QUAD_WORD_FIELD_OP => {
@@ -653,7 +631,7 @@ impl NamedObject {
                     stream,
                     current_scope,
                     CreateFieldType::QWord,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::EXTERNAL_OP => {

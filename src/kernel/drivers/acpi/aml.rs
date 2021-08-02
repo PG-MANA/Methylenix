@@ -11,29 +11,30 @@ mod name_object;
 pub(super) mod named_object;
 mod namespace_modifier_object;
 mod opcode;
-mod parser;
 mod statement_opcode;
 mod term_object;
+mod variable_tree;
 
 pub use self::aml_variable::{AmlPciConfig, AmlVariable};
 pub use self::data_object::{eisa_id_to_dword, ConstData, DataRefObject};
 use self::evaluator::Evaluator;
 pub use self::name_object::NameString;
-use self::named_object::{Device, NamedObject};
-use self::parser::{ContentObject, ParseHelper};
-use self::term_object::{TermArg, TermList};
+use self::term_object::TermList;
+
+use crate::arch::target_arch::device::acpi::osi;
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+
+use alloc::vec::Vec;
 
 type AcpiInt = usize;
 
 #[derive(Clone)]
 pub struct AmlInterpreter {
-    parse_helper: ParseHelper,
     evaluator: Evaluator,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct AmlStream {
     pointer: VAddress,
     limit: VAddress,
@@ -53,43 +54,6 @@ pub enum AmlError {
     UnsupportedType,
 }
 
-pub struct IntIter {
-    stream: AmlStream,
-    remaining_elements: usize,
-}
-
-impl IntIter {
-    pub fn new(stream: AmlStream, num_of_elements: usize) -> Self {
-        Self {
-            stream,
-            remaining_elements: num_of_elements,
-        }
-    }
-
-    fn get_next(&mut self) -> Result<Option<AcpiInt>, AmlError> {
-        if self.remaining_elements == 0 {
-            Ok(None)
-        } else {
-            let d = DataRefObject::parse(&mut self.stream, &NameString::current())?;
-            self.remaining_elements -= 1;
-            Ok(d.get_const_data())
-        }
-    }
-}
-
-impl Iterator for IntIter {
-    type Item = AcpiInt;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.get_next() {
-            Ok(o) => o,
-            Err(e) => {
-                pr_err!("{:?}", e);
-                None
-            }
-        }
-    }
-}
-
 #[macro_export]
 macro_rules! ignore_invalid_type_error {
     ($f:expr, $ok_stmt:expr) => {
@@ -106,58 +70,85 @@ impl AmlInterpreter {
         dsdt_term_list_address: (VAddress, MSize),
         ssdt_term_list_address_list: &[(VAddress, MSize)],
     ) -> Option<Self> {
-        use alloc::vec::Vec;
-
         let dsdt = TermList::new(
             AmlStream::new(dsdt_term_list_address.0, dsdt_term_list_address.1),
             NameString::root(),
         );
-        let mut ssdt_list = Vec::with_capacity(ssdt_term_list_address_list.len());
+        let mut root_term_list = Vec::with_capacity(ssdt_term_list_address_list.len() + 1);
+        root_term_list.push(dsdt.clone());
         for s in ssdt_term_list_address_list {
-            ssdt_list.push(TermList::new(AmlStream::new(s.0, s.1), NameString::root()));
+            root_term_list.push(TermList::new(AmlStream::new(s.0, s.1), NameString::root()));
         }
-        let mut parse_helper = ParseHelper::new(dsdt, ssdt_list, &NameString::root());
-        if let Err(e) = parse_helper.init() {
-            pr_err!("Cannot initialize ParseHelper: {:?}", e);
-            return None;
+
+        let mut evaluator = Evaluator::new(dsdt, root_term_list);
+        if let Err(e) = evaluator.init(osi) {
+            pr_err!("Failed to initialize Evaluator: {:?}", e);
+            None
+        } else {
+            Some(Self {
+                evaluator: evaluator,
+            })
         }
-        let evaluator = Evaluator::new(parse_helper.clone());
-        Some(Self {
-            parse_helper,
-            evaluator,
-        })
     }
 
-    /* DataRefObject => AmlVariable */
-    pub fn get_data_object(&mut self, name: &NameString) -> Option<DataRefObject> {
-        match self.parse_helper.search_object(name) {
-            Ok(Some(d)) => match d {
-                ContentObject::NamedObject(n) => {
-                    pr_err!("Expected DataRefObject, but found {:?}", n);
-                    None
+    pub fn get_aml_variable(&mut self, name: &NameString) -> Option<AmlVariable> {
+        let mut evaluator = self.evaluator.clone();
+        let (mut dummy_local_variables, mut dummy_argument_variables) =
+            Evaluator::init_local_variables_and_argument_variables();
+
+        match evaluator.search_aml_variable(
+            name,
+            None,
+            &mut dummy_local_variables,
+            &mut dummy_argument_variables,
+        ) {
+            Ok(v) => {
+                let cloned_v = v.lock().unwrap().clone();
+                drop(v);
+                if let AmlVariable::Method(m) = cloned_v {
+                    evaluator = self.evaluator.clone();
+                    match evaluator.eval_method(&m, &[], None) {
+                        Ok(v) => Some(v),
+                        Err(e) => {
+                            pr_err!("Evaluating {} was failed: {:?}", m.get_name(), e);
+                            None
+                        }
+                    }
+                } else {
+                    if cloned_v.is_constant_data() {
+                        Some(cloned_v)
+                    } else {
+                        match cloned_v.get_constant_data() {
+                            Ok(constant_data) => Some(constant_data),
+                            Err(e) => {
+                                pr_err!("Failed to get the constant data({}): {:?}", name, e);
+                                None
+                            }
+                        }
+                    }
                 }
-                ContentObject::DataRefObject(d) => Some(d),
-                ContentObject::Scope(s) => {
-                    pr_err!("Expected DataRefObject, but found Scope({})", s);
-                    None
-                }
-            },
-            Ok(None) => None,
+            }
             Err(e) => {
-                pr_err!("Cannot parse AML: {:?}", e);
+                pr_err!("Failed to parse AML: {:?}", e);
                 None
             }
         }
     }
 
-    pub fn move_into_device(&mut self, hid: &[u8; 7]) -> Result<Option<Device>, ()> {
-        match self.parse_helper.move_into_device(hid) {
-            Ok(d) => Ok(d),
+    pub fn move_into_device(&self, hid: &[u8; 7]) -> Result<Option<Self>, ()> {
+        let mut new_interpreter = self.clone();
+        match new_interpreter.evaluator.move_into_device(hid) {
+            Ok(true) => Ok(Some(new_interpreter)),
+            Ok(false) => Ok(None),
             Err(e) => {
                 pr_err!("Parsing AML was failed: {:?}", e);
                 Err(())
             }
         }
+    }
+
+    pub fn get_current_scope(&self) -> &NameString {
+        self.evaluator.get_current_scope()
     }
 
     pub fn evaluate_method(
@@ -169,57 +160,34 @@ impl AmlInterpreter {
             pr_warn!("method_name is NullName.");
             return Ok(None);
         }
-        match self.parse_helper.move_into_object(method_name, None, None) {
-            Ok(m) => match m {
-                ContentObject::NamedObject(n) => match n {
-                    NamedObject::DefMethod(method) => {
-                        self.evaluator.set_parse_helper(self.parse_helper.clone());
-                        match self.evaluator.eval_method(&method, arguments) {
-                            Ok(v) => Ok(Some(v)),
-                            Err(e) => {
-                                pr_err!("AML Evaluator Error: {:?}", e);
-                                Err(())
-                            }
-                        }
-                    }
-                    NamedObject::DefExternal(_) => {
-                        unimplemented!()
-                    }
-                    _ => {
-                        pr_err!("Expected a method, but found {:?}", n);
-                        Err(())
-                    }
-                },
-                ContentObject::DataRefObject(d) => match d {
-                    DataRefObject::DataObject(data_object) => {
-                        self.evaluator.set_parse_helper(self.parse_helper.clone());
-                        let (mut local, mut arg) =
-                            Evaluator::init_local_variables_and_argument_variables();
-                        match self.evaluator.eval_term_arg(
-                            TermArg::DataObject(data_object),
-                            &mut local,
-                            &mut arg,
-                            method_name,
-                        ) {
-                            Ok(d) => Ok(Some(d)),
-                            Err(e) => {
-                                pr_err!("{:?}", e);
-                                Err(())
-                            }
-                        }
-                    }
-                    DataRefObject::ObjectReference(reference) => {
-                        pr_err!("Unexpected ObjectReference: {}", reference);
-                        Err(())
-                    }
-                },
-                ContentObject::Scope(s) => {
-                    pr_err!("Unexpected Scope({})", s);
-                    Err(())
+        let (mut dummy_local_variables, mut dummy_argument_variables) =
+            Evaluator::init_local_variables_and_argument_variables();
+        let method = match self.evaluator.search_aml_variable(
+            method_name,
+            None,
+            &mut dummy_local_variables,
+            &mut dummy_argument_variables,
+        ) {
+            Ok(v) => {
+                if let AmlVariable::Method(m) = &*v.lock().unwrap() {
+                    m.clone()
+                } else {
+                    pr_err!("Expected a method, but found {:?}", &*v.lock().unwrap());
+                    return Err(());
                 }
-            },
+            }
             Err(e) => {
                 pr_err!("Parsing AML was failed: {:?}", e);
+                return Err(());
+            }
+        };
+        match self.evaluator.eval_method(&method, arguments, None) {
+            Ok(v) => match v {
+                AmlVariable::Uninitialized => Ok(None),
+                _ => Ok(Some(v)),
+            },
+            Err(e) => {
+                pr_err!("Failed to evaluate AML: {:?}", e);
                 Err(())
             }
         }

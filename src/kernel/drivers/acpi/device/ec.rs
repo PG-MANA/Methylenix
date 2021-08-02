@@ -8,9 +8,7 @@ use super::super::aml::{ConstData, NameString};
 use super::super::device::AcpiDeviceManager;
 
 use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte};
-use crate::arch::target_arch::device::cpu::out_byte;
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 pub struct EmbeddedController {
@@ -45,17 +43,18 @@ impl EmbeddedController {
         }
     }
 
-    pub fn setup(interpreter: &mut AmlInterpreter, device_manager: &mut AcpiDeviceManager) {
-        let ec_device = if let Ok(Some(d)) = interpreter.move_into_device(&Self::HID) {
-            d
-        } else {
-            return;
-        };
-        pr_info!("ACPI Embedded Controller: {}", ec_device.get_name());
+    pub fn setup(interpreter: &AmlInterpreter, device_manager: &mut AcpiDeviceManager) {
+        let mut ec_device_interpreter =
+            if let Ok(Some(i)) = interpreter.move_into_device(&Self::HID) {
+                i
+            } else {
+                return;
+            };
+        let ec_device_scope = ec_device_interpreter.get_current_scope().clone();
+        pr_info!("ACPI Embedded Controller: {}", ec_device_scope);
         device_manager.ec = Some(
-            match interpreter.evaluate_method(
-                &NameString::from_array(&[*b"_CRS"], false)
-                    .get_full_name_path(ec_device.get_name()),
+            match ec_device_interpreter.evaluate_method(
+                &NameString::from_array(&[*b"_CRS"], false).get_full_name_path(&ec_device_scope),
                 &[],
             ) {
                 Ok(Some(AmlVariable::Buffer(v))) => {
@@ -92,8 +91,8 @@ impl EmbeddedController {
                 Err(_) => return,
             },
         );
-        if let Ok(Some(result)) = interpreter.evaluate_method(
-            &NameString::from_array(&[*b"_STA"], false).get_full_name_path(ec_device.get_name()),
+        if let Ok(Some(result)) = ec_device_interpreter.evaluate_method(
+            &NameString::from_array(&[*b"_STA"], false).get_full_name_path(&ec_device_scope),
             &[],
         ) {
             match result.to_int() {
@@ -120,10 +119,9 @@ impl EmbeddedController {
             AmlVariable::ConstData(ConstData::Byte(3)),
             AmlVariable::ConstData(ConstData::Byte(1)),
         ];
-        if interpreter
+        if ec_device_interpreter
             .evaluate_method(
-                &NameString::from_array(&[*b"_REG"], false)
-                    .get_full_name_path(ec_device.get_name()),
+                &NameString::from_array(&[*b"_REG"], false).get_full_name_path(&ec_device_scope),
                 &arg,
             )
             .is_err()
@@ -133,8 +131,8 @@ impl EmbeddedController {
             return;
         }
 
-        match interpreter.evaluate_method(
-            &NameString::from_array(&[*b"_GPE"], false).get_full_name_path(ec_device.get_name()),
+        match ec_device_interpreter.evaluate_method(
+            &NameString::from_array(&[*b"_GPE"], false).get_full_name_path(&ec_device_scope),
             &[],
         ) {
             Ok(Some(v)) => match v.to_int() {

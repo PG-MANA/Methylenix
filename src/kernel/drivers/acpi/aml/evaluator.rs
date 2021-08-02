@@ -2,9 +2,9 @@
 //! AML Evaluator
 //!
 
-use crate::arch::target_arch::device::acpi::osi;
-
-use super::aml_variable::{AmlBitFiled, AmlByteFiled, AmlPackage, AmlPciConfig, AmlVariable};
+use super::aml_variable::{
+    AmlBitFiled, AmlByteFiled, AmlFunction, AmlPackage, AmlPciConfig, AmlVariable,
+};
 use super::data_object::{
     parse_integer_from_buffer, ComputationalData, ConstData, DataObject, PackageElement,
 };
@@ -13,10 +13,11 @@ use super::expression_opcode::{
 };
 use super::name_object::{NameString, SimpleName, SuperName, Target};
 use super::named_object::{Field, FieldElement, Method, NamedObject, OperationRegionType};
-use super::parser::{ContentObject, ParseHelper};
+use super::namespace_modifier_object::NamespaceModifierObject;
 use super::statement_opcode::{Fatal, IfElse, Notify, StatementOpcode, While};
 use super::term_object::{MethodInvocation, TermArg, TermList, TermObj};
-use super::{AmlError, DataRefObject};
+use super::variable_tree::AmlVariableTree;
+use super::{eisa_id_to_dword, AcpiInt, AmlError, DataRefObject};
 
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::sync::spin_lock::Mutex;
@@ -33,8 +34,11 @@ type ArgumentVariables = [Arc<Mutex<AmlVariable>>; Evaluator::NUMBER_OF_ARGUMENT
 
 #[derive(Clone)]
 pub struct Evaluator {
-    parse_helper: ParseHelper,
-    variables: Vec<(NameString, Arc<Mutex<AmlVariable>>)>,
+    current_root_term_list: TermList,
+    root_term_list: Arc<Vec<TermList>>, /* For SSDT */
+    variable_tree: AmlVariableTree,
+    original_searching_name: Option<NameString>,
+    term_list_hierarchy: Vec<TermList>,
 }
 
 impl Evaluator {
@@ -42,21 +46,43 @@ impl Evaluator {
     const NUMBER_OF_ARGUMENT_VARIABLES: usize = 7;
     const AML_EVALUATOR_REVISION: u8 = 0;
 
-    pub fn new(parse_helper: ParseHelper) -> Self {
-        let mut vec = Vec::with_capacity(64);
-        vec.push((
-            NameString::from_array(&[*b"_OSI"], true),
-            Arc::new(Mutex::new(AmlVariable::BuiltInMethod((osi, 1)))),
-        ));
-
+    pub fn new(current_root_term_list: TermList, root_term_list: Vec<TermList>) -> Self {
+        assert_eq!(current_root_term_list.get_scope_name(), &NameString::root());
         Self {
-            parse_helper,
-            variables: vec,
+            current_root_term_list,
+            root_term_list: Arc::new(root_term_list),
+            variable_tree: AmlVariableTree::create_tree(),
+            original_searching_name: None,
+            term_list_hierarchy: Vec::new(),
         }
     }
 
-    pub fn set_parse_helper(&mut self, parse_helper: ParseHelper) {
-        self.parse_helper = parse_helper;
+    pub fn init(&mut self, osi_function: AmlFunction) -> Result<(), AmlError> {
+        if !self.variable_tree.get_current_scope_name().is_root() {
+            self.variable_tree.move_to_root()?;
+        }
+        /* Add builtin objects */
+        let gl_name = NameString::from_array(&[*b"_GL\0"], true);
+        let gl = AmlVariable::Mutex(Arc::new((AtomicU8::new(0), 0)));
+        self.variable_tree.add_data(gl_name, gl)?;
+
+        let osi_name = NameString::from_array(&[*b"_OSI"], true);
+        let osi = AmlVariable::BuiltInMethod((osi_function, 1));
+        self.variable_tree.add_data(osi_name, osi)?;
+
+        let os_name = NameString::from_array(&[*b"_OS\0"], true);
+        let os = AmlVariable::String(String::from(crate::OS_NAME));
+        self.variable_tree.add_data(os_name, os)?;
+
+        let rev_name = NameString::from_array(&[*b"_REV"], true);
+        let rev = AmlVariable::ConstData(ConstData::Byte(2 /* ACPI 2.0 */));
+        self.variable_tree.add_data(rev_name, rev)?;
+
+        let dlm_name = NameString::from_array(&[*b"_DLM"], true);
+        let dlm = AmlVariable::ConstData(ConstData::Byte(0 /* Temporary fix */));
+        self.variable_tree.add_data(dlm_name, dlm)?;
+
+        return Ok(());
     }
 
     pub(super) fn init_local_variables_and_argument_variables(
@@ -82,349 +108,1079 @@ impl Evaluator {
         }
     }
 
-    fn search_aml_variable(
+    fn search_aml_variable_by_parsing_term_list(
+        &mut self,
+        name: &NameString,
+        mut term_list: TermList,
+        search_scope: Option<&NameString>, /* To search the variable like _SB.PCI0.^^_FOO */
+        should_keep_term_list_hierarchy_when_found: bool,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+    ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
+        if !term_list.get_scope_name().is_child(name)
+            && search_scope
+                .and_then(|s| Some(!term_list.get_scope_name().is_child(s)))
+                .unwrap_or(true)
+        {
+            return Ok(None);
+        }
+        self.variable_tree
+            .move_current_scope(term_list.get_scope_name())?;
+
+        let single_relative_path = name.get_single_name_path();
+        let get_next_term_obj =
+            |t: &mut TermList, p: &mut Self| -> Result<Option<TermObj>, AmlError> {
+                match t.next(p) {
+                    Ok(Some(o)) => Ok(Some(o)),
+                    Ok(None) | Err(AmlError::NestedSearch) | Err(AmlError::AccessOutOfRange) => {
+                        Ok(None)
+                    }
+                    Err(e) => Err(e),
+                }
+            };
+
+        while let Some(term_obj) = get_next_term_obj(&mut term_list, self)? {
+            match term_obj {
+                TermObj::NamespaceModifierObj(name_modifier_object) => {
+                    if name_modifier_object.get_name() == name
+                        || name_modifier_object.get_name().is_child(name)
+                    {
+                        match name_modifier_object {
+                            NamespaceModifierObject::DefAlias(a) => {
+                                if a.get_name().is_child(name) {
+                                    /* SourceObject must be named object. */
+                                    /* Ignore */
+                                } else {
+                                    /* Pop TermListHierarchy to re-search for the source object. */
+                                    unimplemented!()
+                                }
+                            }
+                            NamespaceModifierObject::DefName(n) => {
+                                if n.get_name() == name {
+                                    return match n.get_data_ref_object() {
+                                        DataRefObject::DataObject(d) => {
+                                            let variable = self.eval_term_arg(
+                                                TermArg::DataObject(d.clone()),
+                                                local_variables,
+                                                argument_variables,
+                                                term_list.get_scope_name(),
+                                            )?;
+                                            let variable = self.variable_tree.add_data(
+                                                single_relative_path.unwrap_or_else(|| {
+                                                    name.get_element_as_name_string(name.len() - 1)
+                                                        .unwrap()
+                                                }),
+                                                variable,
+                                            )?;
+
+                                            Ok(Some(variable))
+                                        }
+                                        DataRefObject::ObjectReference(d_r) => {
+                                            pr_err!("Unsupported Type: DataReference({})", d_r);
+                                            Err(AmlError::UnsupportedType)
+                                        }
+                                    };
+                                }
+                            }
+                            NamespaceModifierObject::DefScope(s) => {
+                                self.term_list_hierarchy.push(s.get_term_list().clone());
+
+                                let result = self.search_aml_variable_by_parsing_term_list(
+                                    name,
+                                    s.get_term_list().clone(),
+                                    search_scope,
+                                    should_keep_term_list_hierarchy_when_found,
+                                    local_variables,
+                                    argument_variables,
+                                );
+
+                                match &result {
+                                    Ok(Some(_)) => {
+                                        if !should_keep_term_list_hierarchy_when_found {
+                                            self.term_list_hierarchy.pop();
+                                            self.variable_tree
+                                                .move_current_scope(term_list.get_scope_name())?;
+                                        }
+                                        return result;
+                                    }
+                                    Ok(None) | Err(AmlError::NestedSearch) => {
+                                        self.term_list_hierarchy.pop();
+                                        self.variable_tree
+                                            .move_current_scope(term_list.get_scope_name())?;
+                                        /* Continue */
+                                    }
+                                    Err(_) => {
+                                        self.term_list_hierarchy.pop();
+                                        self.variable_tree
+                                            .move_current_scope(term_list.get_scope_name())?;
+                                        return result;
+                                    }
+                                };
+                            }
+                        }
+                    } else if single_relative_path
+                        .as_ref()
+                        .and_then(|n| Some(name_modifier_object.get_name().suffix_search(n)))
+                        .unwrap_or(false)
+                    {
+                        match name_modifier_object {
+                            NamespaceModifierObject::DefAlias(_a) => {
+                                pr_err!("Alias is not supported yet.");
+                                Err(AmlError::UnsupportedType)?;
+                            }
+                            NamespaceModifierObject::DefName(n) => {
+                                return match n.get_data_ref_object() {
+                                    DataRefObject::DataObject(d) => {
+                                        let variable = self.eval_term_arg(
+                                            TermArg::DataObject(d.clone()),
+                                            local_variables,
+                                            argument_variables,
+                                            term_list.get_scope_name(),
+                                        )?;
+                                        let variable = self.variable_tree.add_data(
+                                            single_relative_path.unwrap_or_else(|| {
+                                                name.get_element_as_name_string(name.len() - 1)
+                                                    .unwrap()
+                                            }),
+                                            variable,
+                                        )?;
+
+                                        Ok(Some(variable))
+                                    }
+                                    DataRefObject::ObjectReference(d_r) => {
+                                        pr_err!("Unsupported Type: DataReference({})", d_r);
+                                        Err(AmlError::UnsupportedType)
+                                    }
+                                };
+                            }
+                            NamespaceModifierObject::DefScope(_) => { /* Ignore */ }
+                        }
+                    }
+                }
+                TermObj::NamedObj(named_object) => {
+                    match self.search_aml_variable_by_parsing_named_object(
+                        name,
+                        term_list.get_scope_name(),
+                        named_object,
+                        search_scope,
+                        should_keep_term_list_hierarchy_when_found,
+                        local_variables,
+                        argument_variables,
+                    ) {
+                        Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+                        o => return o,
+                    }
+                    self.variable_tree
+                        .move_current_scope(term_list.get_scope_name())?;
+                }
+                TermObj::StatementOpcode(s) => {
+                    if let StatementOpcode::DefIfElse(i_e) = s {
+                        pr_warn!("Found an IfElse Statement({:?}), currently ignore it.", i_e);
+                    } else { /* Ignore */
+                    }
+                }
+                TermObj::ExpressionOpcode(_) => { /* Ignore */ }
+            }
+        }
+        return Ok(None);
+    }
+
+    fn search_aml_variable_by_parsing_named_object(
+        &mut self,
+        name: &NameString,
+        current_scope: &NameString,
+        named_object: NamedObject,
+        search_scope: Option<&NameString>, /* To search the variable like _SB.PCI0.^^_FOO */
+        should_keep_term_list_hierarchy_when_found: bool,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+    ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
+        let single_name = name.get_single_name_path();
+
+        if let Some(named_object_name) = named_object.get_name() {
+            if name == named_object_name
+                || single_name
+                    .as_ref()
+                    .and_then(|n| Some(current_scope.is_child(name) && name.suffix_search(n)))
+                    .unwrap_or(false)
+            {
+                let named_object_single_name = single_name.unwrap_or_else(|| {
+                    named_object_name.get_single_name_path().unwrap_or_else(|| {
+                        named_object_name
+                            .get_element_as_name_string(named_object_name.len() - 1)
+                            .unwrap()
+                    })
+                });
+
+                let v = self.eval_named_object(
+                    name,
+                    named_object,
+                    local_variables,
+                    argument_variables,
+                    current_scope,
+                )?;
+                return Ok(Some(
+                    self.variable_tree.add_data(named_object_single_name, v)?,
+                ));
+            }
+        }
+        if !name.is_single_relative_path_name()
+            && !named_object
+                .get_name()
+                .unwrap_or(current_scope)
+                .is_child(name)
+        {
+            return Ok(None);
+        }
+
+        if let Some(mut field_list) = named_object.get_field_list() {
+            while let Some(e) = field_list.next()? {
+                if let FieldElement::NameField((n, _)) = &e {
+                    if n == name {
+                        let temp_name = if !name.is_single_relative_path_name() {
+                            name.get_element_as_name_string(name.len() - 1)
+                        } else {
+                            None
+                        };
+                        let v = self.eval_named_object(
+                            name,
+                            named_object,
+                            local_variables,
+                            argument_variables,
+                            current_scope,
+                        )?;
+                        return Ok(Some(self.variable_tree.add_data(
+                            name.get_single_name_path().or(temp_name).unwrap(),
+                            v,
+                        )?));
+                    } else if single_name
+                        .as_ref()
+                        .and_then(|relative_name| {
+                            Some(current_scope.is_child(name) && n.suffix_search(relative_name))
+                        })
+                        .unwrap_or(false)
+                    {
+                        let single_name = single_name.unwrap();
+                        let v = self.eval_named_object(
+                            name,
+                            named_object,
+                            local_variables,
+                            argument_variables,
+                            current_scope,
+                        )?;
+                        return Ok(Some(
+                            self.variable_tree.add_data(
+                                single_name
+                                    .get_element_as_name_string(single_name.len() - 1)
+                                    .unwrap(),
+                                v,
+                            )?,
+                        ));
+                    }
+                }
+            }
+            Ok(None)
+        } else if let Some(term_list) = named_object.get_term_list() {
+            self.term_list_hierarchy.push(term_list.clone());
+            let result = self.search_aml_variable_by_parsing_term_list(
+                name,
+                term_list,
+                search_scope,
+                should_keep_term_list_hierarchy_when_found,
+                local_variables,
+                argument_variables,
+            );
+            if !(matches!(result, Ok(Some(_))) && should_keep_term_list_hierarchy_when_found) {
+                self.term_list_hierarchy.pop();
+            }
+            self.variable_tree.move_current_scope(current_scope)?;
+            result
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn search_aml_variable_by_absolute_path(
         &mut self,
         name: &NameString,
         local_variables: &mut LocalVariables,
         argument_variables: &mut ArgumentVariables,
-        current_scope: &NameString,
+    ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
+        if let Some(d) = self.variable_tree.find_data_from_root(name)? {
+            return Ok(Some(d));
+        }
+        let current_variable_tree_backup = self.variable_tree.clone();
+        let mut term_list_hierarchy_backup = Vec::new();
+        core::mem::swap(
+            &mut term_list_hierarchy_backup,
+            &mut self.term_list_hierarchy,
+        );
+        self.variable_tree.move_to_root()?;
+        let result = self.search_aml_variable_by_parsing_term_list(
+            name,
+            self.current_root_term_list.clone(),
+            None,
+            false,
+            local_variables,
+            argument_variables,
+        );
+
+        if let Ok(Some(_)) = &result {
+            self.variable_tree = current_variable_tree_backup;
+            core::mem::swap(
+                &mut term_list_hierarchy_backup,
+                &mut self.term_list_hierarchy,
+            );
+            return result;
+        } else if result.is_err() {
+            self.variable_tree = current_variable_tree_backup;
+            core::mem::swap(
+                &mut term_list_hierarchy_backup,
+                &mut self.term_list_hierarchy,
+            );
+            return result;
+        }
+        drop(result);
+        self.term_list_hierarchy.clear();
+
+        let current_term_list_backup = self.current_root_term_list.clone();
+        for term_list in self.root_term_list.clone().iter() {
+            self.current_root_term_list = term_list.clone();
+            let result = self.search_aml_variable_by_parsing_term_list(
+                name,
+                self.current_root_term_list.clone(),
+                None,
+                false,
+                local_variables,
+                argument_variables,
+            );
+
+            if let Ok(Some(_)) = &result {
+                self.variable_tree = current_variable_tree_backup;
+                self.current_root_term_list = current_term_list_backup;
+                core::mem::swap(
+                    &mut term_list_hierarchy_backup,
+                    &mut self.term_list_hierarchy,
+                );
+                return result;
+            } else if result.is_err() {
+                self.variable_tree = current_variable_tree_backup;
+                self.current_root_term_list = current_term_list_backup;
+                core::mem::swap(
+                    &mut term_list_hierarchy_backup,
+                    &mut self.term_list_hierarchy,
+                );
+                return result;
+            }
+            self.term_list_hierarchy.clear();
+        }
+        self.variable_tree = current_variable_tree_backup;
+        self.current_root_term_list = current_term_list_backup;
+        core::mem::swap(
+            &mut term_list_hierarchy_backup,
+            &mut self.term_list_hierarchy,
+        );
+        return Ok(None);
+    }
+
+    /// Find Element with parsing Field and return the object including it.
+    /// This function is the entrance of searching object.
+    pub fn search_aml_variable(
+        &mut self,
+        name: &NameString,
+        preferred_search_scope: Option<&NameString>,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
-        let object = self.parse_helper.search_real_object(name)?;
-        if object.is_none() {
-            pr_err!("Cannot find {}.", name);
-            if name.len() > 1 {
-                let relative_name = name.get_element_as_name_string(name.len() - 1).unwrap();
-                let sb_name = relative_name
-                    .get_full_name_path(&NameString::from_array(&[[b'_', b'S', b'B', 0]], true));
-                if &sb_name != name {
-                    pr_info!("Temporary fix: Search {} instead.", sb_name);
-                    return self.search_aml_variable(
-                        &sb_name,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    );
+        if name.is_null_name() {
+            return Err(AmlError::InvalidMethodName(name.clone()));
+        }
+        let back_up_of_original_name_searching =
+            if let Some(searching) = self.original_searching_name.replace(name.clone()) {
+                if name == &searching {
+                    self.original_searching_name = Some(searching);
+                    return Err(AmlError::NestedSearch);
                 }
-                pr_info!("Temporary fix: Search {} instead.", relative_name);
-                return self.search_aml_variable(
-                    &relative_name,
+                Some(searching)
+            } else {
+                None
+            };
+
+        if self
+            .term_list_hierarchy
+            .last()
+            .and_then(|n| Some(n.get_scope_name() != self.variable_tree.get_current_scope_name()))
+            .unwrap_or(false)
+        {
+            pr_err!("Evaluator's term_list_hierarchy and variable_tree are broken! term_list_hierarchy.last: {:?} != variable_tree: {}",
+                self.term_list_hierarchy.last().and_then(|t|Some(t.get_scope_name())),
+                self.variable_tree.get_current_scope_name());
+        }
+
+        /* Search from the Variable Tree */
+        if let Some(relative_name) =
+            name.get_relative_name(self.variable_tree.get_current_scope_name())
+        {
+            if let Some(v) = self
+                .variable_tree
+                .find_data_from_current_scope(&relative_name)?
+            {
+                self.original_searching_name = back_up_of_original_name_searching;
+                return Ok(v);
+            }
+        }
+        if name.is_absolute_path() {
+            if let Some(v) = self.search_aml_variable_by_absolute_path(
+                name,
+                local_variables,
+                argument_variables,
+            )? {
+                self.original_searching_name = back_up_of_original_name_searching;
+                return Ok(v);
+            }
+        }
+        let single_name = name.get_single_name_path();
+        if let Some(s_n) = single_name.as_ref() {
+            if let Some(v) = self.variable_tree.find_data_from_current_scope(s_n)? {
+                self.original_searching_name = back_up_of_original_name_searching;
+                return Ok(v);
+            }
+        }
+
+        /* Search from the current TermList */
+        if let Some(current_term_list) = self.term_list_hierarchy.last().cloned() {
+            if let Some(v) = self.search_aml_variable_by_parsing_term_list(
+                name,
+                current_term_list,
+                None,
+                false,
+                local_variables,
+                argument_variables,
+            )? {
+                self.original_searching_name = back_up_of_original_name_searching;
+                return Ok(v);
+            }
+        }
+
+        let tree_backup = self.variable_tree.clone();
+        let search_scope = preferred_search_scope
+            .unwrap_or_else(|| self.variable_tree.get_current_scope_name())
+            .clone();
+        let mut term_list_hierarchy_back_up: Vec<TermList> =
+            Vec::with_capacity(self.term_list_hierarchy.len());
+        let mut term_list_hierarchy_len = self.term_list_hierarchy.len(); /* For debug */
+
+        if let Some(t) = self.term_list_hierarchy.pop() {
+            term_list_hierarchy_len -= 1;
+            term_list_hierarchy_back_up.push(t);
+        }
+
+        for index in (0..self.term_list_hierarchy.len()).rev() {
+            let term_list = self.term_list_hierarchy.get(index).unwrap().clone();
+            if self.variable_tree.get_current_scope_name() != term_list.get_scope_name() {
+                self.variable_tree.move_to_parent()?;
+                if self.variable_tree.get_current_scope_name() != term_list.get_scope_name() {
+                    pr_err!(
+                        "Variables' Tree and TermListHierarchy are not matched: {} != {}",
+                        self.variable_tree.get_current_scope_name(),
+                        term_list.get_scope_name()
+                    );
+                    self.variable_tree
+                        .move_current_scope(term_list.get_scope_name())?;
+                }
+            }
+            if let Some(s_n) = single_name.as_ref() {
+                if let Some(v) = self.variable_tree.find_data_from_current_scope(s_n)? {
+                    self.original_searching_name = back_up_of_original_name_searching;
+                    self.variable_tree = tree_backup;
+                    while let Some(t) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(t);
+                    }
+                    return Ok(v);
+                }
+            } else if let Some(r_n) = name.get_relative_name(term_list.get_scope_name()) {
+                if let Some(v) = self.variable_tree.find_data_from_current_scope(&r_n)? {
+                    self.original_searching_name = back_up_of_original_name_searching;
+                    self.variable_tree = tree_backup;
+                    while let Some(t) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(t);
+                    }
+                    return Ok(v);
+                }
+            }
+
+            let search_target_name = single_name
+                .as_ref()
+                .and_then(|n| Some(n.get_full_name_path(term_list.get_scope_name())))
+                .unwrap_or(name.clone());
+
+            match self.search_aml_variable_by_parsing_term_list(
+                &search_target_name,
+                term_list.clone(),
+                Some(&search_scope),
+                false,
+                local_variables,
+                argument_variables,
+            ) {
+                Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+                o => {
+                    self.original_searching_name = back_up_of_original_name_searching;
+                    self.variable_tree = tree_backup;
+                    while let Some(t) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(t);
+                    }
+                    return if let Ok(Some(d)) = o {
+                        Ok(d)
+                    } else if let Err(e) = o {
+                        Err(e)
+                    } else {
+                        unreachable!()
+                    };
+                }
+            }
+            if let Some(t) = self.term_list_hierarchy.pop() {
+                term_list_hierarchy_back_up.push(t)
+            }
+
+            term_list_hierarchy_len -= 1;
+            if self.term_list_hierarchy.len() != term_list_hierarchy_len {
+                pr_err!(
+                    "Expected {} entries in term_list_hierarchy, but found {} entries: {:?}",
+                    term_list_hierarchy_len,
+                    self.term_list_hierarchy.len(),
+                    self.term_list_hierarchy
+                );
+                return Err(AmlError::ObjectTreeError);
+            }
+        }
+
+        /* Search from current root */
+        assert_eq!(self.term_list_hierarchy.len(), 0);
+
+        match self
+            .variable_tree
+            .find_data_from_root(&single_name.as_ref().unwrap_or(name))
+        {
+            Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+            o => {
+                self.original_searching_name = back_up_of_original_name_searching;
+                self.variable_tree = tree_backup;
+                while let Some(t) = term_list_hierarchy_back_up.pop() {
+                    self.term_list_hierarchy.push(t);
+                }
+                return if let Ok(Some(d)) = o {
+                    Ok(d)
+                } else if let Err(e) = o {
+                    Err(e)
+                } else {
+                    unreachable!()
+                };
+            }
+        }
+        match self.search_aml_variable_by_parsing_term_list(
+            &single_name.as_ref().unwrap_or(name),
+            self.current_root_term_list.clone(),
+            Some(&search_scope),
+            false,
+            local_variables,
+            argument_variables,
+        ) {
+            Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+            o => {
+                self.original_searching_name = back_up_of_original_name_searching;
+                self.variable_tree = tree_backup;
+                while let Some(t) = term_list_hierarchy_back_up.pop() {
+                    self.term_list_hierarchy.push(t);
+                }
+                return if let Ok(Some(d)) = o {
+                    Ok(d)
+                } else if let Err(e) = o {
+                    Err(e)
+                } else {
+                    unreachable!()
+                };
+            }
+        }
+
+        let current_term_list_back_up = self.current_root_term_list.clone();
+
+        /* Search from root_term_list including SSDT */
+        for root_term_list in self.root_term_list.clone().iter() {
+            if current_term_list_back_up == *root_term_list {
+                continue;
+            }
+            self.current_root_term_list = root_term_list.clone();
+            match self.search_aml_variable_by_parsing_term_list(
+                name,
+                self.current_root_term_list.clone(),
+                Some(&search_scope),
+                false,
+                local_variables,
+                argument_variables,
+            ) {
+                Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+                o => {
+                    self.current_root_term_list = current_term_list_back_up;
+                    self.original_searching_name = back_up_of_original_name_searching;
+                    self.variable_tree = tree_backup;
+                    while let Some(t) = term_list_hierarchy_back_up.pop() {
+                        self.term_list_hierarchy.push(t);
+                    }
+                    return if let Ok(Some(d)) = o {
+                        Ok(d)
+                    } else if let Err(e) = o {
+                        Err(e)
+                    } else {
+                        unreachable!()
+                    };
+                }
+            }
+        }
+        self.current_root_term_list = current_term_list_back_up;
+        self.original_searching_name = back_up_of_original_name_searching;
+        self.variable_tree = tree_backup;
+        while let Some(t) = term_list_hierarchy_back_up.pop() {
+            self.term_list_hierarchy.push(t);
+        }
+        return Err(AmlError::InvalidMethodName(name.clone()));
+    }
+
+    fn move_into_object(
+        &mut self,
+        object_name: &NameString,
+        search_scope: Option<&NameString>,
+    ) -> Result<(), AmlError> {
+        /* Search from the current root */
+        if !self.term_list_hierarchy.is_empty() {
+            pr_err!("TermListHierarchy is not empty, it will be deleted.");
+            self.term_list_hierarchy.clear();
+        }
+        let (mut dummy_local_variables, mut dummy_argument_variables) =
+            Self::init_local_variables_and_argument_variables();
+
+        match self.search_aml_variable_by_parsing_term_list(
+            object_name,
+            self.current_root_term_list.clone(),
+            search_scope,
+            true,
+            &mut dummy_local_variables,
+            &mut dummy_argument_variables,
+        ) {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+            Err(e) => return Err(e),
+        }
+
+        let current_term_list_back_up = self.current_root_term_list.clone();
+
+        /* Search from root_term_list including SSDT */
+        for root_term_list in self.root_term_list.clone().iter() {
+            if current_term_list_back_up == *root_term_list {
+                continue;
+            }
+            self.current_root_term_list = root_term_list.clone();
+            match self.search_aml_variable_by_parsing_term_list(
+                object_name,
+                self.current_root_term_list.clone(),
+                search_scope,
+                true,
+                &mut dummy_local_variables,
+                &mut dummy_argument_variables,
+            ) {
+                Ok(Some(_)) => return Ok(()), /* Keep current_root_term_list */
+                Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+                Err(e) => {
+                    self.current_root_term_list = current_term_list_back_up;
+                    return Err(e);
+                }
+            }
+        }
+
+        self.current_root_term_list = current_term_list_back_up;
+        return Err(AmlError::InvalidMethodName(object_name.clone()));
+    }
+
+    fn _move_into_device(
+        &mut self,
+        hid: u32,
+        mut term_list: TermList,
+        in_device: bool,
+    ) -> Result<bool, AmlError> {
+        while let Some(obj) = term_list.next(self)? {
+            match obj {
+                TermObj::NamespaceModifierObj(n_m) => {
+                    match n_m {
+                        NamespaceModifierObject::DefScope(s) => {
+                            self.term_list_hierarchy.push(s.get_term_list().clone());
+                            self.variable_tree.move_current_scope(s.get_name())?;
+                            if self._move_into_device(hid, s.get_term_list().clone(), in_device)? {
+                                return Ok(true);
+                            }
+                            self.term_list_hierarchy.pop();
+                            self.variable_tree.move_to_parent()?;
+                            if self.variable_tree.get_current_scope_name()
+                                != term_list.get_scope_name()
+                            {
+                                pr_warn!("VariableTree may be broken: Tree's Scope:{}, TermList's Scope: {}",
+                                    self.variable_tree.get_current_scope_name(),
+                                    term_list.get_scope_name());
+                                self.variable_tree
+                                    .move_current_scope(term_list.get_scope_name())?;
+                            }
+                        }
+                        NamespaceModifierObject::DefName(n) => {
+                            if in_device {
+                                let hid_name = NameString::from_array(&[*b"_HID"], false)
+                                    .get_full_name_path(term_list.get_scope_name());
+                                if n.get_name() == &hid_name {
+                                    if let DataRefObject::DataObject(
+                                        DataObject::ComputationalData(
+                                            ComputationalData::ConstData(d),
+                                        ),
+                                    ) = n.get_data_ref_object()
+                                    {
+                                        if d.to_int() == hid as AcpiInt {
+                                            return Ok(true);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => { /* Ignore */ }
+                    }
+                }
+                TermObj::NamedObj(n_o) => match n_o {
+                    NamedObject::DefDevice(d) => {
+                        self.term_list_hierarchy.push(d.get_term_list().clone());
+                        self.variable_tree.move_current_scope(d.get_name())?;
+                        if self._move_into_device(hid, d.get_term_list().clone(), true)? {
+                            return Ok(true);
+                        }
+                        self.term_list_hierarchy.pop();
+                        self.variable_tree.move_to_parent()?;
+                        if self.variable_tree.get_current_scope_name() != term_list.get_scope_name()
+                        {
+                            pr_warn!(
+                                "VariableTree may be broken: Tree's Scope:{}, TermList's Scope: {}",
+                                self.variable_tree.get_current_scope_name(),
+                                term_list.get_scope_name()
+                            );
+                            self.variable_tree
+                                .move_current_scope(term_list.get_scope_name())?;
+                        }
+                    }
+                    _ => { /* Ignore */ }
+                },
+                TermObj::StatementOpcode(s_o) => {
+                    if let StatementOpcode::DefIfElse(i_e) = s_o {
+                        pr_warn!(
+                            "Found IfElse Statement out of a method, currently ignore it: {:?}",
+                            i_e
+                        );
+                    }
+                }
+                TermObj::ExpressionOpcode(_) => { /* Ignore */ }
+            }
+        }
+        return Ok(false);
+    }
+
+    pub fn move_into_device(&mut self, hid: &[u8; 7]) -> Result<bool, AmlError> {
+        /* Search from the current root */
+        if !self.term_list_hierarchy.is_empty() {
+            pr_err!("TermListHierarchy is not empty, it will be deleted.");
+            self.term_list_hierarchy.clear();
+        }
+        let hid_u32 = eisa_id_to_dword(hid);
+        if self._move_into_device(hid_u32, self.current_root_term_list.clone(), false)? {
+            return Ok(true);
+        }
+
+        return Ok(false);
+    }
+
+    pub fn find_method_argument_count(
+        &mut self,
+        method_name: &NameString,
+    ) -> Result<AcpiInt, AmlError> {
+        if method_name.is_null_name() {
+            return Ok(0);
+        }
+        let (mut local_variables, mut argument_variables) =
+            Self::init_local_variables_and_argument_variables();
+
+        let v = self.search_aml_variable(
+            method_name,
+            None,
+            &mut local_variables,
+            &mut argument_variables,
+        )?;
+        Ok(match &*v.lock().unwrap() {
+            AmlVariable::Method(m) => m.get_argument_count(),
+            _ => 0,
+        })
+    }
+
+    fn eval_named_object(
+        &mut self,
+        object_name: &NameString,
+        named_object: NamedObject,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+        current_scope: &NameString,
+    ) -> Result<AmlVariable, AmlError> {
+        match named_object {
+            NamedObject::DefBankField(_) => {
+                pr_err!("DefBankField is not implemented.");
+                Err(AmlError::UnsupportedType)
+            }
+            NamedObject::DefCreateField(f) => {
+                let source_variable = self.get_aml_variable_reference_from_term_arg(
+                    f.get_source_buffer().clone(),
                     local_variables,
                     argument_variables,
                     current_scope,
-                );
-            }
-            return Err(AmlError::InvalidOperation);
-        }
-
-        match object.unwrap() {
-            ContentObject::NamedObject(n_o) => match n_o {
-                NamedObject::DefBankField(_) => {
-                    unimplemented!()
-                }
-                NamedObject::DefCreateField(f) => {
-                    let source_variable = self.get_aml_variable_reference_from_term_arg(
-                        f.get_source_buffer().clone(),
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?;
-                    return if f.is_bit_field() {
-                        let index = self
-                            .eval_integer_expression(
-                                f.get_index().clone(),
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
-                            .to_int()?;
-                        let field_size = if let Some(field_size) = f.get_source_size() {
-                            assert_eq!(field_size, 1);
-                            field_size
-                        } else {
-                            self.eval_integer_expression(
-                                f.get_source_size_term_arg().as_ref().unwrap().clone(),
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
-                            .to_int()?
-                        };
-                        let bit_field = Arc::new(Mutex::new(AmlVariable::BitField(AmlBitFiled {
-                            source: source_variable,
-                            bit_index: index,
-                            num_of_bits: field_size,
-                            access_align: 1,
-                            should_lock_global_lock: false,
-                        })));
-                        self.variables.push((name.clone(), bit_field.clone()));
-                        Ok(bit_field)
+                )?;
+                return if f.is_bit_field() {
+                    let index = self
+                        .eval_integer_expression(
+                            f.get_index().clone(),
+                            local_variables,
+                            argument_variables,
+                            current_scope,
+                        )?
+                        .to_int()?;
+                    let field_size = if let Some(field_size) = f.get_source_size() {
+                        assert_eq!(field_size, 1);
+                        field_size
                     } else {
-                        let index = self
-                            .eval_integer_expression(
-                                f.get_index().clone(),
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
-                            .to_int()?;
-                        let field_size = f.get_source_size().unwrap();
-                        let byte_field =
-                            Arc::new(Mutex::new(AmlVariable::ByteField(AmlByteFiled {
-                                source: source_variable,
-                                byte_index: index,
-                                num_of_bytes: field_size,
-                                should_lock_global_lock: false,
-                            })));
-                        self.variables.push((name.clone(), byte_field.clone()));
-                        Ok(byte_field)
+                        self.eval_integer_expression(
+                            f.get_source_size_term_arg().as_ref().unwrap().clone(),
+                            local_variables,
+                            argument_variables,
+                            current_scope,
+                        )?
+                        .to_int()?
                     };
-                }
-                NamedObject::DefDataRegion(_) => {
-                    unimplemented!();
-                }
-                NamedObject::DefDevice(_) => {
-                    unimplemented!();
-                }
-                NamedObject::DefField(f) => {
-                    let mut access_size = f.get_access_size();
-                    let should_lock_global_lock = f.should_lock();
-                    let source = self.get_aml_variable(
-                        f.get_source_region_name(),
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?;
-                    let mut index = 0;
-                    let mut field_list = f.get_field_list().clone();
-                    let relative_name = name
-                        .get_relative_name(current_scope)
-                        .unwrap_or_else(|| name.clone());
+                    Ok(AmlVariable::BitField(AmlBitFiled {
+                        source: source_variable,
+                        bit_index: index,
+                        num_of_bits: field_size,
+                        access_align: 1,
+                        should_lock_global_lock: false,
+                    }))
+                } else {
+                    let index = self
+                        .eval_integer_expression(
+                            f.get_index().clone(),
+                            local_variables,
+                            argument_variables,
+                            current_scope,
+                        )?
+                        .to_int()?;
+                    let field_size = f.get_source_size().unwrap();
+                    Ok(AmlVariable::ByteField(AmlByteFiled {
+                        source: source_variable,
+                        byte_index: index,
+                        num_of_bytes: field_size,
+                        should_lock_global_lock: false,
+                    }))
+                };
+            }
+            NamedObject::DefDataRegion(_) => {
+                unimplemented!();
+            }
+            NamedObject::DefDevice(_) => {
+                Ok(AmlVariable::Uninitialized) /* Temporary */
+            }
+            NamedObject::DefField(f) => {
+                let mut access_size = f.get_access_size();
+                let should_lock_global_lock = f.should_lock();
+                let source = self.search_aml_variable(
+                    f.get_source_region_name(),
+                    None,
+                    local_variables,
+                    argument_variables,
+                )?;
+                let mut index = 0;
+                let mut field_list = f.get_field_list().clone();
+                let relative_name = object_name
+                    .get_relative_name(current_scope)
+                    .unwrap_or_else(|| object_name.clone());
 
-                    while let Some(e) = field_list.next()? {
-                        match e {
-                            FieldElement::ReservedField(size) => {
-                                index += size.length;
+                while let Some(e) = field_list.next()? {
+                    match e {
+                        FieldElement::ReservedField(size) => {
+                            index += size.length;
+                        }
+                        FieldElement::AccessField((access_type, access_attribute)) => {
+                            access_size = Field::convert_to_access_size(access_type);
+                            if access_attribute != 0 {
+                                pr_warn!("Unsupported Attribute: {}", access_attribute);
                             }
-                            FieldElement::AccessField((access_type, access_attribute)) => {
-                                access_size = Field::convert_to_access_size(access_type);
-                                if access_attribute != 0 {
-                                    pr_warn!("Unsupported Attribute: {}", access_attribute);
-                                }
-                            }
-                            FieldElement::ExtendedAccessField(e) => {
-                                pr_warn!("Unsupported ExtendedAccessField: {:?}", e);
-                                index += e[2] as usize;
-                            }
-                            FieldElement::ConnectField(c) => {
-                                pr_warn!("Unsupported ConnectField: {}", c);
-                            }
-                            FieldElement::NameField((entry_name, pkg_length)) => {
-                                if relative_name.suffix_search(&entry_name) {
-                                    let bit_field =
-                                        Arc::new(Mutex::new(AmlVariable::BitField(AmlBitFiled {
-                                            source,
-                                            bit_index: index,
-                                            num_of_bits: pkg_length.length,
-                                            access_align: access_size,
-                                            should_lock_global_lock,
-                                        })));
-                                    self.variables.push((name.clone(), bit_field.clone()));
-                                    return Ok(bit_field);
-                                } else {
-                                    index += pkg_length.length;
-                                }
+                        }
+                        FieldElement::ExtendedAccessField(e) => {
+                            pr_warn!("Unsupported ExtendedAccessField: {:?}", e);
+                            index += e[2] as usize;
+                        }
+                        FieldElement::ConnectField(c) => {
+                            pr_warn!("Unsupported ConnectField: {}", c);
+                        }
+                        FieldElement::NameField((entry_name, pkg_length)) => {
+                            if relative_name.suffix_search(&entry_name) {
+                                return Ok(AmlVariable::BitField(AmlBitFiled {
+                                    source,
+                                    bit_index: index,
+                                    num_of_bits: pkg_length.length,
+                                    access_align: access_size,
+                                    should_lock_global_lock,
+                                }));
+                            } else {
+                                index += pkg_length.length;
                             }
                         }
                     }
-                    Err(AmlError::AccessOutOfRange)
                 }
-                NamedObject::DefEvent(_) => {
-                    unimplemented!()
-                }
-                NamedObject::DefIndexField(_) => {
-                    unimplemented!()
-                }
-                NamedObject::DefMethod(m) => {
-                    let variable = Arc::new(Mutex::new(AmlVariable::Method(m)));
-                    self.variables.push((name.clone(), variable.clone()));
-                    Ok(variable)
-                }
-                NamedObject::DefMutex(m) => {
-                    let variable = Arc::new(Mutex::new(AmlVariable::Mutex(Arc::new((
-                        AtomicU8::new(0),
-                        m.1,
-                    )))));
-                    self.variables.push((m.0, variable.clone()));
-                    Ok(variable)
-                }
-                NamedObject::DefExternal(e) => {
-                    pr_err!("Cannot get real object of {}.", e.get_name());
-                    Err(AmlError::InvalidType)
-                }
-                NamedObject::DefOpRegion(operation_region) => {
-                    let region_type = operation_region.get_operation_type()?;
-                    let offset = self
-                        .eval_integer_expression(
-                            operation_region.get_region_offset().clone(),
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
-                        .to_int()?;
-                    let length = self
-                        .eval_integer_expression(
-                            operation_region.get_region_length().clone(),
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
-                        .to_int()?;
-                    let variable = Arc::new(Mutex::new(match region_type {
-                        OperationRegionType::SystemMemory => (AmlVariable::MMIo((offset, length))),
-                        OperationRegionType::SystemIO => (AmlVariable::MMIo((offset, length))),
-                        OperationRegionType::EmbeddedControl => AmlVariable::EcIo((offset, length)),
-                        OperationRegionType::PciConfig => {
-                            let mut operation_region_scope = operation_region.get_name().clone();
-                            operation_region_scope.up_to_parent_name_space();
-                            let bbn_name = NameString::from_array(&[*b"_BBN"], false)
-                                .get_full_name_path(&operation_region_scope);
-                            let locked_bbn_name = self.get_aml_variable(
-                                &bbn_name,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?;
-                            let unlocked_bbn =
-                                locked_bbn_name.try_lock().or(Err(AmlError::MutexError))?;
-                            let bus = (match &*unlocked_bbn {
-                                AmlVariable::ConstData(c) => c.to_int(),
-                                AmlVariable::Method(m) => {
-                                    let method = m.clone();
-                                    drop(unlocked_bbn);
-                                    let eval_result =
-                                        self.run_method(&method, &[], Some(current_scope))?;
-                                    match eval_result.to_int() {
-                                        Ok(b) => b,
-                                        Err(_) => {
-                                            pr_err!(
-                                                "Expected bus number, but found {:?}",
-                                                eval_result
-                                            );
-                                            Err(AmlError::InvalidType)?
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    pr_err!("Expected bus number, but found {:?}", *unlocked_bbn);
-                                    Err(AmlError::InvalidType)?
-                                }
-                            } & 0xFF) as u16;
-                            let adr_name = NameString::from_array(&[*b"_ADR"], false)
-                                .get_full_name_path(&operation_region_scope);
-                            let locked_adr_name = self.get_aml_variable(
-                                &adr_name,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?;
-                            let unlocked_adr =
-                                locked_adr_name.try_lock().or(Err(AmlError::MutexError))?;
-                            let addr = match &*unlocked_adr {
-                                AmlVariable::ConstData(c) => c.to_int(),
-                                AmlVariable::Method(m) => {
-                                    let method = m.clone();
-                                    drop(unlocked_adr);
-                                    let eval_result =
-                                        self.run_method(&method, &[], Some(current_scope))?;
-                                    match eval_result.to_int() {
-                                        Ok(b) => b,
-                                        Err(_) => {
-                                            pr_err!(
-                                                "Expected device/function number, but found {:?}",
-                                                eval_result
-                                            );
-                                            Err(AmlError::InvalidType)?
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    pr_err!(
-                                        "Expected device/function number, but found {:?}",
-                                        *unlocked_adr
-                                    );
-                                    Err(AmlError::InvalidType)?
-                                }
-                            };
-                            let device = ((addr >> 16) & 0xFFFF) as u16;
-                            let function = (addr & 0xFFFF) as u16;
-                            pr_info!(
-                                "{}=>bus:{},device:{},function:{},offset:{},length:{}",
-                                operation_region.get_name(),
-                                bus,
-                                device,
-                                function,
-                                offset,
-                                length
-                            );
-                            AmlVariable::PciConfig(AmlPciConfig {
-                                bus,
-                                device,
-                                function,
-                                offset,
-                                length,
-                            })
-                        }
-                        _ => {
-                            pr_err!("Unsupported Type: {:?}", region_type);
-                            Err(AmlError::UnsupportedType)?
-                        }
-                    }));
-                    self.variables.push((name.clone(), variable.clone()));
-                    Ok(variable)
-                }
-                NamedObject::DefPowerRes(_) => {
-                    unimplemented!()
-                }
-                NamedObject::DefThermalZone(_) => {
-                    unimplemented!()
-                }
-            },
-            ContentObject::DataRefObject(d_o) => match d_o {
-                DataRefObject::DataObject(d) => {
-                    let variable = Arc::new(Mutex::new(self.eval_term_arg(
-                        TermArg::DataObject(d),
+                Err(AmlError::AccessOutOfRange)
+            }
+            NamedObject::DefEvent(_) => {
+                pr_err!("DefEvent is not implemented.");
+                Err(AmlError::UnsupportedType)
+            }
+            NamedObject::DefIndexField(_) => {
+                pr_err!("DefIndexField is not implemented.");
+                Err(AmlError::UnsupportedType)
+            }
+            NamedObject::DefMethod(m) => Ok(AmlVariable::Method(m)),
+            NamedObject::DefMutex(m) => Ok(AmlVariable::Mutex(Arc::new((AtomicU8::new(0), m.1)))),
+            NamedObject::DefExternal(e) => {
+                pr_err!("Cannot get real object of {}.", e.get_name());
+                Err(AmlError::InvalidType)
+            }
+            NamedObject::DefOpRegion(operation_region) => {
+                let region_type = operation_region.get_operation_type()?;
+                let offset = self
+                    .eval_integer_expression(
+                        operation_region.get_region_offset().clone(),
                         local_variables,
                         argument_variables,
                         current_scope,
-                    )?));
-                    self.variables.push((name.clone(), variable.clone()));
-                    Ok(variable)
-                }
-                DataRefObject::ObjectReference(d_r) => {
-                    pr_err!("Unsupported Type: DataReference({})", d_r);
-                    Err(AmlError::UnsupportedType)
-                }
-            },
-            ContentObject::Scope(s) => {
-                pr_err!("Invalid Object: {:?}.", s);
-                Err(AmlError::InvalidOperation)
+                    )?
+                    .to_int()?;
+                let length = self
+                    .eval_integer_expression(
+                        operation_region.get_region_length().clone(),
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    )?
+                    .to_int()?;
+                Ok(match region_type {
+                    OperationRegionType::SystemMemory => (AmlVariable::MMIo((offset, length))),
+                    OperationRegionType::SystemIO => (AmlVariable::MMIo((offset, length))),
+                    OperationRegionType::EmbeddedControl => AmlVariable::EcIo((offset, length)),
+                    OperationRegionType::PciConfig => {
+                        let mut operation_region_scope = operation_region.get_name().clone();
+                        operation_region_scope.up_to_parent_name_space();
+                        let bbn_name = NameString::from_array(&[*b"_BBN"], false)
+                            .get_full_name_path(&operation_region_scope);
+                        let locked_bbn_name = self.search_aml_variable(
+                            &bbn_name,
+                            None,
+                            local_variables,
+                            argument_variables,
+                        )?;
+                        let unlocked_bbn =
+                            locked_bbn_name.try_lock().or(Err(AmlError::MutexError))?;
+                        let bus = (match &*unlocked_bbn {
+                            AmlVariable::ConstData(c) => c.to_int(),
+                            AmlVariable::Method(m) => {
+                                let method = m.clone();
+                                drop(unlocked_bbn);
+                                let eval_result =
+                                    self.eval_method(&method, &[], Some(current_scope))?;
+                                match eval_result.to_int() {
+                                    Ok(b) => b,
+                                    Err(_) => {
+                                        pr_err!("Expected bus number, but found {:?}", eval_result);
+                                        Err(AmlError::InvalidType)?
+                                    }
+                                }
+                            }
+                            _ => {
+                                pr_err!("Expected bus number, but found {:?}", *unlocked_bbn);
+                                Err(AmlError::InvalidType)?
+                            }
+                        } & 0xFF) as u16;
+                        let adr_name = NameString::from_array(&[*b"_ADR"], false)
+                            .get_full_name_path(&operation_region_scope);
+                        let locked_adr_name = self.search_aml_variable(
+                            &adr_name,
+                            None,
+                            local_variables,
+                            argument_variables,
+                        )?;
+                        let unlocked_adr =
+                            locked_adr_name.try_lock().or(Err(AmlError::MutexError))?;
+                        let addr = match &*unlocked_adr {
+                            AmlVariable::ConstData(c) => c.to_int(),
+                            AmlVariable::Method(m) => {
+                                let method = m.clone();
+                                drop(unlocked_adr);
+                                let eval_result =
+                                    self.eval_method(&method, &[], Some(current_scope))?;
+                                match eval_result.to_int() {
+                                    Ok(b) => b,
+                                    Err(_) => {
+                                        pr_err!(
+                                            "Expected device/function number, but found {:?}",
+                                            eval_result
+                                        );
+                                        Err(AmlError::InvalidType)?
+                                    }
+                                }
+                            }
+                            _ => {
+                                pr_err!(
+                                    "Expected device/function number, but found {:?}",
+                                    *unlocked_adr
+                                );
+                                Err(AmlError::InvalidType)?
+                            }
+                        };
+                        let device = ((addr >> 16) & 0xFFFF) as u16;
+                        let function = (addr & 0xFFFF) as u16;
+                        pr_info!(
+                            "{}=>bus:{},device:{},function:{},offset:{},length:{}",
+                            operation_region.get_name(),
+                            bus,
+                            device,
+                            function,
+                            offset,
+                            length
+                        );
+                        AmlVariable::PciConfig(AmlPciConfig {
+                            bus,
+                            device,
+                            function,
+                            offset,
+                            length,
+                        })
+                    }
+                    _ => {
+                        pr_err!("Unsupported Type: {:?}", region_type);
+                        Err(AmlError::UnsupportedType)?
+                    }
+                })
             }
-        }
-    }
-
-    fn get_aml_variable(
-        &mut self,
-        name: &NameString,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
-        current_scope: &NameString,
-    ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
-        if let Some(v) = self.variables.iter().find(|e| &e.0 == name) {
-            Ok(v.1.clone())
-        } else if name.get_single_name_path() == Some(NameString::from_array(&[*b"_OSI"], false)) {
-            Ok(self.variables[0].clone().1)
-        } else {
-            self.search_aml_variable(name, local_variables, argument_variables, current_scope)
+            NamedObject::DefPowerRes(_) => {
+                pr_err!("DefPowerResource is not implemented.");
+                Err(AmlError::UnsupportedType)
+            }
+            NamedObject::DefThermalZone(_) => {
+                pr_err!("DefThermalZone is not implemented.");
+                Err(AmlError::UnsupportedType)
+            }
         }
     }
 
@@ -456,7 +1212,7 @@ impl Evaluator {
         match super_name {
             SuperName::SimpleName(simple_name) => match simple_name {
                 SimpleName::NameString(name) => {
-                    self.get_aml_variable(&name, local_variables, argument_variables, current_scope)
+                    self.search_aml_variable(&name, None, local_variables, argument_variables)
                 }
                 SimpleName::ArgObj(c) => {
                     if *c as usize > Self::NUMBER_OF_ARGUMENT_VARIABLES {
@@ -661,8 +1417,7 @@ impl Evaluator {
         argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Vec<AmlPackage>, AmlError> {
-        let number_of_elements_term =
-            p.get_number_of_elements(&mut self.parse_helper, current_scope)?;
+        let number_of_elements_term = p.get_number_of_elements(self, current_scope)?;
         let number_of_elements = self
             .eval_integer_expression(
                 number_of_elements_term,
@@ -683,12 +1438,11 @@ impl Evaluator {
     fn byte_list_to_vec(
         &mut self,
         mut byte_list: ByteList,
-
         local_variables: &mut LocalVariables,
         argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Vec<u8>, AmlError> {
-        let buffer_size_term_arg = byte_list.get_buffer_size(&mut self.parse_helper)?;
+        let buffer_size_term_arg = byte_list.get_buffer_size(self)?;
         let buffer_size = self
             .eval_integer_expression(
                 buffer_size_term_arg,
@@ -728,15 +1482,10 @@ impl Evaluator {
             Target::SuperName(s) => match s {
                 SuperName::SimpleName(s_n) => match s_n {
                     SimpleName::NameString(n) => {
-                        self.get_aml_variable(
-                            n,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
-                        .try_lock()
-                        .or(Err(AmlError::MutexError))?
-                        .write(data)?;
+                        self.search_aml_variable(n, None, local_variables, argument_variables)?
+                            .try_lock()
+                            .or(Err(AmlError::MutexError))?
+                            .write(data)?;
                     }
                     SimpleName::ArgObj(l) => {
                         if argument_variables.len() <= *l as usize {
@@ -1542,18 +2291,18 @@ impl Evaluator {
             ExpressionOpcode::DefToHexString(_) => Err(AmlError::UnsupportedType),
             ExpressionOpcode::DefToString(_) => Err(AmlError::UnsupportedType),
             ExpressionOpcode::MethodInvocation(method_invocation) => {
-                let obj = self.get_aml_variable(
+                let obj = self.search_aml_variable(
                     method_invocation.get_name(),
+                    None,
                     local_variables,
                     argument_variables,
-                    current_scope,
                 )?;
                 let locked_obj = &*obj.try_lock().or(Err(AmlError::MutexError))?;
                 match locked_obj {
                     AmlVariable::Method(method) => {
                         let method = method.clone();
                         drop(locked_obj);
-                        self.eval_method_with_method_invocation(
+                        self.eval_method_invocation(
                             &method_invocation,
                             &method,
                             local_variables,
@@ -1578,8 +2327,13 @@ impl Evaluator {
         }
     }
 
-    fn eval_notify(&mut self, _notify: Notify) -> Result<(), AmlError> {
-        unimplemented!()
+    fn eval_notify(&mut self, notify: Notify) -> Result<(), AmlError> {
+        pr_info!(
+            "Notify: {:?} ({:?})",
+            notify.get_notify_object_name(),
+            notify.get_notify_value()
+        );
+        Ok(())
     }
 
     fn release_mutex(
@@ -1685,26 +2439,24 @@ impl Evaluator {
             current_scope,
         )? {
             let true_statement = i_e.get_if_true_term_list();
-            self.parse_helper
-                .move_into_term_list(true_statement.clone())?;
+            self.term_list_hierarchy.push(true_statement.clone());
             let result = self._eval_term_list(
                 true_statement.clone(),
                 local_variables,
                 argument_variables,
                 current_scope,
             );
-            self.parse_helper.move_out_from_current_term_list()?;
+            self.term_list_hierarchy.pop();
             result
         } else if let Some(false_statement) = i_e.get_if_false_term_list() {
-            self.parse_helper
-                .move_into_term_list(false_statement.clone())?;
+            self.term_list_hierarchy.push(false_statement.clone());
             let result = self._eval_term_list(
                 false_statement.clone(),
                 local_variables,
                 argument_variables,
                 current_scope,
             );
-            self.parse_helper.move_out_from_current_term_list()?;
+            self.term_list_hierarchy.pop();
             result
         } else {
             Ok(None)
@@ -1720,7 +2472,7 @@ impl Evaluator {
     ) -> Result<Option<StatementOpcode>, AmlError> {
         let predicate = w.get_predicate();
         let term_list = w.get_term_list();
-        self.parse_helper.move_into_term_list(term_list.clone())?;
+        self.term_list_hierarchy.push(term_list.clone());
         loop {
             if !self.eval_bool_expression(
                 predicate.clone(),
@@ -1728,7 +2480,7 @@ impl Evaluator {
                 argument_variables,
                 current_scope,
             )? {
-                self.parse_helper.move_out_from_current_term_list()?;
+                self.term_list_hierarchy.pop();
                 return Ok(None);
             }
 
@@ -1740,11 +2492,11 @@ impl Evaluator {
             ) {
                 Ok(None) | Ok(Some(StatementOpcode::DefContinue)) => { /* Continue */ }
                 Ok(Some(StatementOpcode::DefBreak)) => {
-                    self.parse_helper.move_out_from_current_term_list()?;
+                    self.term_list_hierarchy.pop();
                     return Ok(None);
                 }
                 d => {
-                    self.parse_helper.move_out_from_current_term_list()?;
+                    self.term_list_hierarchy.pop();
                     return d;
                 }
             }
@@ -1758,10 +2510,10 @@ impl Evaluator {
         argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<Option<StatementOpcode>, AmlError> {
-        while let Some(term_obj) = term_list.next(&mut self.parse_helper)? {
+        while let Some(term_obj) = term_list.next(self)? {
             match term_obj {
                 TermObj::NamespaceModifierObj(_) => { /* Ignore */ }
-                TermObj::NamedObj(_) => { /* Ignore */ }
+                TermObj::NamedObj(_) => { /* Ignore */ /* TODO: Initialize Objects*/ }
                 TermObj::StatementOpcode(s_o) => match s_o {
                     StatementOpcode::DefNoop => { /* Do Nothing */ }
                     StatementOpcode::DefNotify(n) => {
@@ -1833,66 +2585,6 @@ impl Evaluator {
         return Ok(None);
     }
 
-    /// Fork parse_helper and evaluate method
-    fn run_method(
-        &mut self,
-        method: &Method,
-        arguments: &[AmlVariable],
-        search_scope: Option<&NameString>,
-    ) -> Result<AmlVariable, AmlError> {
-        let (mut local_variables, mut argument_variables) =
-            Self::init_local_variables_and_argument_variables();
-
-        if method.get_argument_count() != arguments.len() {
-            pr_err!(
-                "Expected {} arguments, but found {} arguments.",
-                method.get_argument_count(),
-                arguments.len()
-            );
-            return Err(AmlError::InvalidOperation);
-        }
-
-        for (index, arg) in arguments.iter().enumerate() {
-            argument_variables[index] = Arc::new(Mutex::new(arg.clone()));
-        }
-
-        let original_parse_helper = self.parse_helper.clone();
-        self.parse_helper
-            .move_into_object(method.get_name(), None, search_scope)?;
-
-        let result = self._eval_term_list(
-            method.get_term_list().clone(),
-            &mut local_variables,
-            &mut argument_variables,
-            method.get_name(),
-        );
-
-        match result {
-            Err(e) => {
-                self.parse_helper = original_parse_helper;
-                Err(e)
-            }
-            Ok(Some(v)) => {
-                let return_value = match v {
-                    StatementOpcode::DefFatal(_) => Err(AmlError::InvalidOperation),
-                    StatementOpcode::DefReturn(return_value) => Ok(self.eval_term_arg(
-                        return_value,
-                        &mut local_variables,
-                        &mut argument_variables,
-                        method.get_name(),
-                    )?),
-                    _ => Err(AmlError::InvalidOperation),
-                };
-                self.parse_helper = original_parse_helper;
-                return_value
-            }
-            Ok(None) => {
-                self.parse_helper = original_parse_helper;
-                Ok(AmlVariable::Uninitialized)
-            }
-        }
-    }
-
     fn eval_builtin_method(
         &mut self,
         method_invocation: &MethodInvocation,
@@ -1917,10 +2609,11 @@ impl Evaluator {
         &mut self,
         method: &Method,
         arguments: &[AmlVariable],
+        search_scope: Option<&NameString>,
     ) -> Result<AmlVariable, AmlError> {
         let (mut local_variables, mut argument_variables) =
             Self::init_local_variables_and_argument_variables();
-        let current_scope = method.get_name();
+
         if method.get_argument_count() != arguments.len() {
             pr_err!(
                 "Expected {} arguments, but found {} arguments.",
@@ -1929,46 +2622,57 @@ impl Evaluator {
             );
             return Err(AmlError::InvalidOperation);
         }
-        for (index, arg) in arguments.iter().enumerate() {
-            argument_variables[index] = Arc::new(Mutex::new(arg.clone()));
+
+        for (destination, source) in argument_variables.iter_mut().zip(arguments.iter()) {
+            *destination = Arc::new(Mutex::new(source.clone()));
         }
-        self.parse_helper
-            .move_into_term_list(method.get_term_list().clone())?;
+
+        /* Backup the current status */
+        let mut term_list_hierarchy_backup = Vec::with_capacity(self.term_list_hierarchy.len());
+        core::mem::swap(
+            &mut self.term_list_hierarchy,
+            &mut term_list_hierarchy_backup,
+        );
+        let variable_tree_backup = self.variable_tree.clone();
+        let current_term_list_backup = self.current_root_term_list.clone();
+
+        self.variable_tree.move_to_root()?;
+        self.move_into_object(method.get_name(), search_scope)?;
+
         let result = self._eval_term_list(
             method.get_term_list().clone(),
             &mut local_variables,
             &mut argument_variables,
-            current_scope,
+            method.get_name(),
         );
 
-        self.parse_helper.move_out_from_current_term_list()?;
-        if let Err(e) = result {
-            Err(e)
-        } else if let Ok(Some(v)) = result {
-            let return_value = match v {
+        let return_value = match result {
+            Err(e) => {
+                pr_err!("Evaluating {} was failed: {:?}", method.get_name(), e);
+                Err(e)
+            }
+            Ok(None) => Ok(AmlVariable::Uninitialized),
+            Ok(Some(v)) => match v {
                 StatementOpcode::DefFatal(_) => Err(AmlError::InvalidOperation),
-                StatementOpcode::DefReturn(return_value) => {
-                    let val = self.eval_term_arg(
-                        return_value,
-                        &mut local_variables,
-                        &mut argument_variables,
-                        current_scope,
-                    )?;
-                    if val.is_constant_data() {
-                        Ok(val)
-                    } else {
-                        Ok(val.get_constant_data()?)
-                    }
-                }
+                StatementOpcode::DefReturn(return_value) => Ok(self.eval_term_arg(
+                    return_value,
+                    &mut local_variables,
+                    &mut argument_variables,
+                    method.get_name(),
+                )?),
                 _ => Err(AmlError::InvalidOperation),
-            };
-            return_value
-        } else {
-            Ok(AmlVariable::Uninitialized)
-        }
+            },
+        };
+
+        /* Restore the status */
+        self.term_list_hierarchy = term_list_hierarchy_backup;
+        self.variable_tree = variable_tree_backup;
+        self.current_root_term_list = current_term_list_backup;
+
+        return return_value;
     }
 
-    fn eval_method_with_method_invocation(
+    fn eval_method_invocation(
         &mut self,
         method_invocation: &MethodInvocation,
         method: &Method,
@@ -1976,10 +2680,6 @@ impl Evaluator {
         original_argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
-        /* TODO: adjust parse_helper's term list */
-        let (mut local_variables, mut argument_variables) =
-            Self::init_local_variables_and_argument_variables();
-
         if method_invocation.get_ter_arg_list().list.len() != method.get_argument_count() {
             pr_err!(
                 "Expected {} arguments, but found {} arguments.",
@@ -1989,49 +2689,29 @@ impl Evaluator {
             return Err(AmlError::InvalidOperation);
         }
 
-        for (index, arg) in method_invocation.get_ter_arg_list().list.iter().enumerate() {
-            argument_variables[index] = Arc::new(Mutex::new(self.eval_term_arg(
-                arg.clone(),
+        let mut arguments: [MaybeUninit<AmlVariable>; Self::NUMBER_OF_ARGUMENT_VARIABLES] =
+            MaybeUninit::uninit_array();
+        for e in arguments.iter_mut() {
+            e.write(AmlVariable::Uninitialized);
+        }
+        let mut arguments = unsafe { MaybeUninit::array_assume_init(arguments) };
+
+        for (destination, source) in arguments
+            .iter_mut()
+            .zip(method_invocation.get_ter_arg_list().list.iter())
+        {
+            *destination = self.eval_term_arg(
+                source.clone(),
                 original_local_variables,
                 original_argument_variables,
                 current_scope,
-            )?));
+            )?;
         }
 
-        let original_parse_helper = self.parse_helper.clone();
-        self.parse_helper
-            .move_into_object(method.get_name(), None, Some(current_scope))?;
+        self.eval_method(method, &arguments, Some(current_scope))
+    }
 
-        let result = self._eval_term_list(
-            method.get_term_list().clone(),
-            &mut local_variables,
-            &mut argument_variables,
-            method.get_name(),
-        );
-
-        match result {
-            Err(e) => {
-                self.parse_helper = original_parse_helper;
-                Err(e)
-            }
-            Ok(Some(v)) => {
-                let return_value = match v {
-                    StatementOpcode::DefFatal(_) => Err(AmlError::InvalidOperation),
-                    StatementOpcode::DefReturn(return_value) => Ok(self.eval_term_arg(
-                        return_value,
-                        &mut local_variables,
-                        &mut argument_variables,
-                        method.get_name(),
-                    )?),
-                    _ => Err(AmlError::InvalidOperation),
-                };
-                self.parse_helper = original_parse_helper;
-                return_value
-            }
-            Ok(None) => {
-                self.parse_helper = original_parse_helper;
-                Ok(AmlVariable::Uninitialized)
-            }
-        }
+    pub fn get_current_scope(&self) -> &NameString {
+        self.variable_tree.get_current_scope_name()
     }
 }
