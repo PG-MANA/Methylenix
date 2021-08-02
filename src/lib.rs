@@ -14,7 +14,6 @@
 #![feature(lang_items)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_extra)]
-#![feature(maybe_uninit_ref)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
