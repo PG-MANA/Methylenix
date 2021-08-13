@@ -814,10 +814,22 @@ impl Evaluator {
                             if self._move_into_device(hid, s.get_term_list().clone(), in_device)? {
                                 return Ok(true);
                             }
-                            self.term_list_hierarchy.pop();
-                            self.variable_tree.move_to_parent()?;
-                            if self.variable_tree.get_current_scope_name()
-                                != term_list.get_scope_name()
+                            if let Some(old_current) = self.term_list_hierarchy.pop() {
+                                if old_current.get_scope_name() != term_list.get_scope_name() {
+                                    self.variable_tree
+                                        .move_current_scope(term_list.get_scope_name())?;
+                                }
+                            }
+                            if term_list
+                                .get_scope_name()
+                                .get_last_element()
+                                .and_then(|e| {
+                                    Some(&e != self.variable_tree.get_current_scope_name())
+                                })
+                                .unwrap_or_else(|| {
+                                    term_list.get_scope_name()
+                                        != self.variable_tree.get_current_scope_name()
+                                })
                             {
                                 pr_warn!("VariableTree may be broken: Tree's Scope:{}, TermList's Scope: {}",
                                     self.variable_tree.get_current_scope_name(),
@@ -854,9 +866,20 @@ impl Evaluator {
                         if self._move_into_device(hid, d.get_term_list().clone(), true)? {
                             return Ok(true);
                         }
-                        self.term_list_hierarchy.pop();
-                        self.variable_tree.move_to_parent()?;
-                        if self.variable_tree.get_current_scope_name() != term_list.get_scope_name()
+                        if let Some(old_current) = self.term_list_hierarchy.pop() {
+                            if old_current.get_scope_name() != term_list.get_scope_name() {
+                                self.variable_tree
+                                    .move_current_scope(term_list.get_scope_name())?;
+                            }
+                        }
+                        if term_list
+                            .get_scope_name()
+                            .get_last_element()
+                            .and_then(|e| Some(&e != self.variable_tree.get_current_scope_name()))
+                            .unwrap_or_else(|| {
+                                term_list.get_scope_name()
+                                    != self.variable_tree.get_current_scope_name()
+                            })
                         {
                             pr_warn!(
                                 "VariableTree may be broken: Tree's Scope:{}, TermList's Scope: {}",

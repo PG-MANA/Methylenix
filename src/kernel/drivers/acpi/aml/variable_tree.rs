@@ -56,10 +56,10 @@ impl AmlVariableTree {
 
     fn _move_current_scope(
         &mut self,
-        relative_target_scope: NameString,
+        target_scope: NameString,
         current_index: usize,
     ) -> Result<(), AmlError> {
-        let child_scope = relative_target_scope
+        let child_scope = target_scope
             .get_element_as_name_string(current_index)
             .unwrap();
         let result = self
@@ -78,21 +78,21 @@ impl AmlVariableTree {
             self.current.children.lock().unwrap().push(node.clone());
             self.current = node;
         }
-        if relative_target_scope.len() - 1 == current_index {
+        if target_scope.len() - 1 == current_index {
             Ok(())
         } else {
-            self._move_current_scope(relative_target_scope, current_index + 1)
+            self._move_current_scope(target_scope, current_index + 1)
         }
     }
 
     pub fn move_current_scope(&mut self, scope: &NameString) -> Result<(), AmlError> {
-        let current_scope = &self.current.name;
-        if current_scope == scope {
-            return Ok(());
-        }
-        if current_scope.is_child(scope) {
-            if let Some(relative_path) = scope.get_relative_name(current_scope) {
-                self._move_current_scope(relative_path, 0)
+        if scope.len() > 0 {
+            self.current = self.root.clone();
+            self._move_current_scope(scope.clone(), 0)
+        } else {
+            if scope.is_root() {
+                self.current = self.root.clone();
+                Ok(())
             } else {
                 pr_err!(
                     "Failed to get the relative name(target: {}, current: {})",
@@ -101,9 +101,6 @@ impl AmlVariableTree {
                 );
                 Err(AmlError::InvalidScope(scope.clone()))
             }
-        } else {
-            self.current = self.root.clone();
-            self.move_current_scope(scope)
         }
     }
 
