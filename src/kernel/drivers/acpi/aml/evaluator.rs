@@ -167,8 +167,7 @@ impl Evaluator {
                                             )?;
                                             let variable = self.variable_tree.add_data(
                                                 single_relative_path.unwrap_or_else(|| {
-                                                    name.get_element_as_name_string(name.len() - 1)
-                                                        .unwrap()
+                                                    name.get_last_element().unwrap()
                                                 }),
                                                 variable,
                                             )?;
@@ -239,8 +238,7 @@ impl Evaluator {
                                         )?;
                                         let variable = self.variable_tree.add_data(
                                             single_relative_path.unwrap_or_else(|| {
-                                                name.get_element_as_name_string(name.len() - 1)
-                                                    .unwrap()
+                                                name.get_last_element().unwrap()
                                             }),
                                             variable,
                                         )?;

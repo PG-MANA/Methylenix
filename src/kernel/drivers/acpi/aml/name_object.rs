@@ -255,8 +255,8 @@ impl NameString {
     }
 
     pub fn get_single_name_path(&self) -> Option<Self> {
-        if self.flag == NameStringFlag::SingleRelativePath && self.len() != 0 {
-            self.get_element_as_name_string(self.len() - 1)
+        if self.flag == NameStringFlag::SingleRelativePath {
+            self.get_last_element()
         } else {
             None
         }
@@ -452,6 +452,14 @@ impl NameString {
         match &self.data {
             NameStringData::Normal((_, c)) => *c as usize,
             NameStringData::Ex(v) => v.len(),
+        }
+    }
+
+    pub fn get_last_element(&self) -> Option<Self> {
+        if self.len() == 0 {
+            None
+        } else {
+            self.get_element_as_name_string(self.len() - 1)
         }
     }
 

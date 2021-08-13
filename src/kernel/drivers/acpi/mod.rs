@@ -392,9 +392,7 @@ impl AcpiManager {
                             return debug_and_return_none(returned_value);
                         }
                         return if let AmlPackage::NameString(link_device) = &device_element[2] {
-                            let link_device = link_device
-                                .get_element_as_name_string(link_device.len() - 1)
-                                .unwrap();
+                            let link_device = link_device.get_last_element().unwrap();
                             pr_info!("Detect: {}", link_device);
                             let crs_function_name = NameString::from_array(&[*b"_CRS"], false)
                                 .get_full_name_path(&link_device.get_full_name_path(
