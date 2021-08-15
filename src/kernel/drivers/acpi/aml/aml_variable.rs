@@ -682,7 +682,13 @@ impl core::fmt::Debug for AmlVariable {
                 "Mutex(Current: {:?}, SyncLevel: {})",
                 m.0, m.1
             )),
-            AmlVariable::Reference(r) => f.write_fmt(format_args!("Reference({:?})", r)),
+            AmlVariable::Reference((s, i)) => {
+                if let Ok(s) = s.try_lock() {
+                    f.write_fmt(format_args!("Reference(Source: {:?}, Index: {:?})", *s, i))
+                } else {
+                    f.write_fmt(format_args!("Reference(Source: Locked, Index: {:?})", i))
+                }
+            }
         }
     }
 }

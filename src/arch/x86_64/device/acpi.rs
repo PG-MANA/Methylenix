@@ -396,14 +396,6 @@ pub fn read_pci(
         Err(AmlError::InvalidOperation)?;
     }
 
-    pr_info!(
-        "Read PCI: {}:{}:{} offset:{}",
-        pci_config.bus,
-        pci_config.device,
-        pci_config.function,
-        bit_offset
-    );
-
     let mut bit_mask = 0;
     for _ in 0..num_of_bits {
         bit_mask <<= 1;
@@ -436,6 +428,16 @@ pub fn read_pci(
         index += 1;
         bit_mask >>= 32;
     }
+
+    pr_info!(
+        "Read PCI: {}:{}:{} offset: {}(bit_index: {}) => {}",
+        pci_config.bus,
+        pci_config.device,
+        pci_config.function,
+        aligned_offset,
+        bit_offset,
+        result
+    );
 
     if num_of_bits <= 8 {
         Ok(ConstData::Byte(result as _))
@@ -477,10 +479,11 @@ pub fn write_pci(
     }
 
     pr_info!(
-        "Write PCI: {}:{}:{} offset:{} <= {:?}",
+        "Write PCI: {}:{}:{} offset: {}(bit_index: {}) <= {:?}",
         pci_config.bus,
         pci_config.device,
         pci_config.function,
+        aligned_offset,
         bit_offset,
         data
     );
