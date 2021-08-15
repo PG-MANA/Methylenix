@@ -34,11 +34,7 @@ impl SmbusManager {
     const SMBUS_HOST_NOTIFY_STATUS: u8 = 1;
     const SMBUS_HOST_NOTIFY_INTERRUPT_ENABLE: u8 = 1;
 
-    pub fn setup(pci_manager: &PciManager, bus: u8, device: u8, function: u8, header_type: u8) {
-        if header_type != 0 {
-            pr_err!("Invalid header type: {}", header_type);
-            return;
-        }
+    pub fn setup(pci_manager: &PciManager, bus: u8, device: u8, function: u8, _header_type: u8) {
         pci_manager.write_config_address_register(bus, device, function, Self::PCI_CMD);
         let status = pci_manager.read_config_data_register() >> 16;
         if (status & Self::INTERRUPT_STATUS) != 0 {
