@@ -2090,24 +2090,14 @@ impl Evaluator {
                     current_scope,
                 )?;
                 let byte_size = match &*obj.try_lock().or(Err(AmlError::MutexError))? {
-                    AmlVariable::ConstData(c) => c.get_byte_size(),
                     AmlVariable::String(s) => s.len(),
                     AmlVariable::Buffer(b) => b.len(),
-                    AmlVariable::Io(_) => Err(AmlError::InvalidOperation)?,
-                    AmlVariable::MMIo(_) => Err(AmlError::InvalidOperation)?,
-                    AmlVariable::EcIo(_) => Err(AmlError::InvalidOperation)?,
-                    AmlVariable::PciConfig(_) => Err(AmlError::InvalidOperation)?,
-                    AmlVariable::BitField(b) => b.access_align.max(b.num_of_bits >> 3),
-                    AmlVariable::ByteField(b) => b.num_of_bytes,
-                    AmlVariable::Package(p) => p.len(), /* OK? */
-                    AmlVariable::Method(_) => Err(AmlError::InvalidOperation)?,
-                    AmlVariable::BuiltInMethod(_) => Err(AmlError::InvalidOperation)?,
-                    AmlVariable::Uninitialized => Err(AmlError::InvalidOperation)?,
-                    AmlVariable::Mutex(_) => Err(AmlError::InvalidOperation)?,
+                    AmlVariable::Package(p) => p.len(),
                     AmlVariable::Reference((s, _)) => s
                         .try_lock()
                         .or(Err(AmlError::MutexError))?
                         .get_byte_size()?,
+                    _ => Err(AmlError::InvalidOperation)?,
                 };
                 Ok(AmlVariable::ConstData(ConstData::QWord(byte_size as _)))
             }
