@@ -3,7 +3,7 @@
 //!
 
 use super::aml_variable::{
-    AmlBitFiled, AmlByteFiled, AmlFunction, AmlPackage, AmlPciConfig, AmlVariable,
+    AmlBitFiled, AmlByteFiled, AmlFunction, AmlIndexField, AmlPackage, AmlPciConfig, AmlVariable,
 };
 use super::data_object::{
     parse_integer_from_buffer, ComputationalData, ConstData, DataObject, PackageElement,
@@ -1102,9 +1102,61 @@ impl Evaluator {
                 pr_err!("DefEvent is not implemented.");
                 Err(AmlError::UnsupportedType)
             }
-            NamedObject::DefIndexField(_) => {
-                pr_err!("DefIndexField is not implemented.");
-                Err(AmlError::UnsupportedType)
+            NamedObject::DefIndexField(field) => {
+                let index_register = self.search_aml_variable(
+                    field.get_index_register(),
+                    None,
+                    local_variables,
+                    argument_variables,
+                )?;
+                let data_register = self.search_aml_variable(
+                    field.get_index_register(),
+                    None,
+                    local_variables,
+                    argument_variables,
+                )?;
+                let mut access_size = field.get_access_size();
+                let mut index = 0;
+                let mut field_list = field.get_field_list().clone();
+                let relative_name = object_name
+                    .get_relative_name(current_scope)
+                    .unwrap_or_else(|| object_name.clone());
+
+                while let Some(e) = field_list.next()? {
+                    match e {
+                        FieldElement::ReservedField(size) => {
+                            index += size.length;
+                        }
+                        FieldElement::AccessField((access_type, access_attribute)) => {
+                            access_size = Field::convert_to_access_size(access_type);
+                            if access_attribute != 0 {
+                                pr_warn!("Unsupported Attribute: {}", access_attribute);
+                            }
+                        }
+                        FieldElement::ExtendedAccessField(e) => {
+                            pr_warn!("Unsupported ExtendedAccessField: {:?}", e);
+                            index += e[2] as usize;
+                        }
+                        FieldElement::ConnectField(c) => {
+                            pr_warn!("Unsupported ConnectField: {}", c);
+                        }
+                        FieldElement::NameField((entry_name, pkg_length)) => {
+                            if relative_name.suffix_search(&entry_name) {
+                                return Ok(AmlVariable::IndexField(AmlIndexField {
+                                    index_register,
+                                    data_register,
+                                    bit_index: index,
+                                    num_of_bits: pkg_length.length,
+                                    access_align: access_size,
+                                    should_lock_global_lock: field.should_lock(),
+                                }));
+                            } else {
+                                index += pkg_length.length;
+                            }
+                        }
+                    }
+                }
+                Err(AmlError::AccessOutOfRange)
             }
             NamedObject::DefMethod(m) => Ok(AmlVariable::Method(m)),
             NamedObject::DefMutex(m) => Ok(AmlVariable::Mutex(Arc::new((AtomicU8::new(0), m.1)))),

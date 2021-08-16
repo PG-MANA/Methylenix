@@ -445,8 +445,8 @@ impl Field {
 
 #[derive(Debug, Clone)]
 pub struct IndexField {
-    index_name: NameString,
-    data_name: NameString,
+    index_register_name: NameString, /* The register(ByteField) to send access index */
+    data_register_name: NameString,  /* The register(ByteField) to read/write data.*/
     field_flags: u8,
     field_list: FieldList,
 }
@@ -462,16 +462,36 @@ impl IndexField {
         stream.seek(pkg_length.actual_length)?;
         drop(stream); /* Avoid using this */
         index_field_stream.change_size(pkg_length.actual_length)?;
-        let index_name = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
-        let data_name = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
+        let index_register_name = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
+        let data_register_name = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
         let field_flags = index_field_stream.read_byte()?;
         let field_list = FieldList::new(index_field_stream, current_scope)?;
         Ok(Self {
-            index_name,
-            data_name,
+            index_register_name,
+            data_register_name,
             field_flags,
             field_list,
         })
+    }
+
+    pub fn get_index_register(&self) -> &NameString {
+        &self.index_register_name
+    }
+
+    pub fn get_data_register(&self) -> &NameString {
+        &self.data_register_name
+    }
+
+    pub fn get_access_size(&self) -> usize {
+        Field::convert_to_access_size(self.field_flags)
+    }
+
+    pub fn should_lock(&self) -> bool {
+        (self.field_flags & (1 << 4)) != 0
+    }
+
+    pub fn get_field_list(&self) -> &FieldList {
+        &self.field_list
     }
 }
 
