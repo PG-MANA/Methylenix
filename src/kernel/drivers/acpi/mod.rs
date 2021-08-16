@@ -18,7 +18,7 @@ pub mod table {
 }
 
 use self::aml::aml_variable::{AmlPackage, AmlVariable};
-use self::aml::{AmlInterpreter, ConstData, NameString};
+use self::aml::{AmlInterpreter, ConstData, NameString, ResourceData};
 use self::device::ec::EmbeddedController;
 use self::device::AcpiDeviceManager;
 use self::event::{AcpiEventManager, AcpiFixedEvent};
@@ -338,13 +338,13 @@ impl AcpiManager {
         }
     }
 
-    pub fn search_intr_number_with_evaluation_aml(
+    pub fn search_interrupt_information_with_evaluation_aml(
         &mut self,
         bus: u8,
         device: u8,
         int_pin: u8,
-    ) -> Option<u8> {
-        let debug_and_return_none = |e: Option<AmlVariable>| -> Option<u8> {
+    ) -> Option<ResourceData> {
+        let debug_and_return_none = |e: Option<AmlVariable>| -> Option<ResourceData> {
             pr_err!("Invalid PCI Routing Table: {:?}", e.unwrap());
             return None;
         };
@@ -386,7 +386,7 @@ impl AcpiManager {
                         }
                         if let AmlPackage::ConstData(c) = device_element[3] {
                             if c.to_int() != 0 {
-                                return Some(c.to_int() as _);
+                                return Some(ResourceData::Irq(c.to_int() as u8));
                             }
                         } else {
                             return debug_and_return_none(returned_value);
@@ -408,36 +408,50 @@ impl AcpiManager {
                             let returned_value = link_device_evaluation_result.unwrap();
 
                             return if let Some(AmlVariable::Buffer(v)) = &returned_value {
-                                let small_resource_type_tag = match v.get(0) {
+                                let resource_type_tag = match v.get(0) {
                                     Some(c) => *c,
                                     None => {
                                         return debug_and_return_none(returned_value);
                                     }
                                 };
-                                if small_resource_type_tag != 0x22
-                                    && small_resource_type_tag != 0x23
-                                {
-                                    /* 0x04 = IRQ */
-                                    pr_err!("Invalid Small Resource Type.");
-                                    return debug_and_return_none(returned_value);
-                                }
-
-                                if v[1] != 0 {
-                                    let mask = v[1];
-                                    for i in 0..8 {
-                                        if ((mask >> i) & 1) != 0 {
-                                            return Some(i);
+                                match resource_type_tag {
+                                    0x22 | 0x23 => {
+                                        if v[1] != 0 {
+                                            let mask = v[1];
+                                            for i in 0..8 {
+                                                if ((mask >> i) & 1) != 0 {
+                                                    return Some(ResourceData::Irq(i));
+                                                }
+                                            }
+                                        } else if v[2] != 0 {
+                                            let mask = v[2];
+                                            for i in 0..8 {
+                                                if ((mask >> i) & 1) != 0 {
+                                                    return Some(ResourceData::Irq(i + 8));
+                                                }
+                                            }
                                         }
+                                        pr_err!("Invalid IRQ Resource Data.");
+                                        debug_and_return_none(returned_value)
                                     }
-                                } else if v[2] != 0 {
-                                    let mask = v[2];
-                                    for i in 0..8 {
-                                        if ((mask >> i) & 1) != 0 {
-                                            return Some(i + 8);
+                                    0x89 => {
+                                        let length = *v.get(1).unwrap_or(&0) as u16
+                                            | ((*v.get(2).unwrap_or(&0) as u16) << 8);
+                                        if length < 0x06 {
+                                            pr_err!("Invalid Large Resource Data Type.");
+                                            return debug_and_return_none(returned_value);
                                         }
+                                        if *v.get(4).unwrap_or(&0) != 1 {
+                                            pr_err!("Interrupt table length must be 1.");
+                                            return debug_and_return_none(returned_value);
+                                        }
+                                        Some(ResourceData::Interrupt(v[5] as usize))
+                                    }
+                                    _ => {
+                                        pr_err!("Invalid Resource Data Type.");
+                                        debug_and_return_none(returned_value)
                                     }
                                 }
-                                return debug_and_return_none(returned_value);
                             } else {
                                 debug_and_return_none(returned_value)
                             };

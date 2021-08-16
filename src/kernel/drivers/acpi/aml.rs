@@ -54,6 +54,12 @@ pub enum AmlError {
     UnsupportedType,
 }
 
+#[derive(Clone, Debug)]
+pub enum ResourceData {
+    Irq(u8),
+    Interrupt(usize),
+}
+
 #[macro_export]
 macro_rules! ignore_invalid_type_error {
     ($f:expr, $ok_stmt:expr) => {
@@ -85,9 +91,7 @@ impl AmlInterpreter {
             pr_err!("Failed to initialize Evaluator: {:?}", e);
             None
         } else {
-            Some(Self {
-                evaluator: evaluator,
-            })
+            Some(Self { evaluator })
         }
     }
 
