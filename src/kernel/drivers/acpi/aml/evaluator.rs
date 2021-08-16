@@ -299,7 +299,9 @@ impl Evaluator {
             if name == named_object_name
                 || single_name
                     .as_ref()
-                    .and_then(|n| Some(current_scope.is_child(name) && name.suffix_search(n)))
+                    .and_then(|n| {
+                        Some(current_scope.is_child(name) && named_object_name.suffix_search(n))
+                    })
                     .unwrap_or(false)
             {
                 let named_object_single_name = single_name.unwrap_or_else(|| {
@@ -507,7 +509,12 @@ impl Evaluator {
         if self
             .term_list_hierarchy
             .last()
-            .and_then(|n| Some(n.get_scope_name() != self.variable_tree.get_current_scope_name()))
+            .and_then(|n| {
+                Some(
+                    !n.get_scope_name()
+                        .suffix_search(self.variable_tree.get_current_scope_name()),
+                )
+            })
             .unwrap_or(false)
         {
             pr_err!("Evaluator's term_list_hierarchy and variable_tree are broken! term_list_hierarchy.last: {:?} != variable_tree: {}",
@@ -610,7 +617,7 @@ impl Evaluator {
             let search_target_name = single_name
                 .as_ref()
                 .and_then(|n| Some(n.get_full_name_path(term_list.get_scope_name())))
-                .unwrap_or(name.clone());
+                .unwrap_or_else(|| name.clone());
 
             match self.search_aml_variable_by_parsing_term_list(
                 &search_target_name,
@@ -675,6 +682,33 @@ impl Evaluator {
                 };
             }
         }
+
+        /* TODO: check search algorithm */
+        match self.search_aml_variable_by_parsing_term_list(
+            name,
+            self.current_root_term_list.clone(),
+            Some(&search_scope),
+            false,
+            local_variables,
+            argument_variables,
+        ) {
+            Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
+            o => {
+                self.original_searching_name = back_up_of_original_name_searching;
+                self.variable_tree = tree_backup;
+                while let Some(t) = term_list_hierarchy_back_up.pop() {
+                    self.term_list_hierarchy.push(t);
+                }
+                return if let Ok(Some(d)) = o {
+                    Ok(d)
+                } else if let Err(e) = o {
+                    Err(e)
+                } else {
+                    unreachable!()
+                };
+            }
+        }
+
         match self.search_aml_variable_by_parsing_term_list(
             &single_name.as_ref().unwrap_or(name),
             self.current_root_term_list.clone(),
@@ -1105,49 +1139,63 @@ impl Evaluator {
                         operation_region_scope.up_to_parent_name_space();
                         let bbn_name = NameString::from_array(&[*b"_BBN"], false)
                             .get_full_name_path(&operation_region_scope);
-                        let locked_bbn_name = self.search_aml_variable(
+                        let bus = match self.search_aml_variable(
                             &bbn_name,
                             None,
                             local_variables,
                             argument_variables,
-                        )?;
-                        let unlocked_bbn =
-                            locked_bbn_name.try_lock().or(Err(AmlError::MutexError))?;
-                        let bus = (match &*unlocked_bbn {
-                            AmlVariable::ConstData(c) => c.to_int(),
-                            AmlVariable::Method(m) => {
-                                let method = m.clone();
-                                drop(unlocked_bbn);
-                                let eval_result =
-                                    self.eval_method(&method, &[], Some(current_scope))?;
-                                match eval_result.to_int() {
-                                    Ok(b) => b,
-                                    Err(_) => {
-                                        pr_err!("Expected bus number, but found {:?}", eval_result);
+                        ) {
+                            Ok(v) => {
+                                let locked_bbn = v.try_lock().or(Err(AmlError::MutexError))?;
+                                (match &*locked_bbn {
+                                    AmlVariable::ConstData(c) => c.to_int(),
+                                    AmlVariable::Method(m) => {
+                                        let method = m.clone();
+                                        drop(locked_bbn);
+                                        let eval_result =
+                                            self.eval_method(&method, &[], Some(current_scope))?;
+                                        match eval_result.to_int() {
+                                            Ok(b) => b,
+                                            Err(_) => {
+                                                pr_err!(
+                                                    "Expected bus number, but found {:?}",
+                                                    eval_result
+                                                );
+                                                Err(AmlError::InvalidType)?
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        pr_err!("Expected bus number, but found {:?}", *locked_bbn);
                                         Err(AmlError::InvalidType)?
                                     }
+                                } & 0xFF) as u16
+                            }
+                            Err(AmlError::InvalidMethodName(m)) => {
+                                if m == bbn_name {
+                                    pr_info!("{} is not found. Assume the bus number is 0.", m);
+                                    0
+                                } else {
+                                    Err(AmlError::InvalidMethodName(m))?
                                 }
                             }
-                            _ => {
-                                pr_err!("Expected bus number, but found {:?}", *unlocked_bbn);
-                                Err(AmlError::InvalidType)?
-                            }
-                        } & 0xFF) as u16;
+                            Err(e) => Err(e)?,
+                        };
+
                         let adr_name = NameString::from_array(&[*b"_ADR"], false)
                             .get_full_name_path(&operation_region_scope);
-                        let locked_adr_name = self.search_aml_variable(
+                        let adr = self.search_aml_variable(
                             &adr_name,
                             None,
                             local_variables,
                             argument_variables,
                         )?;
-                        let unlocked_adr =
-                            locked_adr_name.try_lock().or(Err(AmlError::MutexError))?;
-                        let addr = match &*unlocked_adr {
+                        let locked_adr = adr.try_lock().or(Err(AmlError::MutexError))?;
+                        let addr = match &*locked_adr {
                             AmlVariable::ConstData(c) => c.to_int(),
                             AmlVariable::Method(m) => {
                                 let method = m.clone();
-                                drop(unlocked_adr);
+                                drop(locked_adr);
                                 let eval_result =
                                     self.eval_method(&method, &[], Some(current_scope))?;
                                 match eval_result.to_int() {
@@ -1164,7 +1212,7 @@ impl Evaluator {
                             _ => {
                                 pr_err!(
                                     "Expected device/function number, but found {:?}",
-                                    *unlocked_adr
+                                    *locked_adr
                                 );
                                 Err(AmlError::InvalidType)?
                             }
@@ -2318,24 +2366,26 @@ impl Evaluator {
                     local_variables,
                     argument_variables,
                 )?;
-                let locked_obj = &*obj.try_lock().or(Err(AmlError::MutexError))?;
-                match locked_obj {
+
+                let locked_obj = obj.try_lock().or(Err(AmlError::MutexError))?;
+                match &*locked_obj {
                     AmlVariable::Method(method) => {
-                        let method = method.clone();
+                        let cloned_method = method.clone();
                         drop(locked_obj);
                         self.eval_method_invocation(
                             &method_invocation,
-                            &method,
+                            &cloned_method,
                             local_variables,
                             argument_variables,
                             current_scope,
                         )
                     }
                     AmlVariable::BuiltInMethod((func, _)) => {
+                        let cloned_func = func.clone();
                         drop(locked_obj);
                         self.eval_builtin_method(
                             &method_invocation,
-                            *func,
+                            cloned_func,
                             local_variables,
                             argument_variables,
                             current_scope,
@@ -2461,7 +2511,7 @@ impl Evaluator {
         )? {
             let true_statement = i_e.get_if_true_term_list();
             self.term_list_hierarchy.push(true_statement.clone());
-            let result = self._eval_term_list(
+            let result = self.eval_term_list(
                 true_statement.clone(),
                 local_variables,
                 argument_variables,
@@ -2471,7 +2521,7 @@ impl Evaluator {
             result
         } else if let Some(false_statement) = i_e.get_if_false_term_list() {
             self.term_list_hierarchy.push(false_statement.clone());
-            let result = self._eval_term_list(
+            let result = self.eval_term_list(
                 false_statement.clone(),
                 local_variables,
                 argument_variables,
@@ -2505,7 +2555,7 @@ impl Evaluator {
                 return Ok(None);
             }
 
-            match self._eval_term_list(
+            match self.eval_term_list(
                 term_list.clone(),
                 local_variables,
                 argument_variables,
@@ -2524,7 +2574,7 @@ impl Evaluator {
         }
     }
 
-    fn _eval_term_list(
+    fn eval_term_list(
         &mut self,
         mut term_list: TermList,
         local_variables: &mut LocalVariables,
@@ -2609,7 +2659,7 @@ impl Evaluator {
     fn eval_builtin_method(
         &mut self,
         method_invocation: &MethodInvocation,
-        func: fn(&[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError>,
+        func: AmlFunction,
         local_variables: &mut LocalVariables,
         argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
@@ -2636,15 +2686,27 @@ impl Evaluator {
             Self::init_local_variables_and_argument_variables();
 
         if method.get_argument_count() != arguments.len() {
-            pr_err!(
-                "Expected {} arguments, but found {} arguments.",
-                method.get_argument_count(),
-                arguments.len()
-            );
-            return Err(AmlError::InvalidOperation);
+            let mut num_of_valid_arguments = 0;
+            for e in arguments {
+                if matches!(e, AmlVariable::Uninitialized) {
+                    break;
+                }
+                num_of_valid_arguments += 1;
+            }
+            if num_of_valid_arguments != method.get_argument_count() {
+                pr_err!(
+                    "Expected {} arguments, but found {} arguments.",
+                    method.get_argument_count(),
+                    arguments.len()
+                );
+                return Err(AmlError::InvalidOperation);
+            }
         }
 
         for (destination, source) in argument_variables.iter_mut().zip(arguments.iter()) {
+            if matches!(source, AmlVariable::Uninitialized) {
+                continue;
+            }
             *destination = Arc::new(Mutex::new(source.clone()));
         }
 
@@ -2660,7 +2722,7 @@ impl Evaluator {
         self.variable_tree.move_to_root()?;
         self.move_into_object(method.get_name(), search_scope)?;
 
-        let result = self._eval_term_list(
+        let result = self.eval_term_list(
             method.get_term_list().clone(),
             &mut local_variables,
             &mut argument_variables,
@@ -2675,12 +2737,15 @@ impl Evaluator {
             Ok(None) => Ok(AmlVariable::Uninitialized),
             Ok(Some(v)) => match v {
                 StatementOpcode::DefFatal(_) => Err(AmlError::InvalidOperation),
-                StatementOpcode::DefReturn(return_value) => Ok(self.eval_term_arg(
-                    return_value,
-                    &mut local_variables,
-                    &mut argument_variables,
-                    method.get_name(),
-                )?),
+                StatementOpcode::DefReturn(return_value) => Ok(self
+                    .eval_term_arg(
+                        return_value,
+                        &mut local_variables,
+                        &mut argument_variables,
+                        method.get_name(),
+                    )?
+                    .get_constant_data()?
+                    .clone()),
                 _ => Err(AmlError::InvalidOperation),
             },
         };
