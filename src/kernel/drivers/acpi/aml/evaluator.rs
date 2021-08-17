@@ -474,8 +474,8 @@ impl Evaluator {
                         .move_current_scope(term_list.get_scope_name())?;
                 }
                 TermObj::StatementOpcode(s) => {
-                    if let StatementOpcode::DefIfElse(i_e) = s {
-                        pr_warn!("Found an IfElse Statement({:?}), currently ignore it.", i_e);
+                    if let StatementOpcode::DefIfElse(_i_e) = s {
+                        /* Currently ignore it*/
                     } else { /* Ignore */
                     }
                 }
@@ -839,11 +839,6 @@ impl Evaluator {
                     .and_then(|l| Some(&l != self.variable_tree.get_current_scope_name()))
                     .unwrap_or(false)
                 {
-                    pr_err!(
-                        "Variables' Tree and TermListHierarchy are not matched: {} != {}",
-                        self.variable_tree.get_current_scope_name(),
-                        term_list.get_scope_name()
-                    );
                     self.variable_tree
                         .move_current_scope(term_list.get_scope_name())?;
                 }
