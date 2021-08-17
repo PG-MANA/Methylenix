@@ -812,39 +812,102 @@ impl core::fmt::Debug for AmlVariable {
         match self {
             AmlVariable::Uninitialized => f.write_str("Uninitialized"),
             AmlVariable::ConstData(c) => f.write_fmt(format_args!("ConstantData({})", c.to_int())),
-            AmlVariable::String(s) => f.write_fmt(format_args!("String({})", s)),
+            AmlVariable::String(s) => f.write_fmt(format_args!("String(\"{}\")", s)),
             AmlVariable::Buffer(b) => f.write_fmt(format_args!("Buffer({:?})", b)),
-            AmlVariable::Io((port, limit)) => f.write_fmt(format_args!(
-                "SystemI/O(Port: {:#X}, Limit: {:#X})",
-                port, limit
-            )),
-            AmlVariable::MMIo((port, limit)) => f.write_fmt(format_args!(
-                "MemoryI/O(Port: {:#X}, Limit: {:#X})",
-                port, limit
-            )),
-            AmlVariable::EcIo((port, limit)) => f.write_fmt(format_args!(
-                "EmbeddedControllerI/O(Port: {:#X}, Limit: {:#X})",
-                port, limit
-            )),
+            AmlVariable::Io((port, limit)) => f
+                .debug_struct("SystemI/O")
+                .field("Port", &format_args!("{:#X}", port))
+                .field("Limit", &format_args!("{:#X}", limit))
+                .finish(),
+            AmlVariable::MMIo((port, limit)) => f
+                .debug_struct("MemoryI/O")
+                .field("Port", &format_args!("{:#X}", port))
+                .field("Limit", &format_args!("{:#X}", limit))
+                .finish(),
+            AmlVariable::EcIo((port, limit)) => f
+                .debug_struct("EmbeddedControllerI/O")
+                .field("Port", &format_args!("{:#X}", port))
+                .field("Limit", &format_args!("{:#X}", limit))
+                .finish(),
             AmlVariable::PciConfig(p) => f.write_fmt(format_args!("PCI_Config({:?})", p)),
-            AmlVariable::BitField(b) => f.write_fmt(format_args!("{:?}", b)),
-            AmlVariable::ByteField(b) => f.write_fmt(format_args!("{:?}", b)),
-            AmlVariable::IndexField(b) => f.write_fmt(format_args!("{:?}", b)),
-            AmlVariable::Package(p) => f.write_fmt(format_args!("Package({:?}", p)),
+            AmlVariable::BitField(b) => {
+                if let Ok(s) = b.source.try_lock() {
+                    f.debug_struct("BitField")
+                        .field("Source", &*s)
+                        .field("BitIndex", &b.bit_index)
+                        .field("NumberOfBits", &b.num_of_bits)
+                        .field("AccessAlign", &b.access_align)
+                        .field("GlobalLock", &b.should_lock_global_lock)
+                        .finish()
+                } else {
+                    f.debug_struct("BitField")
+                        .field("BitIndex", &b.bit_index)
+                        .field("NumberOfBits", &b.num_of_bits)
+                        .field("AccessAlign", &b.access_align)
+                        .field("GlobalLock", &b.should_lock_global_lock)
+                        .finish_non_exhaustive()
+                }
+            }
+            AmlVariable::ByteField(b) => {
+                if let Ok(s) = b.source.try_lock() {
+                    f.debug_struct("ByteField")
+                        .field("Source", &*s)
+                        .field("ByteIndex", &b.byte_index)
+                        .field("NumberOfBytes", &b.num_of_bytes)
+                        .field("GlobalLock", &b.should_lock_global_lock)
+                        .finish()
+                } else {
+                    f.debug_struct("ByteField")
+                        .field("ByteIndex", &b.byte_index)
+                        .field("NumberOfBytes", &b.num_of_bytes)
+                        .field("GlobalLock", &b.should_lock_global_lock)
+                        .finish_non_exhaustive()
+                }
+            }
+            AmlVariable::IndexField(b) => {
+                let index = b.index_register.try_lock();
+                let data = b.data_register.try_lock();
+                if index.is_ok() && data.is_ok() {
+                    f.debug_struct("IndexField")
+                        .field("IndexRegister", &*index.unwrap())
+                        .field("DataRegister", &*data.unwrap())
+                        .field("BitIndex", &b.bit_index)
+                        .field("NumberOfBits", &b.num_of_bits)
+                        .field("AccessAlign", &b.access_align)
+                        .field("GlobalLock", &b.should_lock_global_lock)
+                        .finish()
+                } else {
+                    drop(index);
+                    drop(data);
+                    f.debug_struct("IndexField")
+                        .field("BitIndex", &b.bit_index)
+                        .field("NumberOfBits", &b.num_of_bits)
+                        .field("AccessAlign", &b.access_align)
+                        .field("GlobalLock", &b.should_lock_global_lock)
+                        .finish_non_exhaustive()
+                }
+            }
+            AmlVariable::Package(p) => f.write_fmt(format_args!("Package({:?})", p)),
             AmlVariable::Method(m) => f.write_fmt(format_args!("Method({})", m.get_name())),
             AmlVariable::BuiltInMethod(m) => f.write_fmt(format_args!(
                 "BuiltInMethod({})",
                 core::any::type_name_of_val(m)
             )),
-            AmlVariable::Mutex(m) => f.write_fmt(format_args!(
-                "Mutex(Current: {:?}, SyncLevel: {})",
-                m.0, m.1
-            )),
+            AmlVariable::Mutex(m) => f
+                .debug_struct("Mutex")
+                .field("Current", &m.0)
+                .field("SyncLevel", &m.1)
+                .finish(),
             AmlVariable::Reference((s, i)) => {
                 if let Ok(s) = s.try_lock() {
-                    f.write_fmt(format_args!("Reference(Source: {:?}, Index: {:?})", *s, i))
+                    f.debug_struct("Reference")
+                        .field("Source", &*s)
+                        .field("Index", i)
+                        .finish()
                 } else {
-                    f.write_fmt(format_args!("Reference(Source: Locked, Index: {:?})", i))
+                    f.debug_struct("Reference")
+                        .field("Index", i)
+                        .finish_non_exhaustive()
                 }
             }
         }
