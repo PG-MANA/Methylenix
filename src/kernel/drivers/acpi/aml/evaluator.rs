@@ -1208,7 +1208,7 @@ impl Evaluator {
                     argument_variables,
                 )?;
                 let data_register = self.search_aml_variable(
-                    field.get_index_register(),
+                    field.get_data_register(),
                     None,
                     local_variables,
                     argument_variables,
@@ -1282,7 +1282,7 @@ impl Evaluator {
                     .to_int()?;
                 Ok(match region_type {
                     OperationRegionType::SystemMemory => (AmlVariable::MMIo((offset, length))),
-                    OperationRegionType::SystemIO => (AmlVariable::MMIo((offset, length))),
+                    OperationRegionType::SystemIO => (AmlVariable::Io((offset, length))),
                     OperationRegionType::EmbeddedControl => AmlVariable::EcIo((offset, length)),
                     OperationRegionType::PciConfig => {
                         let mut operation_region_scope = operation_region.get_name().clone();

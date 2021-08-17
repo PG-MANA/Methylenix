@@ -63,7 +63,6 @@ impl TermObj {
         current_scope: &NameString,
         evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
-        /* println!("TermObj: {:#X}", stream.peek_byte()?); */
         ignore_invalid_type_error!(
             NamespaceModifierObject::try_parse(stream, current_scope),
             |o| {
