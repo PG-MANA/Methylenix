@@ -1950,9 +1950,18 @@ impl Evaluator {
                 pr_err!("DefProcessor was deleted from ACPI 6.4.");
                 Err(AmlError::InvalidOperation)
             }
-            ExpressionOpcode::DefConcat(_) => Err(AmlError::UnsupportedType),
-            ExpressionOpcode::DefConcatRes(_) => Err(AmlError::UnsupportedType),
-            ExpressionOpcode::DefCopyObject(_, _) => Err(AmlError::UnsupportedType),
+            ExpressionOpcode::DefConcat(_) => {
+                pr_err!("DefConcat is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
+            ExpressionOpcode::DefConcatRes(_) => {
+                pr_err!("DefConcatRes is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
+            ExpressionOpcode::DefCopyObject(_, _) => {
+                pr_err!("DefCopyObject is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
             ExpressionOpcode::BinaryOperation(b_o) => {
                 let left = self.eval_integer_expression(
                     b_o.get_left_operand().clone(),
@@ -2148,8 +2157,14 @@ impl Evaluator {
                 }
                 Ok(result)
             }
-            ExpressionOpcode::DefFromBCD(_) => Err(AmlError::UnsupportedType),
-            ExpressionOpcode::DefMatch(_) => Err(AmlError::UnsupportedType),
+            ExpressionOpcode::DefFromBCD(_) => {
+                pr_err!("DefFromBCD is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
+            ExpressionOpcode::DefMatch(_) => {
+                pr_err!("DefMatch is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
             ExpressionOpcode::DefNot((operand, target)) => {
                 let op = self.eval_integer_expression(
                     operand,
@@ -2179,7 +2194,10 @@ impl Evaluator {
                     Err(AmlError::InvalidOperation)
                 }
             }
-            ExpressionOpcode::DefObjectType(_) => Err(AmlError::UnsupportedType),
+            ExpressionOpcode::DefObjectType(_) => {
+                pr_err!("DefObjectType is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
             ExpressionOpcode::DefSizeOf(obj_name) => {
                 let obj = self.get_aml_variable_reference_from_super_name(
                     &obj_name,
@@ -2215,7 +2233,10 @@ impl Evaluator {
                 )?;
                 Ok(data)
             }
-            ExpressionOpcode::DefToBCD(_) => Err(AmlError::UnsupportedType),
+            ExpressionOpcode::DefToBCD(_) => {
+                pr_err!("DefToBCD is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
             ExpressionOpcode::DefToInteger((operand, target)) => {
                 let obj = self.eval_term_arg(
                     operand,
@@ -2259,7 +2280,10 @@ impl Evaluator {
                 }
                 Ok(AmlVariable::ConstData(result))
             }
-            ExpressionOpcode::DefTimer => Err(AmlError::UnsupportedType),
+            ExpressionOpcode::DefTimer => {
+                pr_err!("DefTimer is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
             ExpressionOpcode::DefCondRefOf((source, destination)) => {
                 let result = self.get_aml_variable_reference_from_super_name(
                     &source,
@@ -2430,8 +2454,14 @@ impl Evaluator {
                             .to_int()?) as u8,
                 )))
             }
-            ExpressionOpcode::DefLoad(_) => Err(AmlError::UnsupportedType),
-            ExpressionOpcode::DefLoadTable(_) => Err(AmlError::UnsupportedType),
+            ExpressionOpcode::DefLoad(_) => {
+                pr_err!("DefLoad is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
+            ExpressionOpcode::DefLoadTable(_) => {
+                pr_err!("DefLoadTable is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
             ExpressionOpcode::DefLOr((left, right)) => Ok(AmlVariable::ConstData(ConstData::Byte(
                 (self.eval_bool_expression(
                     left,
@@ -2445,7 +2475,10 @@ impl Evaluator {
                     current_scope,
                 )?) as u8,
             ))),
-            ExpressionOpcode::DefWait(_) => Err(AmlError::UnsupportedType),
+            ExpressionOpcode::DefWait(_) => {
+                pr_err!("DefWait is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
             ExpressionOpcode::ReferenceTypeOpcode(r_e) => match r_e {
                 ReferenceTypeOpcode::DefRefOf(super_name) => Ok(AmlVariable::Reference((
                     self.get_aml_variable_reference_from_super_name(
