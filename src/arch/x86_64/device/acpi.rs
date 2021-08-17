@@ -382,6 +382,9 @@ pub fn read_pci(
     {
         pr_err!("PCI Express(R) is not supported.");
         return Err(AmlError::UnsupportedType);
+    } else if pci_config.function >= 8 {
+        pr_err!("Function({}) must be less than 8.", pci_config.function);
+        return Err(AmlError::InvalidOperation);
     }
     let offset = pci_config.offset + byte_index;
     let aligned_offset = offset & !0b11;
@@ -464,6 +467,9 @@ pub fn write_pci(
     {
         pr_err!("PCI Express(R) is not supported.");
         return Err(AmlError::UnsupportedType);
+    } else if pci_config.function >= 8 {
+        pr_err!("Function({}) must be less than 8.", pci_config.function);
+        return Err(AmlError::InvalidOperation);
     }
     let offset = pci_config.offset + byte_index;
     let aligned_offset = offset & !0b11;
