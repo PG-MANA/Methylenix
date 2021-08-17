@@ -83,6 +83,7 @@ pub fn read_io(
         pr_err!("Invalid port number: {:#X}", port);
         Err(AmlError::InvalidOperation)
     } else {
+        pr_info!("Read SystemI/O(Port: {:#X}, Align: {})", port, align);
         unsafe {
             match align {
                 1 => {
@@ -141,6 +142,12 @@ pub fn write_io(
         pr_err!("Invalid port number: {:#X}", port);
         Err(AmlError::InvalidOperation)
     } else {
+        pr_info!(
+            "Write SystemI/O(Port: {:#X}, Align: {}) <= {:#X}",
+            port,
+            align,
+            data.to_int()
+        );
         let access_size = (match data {
             ConstData::Byte(_) => 1,
             ConstData::Word(_) => 2,
