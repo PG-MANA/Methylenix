@@ -17,7 +17,7 @@ use super::namespace_modifier_object::NamespaceModifierObject;
 use super::statement_opcode::{Fatal, IfElse, Notify, StatementOpcode, While};
 use super::term_object::{MethodInvocation, TermArg, TermList, TermObj};
 use super::variable_tree::AmlVariableTree;
-use super::{eisa_id_to_dword, AcpiInt, AmlError, DataRefObject};
+use super::{eisa_id_to_dword, AcpiInt, AmlError, DataRefObject, ACPI_INT_ONES};
 
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::sync::spin_lock::Mutex;
@@ -2527,11 +2527,173 @@ impl Evaluator {
                     return Err(AmlError::InvalidType);
                 }
             },
-            ExpressionOpcode::DefMid(_) => Err(AmlError::UnsupportedType),
-            ExpressionOpcode::DefToBuffer(_) => Err(AmlError::UnsupportedType),
-            ExpressionOpcode::DefToDecimalString(_) => Err(AmlError::UnsupportedType),
-            ExpressionOpcode::DefToHexString(_) => Err(AmlError::UnsupportedType),
-            ExpressionOpcode::DefToString(_) => Err(AmlError::UnsupportedType),
+            ExpressionOpcode::DefMid(_) => {
+                pr_err!("DefMid is not supported currently: {:?}", e);
+                Err(AmlError::UnsupportedType)
+            }
+            ExpressionOpcode::DefToBuffer((operand, target)) => {
+                let obj = self.eval_term_arg(
+                    operand,
+                    local_variables,
+                    argument_variables,
+                    current_scope,
+                )?;
+                let constant_data = if obj.is_constant_data() {
+                    obj
+                } else {
+                    obj.get_constant_data()?
+                };
+                let result = match constant_data {
+                    AmlVariable::ConstData(c) => {
+                        let mut result = Vec::new();
+                        let mut data = c.to_int();
+                        while data != 0 {
+                            result.push((data & 0xff) as u8);
+                            data >>= 8;
+                        }
+                        if result.len() == 0 {
+                            result.push(0);
+                        }
+                        result
+                    }
+                    AmlVariable::String(s) if s.len() > 0 => {
+                        let mut result = Vec::from(s);
+                        result.push(0);
+                        result
+                    }
+                    AmlVariable::String(s) if s.len() == 0 => Vec::new(),
+                    AmlVariable::Buffer(b) => b,
+                    _ => Err(AmlError::InvalidOperation)?,
+                };
+                if !target.is_null() {
+                    self.write_data_into_target(
+                        AmlVariable::Buffer(result.clone()),
+                        &target,
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    )?;
+                }
+                Ok(AmlVariable::Buffer(result))
+            }
+            ExpressionOpcode::DefToDecimalString((operand, target)) => {
+                let obj = self.eval_term_arg(
+                    operand,
+                    local_variables,
+                    argument_variables,
+                    current_scope,
+                )?;
+                let constant_data = if obj.is_constant_data() {
+                    obj
+                } else {
+                    obj.get_constant_data()?
+                };
+                let result = match constant_data {
+                    AmlVariable::ConstData(c) => {
+                        format!("{}", c.to_int())
+                    }
+                    AmlVariable::String(s) => s,
+                    AmlVariable::Buffer(b) if b.len() > 0 => {
+                        let mut result = format!("{}", b[0]);
+                        for e in b.iter().skip(1) {
+                            result.push_str(format!(",{}", e).as_str());
+                        }
+                        result
+                    }
+                    AmlVariable::Buffer(b) if b.len() == 0 => String::new(),
+                    _ => Err(AmlError::InvalidOperation)?,
+                };
+                if !target.is_null() {
+                    self.write_data_into_target(
+                        AmlVariable::String(result.clone()),
+                        &target,
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    )?;
+                }
+                Ok(AmlVariable::String(result))
+            }
+            ExpressionOpcode::DefToHexString((operand, target)) => {
+                let obj = self.eval_term_arg(
+                    operand,
+                    local_variables,
+                    argument_variables,
+                    current_scope,
+                )?;
+                let constant_data = if obj.is_constant_data() {
+                    obj
+                } else {
+                    obj.get_constant_data()?
+                };
+                let result = match constant_data {
+                    AmlVariable::ConstData(c) => {
+                        format!("{:X}", c.to_int())
+                    }
+                    AmlVariable::String(s) => s,
+                    AmlVariable::Buffer(b) if b.len() > 0 => {
+                        let mut result = format!("{:X}", b[0]);
+                        for e in b.iter().skip(1) {
+                            result.push_str(format!(",{:X}", e).as_str());
+                        }
+                        result
+                    }
+                    AmlVariable::Buffer(b) if b.len() == 0 => String::new(),
+                    _ => Err(AmlError::InvalidOperation)?,
+                };
+                if !target.is_null() {
+                    self.write_data_into_target(
+                        AmlVariable::String(result.clone()),
+                        &target,
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    )?;
+                }
+                Ok(AmlVariable::String(result))
+            }
+            ExpressionOpcode::DefToString(((operand, length), target)) => {
+                let data = self.eval_term_arg(
+                    operand,
+                    local_variables,
+                    argument_variables,
+                    current_scope,
+                )?;
+                let constant_data = if data.is_constant_data() {
+                    data
+                } else {
+                    data.get_constant_data()?
+                };
+                let len = self
+                    .eval_integer_expression(
+                        length,
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    )?
+                    .to_int()?;
+
+                let result = match constant_data {
+                    AmlVariable::Buffer(mut b) if b.len() > 0 => {
+                        if len != 0 && len != ACPI_INT_ONES {
+                            b.truncate(len);
+                        };
+                        String::from_utf8(b).or(Err(AmlError::InvalidOperation))?
+                    }
+                    AmlVariable::Buffer(b) if b.len() == 0 => String::new(),
+                    _ => Err(AmlError::InvalidOperation)?,
+                };
+                if !target.is_null() {
+                    self.write_data_into_target(
+                        AmlVariable::String(result.clone()),
+                        &target,
+                        local_variables,
+                        argument_variables,
+                        current_scope,
+                    )?;
+                }
+                Ok(AmlVariable::String(result))
+            }
             ExpressionOpcode::MethodInvocation(method_invocation) => {
                 let obj = self.search_aml_variable(
                     method_invocation.get_name(),

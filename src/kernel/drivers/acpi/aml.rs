@@ -28,6 +28,7 @@ use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use alloc::vec::Vec;
 
 type AcpiInt = usize;
+const ACPI_INT_ONES: AcpiInt = opcode::ONES_OP as _;
 
 #[derive(Clone)]
 pub struct AmlInterpreter {
