@@ -44,7 +44,6 @@ pub struct AmlStream {
 #[derive(Debug)]
 pub enum AmlError {
     AccessOutOfRange,
-    InvalidSizeChange,
     InvalidType,
     InvalidMethodName(NameString),
     InvalidScope(NameString),
@@ -279,7 +278,7 @@ impl AmlStream {
     fn change_size(&mut self, new_size_from_current_point: usize) -> Result<(), AmlError> {
         let new_limit = self.pointer + MSize::new(new_size_from_current_point);
         if new_limit > self.limit {
-            Err(AmlError::InvalidSizeChange)
+            Err(AmlError::AccessOutOfRange)
         } else {
             self.limit = new_limit;
             Ok(())
