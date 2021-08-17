@@ -17,6 +17,7 @@ use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
@@ -148,12 +149,20 @@ pub fn init_acpi_later() -> bool {
         pr_info!("ACPI is not available.");
         return true;
     }
+    if !acpi_manager.setup_aml_interpreter() {
+        pr_err!("Cannot setup ACPI AML Interpreter.");
+        return false;
+    }
     if !super::device::acpi::setup_interrupt(&acpi_manager) {
         pr_err!("Cannot setup ACPI interrupt.");
         return false;
     }
     if !acpi_manager.setup_acpi_devices(&mut get_kernel_manager_cluster().acpi_device_manager) {
         pr_err!("Cannot setup ACPI devices.");
+        return false;
+    }
+    if !acpi_manager.initialize_all_devices() {
+        pr_err!("Cannot evaluate _STA/_INI methods.");
         return false;
     }
     if !acpi_manager.enable_acpi() {
@@ -165,6 +174,21 @@ pub fn init_acpi_later() -> bool {
         return false;
     }
     return true;
+}
+
+/// Init PciManager without scanning all bus
+///
+/// This function should be called before `init_acpi_later`.
+pub fn init_pci_early() -> bool {
+    let pci_manager = PciManager::new();
+    get_kernel_manager_cluster().pci_manager = pci_manager;
+    true
+}
+
+/// Init PciManager with scanning all bus
+pub fn init_pci_later() -> bool {
+    get_kernel_manager_cluster().pci_manager.scan_root_bus();
+    true
 }
 
 /// Init Timer

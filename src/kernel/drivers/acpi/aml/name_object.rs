@@ -5,8 +5,7 @@
 use super::data_object::{try_parse_argument_object, try_parse_local_object};
 use super::expression_opcode;
 use super::opcode;
-use super::parser::ParseHelper;
-use super::{AmlError, AmlStream};
+use super::{AmlError, AmlStream, Evaluator};
 
 use crate::ignore_invalid_type_error;
 
@@ -22,6 +21,7 @@ enum NameStringData {
 
 #[derive(Clone, Eq, PartialEq)]
 enum NameStringFlag {
+    SingleRelativePath,
     RelativePath,
     AbsolutePath,
     NullName,
@@ -55,6 +55,11 @@ impl NameString {
         self.flag == NameStringFlag::NullName
     }
 
+    pub fn is_root(&self) -> bool {
+        self.flag == NameStringFlag::AbsolutePath
+            && matches!(self.data, NameStringData::Normal((_, 0)))
+    }
+
     pub fn parse(stream: &mut AmlStream, current_scope: Option<&Self>) -> Result<Self, AmlError> {
         let mut result = Self::root();
         let mut c = stream.read_byte()?;
@@ -65,7 +70,7 @@ impl NameString {
             result.flag = NameStringFlag::AbsolutePath;
             c = stream.read_byte()?;
         } else {
-            result.flag = NameStringFlag::AbsolutePath;
+            result.flag = NameStringFlag::RelativePath;
             if let Some(c_s) = current_scope {
                 if !c_s.is_null_name() {
                     result = c_s.clone();
@@ -93,6 +98,9 @@ impl NameString {
             c = stream.read_byte()?;
             seg_count
         } else {
+            if may_be_null_name {
+                result.flag = NameStringFlag::SingleRelativePath;
+            }
             1
         };
         if let NameStringData::Normal((array, count)) = result.data {
@@ -231,8 +239,24 @@ impl NameString {
             array[0] = *e;
             Some(Self {
                 data: NameStringData::Normal((array, 1)),
-                flag: NameStringFlag::RelativePath,
+                flag: NameStringFlag::SingleRelativePath,
             })
+        } else {
+            None
+        }
+    }
+
+    pub const fn is_absolute_path(&self) -> bool {
+        matches!(self.flag, NameStringFlag::AbsolutePath)
+    }
+
+    pub const fn is_single_relative_path_name(&self) -> bool {
+        matches!(self.flag, NameStringFlag::SingleRelativePath)
+    }
+
+    pub fn get_single_name_path(&self) -> Option<Self> {
+        if self.flag == NameStringFlag::SingleRelativePath {
+            self.get_last_element()
         } else {
             None
         }
@@ -290,7 +314,11 @@ impl NameString {
                     } else {
                         NameStringData::Normal((buffer, counter as u8))
                     },
-                    flag: NameStringFlag::RelativePath,
+                    flag: if counter == 1 {
+                        NameStringFlag::SingleRelativePath
+                    } else {
+                        NameStringFlag::RelativePath
+                    },
                 });
             }
             if s1 != s2 {
@@ -327,6 +355,9 @@ impl NameString {
             }
             index += 1;
         }
+        if self.flag == NameStringFlag::SingleRelativePath {
+            result.flag = NameStringFlag::SingleRelativePath;
+        }
         return result;
     }
 
@@ -349,6 +380,8 @@ impl NameString {
                 data: NameStringData::Normal((buf, array.len() as u8)),
                 flag: if is_absolute {
                     NameStringFlag::AbsolutePath
+                } else if array.len() == 1 {
+                    NameStringFlag::SingleRelativePath
                 } else {
                     NameStringFlag::RelativePath
                 },
@@ -406,6 +439,8 @@ impl NameString {
                 data: NameStringData::Normal((buf, index as u8)),
                 flag: if is_absolute {
                     NameStringFlag::AbsolutePath
+                } else if count == 1 {
+                    NameStringFlag::SingleRelativePath
                 } else {
                     NameStringFlag::RelativePath
                 },
@@ -417,6 +452,14 @@ impl NameString {
         match &self.data {
             NameStringData::Normal((_, c)) => *c as usize,
             NameStringData::Ex(v) => v.len(),
+        }
+    }
+
+    pub fn get_last_element(&self) -> Option<Self> {
+        if self.len() == 0 {
+            None
+        } else {
+            self.get_element_as_name_string(self.len() - 1)
         }
     }
 
@@ -514,7 +557,7 @@ impl Target {
     pub fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         if stream.peek_byte()? == 0 {
             stream.seek(1)?;
@@ -523,7 +566,7 @@ impl Target {
             Ok(Self::SuperName(SuperName::try_parse(
                 stream,
                 current_scope,
-                parse_helper,
+                evaluator,
             )?))
         }
     }
@@ -565,10 +608,10 @@ impl SuperName {
     pub fn try_parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         ignore_invalid_type_error!(
-            expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope, parse_helper),
+            expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope, evaluator),
             |r_n| {
                 return Ok(Self::ReferenceTypeOpcode(Box::new(r_n)));
             }

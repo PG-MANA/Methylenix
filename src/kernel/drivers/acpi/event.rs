@@ -4,12 +4,15 @@
 
 pub mod gpe;
 
+use self::gpe::GpeManager;
+
 use super::table::fadt::FadtManager;
 
 use crate::arch::target_arch::device::cpu::{in_word, out_word};
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::task_manager::work_queue::WorkList;
 
 #[derive(Copy, Clone, Debug)]
 #[repr(u16)]
@@ -38,10 +41,19 @@ pub struct AcpiEventManager {
     pm1_event_block_len: u8,
     pm1a_enabled_event: u16,
     pm1b_enabled_event: u16,
+    gpe0_manager: GpeManager,
+    gpe1_manager: Option<GpeManager>,
 }
 
 impl AcpiEventManager {
     pub fn new(fadt_manager: &FadtManager) -> Self {
+        let gpe1 = fadt_manager.get_gp_event1_block();
+        let gpe1_len = fadt_manager.get_gp_event1_block_len() as usize;
+        let gpe1_manager = if gpe1 != 0 && gpe1_len != 0 {
+            Some(GpeManager::new(gpe1, gpe1_len >> 1 /* / 2 */))
+        } else {
+            None
+        };
         Self {
             write_lock: SpinLockFlag::new(),
             pm1a_event_block: fadt_manager.get_pm1a_event_block(),
@@ -49,6 +61,18 @@ impl AcpiEventManager {
             pm1_event_block_len: fadt_manager.get_pm1_event_block_len(),
             pm1a_enabled_event: 0,
             pm1b_enabled_event: 0,
+            gpe0_manager: GpeManager::new(
+                fadt_manager.get_gp_event0_block(),
+                fadt_manager.get_gp_event0_block_len() as usize >> 1,
+            ),
+            gpe1_manager,
+        }
+    }
+
+    pub fn init_gpe(&self) {
+        self.gpe0_manager.init();
+        if let Some(gpe1) = &self.gpe1_manager {
+            gpe1.init();
         }
     }
 
@@ -124,6 +148,46 @@ impl AcpiEventManager {
         }
     }
 
+    pub fn sci_handler(&self) {
+        if let Some(acpi_event) = self.find_occurred_fixed_event() {
+            let work = WorkList::new(AcpiEventManager::acpi_fixed_event_worker, acpi_event as _);
+            get_cpu_manager_cluster().work_queue.add_work(work);
+            if !get_kernel_manager_cluster()
+                .acpi_event_manager
+                .reset_fixed_event_status(acpi_event)
+            {
+                pr_err!("Cannot reset flag: {:?}", acpi_event);
+            }
+        } else if let Some(gpe_number) = self.gpe0_manager.find_general_purpose_event() {
+            if let Some(ec) = &get_kernel_manager_cluster().acpi_device_manager.ec {
+                if ec.get_gpe_number() == Some(gpe_number) {
+                    let query = ec.read_query();
+                    get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
+                        AcpiEventManager::acpi_query_event_worker,
+                        query as _,
+                    ));
+                    return;
+                }
+            }
+            get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
+                AcpiEventManager::acpi_gpe_worker,
+                gpe_number as _,
+            ));
+        } else {
+            if let Some(ec) = &get_kernel_manager_cluster().acpi_device_manager.ec {
+                let query = ec.read_query();
+                if query != 0 {
+                    get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
+                        AcpiEventManager::acpi_query_event_worker,
+                        query as _,
+                    ));
+                    return;
+                }
+            }
+            pr_err!("Unknown ACPI Event");
+        }
+    }
+
     pub fn reset_fixed_event_status(&self, event: AcpiFixedEvent) -> bool {
         let _lock = if let Ok(l) = self.write_lock.try_lock() {
             l
@@ -158,5 +222,17 @@ impl AcpiEventManager {
         } else {
             pr_err!("Unknown event...");
         }
+    }
+
+    pub fn acpi_gpe_worker(gpe_number: usize) {
+        pr_info!("GPE: {:#X}", gpe_number)
+    }
+
+    pub fn acpi_query_event_worker(query: usize) {
+        get_kernel_manager_cluster()
+            .acpi_manager
+            .lock()
+            .unwrap()
+            .evaluate_query(query as u8);
     }
 }

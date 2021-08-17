@@ -3,7 +3,6 @@
  */
 
 .code32
-.att_syntax
 
 .global setup_long_mode, fin
 .extern init_long_mode

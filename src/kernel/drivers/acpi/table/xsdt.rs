@@ -8,6 +8,7 @@ use super::bgrt::BgrtManager;
 use super::dsdt::DsdtManager;
 use super::fadt::FadtManager;
 use super::madt::MadtManager;
+use super::ssdt::SsdtManager;
 use crate::kernel::drivers::acpi::INITIAL_MMAP_SIZE;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -118,7 +119,7 @@ impl XsdtManager {
             index += 1;
         }
 
-        if !self.dsdt_manager.is_inited() {
+        if !self.dsdt_manager.is_initialized() {
             let v_address = if let Ok(a) = get_kernel_manager_cluster()
                 .memory_manager
                 .lock()
@@ -165,6 +166,47 @@ impl XsdtManager {
 
     pub fn get_fadt_manager(&self) -> &FadtManager {
         &self.fadt_manager
+    }
+
+    pub fn get_ssdt_manager<F>(&self, mut call_back: F) -> bool
+    where
+        F: FnMut(&SsdtManager) -> bool,
+    {
+        let memory_manager = &get_kernel_manager_cluster().memory_manager;
+        let mut index = 0;
+        while let Some(entry_physical_address) = self.get_entry(index) {
+            let result = memory_manager.lock().unwrap().mmap(
+                entry_physical_address,
+                MSize::new(INITIAL_MMAP_SIZE),
+                MemoryPermissionFlags::rodata(),
+                MemoryOptionFlags::PRE_RESERVED
+                    | MemoryOptionFlags::MEMORY_MAP
+                    | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
+            ); /* To drop Mutex Lock */
+
+            if let Ok(v_address) = result {
+                if unsafe { &*(v_address.to_usize() as *const [u8; 4]) } == &SsdtManager::SIGNATURE
+                {
+                    let mut ssdt_manager = SsdtManager::new();
+                    if !ssdt_manager.init(v_address) || !call_back(&ssdt_manager) {
+                        if let Err(e) = memory_manager.lock().unwrap().free(v_address) {
+                            pr_warn!("Cannot Free SSDT: {:?}", e)
+                        }
+                        pr_err!("Failed initialization of SsdtManager.");
+                        return false;
+                    }
+                } else {
+                    if let Err(e) = memory_manager.lock().unwrap().free(v_address) {
+                        pr_warn!("Cannot free an ACPI table: {:?}", e)
+                    }
+                }
+            } else {
+                pr_err!("Cannot map ACPI Table: {:?}", result.unwrap_err());
+                return false;
+            };
+            index += 1;
+        }
+        return true;
     }
 
     pub fn get_madt_manager(&self) -> Option<MadtManager> {

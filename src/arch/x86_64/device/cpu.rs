@@ -259,7 +259,6 @@ pub unsafe fn set_gs_and_kernel_gs_base(address: u64) {
 /// Set all registers from context_data and jump context_data.rip.
 /// This function assume 1st argument is passed by "rdi" and 2nd is passed by "rsi"
 #[naked]
-#[inline(never)]
 #[allow(unused_variables)]
 pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
     asm!(

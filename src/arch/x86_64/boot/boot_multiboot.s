@@ -3,7 +3,6 @@
  */
 
 .code32
-.att_syntax
 
 .global boot_multiboot, BOOT_FROM_MULTIBOOT_MARK
 .extern setup_long_mode, fin                /* at setup_long_mode.s */

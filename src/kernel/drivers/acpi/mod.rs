@@ -8,24 +8,36 @@
 pub mod aml;
 pub mod device;
 pub mod event;
-pub mod table;
+pub mod table {
+    pub mod bgrt;
+    pub mod dsdt;
+    pub mod fadt;
+    pub mod madt;
+    pub mod ssdt;
+    pub mod xsdt;
+}
 
-use self::aml::{AmlPackage, AmlParser, AmlVariable, NameString};
+use self::aml::aml_variable::{AmlPackage, AmlVariable};
+use self::aml::{AmlInterpreter, ConstData, NameString, ResourceData};
 use self::device::ec::EmbeddedController;
 use self::device::AcpiDeviceManager;
-use self::event::gpe::GpeManager;
 use self::event::{AcpiEventManager, AcpiFixedEvent};
 use self::table::dsdt::DsdtManager;
 use self::table::fadt::FadtManager;
+use self::table::ssdt::SsdtManager;
 use self::table::xsdt::XsdtManager;
 
-use crate::arch::target_arch::device::cpu::{disable_interrupt, in_byte, out_byte, out_word};
+use crate::arch::target_arch::device::cpu::{
+    disable_interrupt, enable_interrupt, in_byte, in_word, out_byte, out_word,
+};
 
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::PAddress;
 
 pub struct AcpiManager {
     enabled: bool,
     xsdt_manager: XsdtManager,
+    aml_interpreter: Option<AmlInterpreter>,
 }
 
 #[repr(C, packed)]
@@ -48,6 +60,7 @@ impl AcpiManager {
         Self {
             enabled: false,
             xsdt_manager: XsdtManager::new(),
+            aml_interpreter: None,
         }
     }
 
@@ -60,7 +73,7 @@ impl AcpiManager {
             return false;
         }
         if rsdp.revision != 2 {
-            pr_err!("Not supported ACPI version");
+            pr_err!("Not supported ACPI version: {}", rsdp.revision);
             return false;
         }
         //ADD: checksum verification
@@ -81,14 +94,6 @@ impl AcpiManager {
     pub fn init_acpi_event_manager(&self, event_manager: &mut AcpiEventManager) -> bool {
         if self.enabled {
             *event_manager = AcpiEventManager::new(&self.get_xsdt_manager().get_fadt_manager());
-            let gpe0 = self.get_fadt_manager().get_gp_event0_block();
-            let gpe0_len = self.get_fadt_manager().get_gp_event0_block_len() as usize;
-            let gpe1 = self.get_fadt_manager().get_gp_event1_block();
-            let gpe1_len = self.get_fadt_manager().get_gp_event1_block_len() as usize;
-            GpeManager::init(gpe0, gpe0_len >> 1 /* /2*/);
-            if gpe1 != 0 && gpe1_len != 0 {
-                GpeManager::init(gpe1, gpe1_len >> 1 /* /2*/);
-            }
             true
         } else {
             false
@@ -97,22 +102,52 @@ impl AcpiManager {
 
     pub fn setup_acpi_devices(&self, device_manager: &mut AcpiDeviceManager) -> bool {
         if self.enabled {
-            let mut aml_parser = self.get_aml_parler();
-            EmbeddedController::setup(&mut aml_parser, device_manager);
-            true
+            if self.aml_interpreter.is_none() {
+                pr_err!("AML Interpreter is not available.");
+                return false;
+            }
+            if let Some(i) = &self.aml_interpreter {
+                EmbeddedController::setup(i, device_manager);
+                true
+            } else {
+                pr_err!("AmlInterpreter is not available.");
+                false
+            }
         } else {
             false
         }
     }
 
-    pub fn is_available(&self) -> bool {
-        self.enabled
+    /// Setup Aml Interpreter
+    ///
+    /// This function requires memory allocation.
+    pub fn setup_aml_interpreter(&mut self) -> bool {
+        if self.aml_interpreter.is_some() {
+            pr_info!("AmlInterpreter is already initialized.");
+            return true;
+        }
+        use alloc::vec::Vec;
+        if !self.enabled {
+            return false;
+        }
+        let dsdt = self
+            .get_dsdt_manager()
+            .get_definition_block_address_and_size();
+        let mut ssdt_list = Vec::new();
+        if !self.xsdt_manager.get_ssdt_manager(|s: &SsdtManager| {
+            ssdt_list.push(s.get_definition_block_address_and_size());
+            true
+        }) {
+            pr_err!("Cannot get SSDT.");
+            return false;
+        }
+        pr_info!("Detected {} SSDTs.", ssdt_list.len());
+        self.aml_interpreter = AmlInterpreter::setup(dsdt, ssdt_list.as_slice());
+        self.aml_interpreter.is_some()
     }
 
-    fn get_aml_parler(&self) -> AmlParser {
-        let mut p = self.get_dsdt_manager().get_aml_parser();
-        assert!(p.init());
-        p
+    pub fn is_available(&self) -> bool {
+        self.enabled
     }
 
     pub fn get_xsdt_manager(&self) -> &XsdtManager {
@@ -153,64 +188,76 @@ impl AcpiManager {
         return true;
     }
 
-    fn get_sleep_state_object(aml_parser: &mut AmlParser, s: u8) -> Option<(usize, usize)> {
+    fn find_sleep_state_object(interpreter: &mut AmlInterpreter, s: u8) -> Option<(usize, usize)> {
         if s > 5 {
             pr_err!("Invalid Sleep State {}", s);
             return None;
         }
         let name = NameString::from_array(&[[b'_', b'S', s + 0x30, 0]], true);
-        if let Some(d) = aml_parser.get_data_ref_object(&name) {
-            if let Some(mut iter) = d.to_int_iter() {
-                let pm1_a = iter.next();
-                let pm1_b = iter.next();
-                if pm1_a.is_none() || pm1_b.is_none() {
-                    pr_err!("Invalid _S{} object: {:?}", s, d);
-                    None
-                } else {
-                    Some((pm1_a.unwrap(), pm1_b.unwrap()))
+        if let Some(d) = interpreter.get_aml_variable(&name) {
+            if let AmlVariable::Package(package) = &d {
+                if let Some(AmlPackage::ConstData(pm1_a)) = package.get(0) {
+                    if let Some(AmlPackage::ConstData(pm1_b)) = package.get(1) {
+                        return Some((pm1_a.to_int(), pm1_b.to_int()));
+                    }
                 }
-            } else {
-                pr_err!("Invalid _S{} Object: {:?}", s, d);
-                None
             }
+            pr_err!("Invalid _S{} Object: {:?}", s, d);
+            None
         } else {
-            pr_err!("Cannot find _S{} Object", s);
+            pr_err!("Failed to find _S{} Object", s);
             None
         }
     }
 
     fn enter_sleep_state(
         s: u8,
-        aml_parser: &mut AmlParser,
+        interpreter: &mut AmlInterpreter,
         pm1_a: usize,
         pm1_b: usize,
         sleep_register: Option<usize>,
     ) -> bool {
-        let s_obj = Self::get_sleep_state_object(aml_parser, s);
+        let s_obj = Self::find_sleep_state_object(&mut interpreter.clone(), s);
         if s_obj.is_none() {
             pr_err!("Cannot get _S{} Object.", s);
             return false;
         }
         let s_value = s_obj.unwrap();
+        if interpreter
+            .evaluate_method(
+                &NameString::from_array(&[*b"_PTS"], true),
+                &[AmlVariable::ConstData(ConstData::Byte(s))],
+            )
+            .is_err()
+        {
+            pr_err!("Failed to evaluate _PTS");
+        }
         unsafe {
             if let Some(s_r) = sleep_register {
-                out_byte(s_r as _, (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8);
-            } else if pm1_b != 0 {
-                out_word(pm1_a as _, (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16);
-                out_word(pm1_b as _, (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16);
+                let mut status = in_byte(s_r as _);
+                status &= !(0b111 << 2);
+                status |= (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8;
+                out_byte(s_r as _, status);
             } else {
-                out_word(pm1_a as _, (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16);
+                let mut status = in_word(pm1_a as _);
+                status &= !(0b111 << 10);
+                status |= (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16;
+                out_word(pm1_a as _, status);
+                if pm1_b != 0 {
+                    let mut status = in_word(pm1_b as _);
+                    status &= !(0b111 << 10);
+                    status |= (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16;
+                    out_word(pm1_b as _, status);
+                }
             }
         }
         return true;
     }
 
-    pub fn shutdown(&mut self, aml_parser: Option<&mut AmlParser>) -> ! {
-        let mut default_parser = if aml_parser.is_none() {
-            Some(self.get_aml_parler())
-        } else {
-            None
-        };
+    pub fn shutdown(&mut self) -> ! {
+        if self.aml_interpreter.is_none() {
+            panic!("AML Interpreter is not available.");
+        }
 
         let pm1_a_port = self.get_fadt_manager().get_pm1a_control_block();
         let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block();
@@ -223,25 +270,23 @@ impl AcpiManager {
             pr_info!("Shutdown with HW reduced ACPI.");
         }
 
-        unsafe { disable_interrupt() };
-
         assert!(
             Self::enter_sleep_state(
                 5,
-                aml_parser.or(default_parser.as_mut()).unwrap(),
+                self.aml_interpreter.as_mut().unwrap(),
                 pm1_a_port,
                 pm1_b_port,
                 sleep_control_register
             ),
             "Cannot enter S5."
         );
+        unsafe { disable_interrupt() };
         loop {
             core::hint::spin_loop()
         }
     }
 
     pub fn shutdown_test(&mut self) -> ! {
-        use crate::kernel::manager_cluster::get_kernel_manager_cluster;
         use crate::kernel::timer_manager::Timer;
 
         /* for debug */
@@ -257,56 +302,65 @@ impl AcpiManager {
                 }
             }
         }
-        self.shutdown(None)
-    }
-
-    pub fn search_device(&mut self, aml_parser: Option<&mut AmlParser>, hid: &[u8; 7]) -> bool {
-        let mut default_aml_parser = if aml_parser.is_none() {
-            Some(self.get_aml_parler())
-        } else {
-            None
-        };
-        let aml_parser = aml_parser.or(default_aml_parser.as_mut()).unwrap();
-
-        if let Some(_) = aml_parser.get_device(hid) {
-            true
-        } else {
-            false
-        }
+        unsafe { enable_interrupt() };
+        self.shutdown()
     }
 
     pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
         if (self.get_fadt_manager().get_flags() & (1 << 4)) != 0 {
             pr_info!("PowerButton is the control method power button.");
-            if self.search_device(None, b"PNP0C0C") {
-                pr_info!("This computer has power button.");
+            if let Some(interpreter) = &self.aml_interpreter {
+                match interpreter.move_into_device(b"PNP0C0C") {
+                    Ok(Some(i)) => {
+                        pr_info!("This computer has power button: {}", i.get_current_scope());
+                        true
+                    }
+                    Ok(None) => {
+                        pr_info!("This computer has no power button.");
+                        true
+                    }
+                    Err(_) => {
+                        pr_info!("Cannot get power button device.");
+                        false
+                    }
+                }
+            } else {
+                pr_err!("AmlInterpreter is not available.");
+                false
             }
-            false
         } else {
             pr_info!("PowerButton is the fixed hardware power button.");
             acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton)
         }
     }
 
-    pub fn search_intr_number_with_evaluation_aml(
+    pub fn search_interrupt_information_with_evaluation_aml(
         &mut self,
         bus: u8,
         device: u8,
         int_pin: u8,
-    ) -> Option<u8> {
-        let debug_and_return_none = |e: Option<AmlVariable>| -> Option<u8> {
+    ) -> Option<ResourceData> {
+        let debug_and_return_none = |e: Option<AmlVariable>| -> Option<ResourceData> {
             pr_err!("Invalid PCI Routing Table: {:?}", e.unwrap());
             return None;
         };
-        let mut aml_parser = self.get_aml_parler();
+        let mut interpreter = if let Some(i) = &self.aml_interpreter {
+            i.clone()
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            return None;
+        };
+
         let routing_table_method_name =
             NameString::from_array(&[*b"_SB\0", [b'P', b'C', b'I', bus + b'0'], *b"_PRT"], true); /* \\_SB.PCI(BusNumber)._PRT */
-        let evaluation_result = aml_parser.evaluate_method(&routing_table_method_name, &[]);
-        if evaluation_result.is_none() {
+        let evaluation_result = interpreter.evaluate_method(&routing_table_method_name, &[]);
+        if evaluation_result.is_err() {
             pr_err!("Cannot evaluate {}.", routing_table_method_name);
             return None;
         }
-        if let Some(AmlVariable::Package(vector)) = &evaluation_result {
+        let returned_value = evaluation_result.unwrap();
+
+        if let Some(AmlVariable::Package(vector)) = &returned_value {
             for element in vector.iter() {
                 if let AmlPackage::Package(device_element) = element {
                     if let Some(AmlPackage::ConstData(c)) = device_element.get(0) {
@@ -317,87 +371,147 @@ impl AcpiManager {
                             continue;
                         }
                         if target_function != 0xFFFF || device_element.len() != 4 {
-                            return debug_and_return_none(evaluation_result);
+                            return debug_and_return_none(returned_value);
                         }
                         if let AmlPackage::ConstData(c) = device_element[1] {
                             if c.to_int() != int_pin as _ {
                                 continue;
                             }
                         } else {
-                            return debug_and_return_none(evaluation_result);
+                            return debug_and_return_none(returned_value);
                         }
                         if let AmlPackage::ConstData(c) = device_element[3] {
                             if c.to_int() != 0 {
-                                return Some(c.to_int() as _);
+                                return Some(ResourceData::Irq(c.to_int() as u8));
                             }
                         } else {
-                            return debug_and_return_none(evaluation_result);
+                            return debug_and_return_none(returned_value);
                         }
                         return if let AmlPackage::NameString(link_device) = &device_element[2] {
-                            let link_device = link_device
-                                .get_element_as_name_string(link_device.len() - 1)
-                                .unwrap();
+                            let link_device = link_device.get_last_element().unwrap();
                             pr_info!("Detect: {}", link_device);
                             let crs_function_name = NameString::from_array(&[*b"_CRS"], false)
                                 .get_full_name_path(&link_device.get_full_name_path(
                                     &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
                                 )); /* \\_SB.(DEVICE)._CRS */
+                            let mut interpreter = self.aml_interpreter.as_ref().unwrap().clone();
                             let link_device_evaluation_result =
-                                aml_parser.evaluate_method(&crs_function_name, &[]);
-                            if link_device_evaluation_result.is_none() {
+                                interpreter.evaluate_method(&crs_function_name, &[]);
+                            if link_device_evaluation_result.is_err() {
                                 pr_err!("Cannot evaluate {}.", crs_function_name);
                                 return None;
                             }
-                            return if let Some(AmlVariable::Buffer(v)) =
-                                &link_device_evaluation_result
-                            {
-                                let small_resource_type_tag = match v.get(0) {
+                            let returned_value = link_device_evaluation_result.unwrap();
+
+                            return if let Some(AmlVariable::Buffer(v)) = &returned_value {
+                                let resource_type_tag = match v.get(0) {
                                     Some(c) => *c,
                                     None => {
-                                        return debug_and_return_none(
-                                            link_device_evaluation_result,
-                                        );
+                                        return debug_and_return_none(returned_value);
                                     }
                                 };
-                                if small_resource_type_tag != 0x22
-                                    && small_resource_type_tag != 0x23
-                                {
-                                    /* 0x04 = IRQ */
-                                    pr_err!("Invalid Small Resource Type.");
-                                    return debug_and_return_none(link_device_evaluation_result);
-                                }
-
-                                if v[1] != 0 {
-                                    let mask = v[1];
-                                    for i in 0..8 {
-                                        if ((mask >> i) & 1) != 0 {
-                                            return Some(i);
+                                match resource_type_tag {
+                                    0x22 | 0x23 => {
+                                        if v[1] != 0 {
+                                            let mask = v[1];
+                                            for i in 0..8 {
+                                                if ((mask >> i) & 1) != 0 {
+                                                    return Some(ResourceData::Irq(i));
+                                                }
+                                            }
+                                        } else if v[2] != 0 {
+                                            let mask = v[2];
+                                            for i in 0..8 {
+                                                if ((mask >> i) & 1) != 0 {
+                                                    return Some(ResourceData::Irq(i + 8));
+                                                }
+                                            }
                                         }
+                                        pr_err!("Invalid IRQ Resource Data.");
+                                        debug_and_return_none(returned_value)
                                     }
-                                } else if v[2] != 0 {
-                                    let mask = v[2];
-                                    for i in 0..8 {
-                                        if ((mask >> i) & 1) != 0 {
-                                            return Some(i + 8);
+                                    0x89 => {
+                                        let length = *v.get(1).unwrap_or(&0) as u16
+                                            | ((*v.get(2).unwrap_or(&0) as u16) << 8);
+                                        if length < 0x06 {
+                                            pr_err!("Invalid Large Resource Data Type.");
+                                            return debug_and_return_none(returned_value);
                                         }
+                                        if *v.get(4).unwrap_or(&0) != 1 {
+                                            pr_err!("Interrupt table length must be 1.");
+                                            return debug_and_return_none(returned_value);
+                                        }
+                                        Some(ResourceData::Interrupt(v[5] as usize))
+                                    }
+                                    _ => {
+                                        pr_err!("Invalid Resource Data Type.");
+                                        debug_and_return_none(returned_value)
                                     }
                                 }
-                                return debug_and_return_none(link_device_evaluation_result);
                             } else {
-                                debug_and_return_none(link_device_evaluation_result)
+                                debug_and_return_none(returned_value)
                             };
                         } else {
-                            debug_and_return_none(evaluation_result)
+                            debug_and_return_none(returned_value)
                         };
                     }
                 } else {
-                    return debug_and_return_none(evaluation_result);
+                    return debug_and_return_none(returned_value);
                 }
             }
             pr_err!("Device Specific Table Entry was not found.");
             None
         } else {
-            debug_and_return_none(evaluation_result)
+            debug_and_return_none(returned_value)
+        }
+    }
+
+    pub fn initialize_all_devices(&mut self) -> bool {
+        if let Some(mut interpreter) = self.aml_interpreter.clone() {
+            match interpreter.initialize_all_devices() {
+                Ok(()) => true,
+                Err(()) => false,
+            }
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            false
+        }
+    }
+
+    fn evaluate_query(&self, query: u8) {
+        let interpreter = if let Some(i) = &self.aml_interpreter {
+            i
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            return;
+        };
+        if get_kernel_manager_cluster()
+            .acpi_device_manager
+            .ec
+            .is_some()
+        {
+            if let Ok(Some(mut new_interpreter)) =
+                interpreter.move_into_device(&EmbeddedController::HID)
+            {
+                drop(interpreter);
+                let to_ascii = |x: u8| -> u8 {
+                    if x >= 0xa {
+                        x - 0xa + b'A'
+                    } else {
+                        x + b'0'
+                    }
+                };
+
+                let query_method_name = NameString::from_array(
+                    &[[b'_', b'Q', to_ascii(query >> 4), to_ascii(query & 0xf)]],
+                    false,
+                )
+                .get_full_name_path(new_interpreter.get_current_scope());
+                pr_info!("Evaluate: {}", query_method_name);
+                if let Err(_) = new_interpreter.evaluate_method(&query_method_name, &[]) {
+                    pr_err!("Cannot evaluate: {}", query_method_name);
+                }
+            }
         }
     }
 }

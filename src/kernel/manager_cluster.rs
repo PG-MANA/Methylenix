@@ -13,6 +13,7 @@ use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::efi::EfiManager;
+use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
@@ -41,6 +42,7 @@ pub struct KernelManagerCluster {
     pub acpi_manager: Mutex<AcpiManager>,
     pub acpi_event_manager: AcpiEventManager,
     pub acpi_device_manager: AcpiDeviceManager,
+    pub pci_manager: PciManager,
     pub boot_strap_cpu_manager: CpuManagerCluster,
     pub cpu_list: PtrLinkedList<CpuManagerCluster>, /* may be changed */
     pub arch_depend_data: ArchDependedKernelManagerCluster,
