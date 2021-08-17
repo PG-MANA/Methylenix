@@ -230,7 +230,78 @@ impl AmlVariable {
                 b_f.num_of_bytes.max(access_align),
                 b_f.num_of_bytes << 3,
             ),
-            Self::IndexField(_) => Err(AmlError::UnsupportedType),
+            Self::IndexField(i_f) => {
+                let byte_offset = byte_index + ((i_f.bit_index + bit_index) >> 3);
+                let aligned_byte_offset = if i_f.access_align > 1 {
+                    byte_offset & !(i_f.access_align - 1)
+                } else {
+                    byte_offset
+                };
+                let adjusted_bit_index =
+                    (i_f.bit_index + bit_index) % 8 + (byte_offset - aligned_byte_offset);
+                let index_data = match i_f.access_align {
+                    0 | 1 => {
+                        if aligned_byte_offset > u8::MAX as _ {
+                            pr_err!("Index({}) is out of u8 range.", aligned_byte_offset);
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        AmlVariable::ConstData(ConstData::Byte(aligned_byte_offset as u8))
+                    }
+                    2 => {
+                        if aligned_byte_offset > u16::MAX as _ {
+                            pr_err!("Index({}) is out of u16 range.", aligned_byte_offset);
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        AmlVariable::ConstData(ConstData::Word(aligned_byte_offset as u16))
+                    }
+                    4 => {
+                        if aligned_byte_offset > u32::MAX as _ {
+                            pr_err!("Index({}) is out of u32 range.", aligned_byte_offset);
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        AmlVariable::ConstData(ConstData::DWord(aligned_byte_offset as u32))
+                    }
+                    8 => {
+                        if aligned_byte_offset > u64::MAX as _ {
+                            pr_err!("Index({}) is out of u64 range.", aligned_byte_offset);
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        AmlVariable::ConstData(ConstData::QWord(aligned_byte_offset as u64))
+                    }
+                    _ => {
+                        pr_err!("Invalid Align.");
+                        return Err(AmlError::InvalidOperation);
+                    }
+                };
+                if let Ok(i) = i_f.index_register.try_lock() {
+                    pr_info!("Index Register: {:?} <= {:?}", *i, index_data);
+                }
+                i_f.index_register
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    ._write(
+                        index_data,
+                        0,
+                        0,
+                        should_lock | i_f.should_lock_global_lock,
+                        0,
+                        8,
+                    )?;
+
+                i_f.data_register
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    ._write(
+                        data,
+                        0,
+                        adjusted_bit_index,
+                        should_lock | i_f.should_lock_global_lock,
+                        i_f.access_align,
+                        i_f.num_of_bits,
+                    )?;
+
+                Ok(())
+            }
             Self::Buffer(b) => {
                 let byte_offset = byte_index + (bit_index >> 3);
                 let adjusted_bit_index = bit_index % 8;
@@ -464,7 +535,75 @@ impl AmlVariable {
                 b_f.num_of_bytes.max(access_align),
                 b_f.num_of_bytes << 3,
             ),
-            Self::IndexField(_) => Err(AmlError::UnsupportedType),
+            Self::IndexField(i_f) => {
+                let byte_offset = byte_index + ((i_f.bit_index + bit_index) >> 3);
+                let aligned_byte_offset = if i_f.access_align > 1 {
+                    byte_offset & !(i_f.access_align - 1)
+                } else {
+                    byte_offset
+                };
+                let adjusted_bit_index =
+                    (i_f.bit_index + bit_index) % 8 + (byte_offset - aligned_byte_offset);
+
+                let index_data = match i_f.access_align {
+                    0 | 1 => {
+                        if aligned_byte_offset > u8::MAX as _ {
+                            pr_err!("Index({}) is out of u8 range.", aligned_byte_offset);
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        AmlVariable::ConstData(ConstData::Byte(aligned_byte_offset as u8))
+                    }
+                    2 => {
+                        if aligned_byte_offset > u16::MAX as _ {
+                            pr_err!("Index({}) is out of u16 range.", aligned_byte_offset);
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        AmlVariable::ConstData(ConstData::Word(aligned_byte_offset as u16))
+                    }
+                    4 => {
+                        if aligned_byte_offset > u32::MAX as _ {
+                            pr_err!("Index({}) is out of u32 range.", aligned_byte_offset);
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        AmlVariable::ConstData(ConstData::DWord(aligned_byte_offset as u32))
+                    }
+                    8 => {
+                        if aligned_byte_offset > u64::MAX as _ {
+                            pr_err!("Index({}) is out of u64 range.", aligned_byte_offset);
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        AmlVariable::ConstData(ConstData::QWord(aligned_byte_offset as u64))
+                    }
+                    _ => {
+                        pr_err!("Invalid Align.");
+                        return Err(AmlError::InvalidOperation);
+                    }
+                };
+
+                i_f.index_register
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    ._write(
+                        index_data,
+                        0,
+                        0,
+                        should_lock | i_f.should_lock_global_lock,
+                        0,
+                        8,
+                    )?;
+                let data = i_f
+                    .data_register
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    ._read(
+                        0,
+                        adjusted_bit_index,
+                        should_lock | i_f.should_lock_global_lock,
+                        i_f.access_align,
+                        i_f.num_of_bits,
+                    )?;
+                Ok(data)
+            }
             Self::Reference((source, index)) => {
                 if let Some(index) = index {
                     source
