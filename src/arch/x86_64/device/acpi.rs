@@ -57,6 +57,7 @@ pub fn read_embedded_controller(address: u8) -> Result<u8, AmlError> {
     {
         Ok(ec.read_data(address))
     } else {
+        pr_err!("Embedded Controller is not available.");
         Err(AmlError::InvalidOperation)
     }
 }
@@ -69,6 +70,7 @@ pub fn write_embedded_controller(address: u8, data: u8) -> Result<(), AmlError> 
         ec.write_data(address, data);
         Ok(())
     } else {
+        pr_err!("Embedded Controller is not available.");
         Err(AmlError::InvalidOperation)
     }
 }
@@ -193,7 +195,7 @@ pub fn read_memory(
     align: usize,
     num_of_bits: usize,
 ) -> Result<ConstData, AmlError> {
-    let size = MSize::new((bit_index + num_of_bits) >> 3);
+    let size = MSize::new(((bit_index + num_of_bits) >> 3).max(1));
     let virtual_address = get_kernel_manager_cluster()
         .memory_manager
         .lock()
@@ -204,7 +206,15 @@ pub fn read_memory(
             MemoryPermissionFlags::data(),
             Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
         )
-        .or(Err(AmlError::InvalidOperation))?;
+        .or_else(|e| {
+            pr_err!(
+                "Failed to io_map(PhysicalAddress: {:#X}, Size: {:#X}): {:?}",
+                address.to_usize(),
+                size.to_usize(),
+                e
+            );
+            Err(AmlError::InvalidOperation)
+        })?;
     let result = try {
         unsafe {
             match align {
@@ -300,7 +310,15 @@ pub fn write_memory(
             MemoryPermissionFlags::data(),
             Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
         )
-        .or(Err(AmlError::InvalidOperation))?;
+        .or_else(|e| {
+            pr_err!(
+                "Failed to io_map(PhysicalAddress: {:#X}, Size: {:#X}): {:?}",
+                address.to_usize(),
+                size.to_usize(),
+                e
+            );
+            Err(AmlError::InvalidOperation)
+        })?;
     let result = try {
         unsafe {
             match align {
