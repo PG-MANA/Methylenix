@@ -631,7 +631,12 @@ impl Evaluator {
             let term_list = self.term_list_hierarchy.get(index).unwrap().clone();
             if self.variable_tree.get_current_scope_name() != term_list.get_scope_name() {
                 self.variable_tree.move_to_parent()?;
-                if self.variable_tree.get_current_scope_name() != term_list.get_scope_name() {
+                if term_list
+                    .get_scope_name()
+                    .get_last_element()
+                    .and_then(|l| Some(&l != self.variable_tree.get_current_scope_name()))
+                    .unwrap_or(false)
+                {
                     pr_err!(
                         "Variables' Tree and TermListHierarchy are not matched: {} != {}",
                         self.variable_tree.get_current_scope_name(),
@@ -1070,6 +1075,7 @@ impl Evaluator {
         )?;
         Ok(match &*v.lock().unwrap() {
             AmlVariable::Method(m) => m.get_argument_count(),
+            AmlVariable::BuiltInMethod((_, c)) => *c as AcpiInt,
             _ => 0,
         })
     }
@@ -1180,7 +1186,8 @@ impl Evaluator {
                             pr_warn!("Unsupported ConnectField: {}", c);
                         }
                         FieldElement::NameField((entry_name, pkg_length)) => {
-                            if relative_name.suffix_search(&entry_name) {
+                            let last_name = entry_name.get_single_name_path().unwrap_or(entry_name);
+                            if relative_name.suffix_search(&last_name) {
                                 return Ok(AmlVariable::BitField(AmlBitFiled {
                                     source,
                                     bit_index: index,
@@ -1239,7 +1246,8 @@ impl Evaluator {
                             pr_warn!("Unsupported ConnectField: {}", c);
                         }
                         FieldElement::NameField((entry_name, pkg_length)) => {
-                            if relative_name.suffix_search(&entry_name) {
+                            let last_name = entry_name.get_single_name_path().unwrap_or(entry_name);
+                            if relative_name.suffix_search(&last_name) {
                                 return Ok(AmlVariable::IndexField(AmlIndexField {
                                     index_register,
                                     data_register,
@@ -2218,12 +2226,8 @@ impl Evaluator {
                 Ok(AmlVariable::ConstData(ConstData::QWord(byte_size as _)))
             }
             ExpressionOpcode::DefStore((data, destination)) => {
-                let data = self.eval_integer_expression(
-                    data,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let data =
+                    self.eval_term_arg(data, local_variables, argument_variables, current_scope)?;
                 self.write_data_into_target(
                     data.clone(),
                     &Target::SuperName(destination.clone()),
@@ -2250,24 +2254,18 @@ impl Evaluator {
                     obj.get_constant_data()?
                 };
                 let result = match constant_data {
-                    AmlVariable::Uninitialized => Err(AmlError::InvalidOperation)?,
                     AmlVariable::ConstData(c) => c,
-                    AmlVariable::String(s) => {
+                    AmlVariable::String(s) if s.len() > 0 => {
                         ConstData::QWord(parse_integer_from_buffer(s.as_bytes())? as _)
                     }
-                    AmlVariable::Buffer(b) => {
-                        if b.len() < 8 {
-                            pr_err!("Invalid Buffer Size: {:#X}.", b.len());
-                            Err(AmlError::InvalidOperation)?
-                        } else {
-                            let mut result = 0u64;
-                            for index in 0..8 {
-                                result |= (b[index] as u64) << index;
-                            }
-                            ConstData::QWord(result)
+                    AmlVariable::Buffer(b) if b.len() > 0 => {
+                        let mut result = 0u64;
+                        for index in 0..b.len().min(8) {
+                            result |= (b[index] as u64) << index;
                         }
+                        ConstData::QWord(result)
                     }
-                    _ => Err(AmlError::UnsupportedType)?,
+                    _ => Err(AmlError::InvalidOperation)?,
                 };
                 if !target.is_null() {
                     self.write_data_into_target(
