@@ -118,10 +118,6 @@ impl AcpiManager {
         }
     }
 
-    pub fn evaluate_all_ini_methods(&self) -> bool {
-        true /* TODO: */
-    }
-
     /// Setup Aml Interpreter
     ///
     /// This function requires memory allocation.
@@ -470,32 +466,16 @@ impl AcpiManager {
         }
     }
 
-    pub fn setup_pci_bus(&mut self, bus: u8) -> bool {
-        let mut interpreter = self.aml_interpreter.as_ref().unwrap().clone();
-        let scope = NameString::from_array(&[*b"_SB\0", [b'P', b'C', b'I', bus + b'0']], true);
-        if interpreter
-            .evaluate_method(
-                &NameString::from_array(&[*b"_INI"], false).get_full_name_path(&scope),
-                &[],
-            )
-            .is_err()
-        {
-            pr_err!("Cannot evaluate _INI.");
-            return false;
+    pub fn initialize_all_devices(&mut self) -> bool {
+        if let Some(mut interpreter) = self.aml_interpreter.clone() {
+            match interpreter.initialize_all_devices() {
+                Ok(()) => true,
+                Err(()) => false,
+            }
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            false
         }
-        drop(interpreter);
-        let mut interpreter = self.aml_interpreter.as_ref().unwrap().clone();
-        if interpreter
-            .evaluate_method(
-                &NameString::from_array(&[*b"RP01", *b"_INI"], false).get_full_name_path(&scope),
-                &[],
-            )
-            .is_err()
-        {
-            pr_err!("Cannot evaluate _INI.");
-            return false;
-        }
-        return true;
     }
 
     fn evaluate_query(&self, query: u8) {

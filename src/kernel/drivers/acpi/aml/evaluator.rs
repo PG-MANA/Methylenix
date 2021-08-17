@@ -12,7 +12,7 @@ use super::expression_opcode::{
     ByteList, ExpressionOpcode, Package, ReferenceTypeOpcode, VarPackage,
 };
 use super::name_object::{NameString, SimpleName, SuperName, Target};
-use super::named_object::{Field, FieldElement, Method, NamedObject, OperationRegionType};
+use super::named_object::{Device, Field, FieldElement, Method, NamedObject, OperationRegionType};
 use super::namespace_modifier_object::NamespaceModifierObject;
 use super::statement_opcode::{Fatal, IfElse, Notify, StatementOpcode, While};
 use super::term_object::{MethodInvocation, TermArg, TermList, TermObj};
@@ -83,6 +83,208 @@ impl Evaluator {
         self.variable_tree.add_data(dlm_name, dlm)?;
 
         return Ok(());
+    }
+
+    fn evaluate_sta_and_ini_in_device(
+        &mut self,
+        device: Device,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+    ) -> Result<(), AmlError> {
+        let sta = NameString::from_array(&[*b"_STA"], false).get_full_name_path(device.get_name());
+        let status = match self.search_aml_variable(&sta, None, local_variables, argument_variables)
+        {
+            Ok(v) => {
+                let locked_sta_object = v.lock().unwrap();
+                match &*locked_sta_object {
+                    AmlVariable::ConstData(c) => {
+                        let r = c.to_int();
+                        drop(locked_sta_object);
+                        r
+                    }
+                    AmlVariable::Method(m) => {
+                        let cloned_method = m.clone();
+                        drop(locked_sta_object);
+                        pr_info!("Evaluate: {}", cloned_method.get_name());
+                        self.eval_method(&cloned_method, &[], None)?.to_int()?
+                    }
+                    _ => {
+                        pr_err!("Expected a method, but found {:?}", &*locked_sta_object);
+                        return Err(AmlError::InvalidType);
+                    }
+                }
+            }
+            Err(AmlError::InvalidMethodName(n)) => {
+                if n == sta {
+                    1 | (1 << 3) /* Assume enabled */
+                } else {
+                    return Err(AmlError::InvalidMethodName(n));
+                }
+            }
+            Err(e) => return Err(e),
+        };
+
+        let present_bit = (status & 1) != 0;
+        let functional_bit = (status & (1 << 3)) != 0;
+
+        pr_info!(
+            "Status: {:#b}(P:{}, F:{})",
+            status,
+            present_bit,
+            functional_bit
+        );
+        if !present_bit && !functional_bit {
+            /* Skip this device and children. */
+            pr_info!("Skip {}", device.get_name());
+            return Ok(());
+        }
+        if present_bit {
+            let ini =
+                NameString::from_array(&[*b"_INI"], false).get_full_name_path(device.get_name());
+            match self.search_aml_variable(&ini, None, local_variables, argument_variables) {
+                Ok(v) => {
+                    let locked_ini_object = v.lock().unwrap();
+                    match &*locked_ini_object {
+                        AmlVariable::Method(m) => {
+                            let cloned_method = m.clone();
+                            drop(locked_ini_object);
+                            pr_info!("Evaluate: {}", cloned_method.get_name());
+                            self.eval_method(&cloned_method, &[], None)?;
+                        }
+                        _ => {
+                            pr_err!("Expected a method, but found {:?}", &*locked_ini_object);
+                            return Err(AmlError::InvalidType);
+                        }
+                    }
+                }
+                Err(AmlError::InvalidMethodName(n)) => {
+                    if n != ini {
+                        return Err(AmlError::InvalidMethodName(n));
+                    }
+                }
+                Err(e) => return Err(e),
+            };
+        }
+        self.walk_all_devices(
+            device.get_term_list().clone(),
+            local_variables,
+            argument_variables,
+        )
+    }
+
+    fn walk_all_devices(
+        &mut self,
+        mut term_list: TermList,
+        local_variables: &mut LocalVariables,
+        argument_variables: &mut ArgumentVariables,
+    ) -> Result<(), AmlError> {
+        while let Some(obj) = term_list.next(self)? {
+            match obj {
+                TermObj::NamespaceModifierObj(n_m) => {
+                    match n_m {
+                        NamespaceModifierObject::DefScope(s) => {
+                            self.term_list_hierarchy.push(s.get_term_list().clone());
+                            self.variable_tree.move_current_scope(s.get_name())?;
+                            self.walk_all_devices(
+                                s.get_term_list().clone(),
+                                local_variables,
+                                argument_variables,
+                            )?;
+                            if let Some(old_current) = self.term_list_hierarchy.pop() {
+                                if old_current.get_scope_name() != term_list.get_scope_name() {
+                                    self.variable_tree
+                                        .move_current_scope(term_list.get_scope_name())?;
+                                }
+                            }
+                            if term_list
+                                .get_scope_name()
+                                .get_last_element()
+                                .and_then(|e| {
+                                    Some(&e != self.variable_tree.get_current_scope_name())
+                                })
+                                .unwrap_or_else(|| {
+                                    term_list.get_scope_name()
+                                        != self.variable_tree.get_current_scope_name()
+                                })
+                            {
+                                self.variable_tree
+                                    .move_current_scope(term_list.get_scope_name())?;
+                            }
+                        }
+                        _ => { /* Ignore */ }
+                    }
+                }
+                TermObj::NamedObj(n_o) => match n_o {
+                    NamedObject::DefDevice(d) => {
+                        self.evaluate_sta_and_ini_in_device(
+                            d,
+                            local_variables,
+                            argument_variables,
+                        )?;
+                    }
+                    o if matches!(o, NamedObject::DefDataRegion(_))
+                        || matches!(o, NamedObject::DefPowerRes(_))
+                        || matches!(o, NamedObject::DefThermalZone(_)) =>
+                    {
+                        let t = o.get_term_list().unwrap();
+                        self.term_list_hierarchy.push(t.clone());
+                        self.variable_tree.move_current_scope(t.get_scope_name())?;
+                        self.walk_all_devices(t, local_variables, argument_variables)?;
+                        if let Some(old_current) = self.term_list_hierarchy.pop() {
+                            if old_current.get_scope_name() != term_list.get_scope_name() {
+                                self.variable_tree
+                                    .move_current_scope(term_list.get_scope_name())?;
+                            }
+                        }
+                        if term_list
+                            .get_scope_name()
+                            .get_last_element()
+                            .and_then(|e| Some(&e != self.variable_tree.get_current_scope_name()))
+                            .unwrap_or_else(|| {
+                                term_list.get_scope_name()
+                                    != self.variable_tree.get_current_scope_name()
+                            })
+                        {
+                            self.variable_tree
+                                .move_current_scope(term_list.get_scope_name())?;
+                        }
+                    }
+                    _ => { /* Ignore */ }
+                },
+                TermObj::StatementOpcode(s_o) => {
+                    if let StatementOpcode::DefIfElse(_i_e) = s_o { /* Currently ignore it */ }
+                }
+                TermObj::ExpressionOpcode(_) => { /* Ignore */ }
+            }
+        }
+        Ok(())
+    }
+
+    /// Initialize all devices by evaluating all _STA and _INI methods.
+    pub fn initialize_all_devices(&mut self) -> Result<(), AmlError> {
+        let (mut local_variables, mut argument_variables) =
+            Evaluator::init_local_variables_and_argument_variables();
+
+        self.walk_all_devices(
+            self.current_root_term_list.clone(),
+            &mut local_variables,
+            &mut argument_variables,
+        )?;
+
+        let backup = self.current_root_term_list.clone();
+        for r in self.root_term_list.clone().iter() {
+            if r == &backup {
+                continue;
+            }
+            self.current_root_term_list = r.clone();
+            self.walk_all_devices(
+                self.current_root_term_list.clone(),
+                &mut local_variables,
+                &mut argument_variables,
+            )?;
+        }
+        self.current_root_term_list = backup;
+        Ok(())
     }
 
     pub(super) fn init_local_variables_and_argument_variables(

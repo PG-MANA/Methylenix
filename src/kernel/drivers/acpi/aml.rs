@@ -96,6 +96,15 @@ impl AmlInterpreter {
         }
     }
 
+    pub fn initialize_all_devices(&mut self) -> Result<(), ()> {
+        if let Err(e) = self.evaluator.initialize_all_devices() {
+            pr_err!("Failed to Evaluate _INI/_STA: {:?}", e);
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn get_aml_variable(&mut self, name: &NameString) -> Option<AmlVariable> {
         let mut evaluator = self.evaluator.clone();
         let (mut dummy_local_variables, mut dummy_argument_variables) =

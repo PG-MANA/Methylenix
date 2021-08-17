@@ -161,8 +161,8 @@ pub fn init_acpi_later() -> bool {
         pr_err!("Cannot setup ACPI devices.");
         return false;
     }
-    if !acpi_manager.evaluate_all_ini_methods() {
-        pr_err!("Cannot evaluate _INI methods.");
+    if !acpi_manager.initialize_all_devices() {
+        pr_err!("Cannot evaluate _STA/_INI methods.");
         return false;
     }
     if !acpi_manager.enable_acpi() {
