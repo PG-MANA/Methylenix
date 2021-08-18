@@ -107,7 +107,8 @@ impl Evaluator {
                         let cloned_method = m.clone();
                         drop(locked_sta_object);
                         pr_info!("Evaluate: {}", cloned_method.get_name());
-                        self.eval_method(&cloned_method, &[], None)?.to_int()?
+                        self.eval_method_in_current_status(&cloned_method, &[])?
+                            .to_int()?
                     }
                     _ => {
                         pr_err!("Expected a method, but found {:?}", &*locked_sta_object);
@@ -150,7 +151,7 @@ impl Evaluator {
                             let cloned_method = m.clone();
                             drop(locked_ini_object);
                             pr_info!("Evaluate: {}", cloned_method.get_name());
-                            self.eval_method(&cloned_method, &[], None)?;
+                            self.eval_method_in_current_status(&cloned_method, &[])?;
                         }
                         _ => {
                             pr_err!("Expected a method, but found {:?}", &*locked_ini_object);
@@ -217,11 +218,17 @@ impl Evaluator {
                 }
                 TermObj::NamedObj(n_o) => match n_o {
                     NamedObject::DefDevice(d) => {
+                        self.term_list_hierarchy.push(d.get_term_list().clone());
+                        self.variable_tree
+                            .move_current_scope(d.get_term_list().get_scope_name())?;
                         self.evaluate_sta_and_ini_in_device(
                             d,
                             local_variables,
                             argument_variables,
                         )?;
+                        self.term_list_hierarchy.pop();
+                        self.variable_tree
+                            .move_current_scope(term_list.get_scope_name())?;
                     }
                     o if matches!(o, NamedObject::DefDataRegion(_))
                         || matches!(o, NamedObject::DefPowerRes(_))
@@ -3207,11 +3214,13 @@ impl Evaluator {
         func(&new_argument_variables)
     }
 
-    pub fn eval_method(
+    /// Evaluate method with current variable_tree and term_list_hierarchy
+    ///
+    /// method::term_list will be pushed in term_list_hierarchy
+    fn eval_method_in_current_status(
         &mut self,
         method: &Method,
         arguments: &[AmlVariable],
-        search_scope: Option<&NameString>,
     ) -> Result<AmlVariable, AmlError> {
         let (mut local_variables, mut argument_variables) =
             Self::init_local_variables_and_argument_variables();
@@ -3241,17 +3250,8 @@ impl Evaluator {
             *destination = Arc::new(Mutex::new(source.clone()));
         }
 
-        /* Backup the current status */
-        let mut term_list_hierarchy_backup = Vec::with_capacity(self.term_list_hierarchy.len());
-        core::mem::swap(
-            &mut self.term_list_hierarchy,
-            &mut term_list_hierarchy_backup,
-        );
-        let variable_tree_backup = self.variable_tree.clone();
-        let current_term_list_backup = self.current_root_term_list.clone();
-
-        self.variable_tree.move_to_root()?;
-        self.move_into_object(method.get_name(), search_scope)?;
+        self.term_list_hierarchy
+            .push(method.get_term_list().clone());
 
         let result = self.eval_term_list(
             method.get_term_list().clone(),
@@ -3260,7 +3260,7 @@ impl Evaluator {
             method.get_name(),
         );
 
-        let return_value = match result {
+        let result = match result {
             Err(e) => {
                 pr_err!("Evaluating {} was failed: {:?}", method.get_name(), e);
                 Err(e)
@@ -3277,16 +3277,50 @@ impl Evaluator {
                     )?
                     .get_constant_data()?
                     .clone()),
-                _ => Err(AmlError::InvalidOperation),
+                _ => {
+                    pr_err!("Unexpected StatementCode: {:?}", v);
+                    Err(AmlError::InvalidOperation)
+                }
             },
         };
+
+        if self
+            .term_list_hierarchy
+            .pop()
+            .and_then(|t| Some(&t != method.get_term_list()))
+            .unwrap_or(true)
+        {
+            pr_err!("TermListHierarchy may be broken.");
+        }
+        return result;
+    }
+
+    pub fn eval_method(
+        &mut self,
+        method: &Method,
+        arguments: &[AmlVariable],
+        search_scope: Option<&NameString>,
+    ) -> Result<AmlVariable, AmlError> {
+        /* Backup the current status */
+        let mut term_list_hierarchy_backup = Vec::with_capacity(self.term_list_hierarchy.len());
+        core::mem::swap(
+            &mut self.term_list_hierarchy,
+            &mut term_list_hierarchy_backup,
+        );
+        let variable_tree_backup = self.variable_tree.clone();
+        let current_term_list_backup = self.current_root_term_list.clone();
+
+        self.variable_tree.move_to_root()?;
+        self.move_into_object(method.get_name(), search_scope)?;
+
+        let result = self.eval_method_in_current_status(method, arguments);
 
         /* Restore the status */
         self.term_list_hierarchy = term_list_hierarchy_backup;
         self.variable_tree = variable_tree_backup;
         self.current_root_term_list = current_term_list_backup;
 
-        return return_value;
+        return result;
     }
 
     fn eval_method_invocation(
