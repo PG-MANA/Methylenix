@@ -328,7 +328,7 @@ impl NameString {
         unreachable!()
     }
 
-    pub fn get_full_name_path(&self, scope_name: &Self) -> Self {
+    pub fn get_full_name_path(&self, scope_name: &Self, should_to_be_absolute_path: bool) -> Self {
         if self.flag == NameStringFlag::NullName {
             return scope_name.clone();
         } else if scope_name.flag == NameStringFlag::NullName {
@@ -357,6 +357,9 @@ impl NameString {
         }
         if self.flag == NameStringFlag::SingleRelativePath {
             result.flag = NameStringFlag::SingleRelativePath;
+        }
+        if should_to_be_absolute_path {
+            result.flag = NameStringFlag::AbsolutePath;
         }
         return result;
     }

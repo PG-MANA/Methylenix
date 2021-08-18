@@ -91,7 +91,8 @@ impl Evaluator {
         local_variables: &mut LocalVariables,
         argument_variables: &mut ArgumentVariables,
     ) -> Result<(), AmlError> {
-        let sta = NameString::from_array(&[*b"_STA"], false).get_full_name_path(device.get_name());
+        let sta =
+            NameString::from_array(&[*b"_STA"], false).get_full_name_path(device.get_name(), true);
         let status = match self.search_aml_variable(&sta, None, local_variables, argument_variables)
         {
             Ok(v) => {
@@ -139,8 +140,8 @@ impl Evaluator {
             return Ok(());
         }
         if present_bit {
-            let ini =
-                NameString::from_array(&[*b"_INI"], false).get_full_name_path(device.get_name());
+            let ini = NameString::from_array(&[*b"_INI"], false)
+                .get_full_name_path(device.get_name(), true);
             match self.search_aml_variable(&ini, None, local_variables, argument_variables) {
                 Ok(v) => {
                     let locked_ini_object = v.lock().unwrap();
@@ -1175,7 +1176,7 @@ impl Evaluator {
                         NamespaceModifierObject::DefName(n) => {
                             if in_device {
                                 let hid_name = NameString::from_array(&[*b"_HID"], false)
-                                    .get_full_name_path(term_list.get_scope_name());
+                                    .get_full_name_path(term_list.get_scope_name(), true);
                                 if n.get_name() == &hid_name {
                                     if let DataRefObject::DataObject(
                                         DataObject::ComputationalData(
@@ -1493,7 +1494,7 @@ impl Evaluator {
                         let mut operation_region_scope = operation_region.get_name().clone();
                         operation_region_scope.up_to_parent_name_space();
                         let bbn_name = NameString::from_array(&[*b"_BBN"], false)
-                            .get_full_name_path(&operation_region_scope);
+                            .get_full_name_path(&operation_region_scope, false);
                         let bus = match self.search_aml_variable(
                             &bbn_name,
                             None,
@@ -1538,7 +1539,7 @@ impl Evaluator {
                         };
 
                         let adr_name = NameString::from_array(&[*b"_ADR"], false)
-                            .get_full_name_path(&operation_region_scope);
+                            .get_full_name_path(&operation_region_scope, false);
                         let adr = self.search_aml_variable(
                             &adr_name,
                             None,

@@ -54,7 +54,8 @@ impl EmbeddedController {
         pr_info!("ACPI Embedded Controller: {}", ec_device_scope);
         device_manager.ec = Some(
             match ec_device_interpreter.evaluate_method(
-                &NameString::from_array(&[*b"_CRS"], false).get_full_name_path(&ec_device_scope),
+                &NameString::from_array(&[*b"_CRS"], false)
+                    .get_full_name_path(&ec_device_scope, true),
                 &[],
             ) {
                 Ok(Some(AmlVariable::Buffer(v))) => {
@@ -92,7 +93,7 @@ impl EmbeddedController {
             },
         );
         if let Ok(Some(result)) = ec_device_interpreter.evaluate_method(
-            &NameString::from_array(&[*b"_STA"], false).get_full_name_path(&ec_device_scope),
+            &NameString::from_array(&[*b"_STA"], false).get_full_name_path(&ec_device_scope, true),
             &[],
         ) {
             match result.to_int() {
@@ -121,7 +122,8 @@ impl EmbeddedController {
         ];
         if ec_device_interpreter
             .evaluate_method(
-                &NameString::from_array(&[*b"_REG"], false).get_full_name_path(&ec_device_scope),
+                &NameString::from_array(&[*b"_REG"], false)
+                    .get_full_name_path(&ec_device_scope, true),
                 &arg,
             )
             .is_err()
@@ -132,7 +134,7 @@ impl EmbeddedController {
         }
 
         match ec_device_interpreter.evaluate_method(
-            &NameString::from_array(&[*b"_GPE"], false).get_full_name_path(&ec_device_scope),
+            &NameString::from_array(&[*b"_GPE"], false).get_full_name_path(&ec_device_scope, true),
             &[],
         ) {
             Ok(Some(v)) => match v.to_int() {

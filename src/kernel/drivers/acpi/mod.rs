@@ -391,9 +391,13 @@ impl AcpiManager {
                             let link_device = link_device.get_last_element().unwrap();
                             pr_info!("Detect: {}", link_device);
                             let crs_function_name = NameString::from_array(&[*b"_CRS"], false)
-                                .get_full_name_path(&link_device.get_full_name_path(
-                                    &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
-                                )); /* \\_SB.(DEVICE)._CRS */
+                                .get_full_name_path(
+                                    &link_device.get_full_name_path(
+                                        &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
+                                        true,
+                                    ),
+                                    true,
+                                ); /* \\_SB.(DEVICE)._CRS */
                             let mut interpreter = self.aml_interpreter.as_ref().unwrap().clone();
                             let link_device_evaluation_result =
                                 interpreter.evaluate_method(&crs_function_name, &[]);
@@ -506,7 +510,7 @@ impl AcpiManager {
                     &[[b'_', b'Q', to_ascii(query >> 4), to_ascii(query & 0xf)]],
                     false,
                 )
-                .get_full_name_path(new_interpreter.get_current_scope());
+                .get_full_name_path(new_interpreter.get_current_scope(), false);
                 pr_info!("Evaluate: {}", query_method_name);
                 if let Err(_) = new_interpreter.evaluate_method(&query_method_name, &[]) {
                     pr_err!("Cannot evaluate: {}", query_method_name);
