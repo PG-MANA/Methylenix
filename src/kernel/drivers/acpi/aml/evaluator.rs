@@ -118,7 +118,7 @@ impl Evaluator {
             }
             Err(AmlError::InvalidMethodName(n)) => {
                 if n == sta {
-                    1 | (1 << 3) /* Assume enabled */
+                    0b1111 /* Assume enabled */
                 } else {
                     return Err(AmlError::InvalidMethodName(n));
                 }
@@ -1979,11 +1979,20 @@ impl Evaluator {
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         let data = self.eval_term_arg(e, local_variables, argument_variables, current_scope)?;
-        if let Err(err) = data.to_int() {
-            pr_err!("Expected Integer, but found {:?}({:?}).", data, err);
+        let constant_data = if data.is_constant_data() {
+            data
+        } else {
+            data.get_constant_data()?
+        };
+        if let Err(err) = constant_data.to_int() {
+            pr_err!(
+                "Expected Integer, but found {:?}({:?}).",
+                constant_data,
+                err
+            );
             Err(AmlError::InvalidType)
         } else {
-            Ok(data)
+            Ok(constant_data)
         }
     }
 
