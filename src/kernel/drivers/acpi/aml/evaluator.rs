@@ -348,50 +348,96 @@ impl Evaluator {
                     Err(e) => Err(e),
                 }
             };
+        let compare_by_search_rules = |object_name: &NameString,
+                                       searching_name: &NameString,
+                                       term_list_scope: &NameString,
+                                       single_name: &Option<NameString>,
+                                       search_scope: &Option<&NameString>|
+         -> bool {
+            if searching_name.is_absolute_path() {
+                object_name == searching_name
+            } else if let Some(single_name_segment_path) = single_name {
+                /* Single Name Segments */
+                if let Some(target_scope) = search_scope {
+                    (term_list_scope == *target_scope || term_list_scope.is_child(target_scope))
+                        && object_name.suffix_search(single_name_segment_path)
+                } else {
+                    object_name.suffix_search(single_name_segment_path)
+                }
+            } else {
+                /* Multi Name Segments */
+                /* Maybe wrong... */
+                if let Some(target_scope) = search_scope {
+                    term_list_scope.is_child(target_scope)
+                        && object_name.suffix_search(searching_name)
+                } else {
+                    object_name.suffix_search(searching_name)
+                }
+            }
+        };
 
         while let Some(term_obj) = get_next_term_obj(&mut term_list, self)? {
             match term_obj {
                 TermObj::NamespaceModifierObj(name_modifier_object) => {
-                    if name_modifier_object.get_name() == name
-                        || name_modifier_object.get_name().is_child(name)
-                    {
-                        match name_modifier_object {
-                            NamespaceModifierObject::DefAlias(a) => {
-                                if a.get_name().is_child(name) {
-                                    /* SourceObject must be named object. */
-                                    /* Ignore */
-                                } else {
-                                    /* Pop TermListHierarchy to re-search for the source object. */
-                                    unimplemented!()
-                                }
+                    match name_modifier_object {
+                        NamespaceModifierObject::DefAlias(a) => {
+                            if compare_by_search_rules(
+                                a.get_name(),
+                                name,
+                                term_list.get_scope_name(),
+                                &single_relative_path,
+                                &search_scope,
+                            ) {
+                                pr_err!(
+                                    "Alias is not supported yet. {} => {}",
+                                    name,
+                                    a.get_source()
+                                );
+                                return Err(AmlError::UnsupportedType);
                             }
-                            NamespaceModifierObject::DefName(n) => {
-                                if n.get_name() == name {
-                                    return match n.get_data_ref_object() {
-                                        DataRefObject::DataObject(d) => {
-                                            let variable = self.eval_term_arg(
-                                                TermArg::DataObject(d.clone()),
-                                                local_variables,
-                                                argument_variables,
-                                                term_list.get_scope_name(),
-                                            )?;
-                                            let variable = self.variable_tree.add_data(
-                                                single_relative_path.unwrap_or_else(|| {
-                                                    name.get_last_element().unwrap()
-                                                }),
-                                                variable,
-                                            )?;
+                        }
+                        NamespaceModifierObject::DefName(n) => {
+                            if compare_by_search_rules(
+                                n.get_name(),
+                                name,
+                                term_list.get_scope_name(),
+                                &single_relative_path,
+                                &search_scope,
+                            ) {
+                                return match n.get_data_ref_object() {
+                                    DataRefObject::DataObject(d) => {
+                                        let variable = self.eval_term_arg(
+                                            TermArg::DataObject(d.clone()),
+                                            local_variables,
+                                            argument_variables,
+                                            term_list.get_scope_name(),
+                                        )?;
+                                        let variable = self.variable_tree.add_data(
+                                            single_relative_path.unwrap_or_else(|| {
+                                                name.get_last_element().unwrap()
+                                            }),
+                                            variable,
+                                        )?;
 
-                                            Ok(Some(variable))
-                                        }
-                                        DataRefObject::ObjectReference(d_r) => {
-                                            pr_err!("Unsupported Type: DataReference({})", d_r);
-                                            Err(AmlError::UnsupportedType)
-                                        }
-                                    };
-                                }
+                                        Ok(Some(variable))
+                                    }
+                                    DataRefObject::ObjectReference(d_r) => {
+                                        pr_err!("Unsupported Type: DataReference({})", d_r);
+                                        Err(AmlError::UnsupportedType)
+                                    }
+                                };
                             }
-                            NamespaceModifierObject::DefScope(s) => {
+                        }
+                        NamespaceModifierObject::DefScope(s) => {
+                            if s.get_name() == name
+                                || s.get_name().suffix_search(name)
+                                || s.get_name().is_child(name)
+                                || search_scope
+                                    .and_then(|scope| {
+                                        Some(scope == s.get_name() || s.get_name().is_child(scope))
+                                    })
+                                    .unwrap_or(false)
+                            {
                                 self.term_list_hierarchy.push(s.get_term_list().clone());
 
                                 let result = self.search_aml_variable_by_parsing_term_list(
@@ -426,42 +472,6 @@ impl Evaluator {
                                     }
                                 };
                             }
-                        }
-                    } else if single_relative_path
-                        .as_ref()
-                        .and_then(|n| Some(name_modifier_object.get_name().suffix_search(n)))
-                        .unwrap_or(false)
-                    {
-                        match name_modifier_object {
-                            NamespaceModifierObject::DefAlias(_a) => {
-                                pr_err!("Alias is not supported yet.");
-                                Err(AmlError::UnsupportedType)?;
-                            }
-                            NamespaceModifierObject::DefName(n) => {
-                                return match n.get_data_ref_object() {
-                                    DataRefObject::DataObject(d) => {
-                                        let variable = self.eval_term_arg(
-                                            TermArg::DataObject(d.clone()),
-                                            local_variables,
-                                            argument_variables,
-                                            term_list.get_scope_name(),
-                                        )?;
-                                        let variable = self.variable_tree.add_data(
-                                            single_relative_path.unwrap_or_else(|| {
-                                                name.get_last_element().unwrap()
-                                            }),
-                                            variable,
-                                        )?;
-
-                                        Ok(Some(variable))
-                                    }
-                                    DataRefObject::ObjectReference(d_r) => {
-                                        pr_err!("Unsupported Type: DataReference({})", d_r);
-                                        Err(AmlError::UnsupportedType)
-                                    }
-                                };
-                            }
-                            NamespaceModifierObject::DefScope(_) => { /* Ignore */ }
                         }
                     }
                 }
@@ -515,11 +525,9 @@ impl Evaluator {
                     .unwrap_or(false)
             {
                 let named_object_single_name = single_name.unwrap_or_else(|| {
-                    named_object_name.get_single_name_path().unwrap_or_else(|| {
-                        named_object_name
-                            .get_element_as_name_string(named_object_name.len() - 1)
-                            .unwrap()
-                    })
+                    named_object_name
+                        .get_single_name_path()
+                        .unwrap_or_else(|| named_object_name.get_last_element().unwrap())
                 });
 
                 let v = self.eval_named_object(
@@ -547,11 +555,6 @@ impl Evaluator {
             while let Some(e) = field_list.next()? {
                 if let FieldElement::NameField((n, _)) = &e {
                     if n == name {
-                        let temp_name = if !name.is_single_relative_path_name() {
-                            name.get_element_as_name_string(name.len() - 1)
-                        } else {
-                            None
-                        };
                         let v = self.eval_named_object(
                             name,
                             named_object,
@@ -560,7 +563,7 @@ impl Evaluator {
                             current_scope,
                         )?;
                         return Ok(Some(self.variable_tree.add_data(
-                            name.get_single_name_path().or(temp_name).unwrap(),
+                            name.get_single_name_path().unwrap_or_else(|| name.clone()),
                             v,
                         )?));
                     } else if single_name
@@ -578,19 +581,13 @@ impl Evaluator {
                             argument_variables,
                             current_scope,
                         )?;
-                        return Ok(Some(
-                            self.variable_tree.add_data(
-                                single_name
-                                    .get_element_as_name_string(single_name.len() - 1)
-                                    .unwrap(),
-                                v,
-                            )?,
-                        ));
+                        return Ok(Some(self.variable_tree.add_data(single_name, v)?));
                     }
                 }
             }
             Ok(None)
         } else if let Some(term_list) = named_object.get_term_list() {
+            /* Add scope check */
             self.term_list_hierarchy.push(term_list.clone());
             let result = self.search_aml_variable_by_parsing_term_list(
                 name,
@@ -839,47 +836,40 @@ impl Evaluator {
 
         for index in (0..self.term_list_hierarchy.len()).rev() {
             let term_list = self.term_list_hierarchy.get(index).unwrap().clone();
-            if self.variable_tree.get_current_scope_name() != term_list.get_scope_name() {
-                self.variable_tree.move_to_parent()?;
-                if term_list
-                    .get_scope_name()
-                    .get_last_element()
-                    .and_then(|l| Some(&l != self.variable_tree.get_current_scope_name()))
-                    .unwrap_or(false)
-                {
-                    self.variable_tree
-                        .move_current_scope(term_list.get_scope_name())?;
-                }
-            }
-            if let Some(s_n) = single_name.as_ref() {
-                if let Some(v) = self.variable_tree.find_data_from_current_scope(s_n)? {
-                    restore_status(
-                        self,
-                        back_up_of_original_name_searching,
-                        current_scope_backup,
-                        tree_backup,
-                        term_list_hierarchy_back_up,
-                    )?;
+            self.variable_tree
+                .move_current_scope(term_list.get_scope_name())?;
 
-                    return Ok(v);
-                }
-            } else if let Some(r_n) = name.get_relative_name(term_list.get_scope_name()) {
-                if let Some(v) = self.variable_tree.find_data_from_current_scope(&r_n)? {
-                    restore_status(
-                        self,
-                        back_up_of_original_name_searching,
-                        current_scope_backup,
-                        tree_backup,
-                        term_list_hierarchy_back_up,
-                    )?;
+            if !name.is_absolute_path() {
+                if let Some(s_n) = single_name.as_ref() {
+                    if let Some(v) = self.variable_tree.find_data_from_current_scope(s_n)? {
+                        restore_status(
+                            self,
+                            back_up_of_original_name_searching,
+                            current_scope_backup,
+                            tree_backup,
+                            term_list_hierarchy_back_up,
+                        )?;
 
-                    return Ok(v);
+                        return Ok(v);
+                    }
+                } else if let Some(r_n) = name.get_relative_name(term_list.get_scope_name()) {
+                    if let Some(v) = self.variable_tree.find_data_from_current_scope(&r_n)? {
+                        restore_status(
+                            self,
+                            back_up_of_original_name_searching,
+                            current_scope_backup,
+                            tree_backup,
+                            term_list_hierarchy_back_up,
+                        )?;
+
+                        return Ok(v);
+                    }
                 }
             }
 
             let search_target_name = single_name
                 .as_ref()
-                .and_then(|n| Some(n.get_full_name_path(term_list.get_scope_name())))
+                .and_then(|n| Some(n.get_full_name_path(term_list.get_scope_name(), false)))
                 .unwrap_or_else(|| name.clone());
 
             match self.search_aml_variable_by_parsing_term_list(
@@ -1162,23 +1152,8 @@ impl Evaluator {
                                         .move_current_scope(term_list.get_scope_name())?;
                                 }
                             }
-                            if term_list
-                                .get_scope_name()
-                                .get_last_element()
-                                .and_then(|e| {
-                                    Some(&e != self.variable_tree.get_current_scope_name())
-                                })
-                                .unwrap_or_else(|| {
-                                    term_list.get_scope_name()
-                                        != self.variable_tree.get_current_scope_name()
-                                })
-                            {
-                                pr_warn!("VariableTree may be broken: Tree's Scope:{}, TermList's Scope: {}",
-                                    self.variable_tree.get_current_scope_name(),
-                                    term_list.get_scope_name());
-                                self.variable_tree
-                                    .move_current_scope(term_list.get_scope_name())?;
-                            }
+                            self.variable_tree
+                                .move_current_scope(term_list.get_scope_name())?;
                         }
                         NamespaceModifierObject::DefName(n) => {
                             if in_device {
@@ -1214,23 +1189,8 @@ impl Evaluator {
                                     .move_current_scope(term_list.get_scope_name())?;
                             }
                         }
-                        if term_list
-                            .get_scope_name()
-                            .get_last_element()
-                            .and_then(|e| Some(&e != self.variable_tree.get_current_scope_name()))
-                            .unwrap_or_else(|| {
-                                term_list.get_scope_name()
-                                    != self.variable_tree.get_current_scope_name()
-                            })
-                        {
-                            pr_warn!(
-                                "VariableTree may be broken: Tree's Scope:{}, TermList's Scope: {}",
-                                self.variable_tree.get_current_scope_name(),
-                                term_list.get_scope_name()
-                            );
-                            self.variable_tree
-                                .move_current_scope(term_list.get_scope_name())?;
-                        }
+                        self.variable_tree
+                            .move_current_scope(term_list.get_scope_name())?;
                     }
                     _ => { /* Ignore */ }
                 },
