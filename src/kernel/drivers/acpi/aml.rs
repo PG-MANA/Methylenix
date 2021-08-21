@@ -189,6 +189,15 @@ impl AmlInterpreter {
                     return Err(());
                 }
             }
+            Err(AmlError::InvalidMethodName(n)) => {
+                return if &n == method_name {
+                    pr_warn!("{} is not found.", method_name);
+                    Ok(None)
+                } else {
+                    pr_err!("{} is not found.", n);
+                    Err(())
+                }
+            }
             Err(e) => {
                 pr_err!("Parsing AML was failed: {:?}", e);
                 return Err(());
