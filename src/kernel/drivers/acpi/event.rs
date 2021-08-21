@@ -50,7 +50,11 @@ impl AcpiEventManager {
         let gpe1 = fadt_manager.get_gp_event1_block();
         let gpe1_len = fadt_manager.get_gp_event1_block_len() as usize;
         let gpe1_manager = if gpe1 != 0 && gpe1_len != 0 {
-            Some(GpeManager::new(gpe1, gpe1_len >> 1 /* / 2 */))
+            Some(GpeManager::new(
+                gpe1,
+                gpe1_len >> 1, /* / 2 */
+                (fadt_manager.get_gp_event0_block_len() as usize >> 1) << 3,
+            ))
         } else {
             None
         };
@@ -64,6 +68,7 @@ impl AcpiEventManager {
             gpe0_manager: GpeManager::new(
                 fadt_manager.get_gp_event0_block(),
                 fadt_manager.get_gp_event0_block_len() as usize >> 1,
+                0,
             ),
             gpe1_manager,
         }

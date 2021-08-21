@@ -6,13 +6,15 @@ use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte};
 pub struct GpeManager {
     gpe_block: usize,
     gpe_count: usize,
+    base_number: usize,
 }
 
 impl GpeManager {
-    pub const fn new(gpe_block: usize, gpe_count: usize) -> Self {
+    pub const fn new(gpe_block: usize, gpe_count: usize, base_number: usize) -> Self {
         Self {
             gpe_count,
             gpe_block,
+            base_number,
         }
     }
 
