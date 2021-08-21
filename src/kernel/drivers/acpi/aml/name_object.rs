@@ -19,7 +19,7 @@ enum NameStringData {
     Ex(Vec<[u8; 4]>),
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 enum NameStringFlag {
     SingleRelativePath,
     RelativePath,
@@ -545,7 +545,7 @@ impl core::fmt::Debug for NameString {
         if self.flag == NameStringFlag::NullName {
             f.write_str("NameString(NullName)")
         } else {
-            f.write_fmt(format_args!("NameString({})", self))
+            f.write_fmt(format_args!("NameString({}, {:?})", self, self.flag))
         }
     }
 }
