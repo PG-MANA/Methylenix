@@ -466,6 +466,13 @@ impl NameString {
         }
     }
 
+    pub fn to_be_absolute_path(&self) -> Self {
+        Self {
+            data: (self.data.clone()),
+            flag: NameStringFlag::AbsolutePath,
+        }
+    }
+
     pub fn suffix_search(&self, other: &Self) -> bool {
         if self.flag == NameStringFlag::NullName || other.flag == NameStringFlag::NullName {
             return true;

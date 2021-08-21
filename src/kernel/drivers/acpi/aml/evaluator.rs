@@ -620,8 +620,14 @@ impl Evaluator {
             &mut self.term_list_hierarchy,
         );
         self.variable_tree.move_to_root()?;
+        let absolute_search = if name.is_absolute_path() {
+            None
+        } else {
+            Some(name.to_be_absolute_path())
+        };
+
         let result = self.search_aml_variable_by_parsing_term_list(
-            name,
+            absolute_search.as_ref().unwrap_or(name),
             self.current_root_term_list.clone(),
             None,
             false,
@@ -756,7 +762,14 @@ impl Evaluator {
                 return Ok(v);
             }
         }
-        if name.is_absolute_path() {
+        if name.len() > 1
+            && self
+                .term_list_hierarchy
+                .last()
+                .and_then(|s| Some(!s.get_scope_name().is_child(name)))
+                .unwrap_or(false)
+            && preferred_search_scope.is_none()
+        {
             if let Some(v) = self.search_aml_variable_by_absolute_path(
                 name,
                 local_variables,
