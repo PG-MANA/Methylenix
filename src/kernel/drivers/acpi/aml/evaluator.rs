@@ -64,23 +64,23 @@ impl Evaluator {
         /* Add builtin objects */
         let gl_name = NameString::from_array(&[*b"_GL\0"], true);
         let gl = AmlVariable::Mutex(Arc::new((AtomicU8::new(0), 0)));
-        self.variable_tree.add_data(gl_name, gl)?;
+        self.variable_tree.add_data(gl_name, gl, false)?;
 
         let osi_name = NameString::from_array(&[*b"_OSI"], true);
         let osi = AmlVariable::BuiltInMethod((osi_function, 1));
-        self.variable_tree.add_data(osi_name, osi)?;
+        self.variable_tree.add_data(osi_name, osi, false)?;
 
         let os_name = NameString::from_array(&[*b"_OS\0"], true);
         let os = AmlVariable::String(String::from(crate::OS_NAME));
-        self.variable_tree.add_data(os_name, os)?;
+        self.variable_tree.add_data(os_name, os, false)?;
 
         let rev_name = NameString::from_array(&[*b"_REV"], true);
         let rev = AmlVariable::ConstData(ConstData::Byte(2 /* ACPI 2.0 */));
-        self.variable_tree.add_data(rev_name, rev)?;
+        self.variable_tree.add_data(rev_name, rev, false)?;
 
         let dlm_name = NameString::from_array(&[*b"_DLM"], true);
         let dlm = AmlVariable::ConstData(ConstData::Byte(0 /* Temporary fix */));
-        self.variable_tree.add_data(dlm_name, dlm)?;
+        self.variable_tree.add_data(dlm_name, dlm, false)?;
 
         return Ok(());
     }
@@ -417,6 +417,7 @@ impl Evaluator {
                                                 name.get_last_element().unwrap()
                                             }),
                                             variable,
+                                            false,
                                         )?;
 
                                         Ok(Some(variable))
@@ -537,9 +538,11 @@ impl Evaluator {
                     argument_variables,
                     current_scope,
                 )?;
-                return Ok(Some(
-                    self.variable_tree.add_data(named_object_single_name, v)?,
-                ));
+                return Ok(Some(self.variable_tree.add_data(
+                    named_object_single_name,
+                    v,
+                    false,
+                )?));
             }
         }
         if !name.is_single_relative_path_name()
@@ -565,6 +568,7 @@ impl Evaluator {
                         return Ok(Some(self.variable_tree.add_data(
                             name.get_single_name_path().unwrap_or_else(|| name.clone()),
                             v,
+                            false,
                         )?));
                     } else if single_name
                         .as_ref()
@@ -581,7 +585,7 @@ impl Evaluator {
                             argument_variables,
                             current_scope,
                         )?;
-                        return Ok(Some(self.variable_tree.add_data(single_name, v)?));
+                        return Ok(Some(self.variable_tree.add_data(single_name, v, false)?));
                     }
                 }
             }

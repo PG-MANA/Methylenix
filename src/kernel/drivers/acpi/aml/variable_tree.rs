@@ -213,19 +213,22 @@ impl AmlVariableTree {
         &self,
         name: NameString,
         data: AmlVariable,
+        allow_overwrite: bool,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         if name.len() != 1 {
             if let Some(relative_name) = name.get_relative_name(&self.current.name) {
                 if relative_name.len() == 1 {
-                    return self.add_data(relative_name, data);
+                    return self.add_data(relative_name, data, allow_overwrite);
                 }
             }
             pr_err!("{} is not single name.", name);
             return Err(AmlError::InvalidMethodName(name));
         }
         if let Some(d) = self.find_data_from_current_scope(&name)? {
-            pr_warn!("{} exists already, it will be overwritten.", name);
-            *d.lock().unwrap() = data;
+            if allow_overwrite {
+                pr_warn!("{} exists already, it will be overwritten.", name);
+                *d.try_lock().or(Err(AmlError::MutexError))? = data;
+            }
             return Ok(d);
         }
         let d = Arc::new(Mutex::new(data));
