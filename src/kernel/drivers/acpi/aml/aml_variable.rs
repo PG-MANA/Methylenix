@@ -107,7 +107,7 @@ impl AmlVariable {
             Self::Io((port, limit)) => {
                 if let Self::ConstData(c) = data {
                     let byte_offset = byte_index + (bit_index >> 3);
-                    let bit_index = bit_index >> 3;
+                    let adjusted_bit_index = bit_index & 0b111;
                     if byte_offset > *limit {
                         pr_err!(
                             "Offset({}) is out of I/O area(Port: {:#X}, Limit:{:#X}).",
@@ -117,7 +117,7 @@ impl AmlVariable {
                         );
                         Err(AmlError::InvalidOperation)
                     } else {
-                        write_io(*port + byte_offset, bit_index, access_align, c)
+                        write_io(*port + byte_offset, adjusted_bit_index, access_align, c)
                     }
                 } else {
                     pr_err!("Writing {:?} into I/O({}) is invalid.", data, port);
@@ -127,7 +127,7 @@ impl AmlVariable {
             Self::MMIo((address, limit)) => {
                 if let Self::ConstData(c) = data {
                     let byte_offset = byte_index + (bit_index >> 3);
-                    let bit_index = bit_index >> 3;
+                    let adjusted_bit_index = bit_index & 0b111;
                     if byte_offset > *limit {
                         pr_err!(
                             "Offset({}) is out of Memory area(Address: {:#X}, Limit:{:#X}).",
@@ -139,7 +139,7 @@ impl AmlVariable {
                     } else {
                         write_memory(
                             PAddress::new(*address + byte_offset),
-                            bit_index,
+                            adjusted_bit_index,
                             access_align,
                             c,
                             num_of_bits,
