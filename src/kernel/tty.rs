@@ -248,7 +248,7 @@ macro_rules! kprintln {
 #[macro_export]
 macro_rules! pr_debug {
     ($fmt:expr) => ($crate::kernel::tty::print_debug_message(7, format_args!(concat!($fmt,"\n"))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(6, format_args!(concat!($fmt, "\n"),$($arg)*)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(7, format_args!(concat!($fmt, "\n"),$($arg)*)));
 }
 
 #[macro_export]
