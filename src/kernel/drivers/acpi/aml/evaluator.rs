@@ -129,15 +129,8 @@ impl Evaluator {
         let present_bit = (status & 1) != 0;
         let functional_bit = (status & (1 << 3)) != 0;
 
-        pr_info!(
-            "Status: {:#b}(P:{}, F:{})",
-            status,
-            present_bit,
-            functional_bit
-        );
         if !present_bit && !functional_bit {
             /* Skip this device and children. */
-            pr_info!("Skip {}", device.get_name());
             return Ok(());
         }
         if present_bit {
@@ -1370,6 +1363,7 @@ impl Evaluator {
                         }
                     }
                 }
+                pr_err!("{} is not found in FiledList.", relative_name);
                 Err(AmlError::AccessOutOfRange)
             }
             NamedObject::DefEvent(_) => {
@@ -1431,6 +1425,7 @@ impl Evaluator {
                         }
                     }
                 }
+                pr_err!("{} is not found in FiledList.", relative_name);
                 Err(AmlError::AccessOutOfRange)
             }
             NamedObject::DefMethod(m) => Ok(AmlVariable::Method(m)),
@@ -1546,8 +1541,8 @@ impl Evaluator {
                         };
                         let device = ((addr >> 16) & 0xFFFF) as u16;
                         let function = (addr & 0xFFFF) as u16;
-                        pr_info!(
-                            "{}=>bus:{},device:{},function:{},offset:{},length:{}",
+                        pr_debug!(
+                            "{}(bus:{}, device:{}, function:{}, offset:{}, length:{})",
                             operation_region.get_name(),
                             bus,
                             device,
