@@ -224,7 +224,7 @@ pub fn read_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let data = *(virtual_address.to_usize() as *const u8);
+                    let data = core::ptr::read_volatile(virtual_address.to_usize() as *const u8);
                     ConstData::Byte((data >> bit_index) & bit_mask)
                 }
                 2 => {
@@ -234,7 +234,7 @@ pub fn read_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let data = *(aligned_address as *const u16);
+                    let data = core::ptr::read_volatile(aligned_address as *const u16);
                     ConstData::Word(
                         data >> ((((virtual_address.to_usize() - aligned_address) << 3)
                             + bit_index)
@@ -248,7 +248,7 @@ pub fn read_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let data = *(aligned_address as *const u32);
+                    let data = core::ptr::read_volatile(aligned_address as *const u32);
                     ConstData::DWord(
                         data >> ((((virtual_address.to_usize() - aligned_address) << 3)
                             + bit_index)
@@ -262,7 +262,7 @@ pub fn read_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let data = *(aligned_address as *const u64);
+                    let data = core::ptr::read_volatile(aligned_address as *const u64);
                     ConstData::QWord(
                         data >> ((((virtual_address.to_usize() - aligned_address) << 3)
                             + bit_index)
@@ -328,10 +328,11 @@ pub fn write_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let mut original_data = *(virtual_address.to_usize() as *const u8);
+                    let mut original_data =
+                        core::ptr::read_volatile(virtual_address.to_usize() as *const u8);
                     original_data &= !bit_mask << bit_index;
                     original_data |= ((data.to_int() & (bit_mask as usize)) << bit_index) as u8;
-                    *(virtual_address.to_usize() as *mut u8) = original_data;
+                    core::ptr::write_volatile(virtual_address.to_usize() as *mut u8, original_data);
                 }
                 2 => {
                     let aligned_address = virtual_address.to_usize() & !0b1;
@@ -340,13 +341,13 @@ pub fn write_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let mut original_data = *(aligned_address as *const u16);
+                    let mut original_data = core::ptr::read_volatile(aligned_address as *const u16);
                     original_data &= !bit_mask
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index);
                     original_data |= ((data.to_int() & (bit_mask as usize))
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index))
                         as u16;
-                    *(aligned_address as *mut u16) = original_data;
+                    core::ptr::write_volatile(aligned_address as *mut u16, original_data);
                 }
                 4 => {
                     let aligned_address = virtual_address.to_usize() & !0b11;
@@ -355,13 +356,13 @@ pub fn write_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let mut original_data = *(aligned_address as *const u32);
+                    let mut original_data = core::ptr::read_volatile(aligned_address as *const u32);
                     original_data &= !bit_mask
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index);
                     original_data |= ((data.to_int() & (bit_mask as usize))
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index))
                         as u32;
-                    *(aligned_address as *mut u32) = original_data;
+                    core::ptr::write_volatile(aligned_address as *mut u32, original_data);
                 }
                 8 => {
                     let aligned_address = virtual_address.to_usize() & !0b111;
@@ -370,13 +371,13 @@ pub fn write_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let mut original_data = *(aligned_address as *const u64);
+                    let mut original_data = core::ptr::read_volatile(aligned_address as *const u64);
                     original_data &= !bit_mask
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index);
                     original_data |= ((data.to_int() & (bit_mask as usize))
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index))
                         as u64;
-                    *(aligned_address as *mut u64) = original_data;
+                    core::ptr::write_volatile(aligned_address as *mut u64, original_data);
                 }
                 _ => {
                     pr_err!("Invalid memory operation.");
