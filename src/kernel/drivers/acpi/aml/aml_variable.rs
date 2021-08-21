@@ -156,10 +156,8 @@ impl AmlVariable {
             }
             Self::EcIo((address, limit)) => {
                 let adjusted_byte_index = byte_index + (bit_index >> 3);
-                if (bit_index % 8) != 0 {
-                    pr_err!("Bit Index is not supported in Embedded Controller.");
-                    Err(AmlError::InvalidOperation)
-                } else if adjusted_byte_index >= *limit {
+                let adjusted_bit_index = bit_index & 0b111;
+                if adjusted_byte_index >= *limit {
                     pr_err!(
                         "Offset({}) is out of Embedded Controller area(Address: {:#X}, Limit:{:#X}).",
                         adjusted_byte_index,
@@ -168,10 +166,28 @@ impl AmlVariable {
                     );
                     Err(AmlError::InvalidOperation)
                 } else {
-                    write_embedded_controller(
-                        (*address + adjusted_byte_index) as u8,
-                        data.to_int()? as u8,
-                    )
+                    let to_write_data = if adjusted_bit_index != 0 || num_of_bits != 8 {
+                        if num_of_bits == 0 || (num_of_bits + adjusted_bit_index) > 8 {
+                            pr_err!(
+                                "Invalid BitField: BitIndex: {}, NumOfBits: {}",
+                                adjusted_bit_index,
+                                num_of_bits
+                            );
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        let original_data =
+                            read_embedded_controller((*address + adjusted_byte_index) as u8)?;
+                        let mut bit_mask = 0;
+                        for _ in 0..num_of_bits {
+                            bit_mask <<= 1;
+                            bit_mask |= 1;
+                        }
+                        (original_data & !(bit_mask << adjusted_bit_index))
+                            | (((data.to_int()? as u8) & bit_mask) << adjusted_bit_index)
+                    } else {
+                        data.to_int()? as u8
+                    };
+                    write_embedded_controller((*address + adjusted_byte_index) as u8, to_write_data)
                 }
             }
             Self::PciConfig(pci_config) => {
@@ -469,10 +485,8 @@ impl AmlVariable {
             }
             Self::EcIo((address, limit)) => {
                 let adjusted_byte_index = byte_index + (bit_index >> 3);
-                if (bit_index % 8) != 0 {
-                    pr_err!("Bit Index is not supported in Embedded Controller.");
-                    Err(AmlError::InvalidOperation)
-                } else if adjusted_byte_index >= *limit {
+                let adjusted_bit_index = bit_index & 0b111;
+                if adjusted_byte_index >= *limit {
                     pr_err!(
                         "Offset({}) is out of Embedded Controller area(Address: {:#X}, Limit:{:#X}).",
                         adjusted_byte_index,
@@ -481,9 +495,25 @@ impl AmlVariable {
                     );
                     Err(AmlError::InvalidOperation)
                 } else {
-                    Ok(Self::ConstData(ConstData::Byte(read_embedded_controller(
-                        (*address + adjusted_byte_index) as u8,
-                    )?)))
+                    if num_of_bits == 0 || (num_of_bits + adjusted_bit_index) > 8 {
+                        pr_err!(
+                            "Invalid BitField: BitIndex: {}, NumOfBits: {}",
+                            adjusted_bit_index,
+                            num_of_bits
+                        );
+                        return Err(AmlError::InvalidOperation);
+                    }
+                    let mut read_data =
+                        read_embedded_controller((*address + adjusted_byte_index) as u8)?;
+                    if adjusted_bit_index != 0 || num_of_bits != 8 {
+                        let mut bit_mask: u8 = 0;
+                        for _ in 0..num_of_bits {
+                            bit_mask <<= 1;
+                            bit_mask |= 1;
+                        }
+                        read_data = ((read_data) >> adjusted_bit_index) & bit_mask;
+                    }
+                    Ok(Self::ConstData(ConstData::Byte(read_data)))
                 }
             }
             Self::PciConfig(pci_config) => {
