@@ -23,6 +23,11 @@ use alloc::vec::Vec;
 
 pub type AmlFunction = fn(&[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError>;
 
+struct RecursiveIndex<'a> {
+    index: usize,
+    next: Option<&'a Self>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AmlPciConfig {
     pub bus: u16,
@@ -664,6 +669,53 @@ impl AmlVariable {
         }
     }
 
+    fn write_data_into_package_recursively(
+        &mut self,
+        index: &RecursiveIndex,
+        data: AmlPackage,
+    ) -> Result<(), AmlError> {
+        if let Self::Package(v) = self {
+            let mut deref_index = Some(index);
+            let mut v = v;
+            while let Some(i) = deref_index {
+                if v.len() <= i.index {
+                    pr_err!("Index({}) is out of buffer(len: {}).", i.index, v.len());
+                    return Err(AmlError::InvalidOperation);
+                }
+                if i.next.is_none() {
+                    v[i.index] = data;
+                    return Ok(());
+                }
+                if let AmlPackage::Package(next) = &mut v[i.index] {
+                    v = next;
+                } else {
+                    return Err(AmlError::InvalidType);
+                }
+                deref_index = i.next;
+            }
+            unreachable!()
+        } else if let Self::Reference((source, additional_index)) = self {
+            if let Some(additional) = additional_index {
+                let new_index = RecursiveIndex {
+                    index: *additional,
+                    next: Some(index),
+                };
+                source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .write_data_into_package_recursively(&new_index, data)
+            } else {
+                source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .write_data_into_package_recursively(index, data)
+            }
+        } else {
+            pr_err!("Expected a package, but found {:?}", self);
+            Err(AmlError::InvalidType)
+        }
+    }
+
     pub fn write_buffer_with_index(&mut self, data: Self, index: usize) -> Result<(), AmlError> {
         if let Self::Buffer(s) = self {
             let const_data = if data.is_constant_data() {
@@ -693,6 +745,23 @@ impl AmlVariable {
             } else {
                 pr_err!("index({}) is out of string(len: {}).", index, s.len());
             }
+        } else if let Self::Reference((source, additional_index)) = self {
+            return if additional_index.is_some() {
+                let rec_index = RecursiveIndex { index, next: None };
+                if let Err(e) = self
+                    .write_data_into_package_recursively(&rec_index, data.convert_to_aml_package()?)
+                {
+                    pr_err!("Invalid Package: (Self: {:?}, Index: {})", self, index);
+                    Err(e)
+                } else {
+                    Ok(())
+                }
+            } else {
+                source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .write_buffer_with_index(data, index)
+            };
         } else {
             pr_err!("Invalid Data Type: {:?} <- {:?}", self, data);
         }
@@ -720,6 +789,33 @@ impl AmlVariable {
             } else {
                 pr_err!("index({}) is out of string(len: {}).", index, s.len());
                 Err(AmlError::InvalidOperation)
+            }
+        } else if let Self::Reference((source, additional_index)) = self {
+            if let Some(additional) = additional_index {
+                if let AmlVariable::Package(package) = source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .read_buffer_with_index(*additional)?
+                {
+                    if index < package.len() {
+                        Self::from_aml_package(package[index].clone())
+                    } else {
+                        pr_err!(
+                            "index({}) is out of package(len: {}).",
+                            index,
+                            package.len()
+                        );
+                        Err(AmlError::InvalidOperation)
+                    }
+                } else {
+                    pr_err!("Invalid Reference Data Type: {:?}", self);
+                    Err(AmlError::InvalidOperation)
+                }
+            } else {
+                source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .read_buffer_with_index(index)
             }
         } else {
             pr_err!("Invalid Data Type: {:?}[{}]", self, index);
