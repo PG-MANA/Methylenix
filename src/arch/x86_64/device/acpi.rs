@@ -85,7 +85,7 @@ pub fn read_io(
         pr_err!("Invalid port number: {:#X}", port);
         Err(AmlError::InvalidOperation)
     } else {
-        pr_info!("Read SystemI/O(Port: {:#X}, Align: {})", port, align);
+        pr_debug!("Read SystemI/O(Port: {:#X}, Align: {})", port, align);
         unsafe {
             match align {
                 1 => {
@@ -144,7 +144,7 @@ pub fn write_io(
         pr_err!("Invalid port number: {:#X}", port);
         Err(AmlError::InvalidOperation)
     } else {
-        pr_info!(
+        pr_debug!(
             "Write SystemI/O(Port: {:#X}, Align: {}) <= {:#X}",
             port,
             align,
@@ -282,6 +282,13 @@ pub fn read_memory(
         .unwrap()
         .free(virtual_address)
         .or(Err(AmlError::InvalidOperation))?;
+    pr_debug!(
+        "Read (Address: {:#X}, BitIndex: {}, NumOfBits: {}) => {:?}",
+        address.to_usize(),
+        bit_index,
+        num_of_bits,
+        result
+    );
     return result;
 }
 
@@ -299,6 +306,14 @@ pub fn write_memory(
         ConstData::QWord(_) => 8,
     })
     .max(align);
+    pr_debug!(
+        "Write (Address: {:#X}, BitIndex: {}, NumOfBits: {}) <= {:?}(AccessSize: {})",
+        address.to_usize(),
+        bit_index,
+        num_of_bits,
+        data,
+        access_size
+    );
     let size = MSize::new(access_size);
     let virtual_address = get_kernel_manager_cluster()
         .memory_manager
@@ -458,7 +473,7 @@ pub fn read_pci(
         bit_mask >>= 32;
     }
 
-    pr_info!(
+    pr_debug!(
         "Read PCI: {}:{}:{} offset: {}(bit_index: {}) => {}",
         pci_config.bus,
         pci_config.device,
@@ -510,7 +525,7 @@ pub fn write_pci(
         Err(AmlError::InvalidOperation)?;
     }
 
-    pr_info!(
+    pr_debug!(
         "Write PCI: {}:{}:{} offset: {}(bit_index: {}) <= {:?}",
         pci_config.bus,
         pci_config.device,
