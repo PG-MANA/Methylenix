@@ -109,7 +109,7 @@ impl GraphicManager {
         self.is_font_loaded
     }
 
-    fn draw_string(&self, s: &str) -> fmt::Result {
+    fn draw_string(&self, s: &str, foreground_color: u32, background_color: u32) -> fmt::Result {
         /* assume locked */
         if !self.is_font_loaded {
             return Err(fmt::Error {});
@@ -159,8 +159,8 @@ impl GraphicManager {
                     font_data.height as usize,
                     cursor.x + font_left,
                     cursor.y + font_top,
-                    0x55ffff,
-                    0,
+                    foreground_color,
+                    background_color,
                     true,
                 );
                 cursor.x += font_data.device_width as usize;
@@ -169,7 +169,7 @@ impl GraphicManager {
         Ok(())
     }
 
-    pub fn puts(&self, string: &str) -> bool {
+    pub fn puts(&self, string: &str, foreground_color: u32, background_color: u32) -> bool {
         get_kernel_manager_cluster()
             .serial_port_manager
             .send_str(string);
@@ -181,7 +181,8 @@ impl GraphicManager {
         if self.is_text_mode {
             self.text.lock().unwrap().puts(string)
         } else if self.is_font_loaded {
-            self.draw_string(string).is_ok()
+            self.draw_string(string, foreground_color, background_color)
+                .is_ok()
         } else {
             true
         }
@@ -223,10 +224,16 @@ impl GraphicManager {
 }
 
 impl Writer for GraphicManager {
-    fn write(&self, buf: &[u8], size_to_write: usize) -> fmt::Result {
+    fn write(
+        &self,
+        buf: &[u8],
+        size_to_write: usize,
+        foreground_color: u32,
+        background_color: u32,
+    ) -> fmt::Result {
         use core::str;
         if let Ok(s) = str::from_utf8(buf.split_at(size_to_write).0) {
-            if self.puts(s) {
+            if self.puts(s, foreground_color, background_color) {
                 //適当
                 Ok(())
             } else {
