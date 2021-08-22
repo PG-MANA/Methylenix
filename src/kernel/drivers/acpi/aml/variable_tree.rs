@@ -102,14 +102,14 @@ impl AmlVariableTree {
                 return Ok(());
             }
             pr_err!("Invalid Scope Name: {:?}", scope);
-            return Err(AmlError::InvalidScope(scope.clone()));
+            return Err(AmlError::InvalidName(scope.clone()));
         }
         if self.current.name.is_child(scope) {
             let relative_path = if let Some(n) = scope.get_relative_name(&self.current.name) {
                 n
             } else {
                 pr_err!("Invalid Scope Name: {:?}", scope);
-                return Err(AmlError::InvalidScope(scope.clone()));
+                return Err(AmlError::InvalidName(scope.clone()));
             };
             self._move_current_scope(scope, relative_path, 0)
         } else {
@@ -117,7 +117,7 @@ impl AmlVariableTree {
                 Ok(true) => self.move_current_scope(scope),
                 Ok(false) => {
                     pr_err!("Invalid Scope Name: {:?}", scope);
-                    Err(AmlError::InvalidScope(scope.clone()))
+                    Err(AmlError::InvalidName(scope.clone()))
                 }
                 Err(_) => {
                     self.move_to_root()?;
