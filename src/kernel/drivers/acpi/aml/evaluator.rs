@@ -237,7 +237,7 @@ impl Evaluator {
                 TermObj::ExpressionOpcode(_) => { /* Ignore */ }
             }
         }
-        Ok(())
+        return Ok(());
     }
 
     /// Initialize all devices by evaluating all _STA and _INI methods.
@@ -253,7 +253,7 @@ impl Evaluator {
             self.walk_all_devices(self.current_root_term_list.clone())?;
         }
         self.current_root_term_list = backup;
-        Ok(())
+        return Ok(());
     }
 
     pub(super) fn init_local_variables_and_argument_variables(
@@ -1301,19 +1301,19 @@ impl Evaluator {
             SuperName::SimpleName(simple_name) => match simple_name {
                 SimpleName::NameString(name) => self.search_aml_variable(&name, None, false),
                 SimpleName::ArgObj(c) => {
-                    if *c as usize > Self::NUMBER_OF_ARGUMENT_VARIABLES {
-                        pr_err!("Arg{} is out of index.", c);
+                    if *c as usize >= Self::NUMBER_OF_ARGUMENT_VARIABLES {
+                        pr_err!("ArgObj({}) is out of index.", c);
                         Err(AmlError::InvalidOperation)
                     } else {
-                        Ok(argument_variables[*c as usize].clone())
+                        Ok(self.current_argument_variables[*c as usize].clone())
                     }
                 }
                 SimpleName::LocalObj(c) => {
-                    if *c as usize > Self::NUMBER_OF_LOCAL_VARIABLES {
-                        pr_err!("Local{} is out of index.", c);
+                    if *c as usize >= Self::NUMBER_OF_LOCAL_VARIABLES {
+                        pr_err!("LocalObj({}) is out of index.", c);
                         Err(AmlError::InvalidOperation)
                     } else {
-                        Ok(local_variables[*c as usize].clone())
+                        Ok(self.current_local_variables[*c as usize].clone())
                     }
                 }
             },
@@ -1363,8 +1363,22 @@ impl Evaluator {
                     self.eval_var_package(p, current_scope)?,
                 )))),
             },
-            TermArg::ArgObj(c) => Ok(argument_variables[c as usize].clone()),
-            TermArg::LocalObj(c) => Ok(local_variables[c as usize].clone()),
+            TermArg::ArgObj(c) => {
+                if c as usize >= Self::NUMBER_OF_ARGUMENT_VARIABLES {
+                    pr_err!("Reading ArgObj({}) is invalid.", c);
+                    Err(AmlError::InvalidOperation)
+                } else {
+                    Ok(self.current_argument_variables[c as usize].clone())
+                }
+            }
+            TermArg::LocalObj(c) => {
+                if c as usize >= Self::NUMBER_OF_LOCAL_VARIABLES {
+                    pr_err!("Reading LocalObj({}) is invalid.", c);
+                    Err(AmlError::InvalidOperation)
+                } else {
+                    Ok(self.current_local_variables[c as usize].clone())
+                }
+            }
         }
     }
 
@@ -1525,7 +1539,7 @@ impl Evaluator {
                             .write(data)?;
                     }
                     SimpleName::ArgObj(l) => {
-                        if argument_variables.len() <= *l as usize {
+                        if *l as usize >= Self::NUMBER_OF_ARGUMENT_VARIABLES {
                             pr_err!("Writing ArgObj({}) is invalid.", l);
                             return Err(AmlError::InvalidOperation);
                         }
@@ -1535,7 +1549,7 @@ impl Evaluator {
                             .write(data)?;
                     }
                     SimpleName::LocalObj(l) => {
-                        if (*l as usize) > Self::NUMBER_OF_LOCAL_VARIABLES {
+                        if *l as usize >= Self::NUMBER_OF_LOCAL_VARIABLES {
                             pr_err!("Writing LocalObj({}) is invalid.", l);
                             return Err(AmlError::InvalidOperation);
                         }
@@ -1652,7 +1666,7 @@ impl Evaluator {
                 )),
             },
             TermArg::ArgObj(c) => {
-                if c as usize > Self::NUMBER_OF_ARGUMENT_VARIABLES {
+                if c as usize >= Self::NUMBER_OF_ARGUMENT_VARIABLES {
                     pr_err!("Arg{} is out of index.", c);
                     Err(AmlError::InvalidOperation)
                 } else {
@@ -1663,7 +1677,7 @@ impl Evaluator {
                 }
             }
             TermArg::LocalObj(c) => {
-                if c as usize > Self::NUMBER_OF_LOCAL_VARIABLES {
+                if c as usize >= Self::NUMBER_OF_LOCAL_VARIABLES {
                     pr_err!("Local{} is out of index.", c);
                     Err(AmlError::InvalidOperation)
                 } else {
@@ -1762,7 +1776,7 @@ impl Evaluator {
                     result,
                     left.get_byte_size()?.max(right.get_byte_size()?),
                 )?);
-                if let Target::SuperName(_) = b_o.get_target() {
+                if !b_o.get_target().is_null() {
                     self.write_data_into_target(
                         result_aml_variable.clone(),
                         b_o.get_target(),
@@ -2413,7 +2427,7 @@ impl Evaluator {
         while let Some(term_obj) = term_list.next(self)? {
             match term_obj {
                 TermObj::NamespaceModifierObj(_) => { /* Ignore */ }
-                TermObj::NamedObj(_) => { /* Ignore */ /* TODO: Initialize Objects*/ }
+                TermObj::NamedObj(_) => { /* Ignore */ }
                 TermObj::StatementOpcode(s_o) => match s_o {
                     StatementOpcode::DefNoop => { /* Do Nothing */ }
                     StatementOpcode::DefNotify(n) => {
