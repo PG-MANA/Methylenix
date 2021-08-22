@@ -91,6 +91,9 @@ impl Evaluator {
     }
 
     fn evaluate_sta_and_ini_in_device(&mut self, device: Device) -> Result<(), AmlError> {
+        const STA_PRESENT_BIT: AcpiInt = 1;
+        const STA_FUNCTIONAL_BIT: AcpiInt = 1 << 3;
+
         let sta =
             NameString::from_array(&[*b"_STA"], false).get_full_name_path(device.get_name(), true);
         let status = match self.search_aml_variable(&sta, None, false) {
@@ -105,13 +108,36 @@ impl Evaluator {
                     AmlVariable::Method(m) => {
                         let cloned_method = m.clone();
                         drop(locked_sta_object);
-                        pr_info!("Evaluate: {}", cloned_method.get_name());
-                        self.eval_method_in_current_status(&cloned_method, &[])?
-                            .to_int()?
+                        match self.eval_method_in_current_status(&cloned_method, &[]) {
+                            Ok(v) => match v.to_int() {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    pr_err!("Expected an integer, but found {:?}({:?})", v, e);
+                                    STA_FUNCTIONAL_BIT
+                                }
+                            },
+                            Err(e) => {
+                                pr_err!(
+                                    "Failed to evaluate {}: {:?}, skip this device and children.",
+                                    cloned_method.get_name(),
+                                    e
+                                );
+                                0
+                            }
+                        }
                     }
                     _ => {
                         pr_err!("Expected a method, but found {:?}", &*locked_sta_object);
-                        return Err(AmlError::InvalidType);
+                        match locked_sta_object.to_int() {
+                            Ok(s) => s,
+                            Err(e) => {
+                                pr_err!(
+                                    "Failed to convert to an integer: {:?}, skip this device.",
+                                    e
+                                );
+                                STA_FUNCTIONAL_BIT
+                            }
+                        }
                     }
                 }
             }
@@ -119,14 +145,17 @@ impl Evaluator {
                 if n == sta {
                     0b1111 /* Assume enabled */
                 } else {
-                    return Err(AmlError::InvalidMethodName(n));
+                    0
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                pr_err!("Failed to search {}: {:?}", sta, e);
+                0
+            }
         };
 
-        let present_bit = (status & 1) != 0;
-        let functional_bit = (status & (1 << 3)) != 0;
+        let present_bit = (status & STA_PRESENT_BIT) != 0;
+        let functional_bit = (status & STA_FUNCTIONAL_BIT) != 0;
 
         if !present_bit && !functional_bit {
             /* Skip this device and children. */
@@ -142,21 +171,21 @@ impl Evaluator {
                         AmlVariable::Method(m) => {
                             let cloned_method = m.clone();
                             drop(locked_ini_object);
-                            pr_info!("Evaluate: {}", cloned_method.get_name());
-                            self.eval_method_in_current_status(&cloned_method, &[])?;
+                            if let Err(e) = self.eval_method_in_current_status(&cloned_method, &[])
+                            {
+                                pr_err!("Failed to evaluate {}: {:?}", cloned_method.get_name(), e);
+                            }
                         }
                         _ => {
                             pr_err!("Expected a method, but found {:?}", &*locked_ini_object);
-                            return Err(AmlError::InvalidType);
                         }
                     }
                 }
-                Err(AmlError::InvalidName(n)) => {
-                    if n != ini {
-                        return Err(AmlError::InvalidName(n));
+                Err(e) => {
+                    if !matches!(&e, AmlError::InvalidName(ini)) {
+                        pr_err!("Failed to search {}: {:?}", sta, e);
                     }
                 }
-                Err(e) => return Err(e),
             };
         }
         self.walk_all_devices(device.get_term_list().clone())
