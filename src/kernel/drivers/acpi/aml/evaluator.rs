@@ -370,9 +370,7 @@ impl Evaluator {
                                             term_list.get_scope_name(),
                                         )?;
                                         let variable = self.variable_tree.add_data(
-                                            single_relative_path.unwrap_or_else(|| {
-                                                name.get_last_element().unwrap()
-                                            }),
+                                            n.get_name().clone(),
                                             variable,
                                             false,
                                         )?;
@@ -468,13 +466,14 @@ impl Evaluator {
         should_keep_term_list_hierarchy_when_found: bool,
     ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
         let single_name = name.get_single_name_path();
+        let is_name_child_of_current_scope = current_scope.is_child(name);
 
         if let Some(named_object_name) = named_object.get_name() {
             if name == named_object_name
                 || single_name
                     .as_ref()
                     .and_then(|n| {
-                        Some(current_scope.is_child(name) && named_object_name.suffix_search(n))
+                        Some(is_name_child_of_current_scope && named_object_name.suffix_search(n))
                     })
                     .unwrap_or(false)
             {
@@ -2500,11 +2499,11 @@ impl Evaluator {
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         let (_, mut new_argument_variables) = Self::init_local_variables_and_argument_variables();
-        for (index, arg) in method_invocation.get_ter_arg_list().list.iter().enumerate() {
-            new_argument_variables[index] = Arc::new(Mutex::new(self.eval_term_arg(
-                arg.clone(),
-                current_scope,
-            )?));
+        for (d, arg) in new_argument_variables
+            .iter_mut()
+            .zip(method_invocation.get_ter_arg_list().list.iter())
+        {
+            *d = Arc::new(Mutex::new(self.eval_term_arg(arg.clone(), current_scope)?));
         }
         func(&new_argument_variables)
     }
