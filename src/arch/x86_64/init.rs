@@ -153,6 +153,7 @@ pub fn init_acpi_later() -> bool {
         pr_err!("Cannot setup ACPI AML Interpreter.");
         return false;
     }
+    get_kernel_manager_cluster().acpi_event_manager.init_gpe();
     if !super::device::acpi::setup_interrupt(&acpi_manager) {
         pr_err!("Cannot setup ACPI interrupt.");
         return false;
@@ -173,6 +174,9 @@ pub fn init_acpi_later() -> bool {
         pr_err!("Cannot enable power button.");
         return false;
     }
+    get_kernel_manager_cluster()
+        .acpi_event_manager
+        .enable_gpes();
     return true;
 }
 

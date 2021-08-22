@@ -81,6 +81,33 @@ impl AcpiEventManager {
         }
     }
 
+    pub fn enable_gpes(&self) -> bool {
+        /* Temporary, enable EC only */
+        if let Some(ec_gpe) = get_kernel_manager_cluster()
+            .acpi_device_manager
+            .ec
+            .as_ref()
+            .and_then(|ec| ec.get_gpe_number())
+        {
+            if !self.gpe0_manager.enable_gpe(ec_gpe) {
+                return if let Some(gpe1) = &self.gpe1_manager {
+                    gpe1.enable_gpe(ec_gpe)
+                } else {
+                    false
+                };
+            }
+        }
+        return true;
+    }
+
+    pub fn clear_gpe_status_bit(&self, gpe: usize) {
+        if !self.gpe0_manager.clear_status_bit(gpe) {
+            if let Some(gpe1) = &self.gpe1_manager {
+                gpe1.clear_status_bit(gpe);
+            }
+        }
+    }
+
     fn read_pm1_a_status(&self) -> u16 {
         unsafe { in_word(self.pm1a_event_block as _) }
     }

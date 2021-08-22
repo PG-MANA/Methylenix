@@ -30,6 +30,39 @@ impl GpeManager {
         }
     }
 
+    pub fn enable_gpe(&self, gpe: usize) -> bool {
+        if self.base_number + (self.gpe_count << 3) < gpe || gpe < self.base_number {
+            return false;
+        }
+        let port_index = (gpe - self.base_number) >> 3;
+        let bit_index = gpe - ((gpe >> 3) << 3);
+        pr_info!(
+            "Enable GPE{:#X} (BasePort: {:#X}, Index: {:#X}, Bit: {:#X})",
+            gpe,
+            self.gpe_block + self.gpe_count,
+            port_index,
+            bit_index
+        );
+        self.clear_status_bit(gpe);
+        let mut target = read_io_byte(self.gpe_block + self.gpe_count + port_index);
+        target |= 1 << bit_index;
+        write_io_byte(self.gpe_block + self.gpe_count + port_index, target);
+        return true;
+    }
+
+    pub fn clear_status_bit(&self, gpe: usize) -> bool {
+        if self.base_number + (self.gpe_count << 3) < gpe || gpe < self.base_number {
+            return false;
+        }
+        let port_index = (gpe - self.base_number) >> 3;
+        let bit_index = gpe - ((gpe >> 3) << 3);
+        let current_status = ((read_io_byte(self.gpe_block + port_index)) >> bit_index) & 1;
+        if current_status != 0 {
+            write_io_byte(self.gpe_block + port_index, 1 << bit_index);
+        }
+        return true;
+    }
+
     pub fn find_general_purpose_event(&self) -> Option<usize> {
         let mut bit = 0;
         for port in self.gpe_block..(self.gpe_block + self.gpe_count) {
