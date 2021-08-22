@@ -262,6 +262,35 @@ impl NameString {
         }
     }
 
+    pub fn get_scope_name(&self) -> Self {
+        let mut result = self.clone();
+        if result.len() == 0 {
+        } else if result.len() == 8 {
+            match result.data {
+                NameStringData::Ex(v) => {
+                    let mut normal = ([[0u8; 4]; 7], 7);
+                    for (s, d) in v.iter().zip(normal.0.iter_mut()) {
+                        *d = *s;
+                    }
+                    result.data = NameStringData::Normal(normal);
+                }
+                NameStringData::Normal(_) => {
+                    pr_warn!("Invalid NameString: {:?}", self);
+                }
+            }
+        } else {
+            match &mut result.data {
+                NameStringData::Ex(v) => {
+                    v.pop();
+                }
+                NameStringData::Normal(n) => {
+                    n.1 -= 1;
+                }
+            }
+        }
+        return result;
+    }
+
     pub fn is_child(&self, child: &Self) -> bool {
         for index in 0.. {
             let s1 = self.get_element(index);
@@ -478,12 +507,7 @@ impl NameString {
             return true;
         }
 
-        let self_len = self.len();
-        let other_len = other.len();
-        if self_len == 0 || other_len == 0 {
-            return true;
-        }
-        for (self_index, other_index) in (0..self_len).rev().zip((0..other_len).rev()) {
+        for (self_index, other_index) in (0..self.len()).rev().zip((0..other.len()).rev()) {
             let self_e = self.get_element(self_index).unwrap();
             let other_e = other.get_element(other_index).unwrap();
             if self_e != other_e {
