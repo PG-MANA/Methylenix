@@ -39,6 +39,8 @@ pub struct Evaluator {
     variable_tree: AmlVariableTree,
     original_searching_name: Option<NameString>,
     term_list_hierarchy: Vec<TermList>,
+    current_local_variables: LocalVariables,
+    current_argument_variables: ArgumentVariables,
 }
 
 impl Evaluator {
@@ -48,12 +50,15 @@ impl Evaluator {
 
     pub fn new(current_root_term_list: TermList, root_term_list: Vec<TermList>) -> Self {
         assert_eq!(current_root_term_list.get_scope_name(), &NameString::root());
+        let (local, arguments) = Self::init_local_variables_and_argument_variables();
         Self {
             current_root_term_list,
             root_term_list: Arc::new(root_term_list),
             variable_tree: AmlVariableTree::create_tree(),
             original_searching_name: None,
             term_list_hierarchy: Vec::new(),
+            current_local_variables: local,
+            current_argument_variables: arguments,
         }
     }
 
@@ -85,16 +90,10 @@ impl Evaluator {
         return Ok(());
     }
 
-    fn evaluate_sta_and_ini_in_device(
-        &mut self,
-        device: Device,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
-    ) -> Result<(), AmlError> {
+    fn evaluate_sta_and_ini_in_device(&mut self, device: Device) -> Result<(), AmlError> {
         let sta =
             NameString::from_array(&[*b"_STA"], false).get_full_name_path(device.get_name(), true);
-        let status = match self.search_aml_variable(&sta, None, local_variables, argument_variables)
-        {
+        let status = match self.search_aml_variable(&sta, None, false) {
             Ok(v) => {
                 let locked_sta_object = v.lock().unwrap();
                 match &*locked_sta_object {
@@ -116,7 +115,7 @@ impl Evaluator {
                     }
                 }
             }
-            Err(AmlError::InvalidMethodName(n)) => {
+            Err(AmlError::InvalidName(n)) => {
                 if n == sta {
                     0b1111 /* Assume enabled */
                 } else {
@@ -136,7 +135,7 @@ impl Evaluator {
         if present_bit {
             let ini = NameString::from_array(&[*b"_INI"], false)
                 .get_full_name_path(device.get_name(), true);
-            match self.search_aml_variable(&ini, None, local_variables, argument_variables) {
+            match self.search_aml_variable(&ini, None, false) {
                 Ok(v) => {
                     let locked_ini_object = v.lock().unwrap();
                     match &*locked_ini_object {
@@ -160,19 +159,10 @@ impl Evaluator {
                 Err(e) => return Err(e),
             };
         }
-        self.walk_all_devices(
-            device.get_term_list().clone(),
-            local_variables,
-            argument_variables,
-        )
+        self.walk_all_devices(device.get_term_list().clone())
     }
 
-    fn walk_all_devices(
-        &mut self,
-        mut term_list: TermList,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
-    ) -> Result<(), AmlError> {
+    fn walk_all_devices(&mut self, mut term_list: TermList) -> Result<(), AmlError> {
         while let Some(obj) = term_list.next(self)? {
             match obj {
                 TermObj::NamespaceModifierObj(n_m) => {
@@ -181,11 +171,7 @@ impl Evaluator {
                             self.term_list_hierarchy.push(s.get_term_list().clone());
                             let tree_backup = self.variable_tree.backup_current_scope();
                             self.variable_tree.move_current_scope(s.get_name())?;
-                            self.walk_all_devices(
-                                s.get_term_list().clone(),
-                                local_variables,
-                                argument_variables,
-                            )?;
+                            self.walk_all_devices(s.get_term_list().clone())?;
                             self.variable_tree.restore_current_scope(tree_backup);
                             self.term_list_hierarchy.pop();
                         }
@@ -198,15 +184,9 @@ impl Evaluator {
                         let tree_backup = self.variable_tree.backup_current_scope();
                         self.variable_tree
                             .move_current_scope(d.get_term_list().get_scope_name())?;
-                        self.evaluate_sta_and_ini_in_device(
-                            d,
-                            local_variables,
-                            argument_variables,
-                        )?;
+                        self.evaluate_sta_and_ini_in_device(d)?;
                         self.variable_tree.restore_current_scope(tree_backup);
                         self.term_list_hierarchy.pop();
-                        self.variable_tree
-                            .move_current_scope(term_list.get_scope_name())?;
                     }
                     o if matches!(o, NamedObject::DefDataRegion(_))
                         || matches!(o, NamedObject::DefPowerRes(_))
@@ -216,7 +196,7 @@ impl Evaluator {
                         self.term_list_hierarchy.push(t.clone());
                         let tree_backup = self.variable_tree.backup_current_scope();
                         self.variable_tree.move_current_scope(t.get_scope_name())?;
-                        self.walk_all_devices(t, local_variables, argument_variables)?;
+                        self.walk_all_devices(t)?;
                         self.term_list_hierarchy.pop();
                         self.variable_tree.restore_current_scope(tree_backup);
                     }
@@ -233,14 +213,7 @@ impl Evaluator {
 
     /// Initialize all devices by evaluating all _STA and _INI methods.
     pub fn initialize_all_devices(&mut self) -> Result<(), AmlError> {
-        let (mut local_variables, mut argument_variables) =
-            Evaluator::init_local_variables_and_argument_variables();
-
-        self.walk_all_devices(
-            self.current_root_term_list.clone(),
-            &mut local_variables,
-            &mut argument_variables,
-        )?;
+        self.walk_all_devices(self.current_root_term_list.clone())?;
 
         let backup = self.current_root_term_list.clone();
         for r in self.root_term_list.clone().iter() {
@@ -248,11 +221,7 @@ impl Evaluator {
                 continue;
             }
             self.current_root_term_list = r.clone();
-            self.walk_all_devices(
-                self.current_root_term_list.clone(),
-                &mut local_variables,
-                &mut argument_variables,
-            )?;
+            self.walk_all_devices(self.current_root_term_list.clone())?;
         }
         self.current_root_term_list = backup;
         Ok(())
@@ -287,8 +256,6 @@ impl Evaluator {
         mut term_list: TermList,
         search_scope: Option<&NameString>, /* To search the variable like _SB.PCI0.^^_FOO */
         should_keep_term_list_hierarchy_when_found: bool,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
     ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
         if !term_list.get_scope_name().is_child(name)
             && search_scope
@@ -371,8 +338,6 @@ impl Evaluator {
                                     DataRefObject::DataObject(d) => {
                                         let variable = self.eval_term_arg(
                                             TermArg::DataObject(d.clone()),
-                                            local_variables,
-                                            argument_variables,
                                             term_list.get_scope_name(),
                                         )?;
                                         let variable = self.variable_tree.add_data(
@@ -443,8 +408,6 @@ impl Evaluator {
                         named_object,
                         search_scope,
                         should_keep_term_list_hierarchy_when_found,
-                        local_variables,
-                        argument_variables,
                     ) {
                         Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
                         Ok(Some(v)) => return Ok(Some(v)),
@@ -474,8 +437,6 @@ impl Evaluator {
         named_object: NamedObject,
         search_scope: Option<&NameString>, /* To search the variable like _SB.PCI0.^^_FOO */
         should_keep_term_list_hierarchy_when_found: bool,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
     ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
         let single_name = name.get_single_name_path();
 
@@ -488,24 +449,8 @@ impl Evaluator {
                     })
                     .unwrap_or(false)
             {
-                let named_object_single_name = single_name.unwrap_or_else(|| {
-                    named_object_name
-                        .get_single_name_path()
-                        .unwrap_or_else(|| named_object_name.get_last_element().unwrap())
-                });
-
-                let v = self.eval_named_object(
-                    name,
-                    named_object,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
-                return Ok(Some(self.variable_tree.add_data(
-                    named_object_single_name,
-                    v,
-                    false,
-                )?));
+                let v = self.eval_named_object(name, named_object, current_scope)?;
+                return Ok(Some(self.variable_tree.add_data(name.clone(), v, false)?));
             }
         }
         if !name.is_single_relative_path_name()
@@ -521,18 +466,8 @@ impl Evaluator {
             while let Some(e) = field_list.next()? {
                 if let FieldElement::NameField((n, _)) = &e {
                     if n == name {
-                        let v = self.eval_named_object(
-                            name,
-                            named_object,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?;
-                        return Ok(Some(self.variable_tree.add_data(
-                            name.get_single_name_path().unwrap_or_else(|| name.clone()),
-                            v,
-                            false,
-                        )?));
+                        let v = self.eval_named_object(name, named_object, current_scope)?;
+                        return Ok(Some(self.variable_tree.add_data(name.clone(), v, false)?));
                     } else if single_name
                         .as_ref()
                         .and_then(|relative_name| {
@@ -540,15 +475,8 @@ impl Evaluator {
                         })
                         .unwrap_or(false)
                     {
-                        let single_name = single_name.unwrap();
-                        let v = self.eval_named_object(
-                            name,
-                            named_object,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?;
-                        return Ok(Some(self.variable_tree.add_data(single_name, v, false)?));
+                        let v = self.eval_named_object(name, named_object, current_scope)?;
+                        return Ok(Some(self.variable_tree.add_data(name.clone(), v, false)?));
                     }
                 }
             }
@@ -563,8 +491,6 @@ impl Evaluator {
                 term_list,
                 search_scope,
                 should_keep_term_list_hierarchy_when_found,
-                local_variables,
-                argument_variables,
             );
             if !(matches!(result, Ok(Some(_))) && should_keep_term_list_hierarchy_when_found) {
                 self.variable_tree.restore_current_scope(tree_backup);
@@ -579,8 +505,6 @@ impl Evaluator {
     fn search_aml_variable_by_absolute_path(
         &mut self,
         name: &NameString,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
     ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
         if let Some(d) = self.variable_tree.find_data_from_root(name)? {
             return Ok(Some(d));
@@ -603,8 +527,6 @@ impl Evaluator {
             self.current_root_term_list.clone(),
             None,
             false,
-            local_variables,
-            argument_variables,
         );
 
         if matches!(&result, Ok(Some(_))) || result.is_err() {
@@ -654,8 +576,7 @@ impl Evaluator {
         &mut self,
         name: &NameString,
         preferred_search_scope: Option<&NameString>,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
+        _: bool,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         if name.is_null_name() {
             return Err(AmlError::InvalidName(name.clone()));
@@ -699,11 +620,7 @@ impl Evaluator {
                 .unwrap_or(false)
             && preferred_search_scope.is_none()
         {
-            if let Some(v) = self.search_aml_variable_by_absolute_path(
-                name,
-                local_variables,
-                argument_variables,
-            )? {
+            if let Some(v) = self.search_aml_variable_by_absolute_path(name)? {
                 restore_status(self)?;
                 return Ok(v);
             }
@@ -718,14 +635,9 @@ impl Evaluator {
 
         /* Search from the current TermList */
         if let Some(current_term_list) = self.term_list_hierarchy.last().cloned() {
-            if let Some(v) = self.search_aml_variable_by_parsing_term_list(
-                name,
-                current_term_list,
-                None,
-                false,
-                local_variables,
-                argument_variables,
-            )? {
+            if let Some(v) =
+                self.search_aml_variable_by_parsing_term_list(name, current_term_list, None, false)?
+            {
                 restore_status(self)?;
                 return Ok(v);
             }
@@ -782,8 +694,6 @@ impl Evaluator {
                 term_list.clone(),
                 Some(&search_scope),
                 false,
-                local_variables,
-                argument_variables,
             ) {
                 Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
                 Ok(Some(v)) => {
@@ -836,8 +746,6 @@ impl Evaluator {
             self.current_root_term_list.clone(),
             Some(&search_scope),
             false,
-            local_variables,
-            argument_variables,
         ) {
             Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
             Ok(Some(v)) => {
@@ -855,8 +763,6 @@ impl Evaluator {
             self.current_root_term_list.clone(),
             Some(&search_scope),
             false,
-            local_variables,
-            argument_variables,
         ) {
             Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
             Ok(Some(v)) => {
@@ -890,8 +796,6 @@ impl Evaluator {
                 self.current_root_term_list.clone(),
                 Some(&search_scope),
                 false,
-                local_variables,
-                argument_variables,
             ) {
                 Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
                 Ok(Some(v)) => {
@@ -919,8 +823,6 @@ impl Evaluator {
             pr_err!("TermListHierarchy is not empty, it will be deleted.");
             self.term_list_hierarchy.clear();
         }
-        let (mut dummy_local_variables, mut dummy_argument_variables) =
-            Self::init_local_variables_and_argument_variables();
         self.variable_tree.move_to_root()?;
 
         match self.search_aml_variable_by_parsing_term_list(
@@ -928,8 +830,6 @@ impl Evaluator {
             self.current_root_term_list.clone(),
             search_scope,
             true,
-            &mut dummy_local_variables,
-            &mut dummy_argument_variables,
         ) {
             Ok(Some(_)) => return Ok(()),
             Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
@@ -949,8 +849,6 @@ impl Evaluator {
                 self.current_root_term_list.clone(),
                 search_scope,
                 true,
-                &mut dummy_local_variables,
-                &mut dummy_argument_variables,
             ) {
                 Ok(Some(_)) => return Ok(()), /* Keep current_root_term_list */
                 Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
@@ -1051,15 +949,7 @@ impl Evaluator {
         if method_name.is_null_name() {
             return Ok(0);
         }
-        let (mut local_variables, mut argument_variables) =
-            Self::init_local_variables_and_argument_variables();
-
-        let v = self.search_aml_variable(
-            method_name,
-            None,
-            &mut local_variables,
-            &mut argument_variables,
-        )?;
+        let v = self.search_aml_variable(method_name, None, true)?;
         Ok(match &*v.lock().unwrap() {
             AmlVariable::Method(m) => m.get_argument_count(),
             AmlVariable::BuiltInMethod((_, c)) => *c as AcpiInt,
@@ -1071,8 +961,6 @@ impl Evaluator {
         &mut self,
         object_name: &NameString,
         named_object: NamedObject,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         match named_object {
@@ -1083,18 +971,11 @@ impl Evaluator {
             NamedObject::DefCreateField(f) => {
                 let source_variable = self.get_aml_variable_reference_from_term_arg(
                     f.get_source_buffer().clone(),
-                    local_variables,
-                    argument_variables,
                     current_scope,
                 )?;
                 return if f.is_bit_field() {
                     let index = self
-                        .eval_integer_expression(
-                            f.get_index().clone(),
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_integer_expression(f.get_index().clone(), current_scope)?
                         .to_int()?;
                     let field_size = if let Some(field_size) = f.get_source_size() {
                         assert_eq!(field_size, 1);
@@ -1102,8 +983,6 @@ impl Evaluator {
                     } else {
                         self.eval_integer_expression(
                             f.get_source_size_term_arg().as_ref().unwrap().clone(),
-                            local_variables,
-                            argument_variables,
                             current_scope,
                         )?
                         .to_int()?
@@ -1117,12 +996,7 @@ impl Evaluator {
                     }))
                 } else {
                     let index = self
-                        .eval_integer_expression(
-                            f.get_index().clone(),
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_integer_expression(f.get_index().clone(), current_scope)?
                         .to_int()?;
                     let field_size = f.get_source_size().unwrap();
                     Ok(AmlVariable::ByteField(AmlByteFiled {
@@ -1142,12 +1016,7 @@ impl Evaluator {
             NamedObject::DefField(f) => {
                 let mut access_size = f.get_access_size();
                 let should_lock_global_lock = f.should_lock();
-                let source = self.search_aml_variable(
-                    f.get_source_region_name(),
-                    None,
-                    local_variables,
-                    argument_variables,
-                )?;
+                let source = self.search_aml_variable(f.get_source_region_name(), None, false)?;
                 let mut index = 0;
                 let mut field_list = f.get_field_list().clone();
                 let relative_name = object_name
@@ -1196,18 +1065,10 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             NamedObject::DefIndexField(field) => {
-                let index_register = self.search_aml_variable(
-                    field.get_index_register(),
-                    None,
-                    local_variables,
-                    argument_variables,
-                )?;
-                let data_register = self.search_aml_variable(
-                    field.get_data_register(),
-                    None,
-                    local_variables,
-                    argument_variables,
-                )?;
+                let index_register =
+                    self.search_aml_variable(field.get_index_register(), None, false)?;
+                let data_register =
+                    self.search_aml_variable(field.get_data_register(), None, false)?;
                 let mut access_size = field.get_access_size();
                 let mut index = 0;
                 let mut field_list = field.get_field_list().clone();
@@ -1264,16 +1125,12 @@ impl Evaluator {
                 let offset = self
                     .eval_integer_expression(
                         operation_region.get_region_offset().clone(),
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?
                     .to_int()?;
                 let length = self
                     .eval_integer_expression(
                         operation_region.get_region_length().clone(),
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?
                     .to_int()?;
@@ -1286,12 +1143,7 @@ impl Evaluator {
                         operation_region_scope.up_to_parent_name_space();
                         let bbn_name = NameString::from_array(&[*b"_BBN"], false)
                             .get_full_name_path(&operation_region_scope, false);
-                        let bus = match self.search_aml_variable(
-                            &bbn_name,
-                            None,
-                            local_variables,
-                            argument_variables,
-                        ) {
+                        let bus = match self.search_aml_variable(&bbn_name, None, false) {
                             Ok(v) => {
                                 let locked_bbn = v.try_lock().or(Err(AmlError::MutexError))?;
                                 (match &*locked_bbn {
@@ -1331,12 +1183,7 @@ impl Evaluator {
 
                         let adr_name = NameString::from_array(&[*b"_ADR"], false)
                             .get_full_name_path(&operation_region_scope, false);
-                        let adr = self.search_aml_variable(
-                            &adr_name,
-                            None,
-                            local_variables,
-                            argument_variables,
-                        )?;
+                        let adr = self.search_aml_variable(&adr_name, None, false)?;
                         let locked_adr = adr.try_lock().or(Err(AmlError::MutexError))?;
                         let addr = match &*locked_adr {
                             AmlVariable::ConstData(c) => c.to_int(),
@@ -1403,11 +1250,9 @@ impl Evaluator {
     fn get_aml_variable_reference_from_expression_opcode(
         &mut self,
         e: ExpressionOpcode,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
-        let result = self.eval_expression(e, local_variables, argument_variables, current_scope)?;
+        let result = self.eval_expression(e, current_scope)?;
         if let AmlVariable::Reference((source, None)) = result {
             Ok(source)
         } else if matches!(result, AmlVariable::Reference(_)) {
@@ -1421,15 +1266,11 @@ impl Evaluator {
     fn get_aml_variable_reference_from_super_name(
         &mut self,
         super_name: &SuperName,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         match super_name {
             SuperName::SimpleName(simple_name) => match simple_name {
-                SimpleName::NameString(name) => {
-                    self.search_aml_variable(&name, None, local_variables, argument_variables)
-                }
+                SimpleName::NameString(name) => self.search_aml_variable(&name, None, false),
                 SimpleName::ArgObj(c) => {
                     if *c as usize > Self::NUMBER_OF_ARGUMENT_VARIABLES {
                         pr_err!("Arg{} is out of index.", c);
@@ -1454,8 +1295,6 @@ impl Evaluator {
             SuperName::ReferenceTypeOpcode(r) => self
                 .get_aml_variable_reference_from_expression_opcode(
                     ExpressionOpcode::ReferenceTypeOpcode((**r).clone()),
-                    local_variables,
-                    argument_variables,
                     current_scope,
                 ),
         }
@@ -1464,17 +1303,12 @@ impl Evaluator {
     fn get_aml_variable_reference_from_term_arg(
         &mut self,
         term_arg: TermArg,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         match term_arg {
-            TermArg::ExpressionOpcode(e) => self.get_aml_variable_reference_from_expression_opcode(
-                *e,
-                local_variables,
-                argument_variables,
-                current_scope,
-            ),
+            TermArg::ExpressionOpcode(e) => {
+                self.get_aml_variable_reference_from_expression_opcode(*e, current_scope)
+            }
             TermArg::DataObject(data_object) => match data_object {
                 DataObject::ComputationalData(computational_data) => match computational_data {
                     ComputationalData::ConstData(const_data) => {
@@ -1490,19 +1324,14 @@ impl Evaluator {
                         AmlVariable::ConstData(ConstData::Byte(Self::AML_EVALUATOR_REVISION)),
                     ))),
                     ComputationalData::DefBuffer(byte_list) => Ok(Arc::new(Mutex::new(
-                        AmlVariable::Buffer(self.byte_list_to_vec(
-                            byte_list,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?),
+                        AmlVariable::Buffer(self.byte_list_to_vec(byte_list, current_scope)?),
                     ))),
                 },
                 DataObject::DefPackage(p) => Ok(Arc::new(Mutex::new(AmlVariable::Package(
-                    self.eval_package(p, local_variables, argument_variables, current_scope)?,
+                    self.eval_package(p, current_scope)?,
                 )))),
                 DataObject::DefVarPackage(p) => Ok(Arc::new(Mutex::new(AmlVariable::Package(
-                    self.eval_var_package(p, local_variables, argument_variables, current_scope)?,
+                    self.eval_var_package(p, current_scope)?,
                 )))),
             },
             TermArg::ArgObj(c) => Ok(argument_variables[c as usize].clone()),
@@ -1513,16 +1342,10 @@ impl Evaluator {
     fn get_mutex_object(
         &mut self,
         mutex_name: &SuperName,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Arc<(AtomicU8, u8)>, AmlError> {
-        let aml_variable = &self.get_aml_variable_reference_from_super_name(
-            &mutex_name,
-            local_variables,
-            argument_variables,
-            current_scope,
-        )?;
+        let aml_variable =
+            &self.get_aml_variable_reference_from_super_name(&mutex_name, current_scope)?;
         let locked_aml_variable = aml_variable.try_lock().or(Err(AmlError::MutexError))?;
         let mutex_object = if let AmlVariable::Mutex(m) = &*locked_aml_variable {
             m.clone()
@@ -1542,8 +1365,6 @@ impl Evaluator {
         &mut self,
         mut p: Package,
         num: usize,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Vec<AmlPackage>, AmlError> {
         let mut v = Vec::<AmlPackage>::with_capacity(num);
@@ -1569,29 +1390,20 @@ impl Evaluator {
                                     )));
                                 }
                                 ComputationalData::DefBuffer(byte_list) => {
-                                    v.push(AmlPackage::Buffer(self.byte_list_to_vec(
-                                        byte_list,
-                                        local_variables,
-                                        argument_variables,
-                                        current_scope,
-                                    )?));
+                                    v.push(AmlPackage::Buffer(
+                                        self.byte_list_to_vec(byte_list, current_scope)?,
+                                    ));
                                 }
                             },
                             DataObject::DefPackage(package) => {
-                                v.push(AmlPackage::Package(self.eval_package(
-                                    package,
-                                    local_variables,
-                                    argument_variables,
-                                    current_scope,
-                                )?));
+                                v.push(AmlPackage::Package(
+                                    self.eval_package(package, current_scope)?,
+                                ));
                             }
                             DataObject::DefVarPackage(var_package) => {
-                                v.push(AmlPackage::Package(self.eval_var_package(
-                                    var_package,
-                                    local_variables,
-                                    argument_variables,
-                                    current_scope,
-                                )?));
+                                v.push(AmlPackage::Package(
+                                    self.eval_var_package(var_package, current_scope)?,
+                                ));
                             }
                         },
                         DataRefObject::ObjectReference(o_r) => {
@@ -1618,35 +1430,24 @@ impl Evaluator {
     fn eval_package(
         &mut self,
         p: Package,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Vec<AmlPackage>, AmlError> {
         let num = p.get_number_of_remaining_elements();
-        self.eval_package_list(p, num, local_variables, argument_variables, current_scope)
+        self.eval_package_list(p, num, current_scope)
     }
 
     fn eval_var_package(
         &mut self,
         mut p: VarPackage,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Vec<AmlPackage>, AmlError> {
         let number_of_elements_term = p.get_number_of_elements(self, current_scope)?;
         let number_of_elements = self
-            .eval_integer_expression(
-                number_of_elements_term,
-                local_variables,
-                argument_variables,
-                current_scope,
-            )?
+            .eval_integer_expression(number_of_elements_term, current_scope)?
             .to_int()?;
         self.eval_package_list(
             p.convert_to_package(number_of_elements),
             number_of_elements,
-            local_variables,
-            argument_variables,
             current_scope,
         )
     }
@@ -1654,18 +1455,11 @@ impl Evaluator {
     fn byte_list_to_vec(
         &mut self,
         mut byte_list: ByteList,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<Vec<u8>, AmlError> {
         let buffer_size_term_arg = byte_list.get_buffer_size(self)?;
         let buffer_size = self
-            .eval_integer_expression(
-                buffer_size_term_arg,
-                local_variables,
-                argument_variables,
-                current_scope,
-            )?
+            .eval_integer_expression(buffer_size_term_arg, current_scope)?
             .to_int()?;
         let mut buffer = Vec::<u8>::with_capacity(buffer_size);
         for i in 0..buffer_size {
@@ -1687,8 +1481,6 @@ impl Evaluator {
         &mut self,
         data: AmlVariable,
         target: &Target,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut LocalVariables,
         current_scope: &NameString,
     ) -> Result<(), AmlError> {
         match target {
@@ -1698,7 +1490,7 @@ impl Evaluator {
             Target::SuperName(s) => match s {
                 SuperName::SimpleName(s_n) => match s_n {
                     SimpleName::NameString(n) => {
-                        self.search_aml_variable(n, None, local_variables, argument_variables)?
+                        self.search_aml_variable(n, None, false)?
                             .try_lock()
                             .or(Err(AmlError::MutexError))?
                             .write(data)?;
@@ -1733,28 +1525,16 @@ impl Evaluator {
                         return Err(AmlError::InvalidOperation);
                     }
                     ReferenceTypeOpcode::DefDerefOf(reference) => {
-                        self.eval_term_arg(
-                            reference.clone(),
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
-                        .write(data)?;
+                        self.eval_term_arg(reference.clone(), current_scope)?
+                            .write(data)?;
                     }
                     ReferenceTypeOpcode::DefIndex(i) => {
                         let buffer = self.get_aml_variable_reference_from_term_arg(
                             i.get_source().clone(),
-                            local_variables,
-                            argument_variables,
                             current_scope,
                         )?;
                         let index = self
-                            .eval_term_arg(
-                                i.get_index().clone(),
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
+                            .eval_term_arg(i.get_index().clone(), current_scope)?
                             .to_int()?;
                         let mut aml_variable = AmlVariable::Reference((buffer, Some(index)));
                         aml_variable.write(data)?;
@@ -1762,8 +1542,6 @@ impl Evaluator {
                             self.write_data_into_target(
                                 aml_variable,
                                 i.get_destination(),
-                                local_variables,
-                                argument_variables,
                                 current_scope,
                             )?;
                         }
@@ -1781,11 +1559,9 @@ impl Evaluator {
     fn eval_bool_expression(
         &mut self,
         e: TermArg,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<bool, AmlError> {
-        let data = self.eval_term_arg(e, local_variables, argument_variables, current_scope)?;
+        let data = self.eval_term_arg(e, current_scope)?;
         match data.to_int() {
             Ok(val) => Ok(val != 0),
             Err(err) => {
@@ -1798,11 +1574,9 @@ impl Evaluator {
     fn eval_integer_expression(
         &mut self,
         e: TermArg,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
-        let data = self.eval_term_arg(e, local_variables, argument_variables, current_scope)?;
+        let data = self.eval_term_arg(e, current_scope)?;
         let constant_data = if data.is_constant_data() {
             data
         } else {
@@ -1823,14 +1597,10 @@ impl Evaluator {
     pub(super) fn eval_term_arg(
         &mut self,
         t: TermArg,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         match t {
-            TermArg::ExpressionOpcode(e) => {
-                self.eval_expression(*e, local_variables, argument_variables, current_scope)
-            }
+            TermArg::ExpressionOpcode(e) => self.eval_expression(*e, current_scope),
             TermArg::DataObject(d) => match d {
                 DataObject::ComputationalData(c_d) => match c_d {
                     ComputationalData::ConstData(c) => Ok(AmlVariable::ConstData(c)),
@@ -1841,27 +1611,16 @@ impl Evaluator {
                         Self::AML_EVALUATOR_REVISION,
                     ))),
                     ComputationalData::StringData(s) => Ok(AmlVariable::String(String::from(s))),
-                    ComputationalData::DefBuffer(byte_list) => {
-                        Ok(AmlVariable::Buffer(self.byte_list_to_vec(
-                            byte_list,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?))
-                    }
+                    ComputationalData::DefBuffer(byte_list) => Ok(AmlVariable::Buffer(
+                        self.byte_list_to_vec(byte_list, current_scope)?,
+                    )),
                 },
-                DataObject::DefPackage(p) => Ok(AmlVariable::Package(self.eval_package(
-                    p,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?)),
-                DataObject::DefVarPackage(v_p) => Ok(AmlVariable::Package(self.eval_var_package(
-                    v_p,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?)),
+                DataObject::DefPackage(p) => {
+                    Ok(AmlVariable::Package(self.eval_package(p, current_scope)?))
+                }
+                DataObject::DefVarPackage(v_p) => Ok(AmlVariable::Package(
+                    self.eval_var_package(v_p, current_scope)?,
+                )),
             },
             TermArg::ArgObj(c) => {
                 if c as usize > Self::NUMBER_OF_ARGUMENT_VARIABLES {
@@ -1891,18 +1650,11 @@ impl Evaluator {
     fn eval_expression(
         &mut self,
         e: ExpressionOpcode,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         match e {
             ExpressionOpcode::DefAcquire((mutex_name, wait)) => {
-                let mutex_object = self.get_mutex_object(
-                    &mutex_name,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let mutex_object = self.get_mutex_object(&mutex_name, current_scope)?;
 
                 let current_tick = get_cpu_manager_cluster()
                     .timer_manager
@@ -1930,28 +1682,15 @@ impl Evaluator {
                 }
                 Ok(AmlVariable::ConstData(ConstData::Byte(0)))
             }
-            ExpressionOpcode::DefBuffer(byte_list) => {
-                Ok(AmlVariable::Buffer(self.byte_list_to_vec(
-                    byte_list,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?))
+            ExpressionOpcode::DefBuffer(byte_list) => Ok(AmlVariable::Buffer(
+                self.byte_list_to_vec(byte_list, current_scope)?,
+            )),
+            ExpressionOpcode::DefPackage(p) => {
+                Ok(AmlVariable::Package(self.eval_package(p, current_scope)?))
             }
-            ExpressionOpcode::DefPackage(p) => Ok(AmlVariable::Package(self.eval_package(
-                p,
-                local_variables,
-                argument_variables,
-                current_scope,
-            )?)),
-            ExpressionOpcode::DefVarPackage(var_package) => {
-                Ok(AmlVariable::Package(self.eval_var_package(
-                    var_package,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?))
-            }
+            ExpressionOpcode::DefVarPackage(var_package) => Ok(AmlVariable::Package(
+                self.eval_var_package(var_package, current_scope)?,
+            )),
             ExpressionOpcode::DefProcessor => {
                 pr_err!("DefProcessor was deleted from ACPI 6.4.");
                 Err(AmlError::InvalidOperation)
@@ -1969,18 +1708,10 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             ExpressionOpcode::BinaryOperation(b_o) => {
-                let left = self.eval_integer_expression(
-                    b_o.get_left_operand().clone(),
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
-                let right = self.eval_integer_expression(
-                    b_o.get_right_operand().clone(),
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let left =
+                    self.eval_integer_expression(b_o.get_left_operand().clone(), current_scope)?;
+                let right =
+                    self.eval_integer_expression(b_o.get_right_operand().clone(), current_scope)?;
                 let left_value = left.to_int()?;
                 let right_value = right.to_int()?;
                 use super::opcode;
@@ -2006,20 +1737,14 @@ impl Evaluator {
                     self.write_data_into_target(
                         result_aml_variable.clone(),
                         b_o.get_target(),
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?;
                 }
                 Ok(result_aml_variable)
             }
             ExpressionOpcode::DefDecrement(decrement) => {
-                let obj = self.get_aml_variable_reference_from_super_name(
-                    &decrement,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let obj =
+                    self.get_aml_variable_reference_from_super_name(&decrement, current_scope)?;
                 let mut locked_obj = obj.try_lock().or(Err(AmlError::MutexError))?;
                 if locked_obj.is_constant_data() {
                     if let AmlVariable::ConstData(c) = *locked_obj {
@@ -2050,12 +1775,8 @@ impl Evaluator {
             }
 
             ExpressionOpcode::DefIncrement(increment) => {
-                let obj = self.get_aml_variable_reference_from_super_name(
-                    &increment,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let obj =
+                    self.get_aml_variable_reference_from_super_name(&increment, current_scope)?;
                 let mut locked_obj = obj.try_lock().or(Err(AmlError::MutexError))?;
                 if locked_obj.is_constant_data() {
                     if let AmlVariable::ConstData(c) = *locked_obj {
@@ -2085,18 +1806,10 @@ impl Evaluator {
                 }
             }
             ExpressionOpcode::DefDivide(divide) => {
-                let dividend = self.eval_integer_expression(
-                    divide.get_dividend().clone(),
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
-                let divisor = self.eval_integer_expression(
-                    divide.get_divisor().clone(),
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let dividend =
+                    self.eval_integer_expression(divide.get_dividend().clone(), current_scope)?;
+                let divisor =
+                    self.eval_integer_expression(divide.get_divisor().clone(), current_scope)?;
                 let dividend_data = dividend.to_int()?;
                 let divisor_data = divisor.to_int()?;
                 let result_size = dividend.get_byte_size()?.max(divisor.get_byte_size()?);
@@ -2107,8 +1820,6 @@ impl Evaluator {
                     self.write_data_into_target(
                         result_aml_variable.clone(),
                         divide.get_quotient(),
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?;
                 }
@@ -2117,49 +1828,31 @@ impl Evaluator {
                         dividend_data - result_data * divisor_data,
                         result_size,
                     )?);
-                    self.write_data_into_target(
-                        remainder,
-                        divide.get_remainder(),
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?;
+                    self.write_data_into_target(remainder, divide.get_remainder(), current_scope)?;
                 }
                 Ok(result_aml_variable)
             }
             ExpressionOpcode::DefFindSetLeftBit((operand, target)) => {
                 let operand_data:usize /* To detect error when changed the return type of to_int() */
-                    = self.eval_integer_expression(operand,local_variables,argument_variables,current_scope)?.to_int()?;
+                    = self.eval_integer_expression(operand,current_scope)?.to_int()?;
                 let result = AmlVariable::ConstData(ConstData::Byte(
                     (usize::BITS - operand_data.leading_zeros()) as u8,
                 ));
                 if !target.is_null() {
-                    self.write_data_into_target(
-                        result.clone(),
-                        &target,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?;
+                    self.write_data_into_target(result.clone(), &target, current_scope)?;
                 }
                 Ok(result)
             }
             ExpressionOpcode::DefFindSetRightBit((operand, target)) => {
                 let operand_data:usize /* To detect error when changed the return type of to_int() */
-                    = self.eval_integer_expression(operand,local_variables,argument_variables,current_scope)?.to_int()?;
+                    = self.eval_integer_expression(operand,current_scope)?.to_int()?;
                 let result = AmlVariable::ConstData(ConstData::Byte(if operand_data == 0 {
                     0
                 } else {
                     (operand_data.trailing_zeros() + 1) as u8
                 }));
                 if !target.is_null() {
-                    self.write_data_into_target(
-                        result.clone(),
-                        &target,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?;
+                    self.write_data_into_target(result.clone(), &target, current_scope)?;
                 }
                 Ok(result)
             }
@@ -2172,12 +1865,7 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             ExpressionOpcode::DefNot((operand, target)) => {
-                let op = self.eval_integer_expression(
-                    operand,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let op = self.eval_integer_expression(operand, current_scope)?;
                 if let AmlVariable::ConstData(c) = op {
                     let result_aml_variables = AmlVariable::ConstData(match c {
                         ConstData::Byte(data) => ConstData::Byte(!data),
@@ -2189,8 +1877,6 @@ impl Evaluator {
                         self.write_data_into_target(
                             result_aml_variables.clone(),
                             &target,
-                            local_variables,
-                            argument_variables,
                             current_scope,
                         )?;
                     }
@@ -2205,12 +1891,8 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             ExpressionOpcode::DefSizeOf(obj_name) => {
-                let obj = self.get_aml_variable_reference_from_super_name(
-                    &obj_name,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let obj =
+                    self.get_aml_variable_reference_from_super_name(&obj_name, current_scope)?;
                 let byte_size = match &*obj.try_lock().or(Err(AmlError::MutexError))? {
                     AmlVariable::String(s) => s.len(),
                     AmlVariable::Buffer(b) => b.len(),
@@ -2224,13 +1906,10 @@ impl Evaluator {
                 Ok(AmlVariable::ConstData(ConstData::QWord(byte_size as _)))
             }
             ExpressionOpcode::DefStore((data, destination)) => {
-                let data =
-                    self.eval_term_arg(data, local_variables, argument_variables, current_scope)?;
+                let data = self.eval_term_arg(data, current_scope)?;
                 self.write_data_into_target(
                     data.clone(),
                     &Target::SuperName(destination.clone()),
-                    local_variables,
-                    argument_variables,
                     current_scope,
                 )?;
                 Ok(data)
@@ -2240,12 +1919,7 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             ExpressionOpcode::DefToInteger((operand, target)) => {
-                let obj = self.eval_term_arg(
-                    operand,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let obj = self.eval_term_arg(operand, current_scope)?;
                 let constant_data = if obj.is_constant_data() {
                     obj
                 } else {
@@ -2269,8 +1943,6 @@ impl Evaluator {
                     self.write_data_into_target(
                         AmlVariable::ConstData(result),
                         &target,
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?;
                 }
@@ -2281,21 +1953,15 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             ExpressionOpcode::DefCondRefOf((source, destination)) => {
-                let result = self.get_aml_variable_reference_from_super_name(
-                    &source,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                );
-                if matches!(result, Err(AmlError::InvalidMethodName(_))) {
+                let result =
+                    self.get_aml_variable_reference_from_super_name(&source, current_scope);
+                if matches!(result, Err(AmlError::InvalidName(_))) {
                     Ok(AmlVariable::ConstData(ConstData::Byte(0)))
                 } else if let Ok(obj) = result {
                     if !destination.is_null() {
                         self.write_data_into_target(
                             AmlVariable::Reference((obj, None)),
                             &destination,
-                            local_variables,
-                            argument_variables,
                             current_scope,
                         )?;
                     }
@@ -2306,147 +1972,74 @@ impl Evaluator {
             }
             ExpressionOpcode::DefLAnd((left, right)) => {
                 Ok(AmlVariable::ConstData(ConstData::Byte(
-                    (self.eval_bool_expression(
-                        left,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )? && self.eval_bool_expression(
-                        right,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?) as u8,
+                    (self.eval_bool_expression(left, current_scope)?
+                        && self.eval_bool_expression(right, current_scope)?)
+                        as u8,
                 )))
             }
             ExpressionOpcode::DefLEqual((left, right)) => {
                 Ok(AmlVariable::ConstData(ConstData::Byte(
                     (self
-                        .eval_integer_expression(
-                            left,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_integer_expression(left, current_scope)?
                         .to_int()?
                         == self
-                            .eval_integer_expression(
-                                right,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
+                            .eval_integer_expression(right, current_scope)?
                             .to_int()?) as u8,
                 )))
             }
             ExpressionOpcode::DefLGreater((left, right)) => {
                 Ok(AmlVariable::ConstData(ConstData::Byte(
                     (self
-                        .eval_integer_expression(
-                            left,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_integer_expression(left, current_scope)?
                         .to_int()?
                         > self
-                            .eval_integer_expression(
-                                right,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
+                            .eval_integer_expression(right, current_scope)?
                             .to_int()?) as u8,
                 )))
             }
             ExpressionOpcode::DefLGreaterEqual((left, right)) => {
                 Ok(AmlVariable::ConstData(ConstData::Byte(
                     (self
-                        .eval_integer_expression(
-                            left,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_integer_expression(left, current_scope)?
                         .to_int()?
                         >= self
-                            .eval_integer_expression(
-                                right,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
+                            .eval_integer_expression(right, current_scope)?
                             .to_int()?) as u8,
                 )))
             }
             ExpressionOpcode::DefLLess((left, right)) => {
                 Ok(AmlVariable::ConstData(ConstData::Byte(
                     (self
-                        .eval_integer_expression(
-                            left,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_integer_expression(left, current_scope)?
                         .to_int()?
                         < self
-                            .eval_integer_expression(
-                                right,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
+                            .eval_integer_expression(right, current_scope)?
                             .to_int()?) as u8,
                 )))
             }
             ExpressionOpcode::DefLLessEqual((left, right)) => {
                 Ok(AmlVariable::ConstData(ConstData::Byte(
                     (self
-                        .eval_integer_expression(
-                            left,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_integer_expression(left, current_scope)?
                         .to_int()?
                         <= self
-                            .eval_integer_expression(
-                                right,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
+                            .eval_integer_expression(right, current_scope)?
                             .to_int()?) as u8,
                 )))
             }
             ExpressionOpcode::DefLNot(source) => Ok(AmlVariable::ConstData(ConstData::Byte(
                 (self
-                    .eval_integer_expression(
-                        source,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?
+                    .eval_integer_expression(source, current_scope)?
                     .to_int()?
                     == 0) as u8,
             ))),
             ExpressionOpcode::DefLNotEqual((left, right)) => {
                 Ok(AmlVariable::ConstData(ConstData::Byte(
                     (self
-                        .eval_integer_expression(
-                            left,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_integer_expression(left, current_scope)?
                         .to_int()?
                         != self
-                            .eval_integer_expression(
-                                right,
-                                local_variables,
-                                argument_variables,
-                                current_scope,
-                            )?
+                            .eval_integer_expression(right, current_scope)?
                             .to_int()?) as u8,
                 )))
             }
@@ -2459,17 +2052,8 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             ExpressionOpcode::DefLOr((left, right)) => Ok(AmlVariable::ConstData(ConstData::Byte(
-                (self.eval_bool_expression(
-                    left,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )? || self.eval_bool_expression(
-                    right,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?) as u8,
+                (self.eval_bool_expression(left, current_scope)?
+                    || self.eval_bool_expression(right, current_scope)?) as u8,
             ))),
             ExpressionOpcode::DefWait(_) => {
                 pr_err!("DefWait is not supported currently: {:?}", e);
@@ -2477,42 +2061,25 @@ impl Evaluator {
             }
             ExpressionOpcode::ReferenceTypeOpcode(r_e) => match r_e {
                 ReferenceTypeOpcode::DefRefOf(super_name) => Ok(AmlVariable::Reference((
-                    self.get_aml_variable_reference_from_super_name(
-                        &super_name,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?,
+                    self.get_aml_variable_reference_from_super_name(&super_name, current_scope)?,
                     None,
                 ))),
-                ReferenceTypeOpcode::DefDerefOf(reference) => self.eval_term_arg(
-                    reference.clone(),
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                ),
+                ReferenceTypeOpcode::DefDerefOf(reference) => {
+                    self.eval_term_arg(reference.clone(), current_scope)
+                }
                 ReferenceTypeOpcode::DefIndex(i) => {
                     let buffer = self.get_aml_variable_reference_from_term_arg(
                         i.get_source().clone(),
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?;
                     let index = self
-                        .eval_term_arg(
-                            i.get_index().clone(),
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )?
+                        .eval_term_arg(i.get_index().clone(), current_scope)?
                         .to_int()?;
                     let aml_variable = AmlVariable::Reference((buffer, Some(index)));
                     if !i.get_destination().is_null() {
                         self.write_data_into_target(
                             aml_variable.clone(),
                             i.get_destination(),
-                            local_variables,
-                            argument_variables,
                             current_scope,
                         )?;
                     }
@@ -2528,12 +2095,7 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             ExpressionOpcode::DefToBuffer((operand, target)) => {
-                let obj = self.eval_term_arg(
-                    operand,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let obj = self.eval_term_arg(operand, current_scope)?;
                 let constant_data = if obj.is_constant_data() {
                     obj
                 } else {
@@ -2565,20 +2127,13 @@ impl Evaluator {
                     self.write_data_into_target(
                         AmlVariable::Buffer(result.clone()),
                         &target,
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?;
                 }
                 Ok(AmlVariable::Buffer(result))
             }
             ExpressionOpcode::DefToDecimalString((operand, target)) => {
-                let obj = self.eval_term_arg(
-                    operand,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let obj = self.eval_term_arg(operand, current_scope)?;
                 let constant_data = if obj.is_constant_data() {
                     obj
                 } else {
@@ -2603,20 +2158,13 @@ impl Evaluator {
                     self.write_data_into_target(
                         AmlVariable::String(result.clone()),
                         &target,
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?;
                 }
                 Ok(AmlVariable::String(result))
             }
             ExpressionOpcode::DefToHexString((operand, target)) => {
-                let obj = self.eval_term_arg(
-                    operand,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let obj = self.eval_term_arg(operand, current_scope)?;
                 let constant_data = if obj.is_constant_data() {
                     obj
                 } else {
@@ -2641,32 +2189,20 @@ impl Evaluator {
                     self.write_data_into_target(
                         AmlVariable::String(result.clone()),
                         &target,
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?;
                 }
                 Ok(AmlVariable::String(result))
             }
             ExpressionOpcode::DefToString(((operand, length), target)) => {
-                let data = self.eval_term_arg(
-                    operand,
-                    local_variables,
-                    argument_variables,
-                    current_scope,
-                )?;
+                let data = self.eval_term_arg(operand, current_scope)?;
                 let constant_data = if data.is_constant_data() {
                     data
                 } else {
                     data.get_constant_data()?
                 };
                 let len = self
-                    .eval_integer_expression(
-                        length,
-                        local_variables,
-                        argument_variables,
-                        current_scope,
-                    )?
+                    .eval_integer_expression(length, current_scope)?
                     .to_int()?;
 
                 let result = match constant_data {
@@ -2683,20 +2219,13 @@ impl Evaluator {
                     self.write_data_into_target(
                         AmlVariable::String(result.clone()),
                         &target,
-                        local_variables,
-                        argument_variables,
                         current_scope,
                     )?;
                 }
                 Ok(AmlVariable::String(result))
             }
             ExpressionOpcode::MethodInvocation(method_invocation) => {
-                let obj = self.search_aml_variable(
-                    method_invocation.get_name(),
-                    None,
-                    local_variables,
-                    argument_variables,
-                )?;
+                let obj = self.search_aml_variable(method_invocation.get_name(), None, false)?;
 
                 let locked_obj = obj.try_lock().or(Err(AmlError::MutexError))?;
                 match &*locked_obj {
@@ -2706,21 +2235,13 @@ impl Evaluator {
                         self.eval_method_invocation(
                             &method_invocation,
                             &cloned_method,
-                            local_variables,
-                            argument_variables,
                             current_scope,
                         )
                     }
                     AmlVariable::BuiltInMethod((func, _)) => {
                         let cloned_func = func.clone();
                         drop(locked_obj);
-                        self.eval_builtin_method(
-                            &method_invocation,
-                            cloned_func,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        )
+                        self.eval_builtin_method(&method_invocation, cloned_func, current_scope)
                     }
 
                     _ => Ok(AmlVariable::Reference((obj, None))),
@@ -2741,18 +2262,11 @@ impl Evaluator {
     fn release_mutex(
         &mut self,
         mutex_name: &SuperName,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<(), AmlError> {
-        self.get_mutex_object(
-            &mutex_name,
-            local_variables,
-            argument_variables,
-            current_scope,
-        )?
-        .0
-        .fetch_sub(1, Ordering::Release);
+        self.get_mutex_object(&mutex_name, current_scope)?
+            .0
+            .fetch_sub(1, Ordering::Release);
         return Ok(());
     }
 
@@ -2776,17 +2290,10 @@ impl Evaluator {
     fn eval_sleep(
         &mut self,
         milli_seconds: TermArg,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<(), AmlError> {
         let seconds = self
-            .eval_integer_expression(
-                milli_seconds,
-                local_variables,
-                argument_variables,
-                current_scope,
-            )?
+            .eval_integer_expression(milli_seconds, current_scope)?
             .to_int()?;
         if get_cpu_manager_cluster()
             .timer_manager
@@ -2802,17 +2309,10 @@ impl Evaluator {
     fn eval_stall(
         &mut self,
         micro_seconds: TermArg,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<(), AmlError> {
         let seconds = self
-            .eval_integer_expression(
-                micro_seconds,
-                local_variables,
-                argument_variables,
-                current_scope,
-            )?
+            .eval_integer_expression(micro_seconds, current_scope)?
             .to_int()?;
 
         if get_cpu_manager_cluster()
@@ -2829,35 +2329,18 @@ impl Evaluator {
     fn eval_if_else(
         &mut self,
         i_e: IfElse,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<Option<StatementOpcode>, AmlError> {
         let predicate = i_e.get_predicate();
-        if self.eval_bool_expression(
-            predicate.clone(),
-            local_variables,
-            argument_variables,
-            current_scope,
-        )? {
+        if self.eval_bool_expression(predicate.clone(), current_scope)? {
             let true_statement = i_e.get_if_true_term_list();
             self.term_list_hierarchy.push(true_statement.clone());
-            let result = self.eval_term_list(
-                true_statement.clone(),
-                local_variables,
-                argument_variables,
-                current_scope,
-            );
+            let result = self.eval_term_list(true_statement.clone(), current_scope);
             self.term_list_hierarchy.pop();
             result
         } else if let Some(false_statement) = i_e.get_if_false_term_list() {
             self.term_list_hierarchy.push(false_statement.clone());
-            let result = self.eval_term_list(
-                false_statement.clone(),
-                local_variables,
-                argument_variables,
-                current_scope,
-            );
+            let result = self.eval_term_list(false_statement.clone(), current_scope);
             self.term_list_hierarchy.pop();
             result
         } else {
@@ -2868,30 +2351,18 @@ impl Evaluator {
     fn eval_while(
         &mut self,
         w: While,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<Option<StatementOpcode>, AmlError> {
         let predicate = w.get_predicate();
         let term_list = w.get_term_list();
         self.term_list_hierarchy.push(term_list.clone());
         loop {
-            if !self.eval_bool_expression(
-                predicate.clone(),
-                local_variables,
-                argument_variables,
-                current_scope,
-            )? {
+            if !self.eval_bool_expression(predicate.clone(), current_scope)? {
                 self.term_list_hierarchy.pop();
                 return Ok(None);
             }
 
-            match self.eval_term_list(
-                term_list.clone(),
-                local_variables,
-                argument_variables,
-                current_scope,
-            ) {
+            match self.eval_term_list(term_list.clone(), current_scope) {
                 Ok(None) | Ok(Some(StatementOpcode::DefContinue)) => { /* Continue */ }
                 Ok(Some(StatementOpcode::DefBreak)) => {
                     self.term_list_hierarchy.pop();
@@ -2908,8 +2379,6 @@ impl Evaluator {
     fn eval_term_list(
         &mut self,
         mut term_list: TermList,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<Option<StatementOpcode>, AmlError> {
         while let Some(term_obj) = term_list.next(self)? {
@@ -2922,7 +2391,7 @@ impl Evaluator {
                         self.eval_notify(n)?;
                     }
                     StatementOpcode::DefRelease(m) => {
-                        self.release_mutex(&m, local_variables, argument_variables, current_scope)?;
+                        self.release_mutex(&m, current_scope)?;
                     }
                     StatementOpcode::DefReset(event) => {
                         self.reset_event(&event)?;
@@ -2934,14 +2403,13 @@ impl Evaluator {
                         self.eval_signal(&signal)?;
                     }
                     StatementOpcode::DefSleep(sleep) => {
-                        self.eval_sleep(sleep, local_variables, argument_variables, current_scope)?;
+                        self.eval_sleep(sleep, current_scope)?;
                     }
                     StatementOpcode::DefStall(sleep) => {
-                        self.eval_stall(sleep, local_variables, argument_variables, current_scope)?;
+                        self.eval_stall(sleep, current_scope)?;
                     }
                     StatementOpcode::DefWhile(w) => {
-                        let result =
-                            self.eval_while(w, local_variables, argument_variables, current_scope);
+                        let result = self.eval_while(w, current_scope);
                         if result.is_err() {
                             return result;
                         } else if matches!(result, Ok(None)) {
@@ -2964,12 +2432,7 @@ impl Evaluator {
                         return Ok(Some(StatementOpcode::DefFatal(f)));
                     }
                     StatementOpcode::DefIfElse(i_e) => {
-                        let result = self.eval_if_else(
-                            i_e,
-                            local_variables,
-                            argument_variables,
-                            current_scope,
-                        );
+                        let result = self.eval_if_else(i_e, current_scope);
                         if result.is_err() {
                             return result;
                         } else if matches!(result, Ok(None)) {
@@ -2980,7 +2443,7 @@ impl Evaluator {
                     }
                 },
                 TermObj::ExpressionOpcode(e_o) => {
-                    self.eval_expression(e_o, local_variables, argument_variables, current_scope)?;
+                    self.eval_expression(e_o, current_scope)?;
                 }
             }
         }
@@ -2991,16 +2454,12 @@ impl Evaluator {
         &mut self,
         method_invocation: &MethodInvocation,
         func: AmlFunction,
-        local_variables: &mut LocalVariables,
-        argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         let (_, mut new_argument_variables) = Self::init_local_variables_and_argument_variables();
         for (index, arg) in method_invocation.get_ter_arg_list().list.iter().enumerate() {
             new_argument_variables[index] = Arc::new(Mutex::new(self.eval_term_arg(
                 arg.clone(),
-                local_variables,
-                argument_variables,
                 current_scope,
             )?));
         }
@@ -3015,7 +2474,7 @@ impl Evaluator {
         method: &Method,
         arguments: &[AmlVariable],
     ) -> Result<AmlVariable, AmlError> {
-        let (mut local_variables, mut argument_variables) =
+        let (mut new_local_variables, mut new_argument_variables) =
             Self::init_local_variables_and_argument_variables();
 
         if method.get_argument_count() != arguments.len() {
@@ -3036,7 +2495,7 @@ impl Evaluator {
             }
         }
 
-        for (destination, source) in argument_variables.iter_mut().zip(arguments.iter()) {
+        for (destination, source) in new_argument_variables.iter_mut().zip(arguments.iter()) {
             if matches!(source, AmlVariable::Uninitialized) {
                 continue;
             }
@@ -3046,16 +2505,18 @@ impl Evaluator {
         self.term_list_hierarchy
             .push(method.get_term_list().clone());
 
-        let result = self.eval_term_list(
-            method.get_term_list().clone(),
-            &mut local_variables,
-            &mut argument_variables,
-            method.get_name(),
-        );
         /* Backup current scope and move into method's scope */
         let scope_backup = self.variable_tree.backup_current_scope();
         self.variable_tree
             .move_current_scope(method.get_term_list().get_scope_name())?;
+        /* Swap local variables and argument variables */
+        core::mem::swap(&mut self.current_local_variables, &mut new_local_variables);
+        core::mem::swap(
+            &mut self.current_argument_variables,
+            &mut new_argument_variables,
+        );
+
+        let result = self.eval_term_list(method.get_term_list().clone(), method.get_name());
 
         let result = match result {
             Err(e) => {
@@ -3066,12 +2527,7 @@ impl Evaluator {
             Ok(Some(v)) => match v {
                 StatementOpcode::DefFatal(_) => Err(AmlError::InvalidOperation),
                 StatementOpcode::DefReturn(return_value) => Ok(self
-                    .eval_term_arg(
-                        return_value,
-                        &mut local_variables,
-                        &mut argument_variables,
-                        method.get_name(),
-                    )?
+                    .eval_term_arg(return_value, method.get_name())?
                     .get_constant_data()?
                     .clone()),
                 _ => {
@@ -3093,6 +2549,11 @@ impl Evaluator {
         /* Restore status */
         self.variable_tree.clear_current_cache();
         self.variable_tree.restore_current_scope(scope_backup);
+        core::mem::swap(&mut self.current_local_variables, &mut new_local_variables);
+        core::mem::swap(
+            &mut self.current_argument_variables,
+            &mut new_argument_variables,
+        );
 
         return result;
     }
@@ -3129,8 +2590,6 @@ impl Evaluator {
         &mut self,
         method_invocation: &MethodInvocation,
         method: &Method,
-        original_local_variables: &mut LocalVariables,
-        original_argument_variables: &mut ArgumentVariables,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         if method_invocation.get_ter_arg_list().list.len() != method.get_argument_count() {
@@ -3153,12 +2612,7 @@ impl Evaluator {
             .iter_mut()
             .zip(method_invocation.get_ter_arg_list().list.iter())
         {
-            *destination = self.eval_term_arg(
-                source.clone(),
-                original_local_variables,
-                original_argument_variables,
-                current_scope,
-            )?;
+            *destination = self.eval_term_arg(source.clone(), current_scope)?;
         }
 
         self.eval_method(method, &arguments, Some(current_scope))

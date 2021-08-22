@@ -105,15 +105,8 @@ impl AmlInterpreter {
 
     pub fn get_aml_variable(&mut self, name: &NameString) -> Option<AmlVariable> {
         let mut evaluator = self.evaluator.clone();
-        let (mut dummy_local_variables, mut dummy_argument_variables) =
-            Evaluator::init_local_variables_and_argument_variables();
 
-        match evaluator.search_aml_variable(
-            name,
-            None,
-            &mut dummy_local_variables,
-            &mut dummy_argument_variables,
-        ) {
+        match evaluator.search_aml_variable(name, None, false) {
             Ok(v) => {
                 let cloned_v = v.lock().unwrap().clone();
                 drop(v);
@@ -172,14 +165,8 @@ impl AmlInterpreter {
             pr_warn!("method_name is NullName.");
             return Ok(None);
         }
-        let (mut dummy_local_variables, mut dummy_argument_variables) =
-            Evaluator::init_local_variables_and_argument_variables();
-        let method = match self.evaluator.search_aml_variable(
-            method_name,
-            None,
-            &mut dummy_local_variables,
-            &mut dummy_argument_variables,
-        ) {
+
+        let method = match self.evaluator.search_aml_variable(method_name, None, false) {
             Ok(v) => {
                 if let AmlVariable::Method(m) = &*v.lock().unwrap() {
                     m.clone()
