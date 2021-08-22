@@ -992,8 +992,8 @@ impl Evaluator {
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
         match named_object {
-            NamedObject::DefBankField(_) => {
-                pr_err!("DefBankField is not implemented.");
+            NamedObject::DefBankField(f) => {
+                pr_err!("DefBankField is not implemented: {:?}", f);
                 Err(AmlError::UnsupportedType)
             }
             NamedObject::DefCreateField(f) => {
@@ -1035,11 +1035,13 @@ impl Evaluator {
                     }))
                 };
             }
-            NamedObject::DefDataRegion(_) => {
-                unimplemented!();
+            NamedObject::DefDataRegion(d) => {
+                pr_err!("DefDataRegion is not implemented: {:?}", d);
+                Err(AmlError::UnsupportedType)
             }
-            NamedObject::DefDevice(_) => {
-                Ok(AmlVariable::Uninitialized) /* Temporary */
+            NamedObject::DefDevice(d) => {
+                pr_err!("Converting Device({:?}) to AmlVariable is invalid.", d);
+                Err(AmlError::InvalidOperation)
             }
             NamedObject::DefField(f) => {
                 let mut access_size = f.get_access_size();
@@ -1624,12 +1626,8 @@ impl Evaluator {
         } else {
             data.get_constant_data()?
         };
-        if let Err(err) = constant_data.to_int() {
-            pr_err!(
-                "Expected Integer, but found {:?}({:?}).",
-                constant_data,
-                err
-            );
+        if let Err(e) = constant_data.to_int() {
+            pr_err!("Expected Integer, but found {:?}({:?}).", constant_data, e);
             Err(AmlError::InvalidType)
         } else {
             Ok(constant_data)
@@ -2293,12 +2291,12 @@ impl Evaluator {
     }
 
     fn eval_notify(&mut self, notify: Notify) -> Result<(), AmlError> {
-        pr_info!(
+        pr_debug!(
             "Notify: {:?} ({:?})",
             notify.get_notify_object_name(),
             notify.get_notify_value()
         );
-        Ok(())
+        return Ok(());
     }
 
     fn release_mutex(
@@ -2312,21 +2310,23 @@ impl Evaluator {
         return Ok(());
     }
 
-    fn reset_event(&mut self, _event: &SuperName) -> Result<(), AmlError> {
-        unimplemented!()
+    fn reset_event(&mut self, event: &SuperName) -> Result<(), AmlError> {
+        pr_err!("Resetting {:?} is not supported currently.", event);
+        return Err(AmlError::UnsupportedType);
     }
 
     fn eval_break_point(&self, term_list: &TermList) {
-        pr_info!("AML BreakPoint: {:?}", term_list);
+        pr_debug!("AML BreakPoint: {:?}", term_list);
     }
 
     fn eval_fatal(&self, fatal: &Fatal, term_list: &TermList) -> Result<(), AmlError> {
-        pr_info!("AML Fatal: {:?} ({:?})", fatal, term_list);
+        pr_err!("AML Fatal: {:?} ({:?})", fatal, term_list);
         return Ok(());
     }
 
-    fn eval_signal(&self, _signal: &SuperName) -> Result<(), AmlError> {
-        unimplemented!()
+    fn eval_signal(&self, signal: &SuperName) -> Result<(), AmlError> {
+        pr_err!("Signal to {:?} is not supported currently.", signal);
+        return Err(AmlError::UnsupportedType);
     }
 
     fn eval_sleep(
@@ -2363,7 +2363,7 @@ impl Evaluator {
         {
             Ok(())
         } else {
-            pr_info!("Sleeping {}us was failed.", seconds);
+            pr_err!("Sleeping {}us was failed.", seconds);
             Err(AmlError::InvalidOperation)
         }
     }
