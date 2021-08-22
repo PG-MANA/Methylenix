@@ -1543,7 +1543,7 @@ impl Evaluator {
                             pr_err!("Writing ArgObj({}) is invalid.", l);
                             return Err(AmlError::InvalidOperation);
                         }
-                        argument_variables[*l as usize]
+                        self.current_argument_variables[*l as usize]
                             .try_lock()
                             .or(Err(AmlError::MutexError))?
                             .write(data)?;
@@ -1553,7 +1553,7 @@ impl Evaluator {
                             pr_err!("Writing LocalObj({}) is invalid.", l);
                             return Err(AmlError::InvalidOperation);
                         }
-                        local_variables[*l as usize]
+                        self.current_local_variables[*l as usize]
                             .try_lock()
                             .or(Err(AmlError::MutexError))?
                             .write(data)?;
@@ -1670,7 +1670,7 @@ impl Evaluator {
                     pr_err!("Arg{} is out of index.", c);
                     Err(AmlError::InvalidOperation)
                 } else {
-                    Ok((*argument_variables[c as usize])
+                    Ok((*self.current_argument_variables[c as usize])
                         .try_lock()
                         .or(Err(AmlError::MutexError))?
                         .clone())
@@ -1681,7 +1681,7 @@ impl Evaluator {
                     pr_err!("Local{} is out of index.", c);
                     Err(AmlError::InvalidOperation)
                 } else {
-                    Ok((*local_variables[c as usize])
+                    Ok((*self.current_local_variables[c as usize])
                         .try_lock()
                         .or(Err(AmlError::MutexError))?
                         .clone())
