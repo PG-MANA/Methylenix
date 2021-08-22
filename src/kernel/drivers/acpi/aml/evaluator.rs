@@ -152,9 +152,9 @@ impl Evaluator {
                         }
                     }
                 }
-                Err(AmlError::InvalidMethodName(n)) => {
+                Err(AmlError::InvalidName(n)) => {
                     if n != ini {
-                        return Err(AmlError::InvalidMethodName(n));
+                        return Err(AmlError::InvalidName(n));
                     }
                 }
                 Err(e) => return Err(e),
@@ -658,7 +658,7 @@ impl Evaluator {
         argument_variables: &mut ArgumentVariables,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         if name.is_null_name() {
-            return Err(AmlError::InvalidMethodName(name.clone()));
+            return Err(AmlError::InvalidName(name.clone()));
         }
         let back_up_of_original_name_searching =
             if let Some(searching) = self.original_searching_name.replace(name.clone()) {
@@ -906,7 +906,7 @@ impl Evaluator {
         }
 
         restore_status(self, current_term_list_back_up)?;
-        return Err(AmlError::InvalidMethodName(name.clone()));
+        return Err(AmlError::InvalidName(name.clone()));
     }
 
     fn move_into_object(
@@ -962,7 +962,7 @@ impl Evaluator {
         }
 
         self.current_root_term_list = current_term_list_back_up;
-        return Err(AmlError::InvalidMethodName(object_name.clone()));
+        return Err(AmlError::InvalidName(object_name.clone()));
     }
 
     fn _move_into_device(
@@ -1318,12 +1318,12 @@ impl Evaluator {
                                     }
                                 } & 0xFF) as u16
                             }
-                            Err(AmlError::InvalidMethodName(m)) => {
+                            Err(AmlError::InvalidName(m)) => {
                                 if m == bbn_name {
                                     pr_info!("{} is not found. Assume the bus number is 0.", m);
                                     0
                                 } else {
-                                    Err(AmlError::InvalidMethodName(m))?
+                                    Err(AmlError::InvalidName(m))?
                                 }
                             }
                             Err(e) => Err(e)?,

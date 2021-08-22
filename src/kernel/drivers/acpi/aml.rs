@@ -45,8 +45,7 @@ pub struct AmlStream {
 pub enum AmlError {
     AccessOutOfRange,
     InvalidType,
-    InvalidMethodName(NameString),
-    InvalidScope(NameString),
+    InvalidName(NameString),
     InvalidOperation,
     MutexError,
     ObjectTreeError,
@@ -189,7 +188,7 @@ impl AmlInterpreter {
                     return Err(());
                 }
             }
-            Err(AmlError::InvalidMethodName(n)) => {
+            Err(AmlError::InvalidName(n)) => {
                 return if &n == method_name {
                     pr_warn!("{} is not found.", method_name);
                     Ok(None)
