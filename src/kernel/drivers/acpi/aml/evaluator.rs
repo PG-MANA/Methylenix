@@ -179,32 +179,15 @@ impl Evaluator {
                     match n_m {
                         NamespaceModifierObject::DefScope(s) => {
                             self.term_list_hierarchy.push(s.get_term_list().clone());
+                            let tree_backup = self.variable_tree.backup_current_scope();
                             self.variable_tree.move_current_scope(s.get_name())?;
                             self.walk_all_devices(
                                 s.get_term_list().clone(),
                                 local_variables,
                                 argument_variables,
                             )?;
-                            if let Some(old_current) = self.term_list_hierarchy.pop() {
-                                if old_current.get_scope_name() != term_list.get_scope_name() {
-                                    self.variable_tree
-                                        .move_current_scope(term_list.get_scope_name())?;
-                                }
-                            }
-                            if term_list
-                                .get_scope_name()
-                                .get_last_element()
-                                .and_then(|e| {
-                                    Some(&e != self.variable_tree.get_current_scope_name())
-                                })
-                                .unwrap_or_else(|| {
-                                    term_list.get_scope_name()
-                                        != self.variable_tree.get_current_scope_name()
-                                })
-                            {
-                                self.variable_tree
-                                    .move_current_scope(term_list.get_scope_name())?;
-                            }
+                            self.variable_tree.restore_current_scope(tree_backup);
+                            self.term_list_hierarchy.pop();
                         }
                         _ => { /* Ignore */ }
                     }
@@ -212,6 +195,7 @@ impl Evaluator {
                 TermObj::NamedObj(n_o) => match n_o {
                     NamedObject::DefDevice(d) => {
                         self.term_list_hierarchy.push(d.get_term_list().clone());
+                        let tree_backup = self.variable_tree.backup_current_scope();
                         self.variable_tree
                             .move_current_scope(d.get_term_list().get_scope_name())?;
                         self.evaluate_sta_and_ini_in_device(
@@ -219,6 +203,7 @@ impl Evaluator {
                             local_variables,
                             argument_variables,
                         )?;
+                        self.variable_tree.restore_current_scope(tree_backup);
                         self.term_list_hierarchy.pop();
                         self.variable_tree
                             .move_current_scope(term_list.get_scope_name())?;
@@ -229,26 +214,11 @@ impl Evaluator {
                     {
                         let t = o.get_term_list().unwrap();
                         self.term_list_hierarchy.push(t.clone());
+                        let tree_backup = self.variable_tree.backup_current_scope();
                         self.variable_tree.move_current_scope(t.get_scope_name())?;
                         self.walk_all_devices(t, local_variables, argument_variables)?;
-                        if let Some(old_current) = self.term_list_hierarchy.pop() {
-                            if old_current.get_scope_name() != term_list.get_scope_name() {
-                                self.variable_tree
-                                    .move_current_scope(term_list.get_scope_name())?;
-                            }
-                        }
-                        if term_list
-                            .get_scope_name()
-                            .get_last_element()
-                            .and_then(|e| Some(&e != self.variable_tree.get_current_scope_name()))
-                            .unwrap_or_else(|| {
-                                term_list.get_scope_name()
-                                    != self.variable_tree.get_current_scope_name()
-                            })
-                        {
-                            self.variable_tree
-                                .move_current_scope(term_list.get_scope_name())?;
-                        }
+                        self.term_list_hierarchy.pop();
+                        self.variable_tree.restore_current_scope(tree_backup);
                     }
                     _ => { /* Ignore */ }
                 },
@@ -432,6 +402,7 @@ impl Evaluator {
                                     })
                                     .unwrap_or(false)
                             {
+                                let backup = self.variable_tree.backup_current_scope();
                                 self.term_list_hierarchy.push(s.get_term_list().clone());
 
                                 let result = self.search_aml_variable_by_parsing_term_list(
@@ -439,29 +410,24 @@ impl Evaluator {
                                     s.get_term_list().clone(),
                                     search_scope,
                                     should_keep_term_list_hierarchy_when_found,
-                                    local_variables,
-                                    argument_variables,
                                 );
 
                                 match &result {
                                     Ok(Some(_)) => {
                                         if !should_keep_term_list_hierarchy_when_found {
                                             self.term_list_hierarchy.pop();
-                                            self.variable_tree
-                                                .move_current_scope(term_list.get_scope_name())?;
+                                            self.variable_tree.restore_current_scope(backup);
                                         }
                                         return result;
                                     }
                                     Ok(None) | Err(AmlError::NestedSearch) => {
                                         self.term_list_hierarchy.pop();
-                                        self.variable_tree
-                                            .move_current_scope(term_list.get_scope_name())?;
+                                        self.variable_tree.restore_current_scope(backup);
                                         /* Continue */
                                     }
                                     Err(_) => {
                                         self.term_list_hierarchy.pop();
-                                        self.variable_tree
-                                            .move_current_scope(term_list.get_scope_name())?;
+                                        self.variable_tree.restore_current_scope(backup);
                                         return result;
                                     }
                                 };
@@ -470,6 +436,7 @@ impl Evaluator {
                     }
                 }
                 TermObj::NamedObj(named_object) => {
+                    let tree_backup = self.variable_tree.backup_current_scope();
                     match self.search_aml_variable_by_parsing_named_object(
                         name,
                         term_list.get_scope_name(),
@@ -480,10 +447,13 @@ impl Evaluator {
                         argument_variables,
                     ) {
                         Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
-                        o => return o,
+                        Ok(Some(v)) => return Ok(Some(v)),
+                        o => {
+                            self.variable_tree.restore_current_scope(tree_backup);
+                            return o;
+                        }
                     }
-                    self.variable_tree
-                        .move_current_scope(term_list.get_scope_name())?;
+                    self.variable_tree.restore_current_scope(tree_backup);
                 }
                 TermObj::StatementOpcode(s) => {
                     if let StatementOpcode::DefIfElse(_i_e) = s {
@@ -584,8 +554,10 @@ impl Evaluator {
             }
             Ok(None)
         } else if let Some(term_list) = named_object.get_term_list() {
-            /* Add scope check */
+            let tree_backup = self.variable_tree.backup_current_scope();
             self.term_list_hierarchy.push(term_list.clone());
+            self.variable_tree
+                .move_current_scope(term_list.get_scope_name())?;
             let result = self.search_aml_variable_by_parsing_term_list(
                 name,
                 term_list,
@@ -595,9 +567,9 @@ impl Evaluator {
                 argument_variables,
             );
             if !(matches!(result, Ok(Some(_))) && should_keep_term_list_hierarchy_when_found) {
+                self.variable_tree.restore_current_scope(tree_backup);
                 self.term_list_hierarchy.pop();
             }
-            self.variable_tree.move_current_scope(current_scope)?;
             result
         } else {
             Ok(None)
@@ -613,7 +585,7 @@ impl Evaluator {
         if let Some(d) = self.variable_tree.find_data_from_root(name)? {
             return Ok(Some(d));
         }
-        let current_variable_tree_backup = self.variable_tree.clone();
+        let tree_backup = self.variable_tree.backup_current_scope();
         let mut term_list_hierarchy_backup = Vec::new();
         core::mem::swap(
             &mut term_list_hierarchy_backup,
@@ -635,15 +607,8 @@ impl Evaluator {
             argument_variables,
         );
 
-        if let Ok(Some(_)) = &result {
-            self.variable_tree = current_variable_tree_backup;
-            core::mem::swap(
-                &mut term_list_hierarchy_backup,
-                &mut self.term_list_hierarchy,
-            );
-            return result;
-        } else if result.is_err() {
-            self.variable_tree = current_variable_tree_backup;
+        if matches!(&result, Ok(Some(_))) || result.is_err() {
+            self.variable_tree.restore_current_scope(tree_backup);
             core::mem::swap(
                 &mut term_list_hierarchy_backup,
                 &mut self.term_list_hierarchy,
@@ -661,30 +626,20 @@ impl Evaluator {
                 self.current_root_term_list.clone(),
                 None,
                 false,
-                local_variables,
-                argument_variables,
             );
 
-            if let Ok(Some(_)) = &result {
-                self.variable_tree = current_variable_tree_backup;
-                self.current_root_term_list = current_term_list_backup;
+            if matches!(&result, Ok(Some(_))) || result.is_err() {
+                self.variable_tree.restore_current_scope(tree_backup);
                 core::mem::swap(
                     &mut term_list_hierarchy_backup,
                     &mut self.term_list_hierarchy,
                 );
-                return result;
-            } else if result.is_err() {
-                self.variable_tree = current_variable_tree_backup;
                 self.current_root_term_list = current_term_list_backup;
-                core::mem::swap(
-                    &mut term_list_hierarchy_backup,
-                    &mut self.term_list_hierarchy,
-                );
                 return result;
             }
             self.term_list_hierarchy.clear();
         }
-        self.variable_tree = current_variable_tree_backup;
+        self.variable_tree.restore_current_scope(tree_backup);
         self.current_root_term_list = current_term_list_backup;
         core::mem::swap(
             &mut term_list_hierarchy_backup,
@@ -716,33 +671,11 @@ impl Evaluator {
                 None
             };
 
-        let current_scope_backup = if self
-            .term_list_hierarchy
-            .last()
-            .and_then(|n| {
-                Some(
-                    !n.get_scope_name()
-                        .suffix_search(self.variable_tree.get_current_scope_name()),
-                )
-            })
-            .unwrap_or(false)
-        {
-            let backup = self.variable_tree.get_current_scope_name().clone();
-            self.variable_tree
-                .move_current_scope(self.term_list_hierarchy.last().unwrap().get_scope_name())?;
-            Some(backup)
-        } else {
-            None
-        };
+        let tree_backup = self.variable_tree.backup_current_scope();
 
-        let restore_status = |s: &mut Self,
-                              back_up_of_original_name_searching: Option<NameString>,
-                              current_scope_backup: Option<NameString>|
-         -> Result<(), AmlError> {
+        let restore_status = |s: &mut Self| -> Result<(), AmlError> {
             s.original_searching_name = back_up_of_original_name_searching;
-            if let Some(b) = current_scope_backup {
-                s.variable_tree.move_current_scope(&b)?;
-            }
+            s.variable_tree.restore_current_scope(tree_backup);
             Ok(())
         };
 
@@ -754,11 +687,7 @@ impl Evaluator {
                 .variable_tree
                 .find_data_from_current_scope(&relative_name)?
             {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                )?;
+                restore_status(self)?;
                 return Ok(v);
             }
         }
@@ -775,22 +704,14 @@ impl Evaluator {
                 local_variables,
                 argument_variables,
             )? {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                )?;
+                restore_status(self)?;
                 return Ok(v);
             }
         }
         let single_name = name.get_single_name_path();
         if let Some(s_n) = single_name.as_ref() {
             if let Some(v) = self.variable_tree.find_data_from_current_scope(s_n)? {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                )?;
+                restore_status(self)?;
                 return Ok(v);
             }
         }
@@ -805,11 +726,7 @@ impl Evaluator {
                 local_variables,
                 argument_variables,
             )? {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                )?;
+                restore_status(self)?;
                 return Ok(v);
             }
         }
@@ -818,21 +735,13 @@ impl Evaluator {
             .unwrap_or_else(|| self.variable_tree.get_current_scope_name())
             .clone();
         /* Backup current status */
-        let tree_backup = self.variable_tree.clone();
         let mut term_list_hierarchy_back_up: Vec<TermList> =
             Vec::with_capacity(self.term_list_hierarchy.len());
         let mut term_list_hierarchy_len = self.term_list_hierarchy.len(); /* For debug */
         let restore_status = |s: &mut Self,
-                              back_up_of_original_name_searching: Option<NameString>,
-                              current_scope_backup: Option<NameString>,
-                              tree_backup: AmlVariableTree,
                               mut term_list_hierarchy_back_up: Vec<TermList>|
          -> Result<(), AmlError> {
-            s.variable_tree = tree_backup;
-            s.original_searching_name = back_up_of_original_name_searching;
-            if let Some(b) = current_scope_backup {
-                s.variable_tree.move_current_scope(&b)?;
-            }
+            restore_status(s)?;
             while let Some(t) = term_list_hierarchy_back_up.pop() {
                 s.term_list_hierarchy.push(t);
             }
@@ -852,26 +761,12 @@ impl Evaluator {
             if !name.is_absolute_path() {
                 if let Some(s_n) = single_name.as_ref() {
                     if let Some(v) = self.variable_tree.find_data_from_current_scope(s_n)? {
-                        restore_status(
-                            self,
-                            back_up_of_original_name_searching,
-                            current_scope_backup,
-                            tree_backup,
-                            term_list_hierarchy_back_up,
-                        )?;
-
+                        restore_status(self, term_list_hierarchy_back_up)?;
                         return Ok(v);
                     }
                 } else if let Some(r_n) = name.get_relative_name(term_list.get_scope_name()) {
                     if let Some(v) = self.variable_tree.find_data_from_current_scope(&r_n)? {
-                        restore_status(
-                            self,
-                            back_up_of_original_name_searching,
-                            current_scope_backup,
-                            tree_backup,
-                            term_list_hierarchy_back_up,
-                        )?;
-
+                        restore_status(self, term_list_hierarchy_back_up)?;
                         return Ok(v);
                     }
                 }
@@ -892,24 +787,11 @@ impl Evaluator {
             ) {
                 Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
                 Ok(Some(v)) => {
-                    restore_status(
-                        self,
-                        back_up_of_original_name_searching,
-                        current_scope_backup,
-                        tree_backup,
-                        term_list_hierarchy_back_up,
-                    )?;
-
+                    restore_status(self, term_list_hierarchy_back_up)?;
                     return Ok(v);
                 }
                 Err(e) => {
-                    restore_status(
-                        self,
-                        back_up_of_original_name_searching,
-                        current_scope_backup,
-                        tree_backup,
-                        term_list_hierarchy_back_up,
-                    )?;
+                    restore_status(self, term_list_hierarchy_back_up)?;
 
                     return Err(e);
                 }
@@ -939,25 +821,11 @@ impl Evaluator {
         {
             Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
             Ok(Some(v)) => {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                    tree_backup,
-                    term_list_hierarchy_back_up,
-                )?;
-
+                restore_status(self, term_list_hierarchy_back_up)?;
                 return Ok(v);
             }
             Err(e) => {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                    tree_backup,
-                    term_list_hierarchy_back_up,
-                )?;
-
+                restore_status(self, term_list_hierarchy_back_up)?;
                 return Err(e);
             }
         }
@@ -973,25 +841,11 @@ impl Evaluator {
         ) {
             Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
             Ok(Some(v)) => {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                    tree_backup,
-                    term_list_hierarchy_back_up,
-                )?;
-
+                restore_status(self, term_list_hierarchy_back_up)?;
                 return Ok(v);
             }
             Err(e) => {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                    tree_backup,
-                    term_list_hierarchy_back_up,
-                )?;
-
+                restore_status(self, term_list_hierarchy_back_up)?;
                 return Err(e);
             }
         }
@@ -1006,30 +860,24 @@ impl Evaluator {
         ) {
             Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
             Ok(Some(v)) => {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                    tree_backup,
-                    term_list_hierarchy_back_up,
-                )?;
+                restore_status(self, term_list_hierarchy_back_up)?;
 
                 return Ok(v);
             }
             Err(e) => {
-                restore_status(
-                    self,
-                    back_up_of_original_name_searching,
-                    current_scope_backup,
-                    tree_backup,
-                    term_list_hierarchy_back_up,
-                )?;
+                restore_status(self, term_list_hierarchy_back_up)?;
 
                 return Err(e);
             }
         }
 
         let current_term_list_back_up = self.current_root_term_list.clone();
+        let restore_status =
+            |s: &mut Self, current_term_list_back_up: TermList| -> Result<(), AmlError> {
+                restore_status(s, term_list_hierarchy_back_up)?;
+                s.current_root_term_list = current_term_list_back_up;
+                Ok(())
+            };
 
         /* Search from root_term_list including SSDT */
         for root_term_list in self.root_term_list.clone().iter() {
@@ -1047,41 +895,17 @@ impl Evaluator {
             ) {
                 Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
                 Ok(Some(v)) => {
-                    restore_status(
-                        self,
-                        back_up_of_original_name_searching,
-                        current_scope_backup,
-                        tree_backup,
-                        term_list_hierarchy_back_up,
-                    )?;
-                    self.current_root_term_list = current_term_list_back_up;
-
+                    restore_status(self, current_term_list_back_up)?;
                     return Ok(v);
                 }
                 Err(e) => {
-                    restore_status(
-                        self,
-                        back_up_of_original_name_searching,
-                        current_scope_backup,
-                        tree_backup,
-                        term_list_hierarchy_back_up,
-                    )?;
-                    self.current_root_term_list = current_term_list_back_up;
-
+                    restore_status(self, current_term_list_back_up)?;
                     return Err(e);
                 }
             }
         }
 
-        restore_status(
-            self,
-            back_up_of_original_name_searching,
-            current_scope_backup,
-            tree_backup,
-            term_list_hierarchy_back_up,
-        )?;
-        self.current_root_term_list = current_term_list_back_up;
-
+        restore_status(self, current_term_list_back_up)?;
         return Err(AmlError::InvalidMethodName(name.clone()));
     }
 
@@ -1097,6 +921,7 @@ impl Evaluator {
         }
         let (mut dummy_local_variables, mut dummy_argument_variables) =
             Self::init_local_variables_and_argument_variables();
+        self.variable_tree.move_to_root()?;
 
         match self.search_aml_variable_by_parsing_term_list(
             object_name,
@@ -1152,18 +977,13 @@ impl Evaluator {
                     match n_m {
                         NamespaceModifierObject::DefScope(s) => {
                             self.term_list_hierarchy.push(s.get_term_list().clone());
+                            let tree_backup = self.variable_tree.backup_current_scope();
                             self.variable_tree.move_current_scope(s.get_name())?;
                             if self._move_into_device(hid, s.get_term_list().clone(), in_device)? {
                                 return Ok(true);
                             }
-                            if let Some(old_current) = self.term_list_hierarchy.pop() {
-                                if old_current.get_scope_name() != term_list.get_scope_name() {
-                                    self.variable_tree
-                                        .move_current_scope(term_list.get_scope_name())?;
-                                }
-                            }
-                            self.variable_tree
-                                .move_current_scope(term_list.get_scope_name())?;
+                            self.variable_tree.restore_current_scope(tree_backup);
+                            self.term_list_hierarchy.pop();
                         }
                         NamespaceModifierObject::DefName(n) => {
                             if in_device {
@@ -1189,18 +1009,13 @@ impl Evaluator {
                 TermObj::NamedObj(n_o) => match n_o {
                     NamedObject::DefDevice(d) => {
                         self.term_list_hierarchy.push(d.get_term_list().clone());
+                        let tree_backup = self.variable_tree.backup_current_scope();
                         self.variable_tree.move_current_scope(d.get_name())?;
                         if self._move_into_device(hid, d.get_term_list().clone(), true)? {
                             return Ok(true);
                         }
-                        if let Some(old_current) = self.term_list_hierarchy.pop() {
-                            if old_current.get_scope_name() != term_list.get_scope_name() {
-                                self.variable_tree
-                                    .move_current_scope(term_list.get_scope_name())?;
-                            }
-                        }
-                        self.variable_tree
-                            .move_current_scope(term_list.get_scope_name())?;
+                        self.variable_tree.restore_current_scope(tree_backup);
+                        self.term_list_hierarchy.pop();
                     }
                     _ => { /* Ignore */ }
                 },
@@ -1224,12 +1039,9 @@ impl Evaluator {
             pr_err!("TermListHierarchy is not empty, it will be deleted.");
             self.term_list_hierarchy.clear();
         }
+        self.variable_tree.move_to_root()?;
         let hid_u32 = eisa_id_to_dword(hid);
-        if self._move_into_device(hid_u32, self.current_root_term_list.clone(), false)? {
-            return Ok(true);
-        }
-
-        return Ok(false);
+        self._move_into_device(hid_u32, self.current_root_term_list.clone(), false)
     }
 
     pub fn find_method_argument_count(
@@ -3240,6 +3052,10 @@ impl Evaluator {
             &mut argument_variables,
             method.get_name(),
         );
+        /* Backup current scope and move into method's scope */
+        let scope_backup = self.variable_tree.backup_current_scope();
+        self.variable_tree
+            .move_current_scope(method.get_term_list().get_scope_name())?;
 
         let result = match result {
             Err(e) => {
@@ -3273,6 +3089,11 @@ impl Evaluator {
         {
             pr_err!("TermListHierarchy may be broken.");
         }
+
+        /* Restore status */
+        self.variable_tree.clear_current_cache();
+        self.variable_tree.restore_current_scope(scope_backup);
+
         return result;
     }
 
@@ -3288,7 +3109,7 @@ impl Evaluator {
             &mut self.term_list_hierarchy,
             &mut term_list_hierarchy_backup,
         );
-        let variable_tree_backup = self.variable_tree.clone();
+        let tree_backup = self.variable_tree.backup_current_scope();
         let current_term_list_backup = self.current_root_term_list.clone();
 
         self.variable_tree.move_to_root()?;
@@ -3298,7 +3119,7 @@ impl Evaluator {
 
         /* Restore the status */
         self.term_list_hierarchy = term_list_hierarchy_backup;
-        self.variable_tree = variable_tree_backup;
+        self.variable_tree.restore_current_scope(tree_backup);
         self.current_root_term_list = current_term_list_backup;
 
         return result;

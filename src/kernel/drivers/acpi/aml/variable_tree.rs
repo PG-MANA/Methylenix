@@ -22,6 +22,10 @@ pub struct AmlVariableTree {
     current: Arc<TreeNode>,
 }
 
+pub struct AmlVariableTreeBackup {
+    current: Arc<TreeNode>,
+}
+
 impl TreeNode {
     const DEFAULT_CHILDREN_ENTRIES: usize = 8;
     const DEFAULT_VARIABLES_ENTRIES: usize = 16;
@@ -139,6 +143,16 @@ impl AmlVariableTree {
 
     pub fn get_current_scope_name(&self) -> &NameString {
         &self.current.name
+    }
+
+    pub fn backup_current_scope(&self) -> AmlVariableTreeBackup {
+        AmlVariableTreeBackup {
+            current: self.current.clone(),
+        }
+    }
+
+    pub fn restore_current_scope(&mut self, backup: AmlVariableTreeBackup) {
+        self.current = backup.current;
     }
 
     fn _find_data_and_then_clone(
