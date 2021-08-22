@@ -23,8 +23,8 @@ pub struct AmlVariableTree {
 }
 
 impl TreeNode {
-    const DEFAULT_CHILDREN_ENTRIES: usize = 64;
-    const DEFAULT_VARIABLES_ENTRIES: usize = 64;
+    const DEFAULT_CHILDREN_ENTRIES: usize = 8;
+    const DEFAULT_VARIABLES_ENTRIES: usize = 16;
 
     fn root() -> Self {
         Self {
