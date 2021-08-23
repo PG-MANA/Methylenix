@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 
 #[derive(Clone)]
 enum NameStringData {
-    Normal(([[u8; 4]; 7], u8)),
+    Normal(([[u8; 4]; NameString::NORMAL_LIMIT], u8)),
     Ex(Vec<[u8; 4]>),
 }
 
@@ -36,10 +36,11 @@ pub struct NameString {
 impl NameString {
     const ROOT_CHAR: u8 = 0x5C;
     const PARENT_PREFIX_CHAR: u8 = 0x5E;
+    const NORMAL_LIMIT: usize = 0x07;
 
     pub fn root() -> Self {
         Self {
-            data: NameStringData::Normal(([[0; 4]; 7], 0)),
+            data: NameStringData::Normal(([[0; 4]; Self::NORMAL_LIMIT], 0)),
             flag: NameStringFlag::AbsolutePath,
         }
     }
@@ -104,7 +105,7 @@ impl NameString {
             1
         };
         if let NameStringData::Normal((array, count)) = result.data {
-            if count + num_name_path > 7 {
+            if count + num_name_path > Self::NORMAL_LIMIT as u8 {
                 let mut v: Vec<[u8; 4]> = Vec::with_capacity((count + num_name_path) as usize);
                 for i in 0..count {
                     v.push(array[i as usize]);
@@ -316,16 +317,16 @@ impl NameString {
                 if s1.is_none() {
                     return None;
                 }
-                let mut buffer = [[0u8; 4]; 7];
+                let mut buffer = [[0u8; 4]; Self::NORMAL_LIMIT];
                 let mut vector: Option<Vec<[u8; 4]>> = None;
                 let mut counter = 1;
                 buffer[0] = *s1.unwrap();
                 let mut index = index + 1;
                 while let Some(d) = self.get_element(index) {
-                    if counter >= 7 {
-                        let mut v: Vec<[u8; 4]> = Vec::with_capacity(7);
-                        for i in 0..7 {
-                            v.push(buffer[i]);
+                    if counter >= Self::NORMAL_LIMIT {
+                        let mut v: Vec<[u8; 4]> = Vec::with_capacity(self.len() - scope_name.len());
+                        for e in buffer {
+                            v.push(e);
                         }
                         vector = Some(v);
                     }
@@ -368,10 +369,10 @@ impl NameString {
         while let Some(d) = self.get_element(index) {
             match &mut result.data {
                 NameStringData::Normal((array, counter)) => {
-                    if *counter >= 7 {
-                        let mut v: Vec<[u8; 4]> = Vec::with_capacity(8);
-                        for i in 0..7 {
-                            v.push(array[i]);
+                    if *counter >= Self::NORMAL_LIMIT as u8 {
+                        let mut v: Vec<[u8; 4]> = Vec::with_capacity(scope_name.len() + self.len());
+                        for e in array {
+                            v.push(*e);
                         }
                         v.push(*d);
                         result.data = NameStringData::Ex(v);
@@ -394,7 +395,7 @@ impl NameString {
     }
 
     pub fn from_array(array: &[[u8; 4]], is_absolute: bool) -> Self {
-        if array.len() >= 7 {
+        if array.len() >= Self::NORMAL_LIMIT {
             Self {
                 data: NameStringData::Ex(Vec::from(array)),
                 flag: if is_absolute {
@@ -404,20 +405,47 @@ impl NameString {
                 },
             }
         } else {
-            let mut buf = [[0u8; 4]; 7];
-            for index in 0..array.len() {
-                buf[index] = array[index];
+            let mut buf = [[0u8; 4]; Self::NORMAL_LIMIT];
+            for (d, s) in buf.iter_mut().zip(array) {
+                *d = *s;
             }
             Self {
                 data: NameStringData::Normal((buf, array.len() as u8)),
                 flag: if is_absolute {
                     NameStringFlag::AbsolutePath
+                } else if array.len() == 0 {
+                    NameStringFlag::NullName
                 } else if array.len() == 1 {
                     NameStringFlag::SingleRelativePath
                 } else {
                     NameStringFlag::RelativePath
                 },
             }
+        }
+    }
+
+    pub const fn from_array_const(array: &[[u8; 4]], is_absolute: bool) -> Self {
+        let array_len: usize = core::mem::size_of_val(array) / core::mem::size_of::<[u8; 4]>();
+        if array_len > Self::NORMAL_LIMIT {
+            panic!("array is bigger than NameString buffer.");
+        }
+        let mut normal = [[0u8; 4]; Self::NORMAL_LIMIT];
+        let mut i = 0usize;
+        while i < array_len {
+            normal[i] = array[i];
+            i += 1;
+        }
+        Self {
+            data: NameStringData::Normal((normal, array.len() as u8)),
+            flag: if is_absolute {
+                NameStringFlag::AbsolutePath
+            } else if array.len() == 0 {
+                NameStringFlag::NullName
+            } else if array.len() == 1 {
+                NameStringFlag::SingleRelativePath
+            } else {
+                NameStringFlag::RelativePath
+            },
         }
     }
 

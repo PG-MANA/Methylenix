@@ -67,25 +67,25 @@ impl Evaluator {
             self.variable_tree.move_to_root()?;
         }
         /* Add builtin objects */
-        let gl_name = NameString::from_array(&[*b"_GL\0"], true);
+        const GL_NAME: NameString = NameString::from_array_const(&[*b"_GL\0"], true);
         let gl = AmlVariable::Mutex(Arc::new((AtomicU8::new(0), 0)));
-        self.variable_tree.add_data(gl_name, gl, false)?;
+        self.variable_tree.add_data(GL_NAME, gl, true)?;
 
-        let osi_name = NameString::from_array(&[*b"_OSI"], true);
+        const OSI_NAME: NameString = NameString::from_array_const(&[*b"_OSI"], true);
         let osi = AmlVariable::BuiltInMethod((osi_function, 1));
-        self.variable_tree.add_data(osi_name, osi, false)?;
+        self.variable_tree.add_data(OSI_NAME, osi, true)?;
 
-        let os_name = NameString::from_array(&[*b"_OS\0"], true);
+        const OS_NAME: NameString = NameString::from_array_const(&[*b"_OS\0"], true);
         let os = AmlVariable::String(String::from(crate::OS_NAME));
-        self.variable_tree.add_data(os_name, os, false)?;
+        self.variable_tree.add_data(OS_NAME, os, true)?;
 
-        let rev_name = NameString::from_array(&[*b"_REV"], true);
+        const REV_NAME: NameString = NameString::from_array_const(&[*b"_REV"], true);
         let rev = AmlVariable::ConstData(ConstData::Byte(2 /* ACPI 2.0 */));
-        self.variable_tree.add_data(rev_name, rev, false)?;
+        self.variable_tree.add_data(REV_NAME, rev, true)?;
 
-        let dlm_name = NameString::from_array(&[*b"_DLM"], true);
+        const DLM_NAME: NameString = NameString::from_array_const(&[*b"_DLM"], true);
         let dlm = AmlVariable::ConstData(ConstData::Byte(0 /* Temporary fix */));
-        self.variable_tree.add_data(dlm_name, dlm, false)?;
+        self.variable_tree.add_data(DLM_NAME, dlm, true)?;
 
         return Ok(());
     }
@@ -93,9 +93,10 @@ impl Evaluator {
     fn evaluate_sta_and_ini_in_device(&mut self, device: Device) -> Result<(), AmlError> {
         const STA_PRESENT_BIT: AcpiInt = 1;
         const STA_FUNCTIONAL_BIT: AcpiInt = 1 << 3;
+        const STA_BASE_NAME: NameString = NameString::from_array_const(&[*b"_STA"], false);
+        const INI_BASE_NAME: NameString = NameString::from_array_const(&[*b"_INI"], false);
 
-        let sta =
-            NameString::from_array(&[*b"_STA"], false).get_full_name_path(device.get_name(), true);
+        let sta = STA_BASE_NAME.get_full_name_path(device.get_name(), true);
         let status = match self.search_aml_variable(&sta, None, false) {
             Ok(v) => {
                 let locked_sta_object = v.lock().unwrap();
@@ -162,8 +163,7 @@ impl Evaluator {
             return Ok(());
         }
         if present_bit {
-            let ini = NameString::from_array(&[*b"_INI"], false)
-                .get_full_name_path(device.get_name(), true);
+            let ini = INI_BASE_NAME.get_full_name_path(device.get_name(), true);
             match self.search_aml_variable(&ini, None, false) {
                 Ok(v) => {
                     let locked_ini_object = v.lock().unwrap();
@@ -297,6 +297,11 @@ impl Evaluator {
             .move_current_scope(term_list.get_scope_name())?;
 
         let single_relative_path = name.get_single_name_path();
+        let is_in_search_scope = search_scope
+            .and_then(|s| {
+                Some(term_list.get_scope_name() == s || term_list.get_scope_name().is_child(s))
+            })
+            .unwrap_or(true);
         let get_next_term_obj =
             |t: &mut TermList, p: &mut Self| -> Result<Option<TermObj>, AmlError> {
                 match t.next(p) {
@@ -309,29 +314,17 @@ impl Evaluator {
             };
         let compare_by_search_rules = |object_name: &NameString,
                                        searching_name: &NameString,
-                                       term_list_scope: &NameString,
-                                       single_name: &Option<NameString>,
-                                       search_scope: &Option<&NameString>|
+                                       single_name: &Option<NameString>|
          -> bool {
             if searching_name.is_absolute_path() {
                 object_name == searching_name
             } else if let Some(single_name_segment_path) = single_name {
                 /* Single Name Segments */
-                if let Some(target_scope) = search_scope {
-                    (term_list_scope == *target_scope || term_list_scope.is_child(target_scope))
-                        && object_name.suffix_search(single_name_segment_path)
-                } else {
-                    object_name.suffix_search(single_name_segment_path)
-                }
+                is_in_search_scope && object_name.suffix_search(single_name_segment_path)
             } else {
                 /* Multi Name Segments */
                 /* Maybe wrong... */
-                if let Some(target_scope) = search_scope {
-                    term_list_scope.is_child(target_scope)
-                        && object_name.suffix_search(searching_name)
-                } else {
-                    object_name.suffix_search(searching_name)
-                }
+                is_in_search_scope && object_name.suffix_search(searching_name)
             }
         };
 
@@ -340,13 +333,7 @@ impl Evaluator {
                 TermObj::NamespaceModifierObj(name_modifier_object) => {
                     match name_modifier_object {
                         NamespaceModifierObject::DefAlias(a) => {
-                            if compare_by_search_rules(
-                                a.get_name(),
-                                name,
-                                term_list.get_scope_name(),
-                                &single_relative_path,
-                                &search_scope,
-                            ) {
+                            if compare_by_search_rules(a.get_name(), name, &single_relative_path) {
                                 pr_err!(
                                     "Alias is not supported yet. {} => {}",
                                     name,
@@ -356,13 +343,7 @@ impl Evaluator {
                             }
                         }
                         NamespaceModifierObject::DefName(n) => {
-                            if compare_by_search_rules(
-                                n.get_name(),
-                                name,
-                                term_list.get_scope_name(),
-                                &single_relative_path,
-                                &search_scope,
-                            ) {
+                            if compare_by_search_rules(n.get_name(), name, &single_relative_path) {
                                 return match n.get_data_ref_object() {
                                     DataRefObject::DataObject(d) => {
                                         let variable = self.eval_term_arg(
@@ -466,15 +447,13 @@ impl Evaluator {
         should_keep_term_list_hierarchy_when_found: bool,
     ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
         let single_name = name.get_single_name_path();
-        let is_name_child_of_current_scope = current_scope.is_child(name);
+        let is_in_current_scope = current_scope.is_child(name);
 
         if let Some(named_object_name) = named_object.get_name() {
             if name == named_object_name
                 || single_name
                     .as_ref()
-                    .and_then(|n| {
-                        Some(is_name_child_of_current_scope && named_object_name.suffix_search(n))
-                    })
+                    .and_then(|n| Some(is_in_current_scope && named_object_name.suffix_search(n)))
                     .unwrap_or(false)
             {
                 let v = self.eval_named_object(name, named_object, current_scope)?;
@@ -499,7 +478,7 @@ impl Evaluator {
                     } else if single_name
                         .as_ref()
                         .and_then(|relative_name| {
-                            Some(current_scope.is_child(name) && n.suffix_search(relative_name))
+                            Some(is_in_current_scope && n.suffix_search(relative_name))
                         })
                         .unwrap_or(false)
                     {
@@ -1169,10 +1148,11 @@ impl Evaluator {
                     OperationRegionType::SystemIO => (AmlVariable::Io((offset, length))),
                     OperationRegionType::EmbeddedControl => AmlVariable::EcIo((offset, length)),
                     OperationRegionType::PciConfig => {
-                        let mut operation_region_scope = operation_region.get_name().clone();
-                        operation_region_scope.up_to_parent_name_space();
-                        let bbn_name = NameString::from_array(&[*b"_BBN"], false)
-                            .get_full_name_path(&operation_region_scope, false);
+                        let operation_region_scope = operation_region.get_name().get_scope_name();
+                        const BBN_BASE_NAME: NameString =
+                            NameString::from_array_const(&[*b"_BBN"], false);
+                        let bbn_name =
+                            BBN_BASE_NAME.get_full_name_path(&operation_region_scope, false);
                         let bus = match self.search_aml_variable(&bbn_name, None, false) {
                             Ok(v) => {
                                 let locked_bbn = v.try_lock().or(Err(AmlError::MutexError))?;
@@ -1211,8 +1191,10 @@ impl Evaluator {
                             Err(e) => Err(e)?,
                         };
 
-                        let adr_name = NameString::from_array(&[*b"_ADR"], false)
-                            .get_full_name_path(&operation_region_scope, false);
+                        const ADR_BASE_NAME: NameString =
+                            NameString::from_array_const(&[*b"_ADR"], false);
+                        let adr_name =
+                            ADR_BASE_NAME.get_full_name_path(&operation_region_scope, false);
                         let adr = self.search_aml_variable(&adr_name, None, false)?;
                         let locked_adr = adr.try_lock().or(Err(AmlError::MutexError))?;
                         let addr = match &*locked_adr {
