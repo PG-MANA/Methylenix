@@ -144,10 +144,7 @@ impl NameString {
         return Ok(result);
     }
 
-    pub fn up_to_parent_name_space(&mut self) {
-        if self.flag == NameStringFlag::NullName {
-            return;
-        }
+    fn up_to_parent_name_space(&mut self) {
         match &mut self.data {
             NameStringData::Normal((_, count)) => {
                 if *count == 0 {
@@ -157,14 +154,61 @@ impl NameString {
             }
             NameStringData::Ex(v) => {
                 v.pop();
-                if v.len() <= 7 {
-                    let mut i = 0;
-                    let mut array: [[u8; 4]; 7] = [[0; 4]; 7];
-                    for e in v {
-                        array[i] = *e;
-                        i += 1;
+                if v.len() <= Self::NORMAL_LIMIT {
+                    let mut array = [[0; 4]; Self::NORMAL_LIMIT];
+                    for (d, s) in array.iter_mut().zip(v.iter()) {
+                        *d = *s;
                     }
-                    self.data = NameStringData::Normal((array, i as u8));
+                    self.data = NameStringData::Normal((array, Self::NORMAL_LIMIT as u8));
+                }
+            }
+        }
+    }
+
+    pub fn get_scope_name(&self) -> Self {
+        let len = self.len();
+        if len == 0 {
+            self.clone()
+        } else if len == Self::NORMAL_LIMIT + 1 {
+            let mut normal = ([[0u8; 4]; Self::NORMAL_LIMIT], Self::NORMAL_LIMIT as u8);
+            match &self.data {
+                NameStringData::Ex(v) => {
+                    for (s, d) in v.iter().zip(normal.0.iter_mut()) {
+                        *d = *s;
+                    }
+                }
+                NameStringData::Normal(v) => {
+                    pr_warn!("Invalid NameString: {:?}", self);
+                    normal = v.clone();
+                    if normal.1 > 0 {
+                        normal.1 -= 1;
+                    }
+                }
+            };
+            Self {
+                data: NameStringData::Normal(normal),
+                flag: self.flag.clone(),
+            }
+        } else {
+            match &self.data {
+                NameStringData::Normal(v) => {
+                    let mut normal = v.clone();
+                    if normal.1 > 0 {
+                        normal.1 -= 1;
+                    }
+
+                    Self {
+                        data: NameStringData::Normal(normal),
+                        flag: self.flag.clone(),
+                    }
+                }
+                NameStringData::Ex(v) => {
+                    let mut ex = v.clone();
+                    ex.pop();
+                    Self {
+                        data: NameStringData::Ex(ex),
+                        flag: self.flag.clone(),
+                    }
                 }
             }
         }
@@ -261,35 +305,6 @@ impl NameString {
         } else {
             None
         }
-    }
-
-    pub fn get_scope_name(&self) -> Self {
-        let mut result = self.clone();
-        if result.len() == 0 {
-        } else if result.len() == 8 {
-            match result.data {
-                NameStringData::Ex(v) => {
-                    let mut normal = ([[0u8; 4]; 7], 7);
-                    for (s, d) in v.iter().zip(normal.0.iter_mut()) {
-                        *d = *s;
-                    }
-                    result.data = NameStringData::Normal(normal);
-                }
-                NameStringData::Normal(_) => {
-                    pr_warn!("Invalid NameString: {:?}", self);
-                }
-            }
-        } else {
-            match &mut result.data {
-                NameStringData::Ex(v) => {
-                    v.pop();
-                }
-                NameStringData::Normal(n) => {
-                    n.1 -= 1;
-                }
-            }
-        }
-        return result;
     }
 
     pub fn is_child(&self, child: &Self) -> bool {
