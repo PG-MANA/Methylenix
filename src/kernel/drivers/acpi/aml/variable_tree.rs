@@ -89,7 +89,7 @@ impl AmlVariableTree {
             }
         } else {
             pr_err!("Invalid Scope Name: {:?}", scope);
-            return Err(AmlError::InvalidScope(scope.clone()));
+            return Err(AmlError::InvalidName(scope.clone()));
         }
     }
 

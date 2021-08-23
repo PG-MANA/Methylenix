@@ -2589,7 +2589,6 @@ impl Evaluator {
         }
 
         /* Restore status */
-        self.variable_tree.clear_current_cache();
         self.variable_tree.restore_current_scope(scope_backup);
         core::mem::swap(&mut self.current_local_variables, &mut new_local_variables);
         core::mem::swap(
