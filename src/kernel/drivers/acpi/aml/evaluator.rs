@@ -182,9 +182,7 @@ impl Evaluator {
                     }
                 }
                 Err(e) => {
-                    if !matches!(&e, AmlError::InvalidName(ini)) {
-                        pr_err!("Failed to search {}: {:?}", sta, e);
-                    }
+                    pr_err!("Failed to search {}: {:?}", ini, e);
                 }
             };
         }
@@ -2325,7 +2323,7 @@ impl Evaluator {
         {
             Ok(())
         } else {
-            pr_info!("Sleeping {}ms was failed.", seconds);
+            pr_err!("Sleeping {}ms was failed.", seconds);
             Err(AmlError::InvalidOperation)
         }
     }
