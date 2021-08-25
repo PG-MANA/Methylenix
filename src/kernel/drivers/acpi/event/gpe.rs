@@ -63,21 +63,36 @@ impl GpeManager {
         return true;
     }
 
-    pub fn find_general_purpose_event(&self) -> Option<usize> {
-        let mut bit = 0;
-        for port in self.gpe_block..(self.gpe_block + self.gpe_count) {
-            let mut status = read_io_byte(port);
-            pr_info!("{:#X}: 0b{:b}", port, status);
+    pub fn find_general_purpose_event(&self, skip_gpe: Option<usize>) -> Option<usize> {
+        let mut bit = skip_gpe
+            .and_then(|g| Some((g - self.base_number) & !0b111))
+            .unwrap_or(self.base_number);
+        let start = skip_gpe
+            .and_then(|g| Some(self.gpe_block + ((g - self.base_number) & !0b111)))
+            .unwrap_or(self.gpe_block);
+        for port in start..(self.gpe_block + self.gpe_count) {
+            let mut status = read_io_byte(port) & read_io_byte(port + self.gpe_count);
             if status != 0 {
-                /* Temporary:clear status bit */
-                write_io_byte(port, status);
-                while (status & 1) == 0 {
+                bit += status.trailing_zeros() as usize;
+                if skip_gpe.and_then(|g| Some(bit > g)).unwrap_or(true) {
+                    return Some(bit);
+                } else {
+                    let mut remaining_bits = 8 - status.trailing_zeros() as usize - 1;
+                    status >>= status.trailing_zeros() + 1;
                     bit += 1;
-                    status >>= 1;
+                    while status != 0 {
+                        if (status & 1) != 0 {
+                            return Some(bit);
+                        }
+                        status >>= 1;
+                        bit += 1;
+                        remaining_bits -= 1;
+                    }
+                    bit += remaining_bits;
                 }
-                return Some(bit);
+            } else {
+                bit += 8;
             }
-            bit += 8;
         }
         return None;
     }
