@@ -35,13 +35,14 @@ impl GpeManager {
             return false;
         }
         let port_index = (gpe - self.base_number) >> 3;
-        let bit_index = gpe - ((gpe >> 3) << 3);
+        let bit_index = gpe & 0b111;
         pr_info!(
-            "Enable GPE{:#X} (BasePort: {:#X}, Index: {:#X}, Bit: {:#X})",
+            "Enable GPE{:#X} (BasePort: {:#X}, Index: {:#X}, Bit: {:#X}), Current: {}",
             gpe,
             self.gpe_block + self.gpe_count,
             port_index,
-            bit_index
+            bit_index,
+            ((read_io_byte(self.gpe_block + port_index)) >> bit_index) & 1
         );
         self.clear_status_bit(gpe);
         let mut target = read_io_byte(self.gpe_block + self.gpe_count + port_index);

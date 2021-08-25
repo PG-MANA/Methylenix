@@ -153,7 +153,6 @@ pub fn init_acpi_later() -> bool {
         pr_err!("Cannot setup ACPI AML Interpreter.");
         return false;
     }
-    get_kernel_manager_cluster().acpi_event_manager.init_gpe();
     if !super::device::acpi::setup_interrupt(&acpi_manager) {
         pr_err!("Cannot setup ACPI interrupt.");
         return false;
@@ -166,6 +165,9 @@ pub fn init_acpi_later() -> bool {
         pr_err!("Cannot evaluate _STA/_INI methods.");
         return false;
     }
+    get_kernel_manager_cluster()
+        .acpi_event_manager
+        .init_event_registers();
     if !acpi_manager.enable_acpi() {
         pr_err!("Cannot enable ACPI.");
         return false;

@@ -74,7 +74,11 @@ impl AcpiEventManager {
         }
     }
 
-    pub fn init_gpe(&self) {
+    pub fn init_event_registers(&mut self) {
+        self.pm1a_enabled_event = 0;
+        self.write_pm1_a_enable(0);
+        self.pm1b_enabled_event = 0;
+        self.write_pm1_b_enable(0);
         self.gpe0_manager.init();
         if let Some(gpe1) = &self.gpe1_manager {
             gpe1.init();
