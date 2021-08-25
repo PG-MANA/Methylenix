@@ -256,6 +256,7 @@ pub fn init_timer() -> LocalApicTimer {
             IstIndex::TaskSwitch,
             InterruptionIndex::LocalApicTimer as u16,
             0,
+            false,
         );
 
     /* Setup TimerManager */

@@ -58,11 +58,11 @@ impl IoApicManager {
     /// local_apic_id: the local apic id(identify cpu core) to redirect interrupt
     /// irq: target device's irq
     /// index: The index of IDT vector table to accept the interrupt
-    pub fn set_redirect(&self, local_apic_id: u32, irq: u8, index: u8) {
+    pub fn set_redirect(&self, local_apic_id: u32, irq: u8, index: u8, is_level: bool) {
         //tmp
         let mut table = unsafe { self.read_register(0x10 + (irq as u32) * 2) };
         table &= 0x00fffffffffe0000u64;
-        table |= ((local_apic_id as u64) << 56) | index as u64;
+        table |= ((local_apic_id as u64) << 56) | (is_level as u64) << 15 | index as u64;
         unsafe { self.write_register(0x10 + (irq as u32) * 2, table) };
     }
 
@@ -89,5 +89,15 @@ impl IoApicManager {
             (self.base_address.to_usize() + 0x10) as *mut u32,
             (data >> 32) as u32,
         );
+    }
+
+    pub fn send_eoi(&self, vector: u8) {
+        use core::ptr::write_volatile;
+        unsafe {
+            write_volatile(
+                (self.base_address.to_usize() + 0x40) as *mut u32,
+                vector as u32,
+            );
+        }
     }
 }

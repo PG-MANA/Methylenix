@@ -77,6 +77,7 @@ impl SmbusManager {
                 IstIndex::NormalInterrupt,
                 InterruptManager::irq_to_index(irq),
                 0,
+                false,
             )
         {
             pr_err!("Cannot setup interrupt.");
