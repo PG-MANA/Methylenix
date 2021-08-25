@@ -307,31 +307,32 @@ impl AcpiManager {
     }
 
     pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
-        if (self.get_fadt_manager().get_flags() & (1 << 4)) != 0 {
-            pr_info!("PowerButton is the control method power button.");
-            if let Some(interpreter) = &self.aml_interpreter {
-                match interpreter.move_into_device(b"PNP0C0C") {
-                    Ok(Some(i)) => {
-                        pr_info!("This computer has power button: {}", i.get_current_scope());
-                        true
-                    }
-                    Ok(None) => {
-                        pr_info!("This computer has no power button.");
-                        true
-                    }
-                    Err(_) => {
-                        pr_info!("Cannot get power button device.");
-                        false
-                    }
-                }
-            } else {
-                pr_err!("AmlInterpreter is not available.");
-                false
+        if (self.get_fadt_manager().get_flags() & (1 << 4)) == 0 {
+            pr_info!("PowerButton is the fixed hardware power button.");
+            if !acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton) {
+                return false;
             }
         } else {
-            pr_info!("PowerButton is the fixed hardware power button.");
-            acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton)
+            pr_info!("PowerButton is the control method power button.");
+            if !acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton) {
+                return false;
+            }
         }
+        if let Some(interpreter) = &self.aml_interpreter {
+            match interpreter.move_into_device(b"PNP0C0C") {
+                Ok(Some(i)) => {
+                    pr_info!("This computer has power button: {}", i.get_current_scope());
+                }
+                Ok(None) => {
+                    pr_info!("This computer has no control method power button.");
+                }
+                Err(_) => {
+                    pr_info!("Failed to get power button device.");
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     pub fn search_interrupt_information_with_evaluation_aml(

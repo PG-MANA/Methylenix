@@ -87,18 +87,22 @@ impl AcpiEventManager {
 
     pub fn enable_gpes(&self) -> bool {
         /* Temporary, enable EC only */
-        if let Some(ec_gpe) = get_kernel_manager_cluster()
-            .acpi_device_manager
-            .ec
-            .as_ref()
-            .and_then(|ec| ec.get_gpe_number())
-        {
-            if !self.gpe0_manager.enable_gpe(ec_gpe) {
-                return if let Some(gpe1) = &self.gpe1_manager {
-                    gpe1.enable_gpe(ec_gpe)
+        if let Some(ec) = get_kernel_manager_cluster().acpi_device_manager.ec.as_ref() {
+            if let Some(ec_gpe) = ec.get_gpe_number() {
+                if ec_gpe > self.gpe0_manager.get_gpe_max_number() {
+                    if !self
+                        .gpe1_manager
+                        .as_ref()
+                        .and_then(|m| Some(m.enable_gpe(ec_gpe)))
+                        .unwrap_or(false)
+                    {
+                        return false;
+                    }
                 } else {
-                    false
-                };
+                    if !self.gpe0_manager.enable_gpe(ec_gpe) {
+                        return false;
+                    }
+                }
             }
         }
         return true;

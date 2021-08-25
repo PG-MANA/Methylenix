@@ -18,6 +18,14 @@ impl GpeManager {
         }
     }
 
+    pub const fn get_gpe_min_number(&self) -> usize {
+        self.base_number
+    }
+
+    pub const fn get_gpe_max_number(&self) -> usize {
+        self.base_number + (self.gpe_count << 3) - 1
+    }
+
     pub fn init(&self) {
         /* Clear GPE Status Bits */
         for port in self.gpe_block..(self.gpe_block + self.gpe_count) {
