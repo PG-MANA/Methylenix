@@ -6,6 +6,7 @@ pub mod gpe;
 
 use self::gpe::GpeManager;
 
+use super::aml::notify::NotifyList;
 use super::table::fadt::FadtManager;
 
 use crate::arch::target_arch::device::cpu::{in_word, out_word};
@@ -43,6 +44,7 @@ pub struct AcpiEventManager {
     pm1b_enabled_event: u16,
     gpe0_manager: GpeManager,
     gpe1_manager: Option<GpeManager>,
+    notify_list: NotifyList,
 }
 
 impl AcpiEventManager {
@@ -71,6 +73,7 @@ impl AcpiEventManager {
                 0,
             ),
             gpe1_manager,
+            notify_list: NotifyList::new(),
         }
     }
 
@@ -114,6 +117,10 @@ impl AcpiEventManager {
                 gpe1.clear_status_bit(gpe);
             }
         }
+    }
+
+    pub fn get_notify_list(&self) -> &NotifyList {
+        &self.notify_list
     }
 
     fn read_pm1_a_status(&self) -> u16 {

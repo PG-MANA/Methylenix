@@ -306,6 +306,26 @@ impl AcpiManager {
         self.shutdown()
     }
 
+    fn control_method_power_button_hook(v: AmlVariable) {
+        match v.to_int() {
+            Ok(s) => {
+                if s == 0x80 {
+                    pr_info!("PowerButton was pushed.");
+                    get_kernel_manager_cluster()
+                        .acpi_manager
+                        .lock()
+                        .unwrap()
+                        .shutdown_test();
+                } else {
+                    pr_debug!("PowerButton: {:#X}", s)
+                }
+            }
+            Err(e) => {
+                pr_warn!("Unknown PowerButton Notify: {:?}, {:?}", v, e);
+            }
+        }
+    }
+
     pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
         if (self.get_fadt_manager().get_flags() & (1 << 4)) == 0 {
             pr_info!("PowerButton is the fixed hardware power button.");

@@ -2270,12 +2270,27 @@ impl Evaluator {
         }
     }
 
-    fn eval_notify(&mut self, notify: Notify) -> Result<(), AmlError> {
-        pr_debug!(
-            "Notify: {:?} ({:?})",
-            notify.get_notify_object_name(),
-            notify.get_notify_value()
-        );
+    fn eval_notify(&mut self, notify: Notify, current_scope: &NameString) -> Result<(), AmlError> {
+        use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+        let notify_value = self.eval_term_arg(notify.get_notify_value().clone(), current_scope)?;
+        let notify_list = get_kernel_manager_cluster()
+            .acpi_event_manager
+            .get_notify_list();
+        if let SuperName::SimpleName(SimpleName::NameString(n)) = notify.get_notify_object_name() {
+            if !notify_list.notify(n, notify_value) {
+                pr_warn!(
+                    "No function to handle the notify {}({:?}) was found.",
+                    n,
+                    notify.get_notify_value()
+                );
+            }
+        } else {
+            pr_err!(
+                "Notify {:?}({:?}) is not supported currently.",
+                notify.get_notify_object_name(),
+                notify_value
+            );
+        }
         return Ok(());
     }
 
@@ -2410,7 +2425,7 @@ impl Evaluator {
                 TermObj::StatementOpcode(s_o) => match s_o {
                     StatementOpcode::DefNoop => { /* Do Nothing */ }
                     StatementOpcode::DefNotify(n) => {
-                        self.eval_notify(n)?;
+                        self.eval_notify(n, current_scope)?;
                     }
                     StatementOpcode::DefRelease(m) => {
                         self.release_mutex(&m, current_scope)?;

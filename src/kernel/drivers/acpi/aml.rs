@@ -10,6 +10,7 @@ mod expression_opcode;
 mod name_object;
 pub(super) mod named_object;
 mod namespace_modifier_object;
+pub(super) mod notify;
 mod opcode;
 mod statement_opcode;
 mod term_object;
