@@ -69,6 +69,9 @@ impl GpeManager {
         if current_status != 0 {
             write_io_byte(self.gpe_block + port_index, 1 << bit_index);
         }
+        if (((read_io_byte(self.gpe_block + port_index)) >> bit_index) & 1) != 0 {
+            pr_warn!("Failed to clear StatusBit(GPE:{:#X})", gpe);
+        }
         return true;
     }
 

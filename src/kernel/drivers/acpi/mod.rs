@@ -2,7 +2,7 @@
 //! Advanced Configuration and Power Interface Manager
 //!
 //! Supported ACPI version 6.4
-//! <https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf>
+//! <https://uefi.org/sites/default/files/resources/ACPI_Spec_6_4_Jan22.pdf>
 //!
 
 pub mod aml;
@@ -342,6 +342,13 @@ impl AcpiManager {
             match interpreter.move_into_device(b"PNP0C0C") {
                 Ok(Some(i)) => {
                     pr_info!("This computer has power button: {}", i.get_current_scope());
+                    get_kernel_manager_cluster()
+                        .acpi_event_manager
+                        .get_notify_list()
+                        .register_function(
+                            i.get_current_scope(),
+                            Self::control_method_power_button_hook,
+                        );
                 }
                 Ok(None) => {
                     pr_info!("This computer has no control method power button.");
@@ -503,6 +510,80 @@ impl AcpiManager {
         }
     }
 
+    fn evaluate_edge_trigger_event(&self, event_number: u8) -> Result<(), ()> {
+        let mut interpreter = if let Some(i) = &self.aml_interpreter {
+            i.clone()
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            return Err(());
+        };
+        let to_ascii = |x: u8| -> u8 {
+            if x >= 0xa {
+                x - 0xa + b'A'
+            } else {
+                x + b'0'
+            }
+        };
+
+        let edge_trigger_method_name = NameString::from_array(
+            &[
+                *b"_GPE",
+                [
+                    b'_',
+                    b'E',
+                    to_ascii(event_number >> 4),
+                    to_ascii(event_number & 0xf),
+                ],
+            ],
+            true,
+        );
+        pr_debug!("Evaluate: {}", edge_trigger_method_name);
+        match interpreter.evaluate_method(&edge_trigger_method_name, &[]) {
+            Ok(Some(v)) => {
+                pr_info!("Returned: {:?}", v);
+                Ok(())
+            }
+            Ok(None) => {
+                pr_info!("Nothing is returned.");
+                Ok(())
+            }
+            Err(_) => Err(()),
+        }
+    }
+
+    fn evaluate_level_trigger_event(&self, event_number: u8) -> Result<(), ()> {
+        let mut interpreter = if let Some(i) = &self.aml_interpreter {
+            i.clone()
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            return Err(());
+        };
+        let to_ascii = |x: u8| -> u8 {
+            if x >= 0xa {
+                x - 0xa + b'A'
+            } else {
+                x + b'0'
+            }
+        };
+
+        let level_trigger_method_name = NameString::from_array(
+            &[
+                *b"_GPE",
+                [
+                    b'_',
+                    b'L',
+                    to_ascii(event_number >> 4),
+                    to_ascii(event_number & 0xf),
+                ],
+            ],
+            true,
+        );
+        pr_debug!("Evaluate: {}", level_trigger_method_name);
+        interpreter
+            .evaluate_method(&level_trigger_method_name, &[])
+            .and(Ok(()))
+    }
+
     fn evaluate_query(&self, query: u8) {
         let interpreter = if let Some(i) = &self.aml_interpreter {
             i
@@ -532,9 +613,9 @@ impl AcpiManager {
                     false,
                 )
                 .get_full_name_path(new_interpreter.get_current_scope(), false);
-                pr_info!("Evaluate: {}", query_method_name);
+                pr_debug!("Evaluate: {}", query_method_name);
                 if let Err(_) = new_interpreter.evaluate_method(&query_method_name, &[]) {
-                    pr_err!("Cannot evaluate: {}", query_method_name);
+                    pr_err!("Failed to evaluate: {}", query_method_name);
                 }
             }
         }

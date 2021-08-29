@@ -203,36 +203,49 @@ impl AcpiEventManager {
                 .acpi_event_manager
                 .reset_fixed_event_status(acpi_event)
             {
-                pr_err!("Cannot reset flag: {:?}", acpi_event);
+                pr_err!("Failed to reset the Fixed Event: {:?}", acpi_event);
             }
-        } else if let Some(gpe_number) = self.gpe0_manager.find_general_purpose_event() {
-            if let Some(ec) = &get_kernel_manager_cluster().acpi_device_manager.ec {
-                if ec.get_gpe_number() == Some(gpe_number) {
-                    let query = ec.read_query();
+            return;
+        } else if let Some(gpe_number) = self.gpe0_manager.find_general_purpose_event(None) {
+            let mut next_gpe = Some(gpe_number);
+            while let Some(gpe_number) = next_gpe {
+                if get_kernel_manager_cluster()
+                    .acpi_device_manager
+                    .get_embedded_controller()
+                    .and_then(|ec| ec.get_gpe_number())
+                    == Some(gpe_number)
+                {
+                    let query = get_kernel_manager_cluster()
+                        .acpi_device_manager
+                        .get_embedded_controller()
+                        .unwrap()
+                        .read_query();
                     get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
                         AcpiEventManager::acpi_query_event_worker,
                         query as _,
                     ));
-                    return;
-                }
-            }
-            get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
-                AcpiEventManager::acpi_gpe_worker,
-                gpe_number as _,
-            ));
-        } else {
-            if let Some(ec) = &get_kernel_manager_cluster().acpi_device_manager.ec {
-                let query = ec.read_query();
-                if query != 0 {
+                } else {
                     get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
-                        AcpiEventManager::acpi_query_event_worker,
-                        query as _,
+                        AcpiEventManager::acpi_gpe_worker,
+                        gpe_number as _,
                     ));
-                    return;
                 }
+                self.gpe0_manager.clear_status_bit(gpe_number);
+                next_gpe = self.gpe0_manager.find_general_purpose_event(next_gpe);
             }
-            pr_err!("Unknown ACPI Event");
+            return;
         }
+        if let Some(ec) = &get_kernel_manager_cluster().acpi_device_manager.ec {
+            let query = ec.read_query();
+            if query != 0 {
+                get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
+                    AcpiEventManager::acpi_query_event_worker,
+                    query as _,
+                ));
+                return;
+            }
+        }
+        pr_err!("Unknown ACPI Event");
     }
 
     pub fn reset_fixed_event_status(&self, event: AcpiFixedEvent) -> bool {
@@ -272,14 +285,15 @@ impl AcpiEventManager {
     }
 
     pub fn acpi_gpe_worker(gpe_number: usize) {
-        pr_info!("GPE: {:#X}", gpe_number)
+        let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+        pr_debug!("GPE: {:#X}", gpe_number);
+        let _ = acpi_manager.evaluate_edge_trigger_event(gpe_number as u8);
+        let _ = acpi_manager.evaluate_level_trigger_event(gpe_number as u8);
     }
 
     pub fn acpi_query_event_worker(query: usize) {
-        get_kernel_manager_cluster()
-            .acpi_manager
-            .lock()
-            .unwrap()
-            .evaluate_query(query as u8);
+        let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+        pr_debug!("Query: {:#X}", query);
+        acpi_manager.evaluate_query(query as u8);
     }
 }
