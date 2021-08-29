@@ -272,14 +272,28 @@ impl InterruptManager {
         return true;
     }
 
+    /// Save current the interrupt status and disable interrupt
+    ///
+    /// This function disables interrupt and return interrupt status before disable interrupt.
+    /// The return value will be used by [`restore_local_irq`].
+    /// This can be nested called.
     pub fn save_and_disable_local_irq() -> StoredIrqData {
         let r_flags = unsafe { cpu::get_r_flags() };
         unsafe { cpu::disable_interrupt() };
         StoredIrqData { r_flags }
     }
 
+    /// Restore the interrupt status before calling [`save_and_disable_local_irq`]
+    ///
+    /// if the interrupt was enabled before calling [`save_and_disable_local_irq`],
+    /// this will enable interrupt, otherwise this will not change the interrupt status.
     pub fn restore_local_irq(original: StoredIrqData) {
         unsafe { cpu::set_r_flags(original.r_flags) };
+    }
+
+    /// Restore the interrupt status with StoredIrqData reference.
+    pub unsafe fn restore_local_irq_by_reference(original: &StoredIrqData) {
+        cpu::set_r_flags(original.r_flags);
     }
 
     /// Send end of interrupt to Local APIC.

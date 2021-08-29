@@ -2,6 +2,8 @@
 //! Mutex(Spin Lock version)
 //!
 
+use crate::arch::target_arch::interrupt::{InterruptManager, StoredIrqData};
+
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +20,16 @@ pub struct SpinLockFlag {
 }
 
 pub struct SpinLockFlagHolder {
-    flag: usize,
+    flag: *const AtomicBool,
+}
+
+pub struct IrqSaveSpinLockFlag {
+    flag: AtomicBool,
+}
+
+pub struct IrqSaveSpinLockFlagHolder {
+    flag: *const AtomicBool,
+    irq: StoredIrqData,
 }
 
 pub struct MutexGuard<'a, T: ?Sized + 'a> {
@@ -49,7 +60,7 @@ impl SpinLockFlag {
             .is_ok()
         {
             Ok(SpinLockFlagHolder {
-                flag: &self.flag as *const _ as usize,
+                flag: &self.flag as *const _,
             })
         } else {
             Err(())
@@ -63,7 +74,7 @@ impl SpinLockFlag {
             .is_ok()
         {
             Ok(SpinLockFlagHolder {
-                flag: &self.flag as *const _ as usize,
+                flag: &self.flag as *const _,
             })
         } else {
             Err(())
@@ -72,9 +83,8 @@ impl SpinLockFlag {
 
     pub fn lock(&self) -> SpinLockFlagHolder {
         loop {
-            let lock = self.try_lock_weak();
-            if lock.is_ok() {
-                return lock.unwrap();
+            if let Ok(s) = self.try_lock_weak() {
+                return s;
             }
             while self.flag.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
@@ -89,7 +99,73 @@ impl SpinLockFlag {
 
 impl Drop for SpinLockFlagHolder {
     fn drop(&mut self) {
-        unsafe { &*(self.flag as *const AtomicBool) }.store(false, Ordering::Release);
+        unsafe { &*self.flag }.store(false, Ordering::Release);
+    }
+}
+
+impl IrqSaveSpinLockFlag {
+    pub const fn new() -> Self {
+        Self {
+            flag: AtomicBool::new(false),
+        }
+    }
+
+    pub fn try_lock(&self) -> Result<IrqSaveSpinLockFlagHolder, ()> {
+        let irq = InterruptManager::save_and_disable_local_irq();
+        if self
+            .flag
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            Ok(IrqSaveSpinLockFlagHolder {
+                flag: &self.flag as *const _,
+                irq,
+            })
+        } else {
+            InterruptManager::restore_local_irq(irq);
+            Err(())
+        }
+    }
+
+    pub fn try_lock_weak(&self) -> Result<IrqSaveSpinLockFlagHolder, ()> {
+        let irq = InterruptManager::save_and_disable_local_irq();
+        if self
+            .flag
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            Ok(IrqSaveSpinLockFlagHolder {
+                flag: &self.flag as *const _,
+                irq,
+            })
+        } else {
+            InterruptManager::restore_local_irq(irq);
+            Err(())
+        }
+    }
+
+    pub fn lock(&self) -> IrqSaveSpinLockFlagHolder {
+        loop {
+            if let Ok(s) = self.try_lock_weak() {
+                return s;
+            }
+            while self.flag.load(Ordering::Relaxed) {
+                core::hint::spin_loop();
+            }
+        }
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for IrqSaveSpinLockFlagHolder {
+    fn drop(&mut self) {
+        unsafe {
+            (&*self.flag).store(false, Ordering::Release);
+            InterruptManager::restore_local_irq_by_reference(&self.irq);
+        }
     }
 }
 
