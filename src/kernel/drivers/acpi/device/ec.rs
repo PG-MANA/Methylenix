@@ -9,13 +9,13 @@ use super::super::device::AcpiDeviceManager;
 
 use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte};
 
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 pub struct EmbeddedController {
     ec_sc: usize,
     ec_data: usize,
     gpe: Option<usize>,
-    write_lock: SpinLockFlag,
+    write_lock: IrqSaveSpinLockFlag,
 }
 
 impl EmbeddedController {
@@ -78,7 +78,7 @@ impl EmbeddedController {
                         ec_sc,
                         ec_data,
                         gpe: None,
-                        write_lock: SpinLockFlag::new(),
+                        write_lock: IrqSaveSpinLockFlag::new(),
                     }
                 }
                 Ok(Some(d)) => {
@@ -179,6 +179,7 @@ impl EmbeddedController {
         /* write_io_byte(self.ec_sc, Self::BD_EC); */
 
         pr_debug!("Read EC(Address: {:#X}) => {:#X}", address, result);
+        drop(_lock);
         return result;
     }
 
@@ -198,7 +199,7 @@ impl EmbeddedController {
         self.wait_input_buffer();
 
         /* write_io_byte(self.ec_sc, Self::BD_EC); */
-
+        drop(_lock);
         return;
     }
 
@@ -214,7 +215,7 @@ impl EmbeddedController {
         let result = read_io_byte(self.ec_data);
 
         /* write_io_byte(self.ec_sc, Self::BD_EC); */
-
+        drop(_lock);
         return result;
     }
 
