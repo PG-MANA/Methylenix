@@ -5,7 +5,7 @@
 use crate::arch::target_arch::device::cpu::{
     in_byte, in_dword, in_word, out_byte, out_dword, out_word,
 };
-use crate::arch::target_arch::interrupt::IstIndex;
+use crate::arch::target_arch::interrupt::{InterruptManager, IstIndex};
 
 use crate::kernel::drivers::acpi::aml::{AmlError, ConstData};
 use crate::kernel::drivers::acpi::aml::{AmlPciConfig, AmlVariable};
@@ -19,25 +19,37 @@ use crate::kernel::sync::spin_lock::Mutex;
 
 use alloc::sync::Arc;
 
+static mut INTERRUPT_VECTOR: u8 = 0;
+
 pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
     let irq = acpi_manager.get_fadt_manager().get_sci_int();
+    let index = InterruptManager::irq_to_index(irq as u8);
     make_device_interrupt_handler!(handler, acpi_event_handler);
-    get_cpu_manager_cluster()
+    if get_cpu_manager_cluster()
         .interrupt_manager
         .set_device_interrupt_function(
             handler,
             Some(irq as u8),
             IstIndex::NormalInterrupt,
-            0x20 + irq,
+            index,
             0,
+            true,
         )
+    {
+        unsafe { INTERRUPT_VECTOR = index as u8 };
+        true
+    } else {
+        false
+    }
 }
 
 extern "C" fn acpi_event_handler() {
     get_kernel_manager_cluster()
         .acpi_event_manager
         .sci_handler();
-    get_cpu_manager_cluster().interrupt_manager.send_eoi();
+    get_cpu_manager_cluster()
+        .interrupt_manager
+        .send_eoi_level_trigger(unsafe { INTERRUPT_VECTOR });
 }
 
 #[inline]
@@ -57,6 +69,7 @@ pub fn read_embedded_controller(address: u8) -> Result<u8, AmlError> {
     {
         Ok(ec.read_data(address))
     } else {
+        pr_err!("Embedded Controller is not available.");
         Err(AmlError::InvalidOperation)
     }
 }
@@ -69,6 +82,7 @@ pub fn write_embedded_controller(address: u8, data: u8) -> Result<(), AmlError> 
         ec.write_data(address, data);
         Ok(())
     } else {
+        pr_err!("Embedded Controller is not available.");
         Err(AmlError::InvalidOperation)
     }
 }
@@ -83,7 +97,7 @@ pub fn read_io(
         pr_err!("Invalid port number: {:#X}", port);
         Err(AmlError::InvalidOperation)
     } else {
-        pr_info!("Read SystemI/O(Port: {:#X}, Align: {})", port, align);
+        pr_debug!("Read SystemI/O(Port: {:#X}, Align: {})", port, align);
         unsafe {
             match align {
                 1 => {
@@ -142,7 +156,7 @@ pub fn write_io(
         pr_err!("Invalid port number: {:#X}", port);
         Err(AmlError::InvalidOperation)
     } else {
-        pr_info!(
+        pr_debug!(
             "Write SystemI/O(Port: {:#X}, Align: {}) <= {:#X}",
             port,
             align,
@@ -193,7 +207,7 @@ pub fn read_memory(
     align: usize,
     num_of_bits: usize,
 ) -> Result<ConstData, AmlError> {
-    let size = MSize::new((bit_index + num_of_bits) >> 3);
+    let size = MSize::new(((bit_index + num_of_bits) >> 3).max(1));
     let virtual_address = get_kernel_manager_cluster()
         .memory_manager
         .lock()
@@ -204,7 +218,15 @@ pub fn read_memory(
             MemoryPermissionFlags::data(),
             Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
         )
-        .or(Err(AmlError::InvalidOperation))?;
+        .or_else(|e| {
+            pr_err!(
+                "Failed to io_map(PhysicalAddress: {:#X}, Size: {:#X}): {:?}",
+                address.to_usize(),
+                size.to_usize(),
+                e
+            );
+            Err(AmlError::InvalidOperation)
+        })?;
     let result = try {
         unsafe {
             match align {
@@ -214,7 +236,7 @@ pub fn read_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let data = *(virtual_address.to_usize() as *const u8);
+                    let data = core::ptr::read_volatile(virtual_address.to_usize() as *const u8);
                     ConstData::Byte((data >> bit_index) & bit_mask)
                 }
                 2 => {
@@ -224,7 +246,7 @@ pub fn read_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let data = *(aligned_address as *const u16);
+                    let data = core::ptr::read_volatile(aligned_address as *const u16);
                     ConstData::Word(
                         data >> ((((virtual_address.to_usize() - aligned_address) << 3)
                             + bit_index)
@@ -238,7 +260,7 @@ pub fn read_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let data = *(aligned_address as *const u32);
+                    let data = core::ptr::read_volatile(aligned_address as *const u32);
                     ConstData::DWord(
                         data >> ((((virtual_address.to_usize() - aligned_address) << 3)
                             + bit_index)
@@ -252,7 +274,7 @@ pub fn read_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let data = *(aligned_address as *const u64);
+                    let data = core::ptr::read_volatile(aligned_address as *const u64);
                     ConstData::QWord(
                         data >> ((((virtual_address.to_usize() - aligned_address) << 3)
                             + bit_index)
@@ -272,6 +294,13 @@ pub fn read_memory(
         .unwrap()
         .free(virtual_address)
         .or(Err(AmlError::InvalidOperation))?;
+    pr_debug!(
+        "Read (Address: {:#X}, BitIndex: {}, NumOfBits: {}) => {:?}",
+        address.to_usize(),
+        bit_index,
+        num_of_bits,
+        result
+    );
     return result;
 }
 
@@ -289,6 +318,14 @@ pub fn write_memory(
         ConstData::QWord(_) => 8,
     })
     .max(align);
+    pr_debug!(
+        "Write (Address: {:#X}, BitIndex: {}, NumOfBits: {}) <= {:?}(AccessSize: {})",
+        address.to_usize(),
+        bit_index,
+        num_of_bits,
+        data,
+        access_size
+    );
     let size = MSize::new(access_size);
     let virtual_address = get_kernel_manager_cluster()
         .memory_manager
@@ -300,7 +337,15 @@ pub fn write_memory(
             MemoryPermissionFlags::data(),
             Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
         )
-        .or(Err(AmlError::InvalidOperation))?;
+        .or_else(|e| {
+            pr_err!(
+                "Failed to io_map(PhysicalAddress: {:#X}, Size: {:#X}): {:?}",
+                address.to_usize(),
+                size.to_usize(),
+                e
+            );
+            Err(AmlError::InvalidOperation)
+        })?;
     let result = try {
         unsafe {
             match align {
@@ -310,10 +355,11 @@ pub fn write_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let mut original_data = *(virtual_address.to_usize() as *const u8);
+                    let mut original_data =
+                        core::ptr::read_volatile(virtual_address.to_usize() as *const u8);
                     original_data &= !bit_mask << bit_index;
                     original_data |= ((data.to_int() & (bit_mask as usize)) << bit_index) as u8;
-                    *(virtual_address.to_usize() as *mut u8) = original_data;
+                    core::ptr::write_volatile(virtual_address.to_usize() as *mut u8, original_data);
                 }
                 2 => {
                     let aligned_address = virtual_address.to_usize() & !0b1;
@@ -322,13 +368,13 @@ pub fn write_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let mut original_data = *(aligned_address as *const u16);
+                    let mut original_data = core::ptr::read_volatile(aligned_address as *const u16);
                     original_data &= !bit_mask
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index);
                     original_data |= ((data.to_int() & (bit_mask as usize))
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index))
                         as u16;
-                    *(aligned_address as *mut u16) = original_data;
+                    core::ptr::write_volatile(aligned_address as *mut u16, original_data);
                 }
                 4 => {
                     let aligned_address = virtual_address.to_usize() & !0b11;
@@ -337,13 +383,13 @@ pub fn write_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let mut original_data = *(aligned_address as *const u32);
+                    let mut original_data = core::ptr::read_volatile(aligned_address as *const u32);
                     original_data &= !bit_mask
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index);
                     original_data |= ((data.to_int() & (bit_mask as usize))
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index))
                         as u32;
-                    *(aligned_address as *mut u32) = original_data;
+                    core::ptr::write_volatile(aligned_address as *mut u32, original_data);
                 }
                 8 => {
                     let aligned_address = virtual_address.to_usize() & !0b111;
@@ -352,13 +398,13 @@ pub fn write_memory(
                         bit_mask <<= 1;
                         bit_mask |= 1;
                     }
-                    let mut original_data = *(aligned_address as *const u64);
+                    let mut original_data = core::ptr::read_volatile(aligned_address as *const u64);
                     original_data &= !bit_mask
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index);
                     original_data |= ((data.to_int() & (bit_mask as usize))
                         << (((virtual_address.to_usize() - aligned_address) << 3) + bit_index))
                         as u64;
-                    *(aligned_address as *mut u64) = original_data;
+                    core::ptr::write_volatile(aligned_address as *mut u64, original_data);
                 }
                 _ => {
                     pr_err!("Invalid memory operation.");
@@ -439,7 +485,7 @@ pub fn read_pci(
         bit_mask >>= 32;
     }
 
-    pr_info!(
+    pr_debug!(
         "Read PCI: {}:{}:{} offset: {}(bit_index: {}) => {}",
         pci_config.bus,
         pci_config.device,
@@ -491,7 +537,7 @@ pub fn write_pci(
         Err(AmlError::InvalidOperation)?;
     }
 
-    pr_info!(
+    pr_debug!(
         "Write PCI: {}:{}:{} offset: {}(bit_index: {}) <= {:?}",
         pci_config.bus,
         pci_config.device,

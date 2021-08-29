@@ -23,6 +23,11 @@ use alloc::vec::Vec;
 
 pub type AmlFunction = fn(&[Arc<Mutex<AmlVariable>>]) -> Result<AmlVariable, AmlError>;
 
+struct RecursiveIndex<'a> {
+    index: usize,
+    next: Option<&'a Self>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AmlPciConfig {
     pub bus: u16,
@@ -102,7 +107,7 @@ impl AmlVariable {
             Self::Io((port, limit)) => {
                 if let Self::ConstData(c) = data {
                     let byte_offset = byte_index + (bit_index >> 3);
-                    let bit_index = bit_index >> 3;
+                    let adjusted_bit_index = bit_index & 0b111;
                     if byte_offset > *limit {
                         pr_err!(
                             "Offset({}) is out of I/O area(Port: {:#X}, Limit:{:#X}).",
@@ -112,7 +117,7 @@ impl AmlVariable {
                         );
                         Err(AmlError::InvalidOperation)
                     } else {
-                        write_io(*port + byte_offset, bit_index, access_align, c)
+                        write_io(*port + byte_offset, adjusted_bit_index, access_align, c)
                     }
                 } else {
                     pr_err!("Writing {:?} into I/O({}) is invalid.", data, port);
@@ -122,7 +127,7 @@ impl AmlVariable {
             Self::MMIo((address, limit)) => {
                 if let Self::ConstData(c) = data {
                     let byte_offset = byte_index + (bit_index >> 3);
-                    let bit_index = bit_index >> 3;
+                    let adjusted_bit_index = bit_index & 0b111;
                     if byte_offset > *limit {
                         pr_err!(
                             "Offset({}) is out of Memory area(Address: {:#X}, Limit:{:#X}).",
@@ -134,7 +139,7 @@ impl AmlVariable {
                     } else {
                         write_memory(
                             PAddress::new(*address + byte_offset),
-                            bit_index,
+                            adjusted_bit_index,
                             access_align,
                             c,
                             num_of_bits,
@@ -151,10 +156,8 @@ impl AmlVariable {
             }
             Self::EcIo((address, limit)) => {
                 let adjusted_byte_index = byte_index + (bit_index >> 3);
-                if (bit_index % 8) != 0 {
-                    pr_err!("Bit Index is not supported in Embedded Controller.");
-                    Err(AmlError::InvalidOperation)
-                } else if adjusted_byte_index >= *limit {
+                let adjusted_bit_index = bit_index & 0b111;
+                if adjusted_byte_index >= *limit {
                     pr_err!(
                         "Offset({}) is out of Embedded Controller area(Address: {:#X}, Limit:{:#X}).",
                         adjusted_byte_index,
@@ -163,10 +166,28 @@ impl AmlVariable {
                     );
                     Err(AmlError::InvalidOperation)
                 } else {
-                    write_embedded_controller(
-                        (*address + adjusted_byte_index) as u8,
-                        data.to_int()? as u8,
-                    )
+                    let to_write_data = if adjusted_bit_index != 0 || num_of_bits != 8 {
+                        if num_of_bits == 0 || (num_of_bits + adjusted_bit_index) > 8 {
+                            pr_err!(
+                                "Invalid BitField: BitIndex: {}, NumOfBits: {}",
+                                adjusted_bit_index,
+                                num_of_bits
+                            );
+                            return Err(AmlError::InvalidOperation);
+                        }
+                        let original_data =
+                            read_embedded_controller((*address + adjusted_byte_index) as u8)?;
+                        let mut bit_mask = 0;
+                        for _ in 0..num_of_bits {
+                            bit_mask <<= 1;
+                            bit_mask |= 1;
+                        }
+                        (original_data & !(bit_mask << adjusted_bit_index))
+                            | (((data.to_int()? as u8) & bit_mask) << adjusted_bit_index)
+                    } else {
+                        data.to_int()? as u8
+                    };
+                    write_embedded_controller((*address + adjusted_byte_index) as u8, to_write_data)
                 }
             }
             Self::PciConfig(pci_config) => {
@@ -464,10 +485,8 @@ impl AmlVariable {
             }
             Self::EcIo((address, limit)) => {
                 let adjusted_byte_index = byte_index + (bit_index >> 3);
-                if (bit_index % 8) != 0 {
-                    pr_err!("Bit Index is not supported in Embedded Controller.");
-                    Err(AmlError::InvalidOperation)
-                } else if adjusted_byte_index >= *limit {
+                let adjusted_bit_index = bit_index & 0b111;
+                if adjusted_byte_index >= *limit {
                     pr_err!(
                         "Offset({}) is out of Embedded Controller area(Address: {:#X}, Limit:{:#X}).",
                         adjusted_byte_index,
@@ -476,9 +495,25 @@ impl AmlVariable {
                     );
                     Err(AmlError::InvalidOperation)
                 } else {
-                    Ok(Self::ConstData(ConstData::Byte(read_embedded_controller(
-                        (*address + adjusted_byte_index) as u8,
-                    )?)))
+                    if num_of_bits == 0 || (num_of_bits + adjusted_bit_index) > 8 {
+                        pr_err!(
+                            "Invalid BitField: BitIndex: {}, NumOfBits: {}",
+                            adjusted_bit_index,
+                            num_of_bits
+                        );
+                        return Err(AmlError::InvalidOperation);
+                    }
+                    let mut read_data =
+                        read_embedded_controller((*address + adjusted_byte_index) as u8)?;
+                    if adjusted_bit_index != 0 || num_of_bits != 8 {
+                        let mut bit_mask: u8 = 0;
+                        for _ in 0..num_of_bits {
+                            bit_mask <<= 1;
+                            bit_mask |= 1;
+                        }
+                        read_data = ((read_data) >> adjusted_bit_index) & bit_mask;
+                    }
+                    Ok(Self::ConstData(ConstData::Byte(read_data)))
                 }
             }
             Self::PciConfig(pci_config) => {
@@ -664,6 +699,53 @@ impl AmlVariable {
         }
     }
 
+    fn write_data_into_package_recursively(
+        &mut self,
+        index: &RecursiveIndex,
+        data: AmlPackage,
+    ) -> Result<(), AmlError> {
+        if let Self::Package(v) = self {
+            let mut deref_index = Some(index);
+            let mut v = v;
+            while let Some(i) = deref_index {
+                if v.len() <= i.index {
+                    pr_err!("Index({}) is out of buffer(len: {}).", i.index, v.len());
+                    return Err(AmlError::InvalidOperation);
+                }
+                if i.next.is_none() {
+                    v[i.index] = data;
+                    return Ok(());
+                }
+                if let AmlPackage::Package(next) = &mut v[i.index] {
+                    v = next;
+                } else {
+                    return Err(AmlError::InvalidType);
+                }
+                deref_index = i.next;
+            }
+            unreachable!()
+        } else if let Self::Reference((source, additional_index)) = self {
+            if let Some(additional) = additional_index {
+                let new_index = RecursiveIndex {
+                    index: *additional,
+                    next: Some(index),
+                };
+                source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .write_data_into_package_recursively(&new_index, data)
+            } else {
+                source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .write_data_into_package_recursively(index, data)
+            }
+        } else {
+            pr_err!("Expected a package, but found {:?}", self);
+            Err(AmlError::InvalidType)
+        }
+    }
+
     pub fn write_buffer_with_index(&mut self, data: Self, index: usize) -> Result<(), AmlError> {
         if let Self::Buffer(s) = self {
             let const_data = if data.is_constant_data() {
@@ -693,6 +775,23 @@ impl AmlVariable {
             } else {
                 pr_err!("index({}) is out of string(len: {}).", index, s.len());
             }
+        } else if let Self::Reference((source, additional_index)) = self {
+            return if additional_index.is_some() {
+                let rec_index = RecursiveIndex { index, next: None };
+                if let Err(e) = self
+                    .write_data_into_package_recursively(&rec_index, data.convert_to_aml_package()?)
+                {
+                    pr_err!("Invalid Package: (Self: {:?}, Index: {})", self, index);
+                    Err(e)
+                } else {
+                    Ok(())
+                }
+            } else {
+                source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .write_buffer_with_index(data, index)
+            };
         } else {
             pr_err!("Invalid Data Type: {:?} <- {:?}", self, data);
         }
@@ -720,6 +819,33 @@ impl AmlVariable {
             } else {
                 pr_err!("index({}) is out of string(len: {}).", index, s.len());
                 Err(AmlError::InvalidOperation)
+            }
+        } else if let Self::Reference((source, additional_index)) = self {
+            if let Some(additional) = additional_index {
+                if let AmlVariable::Package(package) = source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .read_buffer_with_index(*additional)?
+                {
+                    if index < package.len() {
+                        Self::from_aml_package(package[index].clone())
+                    } else {
+                        pr_err!(
+                            "index({}) is out of package(len: {}).",
+                            index,
+                            package.len()
+                        );
+                        Err(AmlError::InvalidOperation)
+                    }
+                } else {
+                    pr_err!("Invalid Reference Data Type: {:?}", self);
+                    Err(AmlError::InvalidOperation)
+                }
+            } else {
+                source
+                    .try_lock()
+                    .or(Err(AmlError::MutexError))?
+                    .read_buffer_with_index(index)
             }
         } else {
             pr_err!("Invalid Data Type: {:?}[{}]", self, index);

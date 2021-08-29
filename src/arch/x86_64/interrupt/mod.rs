@@ -182,6 +182,7 @@ impl InterruptManager {
             IstIndex::TaskSwitch,
             InterruptionIndex::RescheduleIpi as u16,
             0,
+            false,
         );
     }
 
@@ -236,6 +237,7 @@ impl InterruptManager {
         ist: IstIndex,
         index: u16,
         privilege_level: u8,
+        is_level_trigger: bool,
     ) -> bool {
         if index <= 32 || index > 0xFF {
             /* CPU exception interrupt */
@@ -258,7 +260,12 @@ impl InterruptManager {
                 .io_apic_manager
                 .lock()
                 .unwrap()
-                .set_redirect(self.local_apic.get_apic_id(), irq, index as u8);
+                .set_redirect(
+                    self.local_apic.get_apic_id(),
+                    irq,
+                    index as u8,
+                    is_level_trigger,
+                );
         }
         drop(_lock);
         Self::restore_local_irq(flag);
@@ -289,9 +296,21 @@ impl InterruptManager {
         cpu::set_r_flags(original.r_flags);
     }
 
-    /// Send end of interruption to Local APIC.
+    /// Send end of interrupt to Local APIC.
     pub fn send_eoi(&self) {
         self.local_apic.send_eoi();
+    }
+
+    /// Send end of interrupt to Local APIC and also send to I/O APIC.
+    pub fn send_eoi_level_trigger(&self, vector: u8) {
+        self.local_apic.send_eoi();
+        if let Ok(io) = get_kernel_manager_cluster()
+            .arch_depend_data
+            .io_apic_manager
+            .try_lock()
+        {
+            io.send_eoi(vector)
+        }
     }
 
     /// Return the reference of LocalApicManager.

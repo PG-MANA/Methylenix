@@ -9,13 +9,13 @@ use super::super::device::AcpiDeviceManager;
 
 use crate::arch::target_arch::device::acpi::{read_io_byte, write_io_byte};
 
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 pub struct EmbeddedController {
     ec_sc: usize,
     ec_data: usize,
     gpe: Option<usize>,
-    write_lock: SpinLockFlag,
+    write_lock: IrqSaveSpinLockFlag,
 }
 
 impl EmbeddedController {
@@ -54,7 +54,8 @@ impl EmbeddedController {
         pr_info!("ACPI Embedded Controller: {}", ec_device_scope);
         device_manager.ec = Some(
             match ec_device_interpreter.evaluate_method(
-                &NameString::from_array(&[*b"_CRS"], false).get_full_name_path(&ec_device_scope),
+                &NameString::from_array(&[*b"_CRS"], false)
+                    .get_full_name_path(&ec_device_scope, true),
                 &[],
             ) {
                 Ok(Some(AmlVariable::Buffer(v))) => {
@@ -77,7 +78,7 @@ impl EmbeddedController {
                         ec_sc,
                         ec_data,
                         gpe: None,
-                        write_lock: SpinLockFlag::new(),
+                        write_lock: IrqSaveSpinLockFlag::new(),
                     }
                 }
                 Ok(Some(d)) => {
@@ -92,7 +93,7 @@ impl EmbeddedController {
             },
         );
         if let Ok(Some(result)) = ec_device_interpreter.evaluate_method(
-            &NameString::from_array(&[*b"_STA"], false).get_full_name_path(&ec_device_scope),
+            &NameString::from_array(&[*b"_STA"], false).get_full_name_path(&ec_device_scope, true),
             &[],
         ) {
             match result.to_int() {
@@ -121,7 +122,8 @@ impl EmbeddedController {
         ];
         if ec_device_interpreter
             .evaluate_method(
-                &NameString::from_array(&[*b"_REG"], false).get_full_name_path(&ec_device_scope),
+                &NameString::from_array(&[*b"_REG"], false)
+                    .get_full_name_path(&ec_device_scope, true),
                 &arg,
             )
             .is_err()
@@ -132,7 +134,7 @@ impl EmbeddedController {
         }
 
         match ec_device_interpreter.evaluate_method(
-            &NameString::from_array(&[*b"_GPE"], false).get_full_name_path(&ec_device_scope),
+            &NameString::from_array(&[*b"_GPE"], false).get_full_name_path(&ec_device_scope, true),
             &[],
         ) {
             Ok(Some(v)) => match v.to_int() {
@@ -176,11 +178,14 @@ impl EmbeddedController {
 
         /* write_io_byte(self.ec_sc, Self::BD_EC); */
 
+        pr_debug!("Read EC(Address: {:#X}) => {:#X}", address, result);
+        drop(_lock);
         return result;
     }
 
     pub fn write_data(&self, address: u8, data: u8) {
         let _lock = self.write_lock.lock();
+        pr_debug!("Write EC(Address: {:#X}) <= {}", address, data);
         /* write_io_byte(self.ec_sc, Self::BE_EC); */
         self.wait_input_buffer();
 
@@ -194,7 +199,7 @@ impl EmbeddedController {
         self.wait_input_buffer();
 
         /* write_io_byte(self.ec_sc, Self::BD_EC); */
-
+        drop(_lock);
         return;
     }
 
@@ -210,7 +215,7 @@ impl EmbeddedController {
         let result = read_io_byte(self.ec_data);
 
         /* write_io_byte(self.ec_sc, Self::BD_EC); */
-
+        drop(_lock);
         return result;
     }
 

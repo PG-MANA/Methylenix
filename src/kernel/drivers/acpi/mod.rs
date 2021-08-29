@@ -2,7 +2,7 @@
 //! Advanced Configuration and Power Interface Manager
 //!
 //! Supported ACPI version 6.4
-//! <https://uefi.org/sites/default/files/resources/ACPI_6_3_May16.pdf>
+//! <https://uefi.org/sites/default/files/resources/ACPI_Spec_6_4_Jan22.pdf>
 //!
 
 pub mod aml;
@@ -306,36 +306,64 @@ impl AcpiManager {
         self.shutdown()
     }
 
-    pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
-        if (self.get_fadt_manager().get_flags() & (1 << 4)) != 0 {
-            pr_info!("PowerButton is the control method power button.");
-            if let Some(interpreter) = &self.aml_interpreter {
-                match interpreter.move_into_device(b"PNP0C0C") {
-                    Ok(Some(i)) => {
-                        pr_info!("This computer has power button: {}", i.get_current_scope());
-                        true
-                    }
-                    Ok(None) => {
-                        pr_info!("This computer has no power button.");
-                        true
-                    }
-                    Err(_) => {
-                        pr_info!("Cannot get power button device.");
-                        false
-                    }
+    fn control_method_power_button_hook(v: AmlVariable) {
+        match v.to_int() {
+            Ok(s) => {
+                if s == 0x80 {
+                    pr_info!("PowerButton was pushed.");
+                    get_kernel_manager_cluster()
+                        .acpi_manager
+                        .lock()
+                        .unwrap()
+                        .shutdown_test();
+                } else {
+                    pr_debug!("PowerButton: {:#X}", s)
                 }
-            } else {
-                pr_err!("AmlInterpreter is not available.");
-                false
             }
-        } else {
-            pr_info!("PowerButton is the fixed hardware power button.");
-            acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton)
+            Err(e) => {
+                pr_warn!("Unknown PowerButton Notify: {:?}, {:?}", v, e);
+            }
         }
     }
 
+    pub fn enable_power_button(&mut self, acpi_event_manager: &mut AcpiEventManager) -> bool {
+        if (self.get_fadt_manager().get_flags() & (1 << 4)) == 0 {
+            pr_info!("PowerButton is the fixed hardware power button.");
+            if !acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton) {
+                return false;
+            }
+        } else {
+            pr_info!("PowerButton is the control method power button.");
+            if !acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton) {
+                return false;
+            }
+        }
+        if let Some(interpreter) = &self.aml_interpreter {
+            match interpreter.move_into_device(b"PNP0C0C") {
+                Ok(Some(i)) => {
+                    pr_info!("This computer has power button: {}", i.get_current_scope());
+                    get_kernel_manager_cluster()
+                        .acpi_event_manager
+                        .get_notify_list()
+                        .register_function(
+                            i.get_current_scope(),
+                            Self::control_method_power_button_hook,
+                        );
+                }
+                Ok(None) => {
+                    pr_info!("This computer has no control method power button.");
+                }
+                Err(_) => {
+                    pr_info!("Failed to get power button device.");
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     pub fn search_interrupt_information_with_evaluation_aml(
-        &mut self,
+        &self,
         bus: u8,
         device: u8,
         int_pin: u8,
@@ -391,9 +419,13 @@ impl AcpiManager {
                             let link_device = link_device.get_last_element().unwrap();
                             pr_info!("Detect: {}", link_device);
                             let crs_function_name = NameString::from_array(&[*b"_CRS"], false)
-                                .get_full_name_path(&link_device.get_full_name_path(
-                                    &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
-                                )); /* \\_SB.(DEVICE)._CRS */
+                                .get_full_name_path(
+                                    &link_device.get_full_name_path(
+                                        &NameString::from_array(&[[b'_', b'S', b'B', 0]], true),
+                                        true,
+                                    ),
+                                    true,
+                                ); /* \\_SB.(DEVICE)._CRS */
                             let mut interpreter = self.aml_interpreter.as_ref().unwrap().clone();
                             let link_device_evaluation_result =
                                 interpreter.evaluate_method(&crs_function_name, &[]);
@@ -466,7 +498,7 @@ impl AcpiManager {
         }
     }
 
-    pub fn initialize_all_devices(&mut self) -> bool {
+    pub fn initialize_all_devices(&self) -> bool {
         if let Some(mut interpreter) = self.aml_interpreter.clone() {
             match interpreter.initialize_all_devices() {
                 Ok(()) => true,
@@ -476,6 +508,80 @@ impl AcpiManager {
             pr_err!("AmlInterpreter is not available.");
             false
         }
+    }
+
+    fn evaluate_edge_trigger_event(&self, event_number: u8) -> Result<(), ()> {
+        let mut interpreter = if let Some(i) = &self.aml_interpreter {
+            i.clone()
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            return Err(());
+        };
+        let to_ascii = |x: u8| -> u8 {
+            if x >= 0xa {
+                x - 0xa + b'A'
+            } else {
+                x + b'0'
+            }
+        };
+
+        let edge_trigger_method_name = NameString::from_array(
+            &[
+                *b"_GPE",
+                [
+                    b'_',
+                    b'E',
+                    to_ascii(event_number >> 4),
+                    to_ascii(event_number & 0xf),
+                ],
+            ],
+            true,
+        );
+        pr_debug!("Evaluate: {}", edge_trigger_method_name);
+        match interpreter.evaluate_method(&edge_trigger_method_name, &[]) {
+            Ok(Some(v)) => {
+                pr_info!("Returned: {:?}", v);
+                Ok(())
+            }
+            Ok(None) => {
+                pr_info!("Nothing is returned.");
+                Ok(())
+            }
+            Err(_) => Err(()),
+        }
+    }
+
+    fn evaluate_level_trigger_event(&self, event_number: u8) -> Result<(), ()> {
+        let mut interpreter = if let Some(i) = &self.aml_interpreter {
+            i.clone()
+        } else {
+            pr_err!("AmlInterpreter is not available.");
+            return Err(());
+        };
+        let to_ascii = |x: u8| -> u8 {
+            if x >= 0xa {
+                x - 0xa + b'A'
+            } else {
+                x + b'0'
+            }
+        };
+
+        let level_trigger_method_name = NameString::from_array(
+            &[
+                *b"_GPE",
+                [
+                    b'_',
+                    b'L',
+                    to_ascii(event_number >> 4),
+                    to_ascii(event_number & 0xf),
+                ],
+            ],
+            true,
+        );
+        pr_debug!("Evaluate: {}", level_trigger_method_name);
+        interpreter
+            .evaluate_method(&level_trigger_method_name, &[])
+            .and(Ok(()))
     }
 
     fn evaluate_query(&self, query: u8) {
@@ -506,10 +612,10 @@ impl AcpiManager {
                     &[[b'_', b'Q', to_ascii(query >> 4), to_ascii(query & 0xf)]],
                     false,
                 )
-                .get_full_name_path(new_interpreter.get_current_scope());
-                pr_info!("Evaluate: {}", query_method_name);
+                .get_full_name_path(new_interpreter.get_current_scope(), false);
+                pr_debug!("Evaluate: {}", query_method_name);
                 if let Err(_) = new_interpreter.evaluate_method(&query_method_name, &[]) {
-                    pr_err!("Cannot evaluate: {}", query_method_name);
+                    pr_err!("Failed to evaluate: {}", query_method_name);
                 }
             }
         }

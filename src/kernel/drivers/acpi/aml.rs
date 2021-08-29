@@ -10,6 +10,7 @@ mod expression_opcode;
 mod name_object;
 pub(super) mod named_object;
 mod namespace_modifier_object;
+pub(super) mod notify;
 mod opcode;
 mod statement_opcode;
 mod term_object;
@@ -44,10 +45,8 @@ pub struct AmlStream {
 #[derive(Debug)]
 pub enum AmlError {
     AccessOutOfRange,
-    InvalidSizeChange,
     InvalidType,
-    InvalidMethodName(NameString),
-    InvalidScope(NameString),
+    InvalidName(NameString),
     InvalidOperation,
     MutexError,
     ObjectTreeError,
@@ -107,15 +106,8 @@ impl AmlInterpreter {
 
     pub fn get_aml_variable(&mut self, name: &NameString) -> Option<AmlVariable> {
         let mut evaluator = self.evaluator.clone();
-        let (mut dummy_local_variables, mut dummy_argument_variables) =
-            Evaluator::init_local_variables_and_argument_variables();
 
-        match evaluator.search_aml_variable(
-            name,
-            None,
-            &mut dummy_local_variables,
-            &mut dummy_argument_variables,
-        ) {
+        match evaluator.search_aml_variable(name, None, false) {
             Ok(v) => {
                 let cloned_v = v.lock().unwrap().clone();
                 drop(v);
@@ -174,20 +166,23 @@ impl AmlInterpreter {
             pr_warn!("method_name is NullName.");
             return Ok(None);
         }
-        let (mut dummy_local_variables, mut dummy_argument_variables) =
-            Evaluator::init_local_variables_and_argument_variables();
-        let method = match self.evaluator.search_aml_variable(
-            method_name,
-            None,
-            &mut dummy_local_variables,
-            &mut dummy_argument_variables,
-        ) {
+
+        let method = match self.evaluator.search_aml_variable(method_name, None, false) {
             Ok(v) => {
                 if let AmlVariable::Method(m) = &*v.lock().unwrap() {
                     m.clone()
                 } else {
                     pr_err!("Expected a method, but found {:?}", &*v.lock().unwrap());
                     return Err(());
+                }
+            }
+            Err(AmlError::InvalidName(n)) => {
+                return if &n == method_name {
+                    pr_warn!("{} is not found.", method_name);
+                    Ok(None)
+                } else {
+                    pr_err!("{} is not found.", n);
+                    Err(())
                 }
             }
             Err(e) => {
@@ -279,7 +274,7 @@ impl AmlStream {
     fn change_size(&mut self, new_size_from_current_point: usize) -> Result<(), AmlError> {
         let new_limit = self.pointer + MSize::new(new_size_from_current_point);
         if new_limit > self.limit {
-            Err(AmlError::InvalidSizeChange)
+            Err(AmlError::AccessOutOfRange)
         } else {
             self.limit = new_limit;
             Ok(())
