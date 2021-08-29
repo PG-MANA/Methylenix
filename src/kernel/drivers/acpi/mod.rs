@@ -363,7 +363,7 @@ impl AcpiManager {
     }
 
     pub fn search_interrupt_information_with_evaluation_aml(
-        &mut self,
+        &self,
         bus: u8,
         device: u8,
         int_pin: u8,
@@ -498,7 +498,7 @@ impl AcpiManager {
         }
     }
 
-    pub fn initialize_all_devices(&mut self) -> bool {
+    pub fn initialize_all_devices(&self) -> bool {
         if let Some(mut interpreter) = self.aml_interpreter.clone() {
             match interpreter.initialize_all_devices() {
                 Ok(()) => true,
