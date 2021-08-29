@@ -586,7 +586,7 @@ impl Evaluator {
         &mut self,
         name: &NameString,
         preferred_search_scope: Option<&NameString>,
-        _: bool,
+        _allow_search_from_cache: bool,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         if name.is_null_name() {
             return Err(AmlError::InvalidName(name.clone()));
@@ -2264,7 +2264,7 @@ impl Evaluator {
                         )
                     }
                     AmlVariable::BuiltInMethod((func, _)) => {
-                        let cloned_func = func.clone();
+                        let cloned_func = *func;
                         drop(locked_obj);
                         self.eval_builtin_method(&method_invocation, cloned_func, current_scope)
                     }

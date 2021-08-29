@@ -28,7 +28,7 @@ pub struct AmlVariableTreeBackup {
 
 impl TreeNode {
     const DEFAULT_CHILDREN_ENTRIES: usize = 8;
-    const DEFAULT_VARIABLES_ENTRIES: usize = 16;
+    const DEFAULT_VARIABLES_ENTRIES: usize = 4;
 
     fn root() -> Self {
         Self {
