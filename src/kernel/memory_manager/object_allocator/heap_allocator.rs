@@ -19,7 +19,7 @@ pub struct HeapAllocator {
 }
 
 impl HeapAllocator {
-    const DEFAULT_ALLOC_PAGE_ORDER: MPageOrder = MPageOrder::new(2);
+    const DEFAULT_ALLOC_PAGE_ORDER: MPageOrder = MPageOrder::new(4);
 
     pub const fn new() -> Self {
         Self {
