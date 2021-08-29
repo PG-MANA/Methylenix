@@ -146,6 +146,7 @@ impl Evaluator {
                 if n == sta {
                     0b1111 /* Assume enabled */
                 } else {
+                    pr_err!("Failed to search {}: {:?}", sta, AmlError::InvalidName(n));
                     0
                 }
             }
@@ -285,6 +286,7 @@ impl Evaluator {
     fn search_aml_variable_by_parsing_term_list(
         &mut self,
         name: &NameString,
+        name_single_relative: Option<&NameString>,
         mut term_list: TermList,
         search_scope: Option<&NameString>, /* To search the variable like _SB.PCI0.^^_FOO */
         should_keep_term_list_hierarchy_when_found: bool,
@@ -299,7 +301,6 @@ impl Evaluator {
         self.variable_tree
             .move_current_scope(term_list.get_scope_name())?;
 
-        let single_relative_path = name.get_single_name_path();
         let is_in_search_scope = search_scope
             .and_then(|s| {
                 Some(term_list.get_scope_name() == s || term_list.get_scope_name().is_child(s))
@@ -315,19 +316,16 @@ impl Evaluator {
                     Err(e) => Err(e),
                 }
             };
-        let compare_by_search_rules = |object_name: &NameString,
-                                       searching_name: &NameString,
-                                       single_name: &Option<NameString>|
-         -> bool {
-            if searching_name.is_absolute_path() {
-                object_name == searching_name
-            } else if let Some(single_name_segment_path) = single_name {
+        let compare_by_search_rules = |object_name: &NameString| -> bool {
+            if name.is_absolute_path() {
+                object_name == name
+            } else if let Some(single_name_segment_path) = name_single_relative {
                 /* Single Name Segments */
                 is_in_search_scope && object_name.suffix_search(single_name_segment_path)
             } else {
                 /* Multi Name Segments */
                 /* Maybe wrong... */
-                is_in_search_scope && object_name.suffix_search(searching_name)
+                is_in_search_scope && object_name.suffix_search(name)
             }
         };
 
@@ -336,7 +334,7 @@ impl Evaluator {
                 TermObj::NamespaceModifierObj(name_modifier_object) => {
                     match name_modifier_object {
                         NamespaceModifierObject::DefAlias(a) => {
-                            if compare_by_search_rules(a.get_name(), name, &single_relative_path) {
+                            if compare_by_search_rules(a.get_name()) {
                                 pr_err!(
                                     "Alias is not supported yet. {} => {}",
                                     name,
@@ -346,7 +344,7 @@ impl Evaluator {
                             }
                         }
                         NamespaceModifierObject::DefName(n) => {
-                            if compare_by_search_rules(n.get_name(), name, &single_relative_path) {
+                            if compare_by_search_rules(n.get_name()) {
                                 return match n.get_data_ref_object() {
                                     DataRefObject::DataObject(d) => {
                                         let variable = self.eval_term_arg(
@@ -383,6 +381,7 @@ impl Evaluator {
 
                                 let result = self.search_aml_variable_by_parsing_term_list(
                                     name,
+                                    name_single_relative,
                                     s.get_term_list().clone(),
                                     search_scope,
                                     should_keep_term_list_hierarchy_when_found,
@@ -415,6 +414,7 @@ impl Evaluator {
                     let tree_backup = self.variable_tree.backup_current_scope();
                     match self.search_aml_variable_by_parsing_named_object(
                         name,
+                        name_single_relative,
                         term_list.get_scope_name(),
                         named_object,
                         search_scope,
@@ -444,18 +444,17 @@ impl Evaluator {
     fn search_aml_variable_by_parsing_named_object(
         &mut self,
         name: &NameString,
+        name_single_relative: Option<&NameString>,
         current_scope: &NameString,
         named_object: NamedObject,
         search_scope: Option<&NameString>, /* To search the variable like _SB.PCI0.^^_FOO */
         should_keep_term_list_hierarchy_when_found: bool,
     ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
-        let single_name = name.get_single_name_path();
         let is_in_current_scope = current_scope.is_child(name);
 
         if let Some(named_object_name) = named_object.get_name() {
             if name == named_object_name
-                || single_name
-                    .as_ref()
+                || name_single_relative
                     .and_then(|n| Some(is_in_current_scope && named_object_name.suffix_search(n)))
                     .unwrap_or(false)
             {
@@ -478,8 +477,7 @@ impl Evaluator {
                     if n == name {
                         let v = self.eval_named_object(name, named_object, current_scope)?;
                         return Ok(Some(self.variable_tree.add_data(name.clone(), v, false)?));
-                    } else if single_name
-                        .as_ref()
+                    } else if name_single_relative
                         .and_then(|relative_name| {
                             Some(is_in_current_scope && n.suffix_search(relative_name))
                         })
@@ -498,6 +496,7 @@ impl Evaluator {
                 .move_current_scope(term_list.get_scope_name())?;
             let result = self.search_aml_variable_by_parsing_term_list(
                 name,
+                name_single_relative,
                 term_list,
                 search_scope,
                 should_keep_term_list_hierarchy_when_found,
@@ -534,6 +533,7 @@ impl Evaluator {
 
         let result = self.search_aml_variable_by_parsing_term_list(
             absolute_search.as_ref().unwrap_or(name),
+            None,
             self.current_root_term_list.clone(),
             None,
             false,
@@ -555,6 +555,7 @@ impl Evaluator {
             self.current_root_term_list = term_list.clone();
             let result = self.search_aml_variable_by_parsing_term_list(
                 name,
+                None,
                 self.current_root_term_list.clone(),
                 None,
                 false,
@@ -645,9 +646,13 @@ impl Evaluator {
 
         /* Search from the current TermList */
         if let Some(current_term_list) = self.term_list_hierarchy.last().cloned() {
-            if let Some(v) =
-                self.search_aml_variable_by_parsing_term_list(name, current_term_list, None, false)?
-            {
+            if let Some(v) = self.search_aml_variable_by_parsing_term_list(
+                name,
+                single_name.as_ref(),
+                current_term_list,
+                None,
+                false,
+            )? {
                 restore_status(self)?;
                 return Ok(v);
             }
@@ -701,6 +706,7 @@ impl Evaluator {
 
             match self.search_aml_variable_by_parsing_term_list(
                 &search_target_name,
+                single_name.as_ref(),
                 term_list.clone(),
                 Some(&search_scope),
                 false,
@@ -753,6 +759,7 @@ impl Evaluator {
         /* TODO: check search algorithm */
         match self.search_aml_variable_by_parsing_term_list(
             name,
+            single_name.as_ref(),
             self.current_root_term_list.clone(),
             Some(&search_scope),
             false,
@@ -770,6 +777,7 @@ impl Evaluator {
 
         match self.search_aml_variable_by_parsing_term_list(
             &single_name.as_ref().unwrap_or(name),
+            single_name.as_ref(),
             self.current_root_term_list.clone(),
             Some(&search_scope),
             false,
@@ -803,6 +811,7 @@ impl Evaluator {
             self.current_root_term_list = root_term_list.clone();
             match self.search_aml_variable_by_parsing_term_list(
                 name,
+                single_name.as_ref(),
                 self.current_root_term_list.clone(),
                 Some(&search_scope),
                 false,
@@ -834,9 +843,11 @@ impl Evaluator {
             self.term_list_hierarchy.clear();
         }
         self.variable_tree.move_to_root()?;
+        let single_name = object_name.get_single_name_path();
 
         match self.search_aml_variable_by_parsing_term_list(
             object_name,
+            single_name.as_ref(),
             self.current_root_term_list.clone(),
             search_scope,
             true,
@@ -856,6 +867,7 @@ impl Evaluator {
             self.current_root_term_list = root_term_list.clone();
             match self.search_aml_variable_by_parsing_term_list(
                 object_name,
+                single_name.as_ref(),
                 self.current_root_term_list.clone(),
                 search_scope,
                 true,
@@ -925,7 +937,19 @@ impl Evaluator {
                         self.variable_tree.restore_current_scope(tree_backup);
                         self.term_list_hierarchy.pop();
                     }
-                    _ => { /* Ignore */ }
+                    o => {
+                        if let Some(term_list) = o.get_term_list() {
+                            self.term_list_hierarchy.push(term_list.clone());
+                            let tree_backup = self.variable_tree.backup_current_scope();
+                            self.variable_tree
+                                .move_current_scope(term_list.get_scope_name())?;
+                            if self._move_into_device(hid, term_list, in_device)? {
+                                return Ok(true);
+                            }
+                            self.variable_tree.restore_current_scope(tree_backup);
+                            self.term_list_hierarchy.pop();
+                        }
+                    }
                 },
                 TermObj::StatementOpcode(_s_o) => {
                     /* if let StatementOpcode::DefIfElse(i_e) = s_o {
@@ -942,14 +966,29 @@ impl Evaluator {
     }
 
     pub fn move_into_device(&mut self, hid: &[u8; 7]) -> Result<bool, AmlError> {
-        /* Search from the current root */
         if !self.term_list_hierarchy.is_empty() {
             pr_err!("TermListHierarchy is not empty, it will be deleted.");
             self.term_list_hierarchy.clear();
         }
         self.variable_tree.move_to_root()?;
         let hid_u32 = eisa_id_to_dword(hid);
-        self._move_into_device(hid_u32, self.current_root_term_list.clone(), false)
+        if self._move_into_device(hid_u32, self.current_root_term_list.clone(), false)? {
+            return Ok(true);
+        }
+
+        let backup = self.current_root_term_list.clone();
+        for r in self.root_term_list.clone().iter() {
+            if r == &backup {
+                continue;
+            }
+            self.current_root_term_list = r.clone();
+            if self._move_into_device(hid_u32, r.clone(), false)? {
+                self.current_root_term_list = backup;
+                return Ok(true);
+            }
+        }
+        self.current_root_term_list = backup;
+        return Ok(false);
     }
 
     pub fn find_method_argument_count(
@@ -979,7 +1018,7 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             NamedObject::DefCreateField(f) => {
-                let source_variable = self.get_aml_variable_reference_from_term_arg(
+                let source_variable = self.create_aml_variable_reference_from_term_arg(
                     f.get_source_buffer().clone(),
                     current_scope,
                 )?;
@@ -1262,7 +1301,7 @@ impl Evaluator {
         }
     }
 
-    fn get_aml_variable_reference_from_expression_opcode(
+    fn create_aml_variable_reference_from_expression_opcode(
         &mut self,
         e: ExpressionOpcode,
         current_scope: &NameString,
@@ -1273,12 +1312,12 @@ impl Evaluator {
         } else if matches!(result, AmlVariable::Reference(_)) {
             Ok(Arc::new(Mutex::new(result)))
         } else {
-            pr_info!("Expected a reference, but found {:?}.", result);
+            pr_warn!("Expected a reference, but found {:?}.", result);
             Ok(Arc::new(Mutex::new(result)))
         }
     }
 
-    fn get_aml_variable_reference_from_super_name(
+    fn create_aml_variable_reference_from_super_name(
         &mut self,
         super_name: &SuperName,
         current_scope: &NameString,
@@ -1308,21 +1347,21 @@ impl Evaluator {
                 Err(AmlError::UnsupportedType)
             }
             SuperName::ReferenceTypeOpcode(r) => self
-                .get_aml_variable_reference_from_expression_opcode(
+                .create_aml_variable_reference_from_expression_opcode(
                     ExpressionOpcode::ReferenceTypeOpcode((**r).clone()),
                     current_scope,
                 ),
         }
     }
 
-    fn get_aml_variable_reference_from_term_arg(
+    fn create_aml_variable_reference_from_term_arg(
         &mut self,
         term_arg: TermArg,
         current_scope: &NameString,
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         match term_arg {
             TermArg::ExpressionOpcode(e) => {
-                self.get_aml_variable_reference_from_expression_opcode(*e, current_scope)
+                self.create_aml_variable_reference_from_expression_opcode(*e, current_scope)
             }
             TermArg::DataObject(data_object) => match data_object {
                 DataObject::ComputationalData(computational_data) => match computational_data {
@@ -1368,13 +1407,13 @@ impl Evaluator {
         }
     }
 
-    fn get_mutex_object(
+    fn search_mutex_object(
         &mut self,
         mutex_name: &SuperName,
         current_scope: &NameString,
     ) -> Result<Arc<(AtomicU8, u8)>, AmlError> {
         let aml_variable =
-            &self.get_aml_variable_reference_from_super_name(&mutex_name, current_scope)?;
+            &self.create_aml_variable_reference_from_super_name(&mutex_name, current_scope)?;
         let locked_aml_variable = aml_variable.try_lock().or(Err(AmlError::MutexError))?;
         let mutex_object = if let AmlVariable::Mutex(m) = &*locked_aml_variable {
             m.clone()
@@ -1558,7 +1597,7 @@ impl Evaluator {
                             .write(data)?;
                     }
                     ReferenceTypeOpcode::DefIndex(i) => {
-                        let buffer = self.get_aml_variable_reference_from_term_arg(
+                        let buffer = self.create_aml_variable_reference_from_term_arg(
                             i.get_source().clone(),
                             current_scope,
                         )?;
@@ -1679,7 +1718,7 @@ impl Evaluator {
     ) -> Result<AmlVariable, AmlError> {
         match e {
             ExpressionOpcode::DefAcquire((mutex_name, wait)) => {
-                let mutex_object = self.get_mutex_object(&mutex_name, current_scope)?;
+                let mutex_object = self.search_mutex_object(&mutex_name, current_scope)?;
 
                 let current_tick = get_cpu_manager_cluster()
                     .timer_manager
@@ -1769,7 +1808,7 @@ impl Evaluator {
             }
             ExpressionOpcode::DefDecrement(decrement) => {
                 let obj =
-                    self.get_aml_variable_reference_from_super_name(&decrement, current_scope)?;
+                    self.create_aml_variable_reference_from_super_name(&decrement, current_scope)?;
                 let mut locked_obj = obj.try_lock().or(Err(AmlError::MutexError))?;
                 if locked_obj.is_constant_data() {
                     if let AmlVariable::ConstData(c) = *locked_obj {
@@ -1801,7 +1840,7 @@ impl Evaluator {
 
             ExpressionOpcode::DefIncrement(increment) => {
                 let obj =
-                    self.get_aml_variable_reference_from_super_name(&increment, current_scope)?;
+                    self.create_aml_variable_reference_from_super_name(&increment, current_scope)?;
                 let mut locked_obj = obj.try_lock().or(Err(AmlError::MutexError))?;
                 if locked_obj.is_constant_data() {
                     if let AmlVariable::ConstData(c) = *locked_obj {
@@ -1917,7 +1956,7 @@ impl Evaluator {
             }
             ExpressionOpcode::DefSizeOf(obj_name) => {
                 let obj =
-                    self.get_aml_variable_reference_from_super_name(&obj_name, current_scope)?;
+                    self.create_aml_variable_reference_from_super_name(&obj_name, current_scope)?;
                 let byte_size = match &*obj.try_lock().or(Err(AmlError::MutexError))? {
                     AmlVariable::String(s) => s.len(),
                     AmlVariable::Buffer(b) => b.len(),
@@ -1979,7 +2018,7 @@ impl Evaluator {
             }
             ExpressionOpcode::DefCondRefOf((source, destination)) => {
                 let result =
-                    self.get_aml_variable_reference_from_super_name(&source, current_scope);
+                    self.create_aml_variable_reference_from_super_name(&source, current_scope);
                 if matches!(result, Err(AmlError::InvalidName(_))) {
                     Ok(AmlVariable::ConstData(ConstData::Byte(0)))
                 } else if let Ok(obj) = result {
@@ -2086,14 +2125,14 @@ impl Evaluator {
             }
             ExpressionOpcode::ReferenceTypeOpcode(r_e) => match r_e {
                 ReferenceTypeOpcode::DefRefOf(super_name) => Ok(AmlVariable::Reference((
-                    self.get_aml_variable_reference_from_super_name(&super_name, current_scope)?,
+                    self.create_aml_variable_reference_from_super_name(&super_name, current_scope)?,
                     None,
                 ))),
                 ReferenceTypeOpcode::DefDerefOf(reference) => {
                     self.eval_term_arg(reference.clone(), current_scope)
                 }
                 ReferenceTypeOpcode::DefIndex(i) => {
-                    let buffer = self.get_aml_variable_reference_from_term_arg(
+                    let buffer = self.create_aml_variable_reference_from_term_arg(
                         i.get_source().clone(),
                         current_scope,
                     )?;
@@ -2304,7 +2343,7 @@ impl Evaluator {
         mutex_name: &SuperName,
         current_scope: &NameString,
     ) -> Result<(), AmlError> {
-        self.get_mutex_object(&mutex_name, current_scope)?
+        self.search_mutex_object(&mutex_name, current_scope)?
             .0
             .fetch_sub(1, Ordering::Release);
         return Ok(());
