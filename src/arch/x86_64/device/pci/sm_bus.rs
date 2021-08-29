@@ -5,6 +5,7 @@
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 use crate::arch::target_arch::interrupt::{InterruptManager, IstIndex};
 
+use crate::kernel::drivers::acpi::aml::ResourceData;
 use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 
@@ -34,11 +35,7 @@ impl SmbusManager {
     const SMBUS_HOST_NOTIFY_STATUS: u8 = 1;
     const SMBUS_HOST_NOTIFY_INTERRUPT_ENABLE: u8 = 1;
 
-    pub fn setup(pci_manager: &PciManager, bus: u8, device: u8, function: u8, header_type: u8) {
-        if header_type != 0 {
-            pr_err!("Invalid header type: {}", header_type);
-            return;
-        }
+    pub fn setup(pci_manager: &PciManager, bus: u8, device: u8, function: u8, _header_type: u8) {
         pci_manager.write_config_address_register(bus, device, function, Self::PCI_CMD);
         let status = pci_manager.read_config_data_register() >> 16;
         if (status & Self::INTERRUPT_STATUS) != 0 {
@@ -56,26 +53,31 @@ impl SmbusManager {
         }
         let int_pin = interrupt_pin - 1;
         pr_info!("Interrupt Pin: INT{}#", (int_pin + b'A') as char);
-        let irq = get_kernel_manager_cluster()
+        let resource_data = get_kernel_manager_cluster()
             .acpi_manager
             .lock()
             .unwrap()
-            .search_intr_number_with_evaluation_aml(bus, device, int_pin);
-        if irq.is_none() {
+            .search_interrupt_information_with_evaluation_aml(bus, device, int_pin);
+        if resource_data.is_none() {
             pr_err!("Cannot detect irq.");
             return;
         }
-        pr_info!("IRQ: {}", irq.unwrap());
+        let irq = match resource_data.unwrap() {
+            ResourceData::Irq(i) => i,
+            ResourceData::Interrupt(i) => i as u8, /* OK...? */
+        };
+        pr_info!("IRQ: {}", irq);
 
         make_device_interrupt_handler!(handler, smbus_handler);
         if !get_cpu_manager_cluster()
             .interrupt_manager
             .set_device_interrupt_function(
                 handler,
-                irq,
+                Some(irq),
                 IstIndex::NormalInterrupt,
-                InterruptManager::irq_to_index(irq.unwrap()),
+                InterruptManager::irq_to_index(irq),
                 0,
+                false,
             )
         {
             pr_err!("Cannot setup interrupt.");

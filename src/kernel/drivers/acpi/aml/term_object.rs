@@ -9,16 +9,15 @@ use super::expression_opcode::ExpressionOpcode;
 use super::name_object::NameString;
 use super::named_object::NamedObject;
 use super::namespace_modifier_object::NamespaceModifierObject;
-use super::parser::ParseHelper;
 use super::statement_opcode::StatementOpcode;
-use super::{AcpiInt, AmlError, AmlStream};
+use super::{AcpiInt, AmlError, AmlStream, Evaluator};
 
 use crate::ignore_invalid_type_error;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TermList {
     stream: AmlStream,
     current_scope: NameString,
@@ -40,11 +39,11 @@ impl TermList {
         &self.current_scope
     }
 
-    pub fn next(&mut self, parse_helper: &mut ParseHelper) -> Result<Option<TermObj>, AmlError> {
+    pub fn next(&mut self, evaluator: &mut Evaluator) -> Result<Option<TermObj>, AmlError> {
         if self.is_end_of_stream() {
             Ok(None)
         } else {
-            TermObj::parse(&mut self.stream, &self.current_scope, parse_helper)
+            TermObj::parse(&mut self.stream, &self.current_scope, evaluator)
                 .and_then(|o| Ok(Some(o)))
         }
     }
@@ -62,9 +61,8 @@ impl TermObj {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
-        /* println!("TermObj: {:#X}", stream.peek_byte()?); */
         ignore_invalid_type_error!(
             NamespaceModifierObject::try_parse(stream, current_scope),
             |o| {
@@ -72,19 +70,19 @@ impl TermObj {
             }
         );
         ignore_invalid_type_error!(
-            NamedObject::try_parse(stream, current_scope, parse_helper),
+            NamedObject::try_parse(stream, current_scope, evaluator),
             |o: NamedObject| {
                 return Ok(Self::NamedObj(o));
             }
         );
         ignore_invalid_type_error!(
-            StatementOpcode::try_parse(stream, current_scope, parse_helper),
+            StatementOpcode::try_parse(stream, current_scope, evaluator),
             |o| {
                 return Ok(Self::StatementOpcode(o));
             }
         );
         ignore_invalid_type_error!(
-            ExpressionOpcode::try_parse(stream, current_scope, parse_helper),
+            ExpressionOpcode::try_parse(stream, current_scope, evaluator),
             |o| {
                 return Ok(Self::ExpressionOpcode(o));
             }
@@ -105,7 +103,7 @@ impl TermArg {
     pub fn try_parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* println!("TermArg: {:#X}", stream.peek_byte()?); */
         ignore_invalid_type_error!(try_parse_local_object(stream), |n| {
@@ -118,7 +116,7 @@ impl TermArg {
             return Ok(Self::DataObject(d));
         });
         ignore_invalid_type_error!(
-            ExpressionOpcode::try_parse(stream, current_scope, parse_helper),
+            ExpressionOpcode::try_parse(stream, current_scope, evaluator),
             |o| {
                 return Ok(Self::ExpressionOpcode(Box::new(o)));
             }
@@ -129,10 +127,10 @@ impl TermArg {
     pub fn parse_integer(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         let backup = stream.clone();
-        let arg = Self::try_parse(stream, current_scope, parse_helper)?;
+        let arg = Self::try_parse(stream, current_scope, evaluator)?;
         if matches!(arg, Self::LocalObj(_))
             || matches!(arg, Self::ArgObj(_))
             || matches!(
@@ -180,7 +178,7 @@ impl TermArgList {
         stream: &mut AmlStream,
         current_scope: &NameString,
         argument_count: AcpiInt,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         let mut term_arg_list = Self {
             list: Vec::with_capacity(argument_count as usize),
@@ -188,7 +186,7 @@ impl TermArgList {
         for _ in 0..argument_count {
             term_arg_list
                 .list
-                .push(TermArg::try_parse(stream, current_scope, parse_helper)?);
+                .push(TermArg::try_parse(stream, current_scope, evaluator)?);
         }
         return Ok(term_arg_list);
     }
@@ -204,16 +202,13 @@ impl MethodInvocation {
     pub fn try_parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         let backup = stream.clone();
         match NameString::parse(stream, Some(current_scope)) {
             Ok(name) => {
-                let arg_cnt = parse_helper
-                    .find_method_argument_count(&name)?
-                    .ok_or_else(|| AmlError::InvalidMethodName(name.clone()))?;
-                let term_arg_list =
-                    TermArgList::parse(stream, current_scope, arg_cnt, parse_helper)?;
+                let arg_cnt = evaluator.find_method_argument_count(&name)?;
+                let term_arg_list = TermArgList::parse(stream, current_scope, arg_cnt, evaluator)?;
                 Ok(Self {
                     name,
                     term_arg_list,

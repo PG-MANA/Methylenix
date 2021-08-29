@@ -1,7 +1,7 @@
 //!
-//! Differentiated System Description Table
+//! Secondary System Description Table
 //!
-//! This manager contains the information of DSDT
+//! This manager contains the information of SSDT
 //! Definition block is treated by AML module.
 //!
 
@@ -11,7 +11,7 @@ use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 #[repr(C, packed)]
-struct DSDT {
+struct SSDT {
     signature: [u8; 4],
     length: u32,
     major_version: u8,
@@ -23,12 +23,12 @@ struct DSDT {
     creator_revision: u32,
 }
 
-pub struct DsdtManager {
+pub struct SsdtManager {
     base_address: VAddress,
 }
 
-impl DsdtManager {
-    pub const SIGNATURE: [u8; 4] = *b"DSDT";
+impl SsdtManager {
+    pub const SIGNATURE: [u8; 4] = *b"SSDT";
     pub const fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
@@ -39,36 +39,36 @@ impl DsdtManager {
         !self.base_address.is_zero()
     }
 
-    pub fn init(&mut self, dsdt_vm_address: VAddress) -> bool {
-        /* dsdt_vm_address must be accessible */
-        let dsdt = unsafe { &*(dsdt_vm_address.to_usize() as *const DSDT) };
-        if dsdt.major_version > 2 {
-            pr_err!("Not supported DSDT version:{}", dsdt.major_version);
+    pub fn init(&mut self, ssdt_vm_address: VAddress) -> bool {
+        /* ssdt_vm_address must be accessible */
+        let ssdt = unsafe { &*(ssdt_vm_address.to_usize() as *const SSDT) };
+        if ssdt.major_version > 2 {
+            pr_err!("Not supported SSDT version:{}", ssdt.major_version);
         }
 
-        let dsdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
+        let ssdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
             .memory_manager
             .lock()
             .unwrap()
             .mremap_dev(
-                dsdt_vm_address,
+                ssdt_vm_address,
                 INITIAL_MMAP_SIZE.into(),
-                (dsdt.length as usize).into(),
+                (ssdt.length as usize).into(),
             ) {
             a
         } else {
-            pr_err!("Cannot map memory area of DSDT.");
+            pr_err!("Cannot map memory area of SSDT.");
             return false;
         };
-        self.base_address = dsdt_vm_address;
+        self.base_address = ssdt_vm_address;
         return true;
     }
 
     pub const fn get_definition_block_address_and_size(&self) -> (VAddress, MSize) {
-        let dsdt = unsafe { &*(self.base_address.to_usize() as *const DSDT) };
+        let dsdt = unsafe { &*(self.base_address.to_usize() as *const SSDT) };
         (
-            self.base_address + MSize::new(core::mem::size_of::<DSDT>()),
-            MSize::new(dsdt.length as usize - core::mem::size_of::<DSDT>()),
+            self.base_address + MSize::new(core::mem::size_of::<SSDT>()),
+            MSize::new(dsdt.length as usize - core::mem::size_of::<SSDT>()),
         )
     }
 }

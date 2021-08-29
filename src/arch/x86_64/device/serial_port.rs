@@ -56,6 +56,7 @@ impl SerialPortManager {
                     IstIndex::NormalInterrupt,
                     0x24,
                     0,
+                    false,
                 );
             let _lock = self.write_lock.lock();
             out_byte(self.port + 1, 0x00); // Off the FIFO of controller

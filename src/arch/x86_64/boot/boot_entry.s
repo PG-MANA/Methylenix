@@ -3,7 +3,6 @@
  */
 
 .code32
-.att_syntax
 
 .global boot_entry
 .extern boot_multiboot     /* at boot_multiboot.s */

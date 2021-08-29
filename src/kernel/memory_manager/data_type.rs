@@ -448,7 +448,7 @@ impl const SubAssign for MIndex {
     }
 }
 
-unsafe impl Step for MIndex {
+impl Step for MIndex {
     #[inline]
     fn steps_between(start: &Self, end: &Self) -> Option<usize> {
         if start.0 <= end.0 {

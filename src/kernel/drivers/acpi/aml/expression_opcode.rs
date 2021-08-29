@@ -7,9 +7,8 @@
 use super::data_object::{PackageElement, PkgLength};
 use super::name_object::{NameString, SimpleName, SuperName, Target};
 use super::opcode;
-use super::parser::ParseHelper;
 use super::term_object::{MethodInvocation, TermArg};
-use super::{AcpiInt, AmlError, AmlStream, DataRefObject, IntIter};
+use super::{AcpiInt, AmlError, AmlStream, DataRefObject, Evaluator};
 
 use crate::ignore_invalid_type_error;
 
@@ -62,10 +61,6 @@ impl Package {
         self.num_elements -= 1;
         return Ok(Some(PackageElement::NameString(name_string)));
     }
-
-    pub fn to_int_iter(&self) -> IntIter {
-        IntIter::new(self.stream.clone(), self.num_elements)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -92,10 +87,10 @@ impl VarPackage {
 
     pub fn get_number_of_elements(
         &mut self,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
         current_scope: &NameString,
     ) -> Result<TermArg, AmlError> {
-        TermArg::parse_integer(&mut self.stream, current_scope, parse_helper)
+        TermArg::parse_integer(&mut self.stream, current_scope, evaluator)
     }
 
     pub fn convert_to_package(self, num_elements: usize) -> Package {
@@ -123,12 +118,12 @@ impl Index {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* IndexOp was read */
-        let source = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let index = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let target = Target::parse(stream, current_scope, parse_helper)?;
+        let source = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let index = TermArg::parse_integer(stream, current_scope, evaluator)?;
+        let target = Target::parse(stream, current_scope, evaluator)?;
         Ok(Self {
             source,
             index,
@@ -161,7 +156,7 @@ impl ReferenceTypeOpcode {
     pub fn try_parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         match stream.peek_byte()? {
             opcode::REF_OF_OP => {
@@ -169,7 +164,7 @@ impl ReferenceTypeOpcode {
                 Ok(Self::DefRefOf(SuperName::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::DEREF_OF_OP => {
@@ -177,7 +172,7 @@ impl ReferenceTypeOpcode {
                 Ok(Self::DefDerefOf(TermArg::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::INDEX_OP => {
@@ -185,7 +180,7 @@ impl ReferenceTypeOpcode {
                 Ok(Self::DefIndex(Index::parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             _ => Err(AmlError::InvalidType),
@@ -215,8 +210,8 @@ impl ByteList {
         })
     }
 
-    pub fn get_buffer_size(&mut self, parse_helper: &mut ParseHelper) -> Result<TermArg, AmlError> {
-        TermArg::parse_integer(&mut self.stream, &self.current_scope, parse_helper)
+    pub fn get_buffer_size(&mut self, evaluator: &mut Evaluator) -> Result<TermArg, AmlError> {
+        TermArg::parse_integer(&mut self.stream, &self.current_scope, evaluator)
     }
 
     pub fn read_next(&mut self) -> Result<u8, AmlError> {
@@ -236,12 +231,12 @@ impl BinaryOperation {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         let opcode = stream.read_byte()?;
-        let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let target = Target::parse(stream, current_scope, parse_helper)?;
+        let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+        let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+        let target = Target::parse(stream, current_scope, evaluator)?;
         Ok(Self {
             opcode,
             operand1,
@@ -284,12 +279,12 @@ impl Concat {
     fn parse_concat(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* ConcatOp was read */
-        let data1 = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let data2 = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let target = Target::parse(stream, current_scope, parse_helper)?;
+        let data1 = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let data2 = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let target = Target::parse(stream, current_scope, evaluator)?;
         Ok(Self {
             data1: ConcatDataType::ComputationalData(data1),
             data2: ConcatDataType::ComputationalData(data2),
@@ -300,12 +295,12 @@ impl Concat {
     fn parse_concat_res(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* ConcatResOp was read */
-        let data1 = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let data2 = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let target = Target::parse(stream, current_scope, parse_helper)?;
+        let data1 = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let data2 = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let target = Target::parse(stream, current_scope, evaluator)?;
         Ok(Self {
             data1: ConcatDataType::Buffer(data1),
             data2: ConcatDataType::Buffer(data2),
@@ -326,13 +321,13 @@ impl Divide {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* DivideOp was read */
-        let dividend = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let divisor = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let remainder = Target::parse(stream, current_scope, parse_helper)?;
-        let quotient = Target::parse(stream, current_scope, parse_helper)?;
+        let dividend = TermArg::parse_integer(stream, current_scope, evaluator)?;
+        let divisor = TermArg::parse_integer(stream, current_scope, evaluator)?;
+        let remainder = Target::parse(stream, current_scope, evaluator)?;
+        let quotient = Target::parse(stream, current_scope, evaluator)?;
         Ok(Self {
             dividend,
             divisor,
@@ -372,15 +367,15 @@ impl Match {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* MatchOp was read */
-        let search_pkg = TermArg::try_parse(stream, current_scope, parse_helper)?;
+        let search_pkg = TermArg::try_parse(stream, current_scope, evaluator)?;
         let match_opcode_1 = stream.read_byte()?;
-        let operand_1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+        let operand_1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
         let match_opcode_2 = stream.read_byte()?;
-        let operand_2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-        let start_index = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+        let operand_2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+        let start_index = TermArg::parse_integer(stream, current_scope, evaluator)?;
         Ok(Self {
             search_pkg,
             match_opcode_1,
@@ -404,13 +399,13 @@ impl Mid {
     fn parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* MidOp was read */
-        let mid_obj = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let term_arg_1 = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let term_arg_2 = TermArg::try_parse(stream, current_scope, parse_helper)?;
-        let target = Target::parse(stream, current_scope, parse_helper)?;
+        let mid_obj = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let term_arg_1 = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let term_arg_2 = TermArg::try_parse(stream, current_scope, evaluator)?;
+        let target = Target::parse(stream, current_scope, evaluator)?;
         Ok(Self {
             mid_obj,
             term_arg_1,
@@ -471,7 +466,7 @@ impl ExpressionOpcode {
     pub fn try_parse(
         stream: &mut AmlStream,
         current_scope: &NameString,
-        parse_helper: &mut ParseHelper,
+        evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         /* println!(
             "ExpressionOpcode: {:#X},{:#X}",
@@ -482,27 +477,27 @@ impl ExpressionOpcode {
             opcode::EXT_OP_PREFIX => match stream.peek_byte_with_pos(1)? {
                 opcode::ACQUIRE_OP => {
                     stream.seek(2)?;
-                    let mutex_object = SuperName::try_parse(stream, current_scope, parse_helper)?;
+                    let mutex_object = SuperName::try_parse(stream, current_scope, evaluator)?;
                     let timeout = stream.read_word()?;
                     Ok(Self::DefAcquire((mutex_object, timeout)))
                 }
                 opcode::COND_REF_OF_OP => {
                     stream.seek(2)?;
-                    let source = SuperName::try_parse(stream, current_scope, parse_helper)?;
-                    let result = Target::parse(stream, current_scope, parse_helper)?;
+                    let source = SuperName::try_parse(stream, current_scope, evaluator)?;
+                    let result = Target::parse(stream, current_scope, evaluator)?;
                     Ok(Self::DefCondRefOf((source, result)))
                 }
                 opcode::FROM_BCD_OP => {
                     stream.seek(2)?;
-                    let bcd_value = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                    let target = Target::parse(stream, current_scope, parse_helper)?;
+                    let bcd_value = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                    let target = Target::parse(stream, current_scope, evaluator)?;
                     Ok(Self::DefFromBCD((bcd_value, target)))
                 }
 
                 opcode::LOAD_OP => {
                     stream.seek(2)?;
                     let name = NameString::parse(stream, Some(&current_scope))?;
-                    let target = Target::parse(stream, current_scope, parse_helper)?;
+                    let target = Target::parse(stream, current_scope, evaluator)?;
                     Ok(Self::DefLoad((name, target)))
                 }
                 opcode::LOAD_TABLE_OP => {
@@ -511,7 +506,7 @@ impl ExpressionOpcode {
                         unsafe { core::mem::MaybeUninit::uninit().assume_init() };
                     for i in 0..table.len() {
                         /* Using this style instead of Iter */
-                        table[i] = TermArg::try_parse(stream, current_scope, parse_helper)?;
+                        table[i] = TermArg::try_parse(stream, current_scope, evaluator)?;
                     }
                     Ok(Self::DefLoadTable(table))
                 }
@@ -521,8 +516,8 @@ impl ExpressionOpcode {
                 }
                 opcode::TO_BCD_OP => {
                     stream.seek(2)?;
-                    let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                    let target = Target::parse(stream, current_scope, parse_helper)?;
+                    let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                    let target = Target::parse(stream, current_scope, evaluator)?;
                     Ok(Self::DefToBCD((operand, target)))
                 }
                 opcode::PROCESSOR_OP => {
@@ -533,8 +528,8 @@ impl ExpressionOpcode {
                 }
                 opcode::WAIT_OP => {
                     stream.seek(2)?;
-                    let event_object = SuperName::try_parse(stream, current_scope, parse_helper)?;
-                    let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                    let event_object = SuperName::try_parse(stream, current_scope, evaluator)?;
+                    let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
                     Ok(Self::DefWait((event_object, operand)))
                 }
                 _ => Err(AmlError::InvalidType),
@@ -552,7 +547,7 @@ impl ExpressionOpcode {
             | opcode::XOR_OP => Ok(Self::BinaryOperation(BinaryOperation::parse(
                 stream,
                 current_scope,
-                parse_helper,
+                evaluator,
             )?)),
             opcode::BUFFER_OP => {
                 stream.seek(1)?;
@@ -563,7 +558,7 @@ impl ExpressionOpcode {
                 Ok(Self::DefConcat(Concat::parse_concat(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::CONCAT_RES_OP => {
@@ -571,12 +566,12 @@ impl ExpressionOpcode {
                 Ok(Self::DefConcatRes(Concat::parse_concat_res(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::COPY_OBJECT_OP => {
                 stream.seek(1)?;
-                let term_arg = TermArg::try_parse(stream, current_scope, parse_helper)?;
+                let term_arg = TermArg::try_parse(stream, current_scope, evaluator)?;
                 let simple_name = SimpleName::parse(stream, current_scope)?;
                 Ok(Self::DefCopyObject(term_arg, simple_name))
             }
@@ -585,7 +580,7 @@ impl ExpressionOpcode {
                 Ok(Self::DefDecrement(SuperName::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::DIVIDE_OP => {
@@ -593,19 +588,19 @@ impl ExpressionOpcode {
                 Ok(Self::DefDivide(Divide::parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::FIND_SET_LEFT_BIT_OP => {
                 stream.seek(1)?;
-                let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let target = Target::parse(stream, current_scope, parse_helper)?;
+                let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let target = Target::parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefFindSetLeftBit((operand, target)))
             }
             opcode::FIND_SET_RIGHT_BIT_OP => {
                 stream.seek(1)?;
-                let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let target = Target::parse(stream, current_scope, parse_helper)?;
+                let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let target = Target::parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefFindSetRightBit((operand, target)))
             }
             opcode::INCREMENT_OP => {
@@ -613,31 +608,31 @@ impl ExpressionOpcode {
                 Ok(Self::DefIncrement(SuperName::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::L_AND_OP => {
                 stream.seek(1)?;
-                let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
                 Ok(Self::DefLAnd((operand1, operand2)))
             }
             opcode::L_EQUAL_OP => {
                 stream.seek(1)?;
-                let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
                 Ok(Self::DefLEqual((operand1, operand2)))
             }
             opcode::L_GREATER_OP => {
                 stream.seek(1)?;
-                let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
                 Ok(Self::DefLGreater((operand1, operand2)))
             }
             opcode::L_LESS_OP => {
                 stream.seek(1)?;
-                let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
                 Ok(Self::DefLLess((operand1, operand2)))
             }
             opcode::L_NOT_OP => {
@@ -645,33 +640,33 @@ impl ExpressionOpcode {
                 match stream.peek_byte()? {
                     opcode::L_LESS_OP => {
                         stream.seek(1)?;
-                        let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                        let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                        let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                        let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
                         Ok(Self::DefLGreaterEqual((operand1, operand2)))
                     }
                     opcode::L_GREATER_OP => {
                         stream.seek(1)?;
-                        let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                        let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                        let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                        let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
                         Ok(Self::DefLLessEqual((operand1, operand2)))
                     }
                     opcode::L_EQUAL_OP => {
                         stream.seek(1)?;
-                        let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                        let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                        let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                        let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
                         Ok(Self::DefLNotEqual((operand1, operand2)))
                     }
                     _ => Ok(Self::DefLNot(TermArg::parse_integer(
                         stream,
                         current_scope,
-                        parse_helper,
+                        evaluator,
                     )?)),
                 }
             }
             opcode::L_OR_OP => {
                 stream.seek(1)?;
-                let operand1 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let operand2 = TermArg::parse_integer(stream, current_scope, parse_helper)?;
+                let operand1 = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let operand2 = TermArg::parse_integer(stream, current_scope, evaluator)?;
                 Ok(Self::DefLOr((operand1, operand2)))
             }
             opcode::MATCH_OP => {
@@ -679,21 +674,17 @@ impl ExpressionOpcode {
                 Ok(Self::DefMatch(Match::parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::MID_OP => {
                 stream.seek(1)?;
-                Ok(Self::DefMid(Mid::parse(
-                    stream,
-                    current_scope,
-                    parse_helper,
-                )?))
+                Ok(Self::DefMid(Mid::parse(stream, current_scope, evaluator)?))
             }
             opcode::NOT_OP => {
                 stream.seek(1)?;
-                let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let target = Target::parse(stream, current_scope, parse_helper)?;
+                let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let target = Target::parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefNot((operand, target)))
             }
             opcode::OBJECT_TYPE_OP => {
@@ -701,7 +692,7 @@ impl ExpressionOpcode {
                 Ok(Self::DefObjectType(SuperName::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::VAR_PACKAGE_OP => {
@@ -717,49 +708,49 @@ impl ExpressionOpcode {
                 Ok(Self::DefSizeOf(SuperName::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
             opcode::STORE_OP => {
                 stream.seek(1)?;
-                let term_arg = TermArg::try_parse(stream, current_scope, parse_helper)?;
-                let super_name = SuperName::try_parse(stream, current_scope, parse_helper)?;
+                let term_arg = TermArg::try_parse(stream, current_scope, evaluator)?;
+                let super_name = SuperName::try_parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefStore((term_arg, super_name)))
             }
             opcode::TO_BUFFER_OP => {
                 stream.seek(1)?;
-                let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let target = Target::parse(stream, current_scope, parse_helper)?;
+                let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let target = Target::parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefToBuffer((operand, target)))
             }
             opcode::TO_DECIMAL_STRING_OP => {
                 stream.seek(1)?;
-                let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let target = Target::parse(stream, current_scope, parse_helper)?;
+                let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let target = Target::parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefToDecimalString((operand, target)))
             }
             opcode::TO_HEX_STRING_OP => {
                 stream.seek(1)?;
-                let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let target = Target::parse(stream, current_scope, parse_helper)?;
+                let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let target = Target::parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefToHexString((operand, target)))
             }
             opcode::TO_INTEGER_OP => {
                 stream.seek(1)?;
-                let operand = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let target = Target::parse(stream, current_scope, parse_helper)?;
+                let operand = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let target = Target::parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefToInteger((operand, target)))
             }
             opcode::TO_STRING_OP => {
                 stream.seek(1)?;
-                let term_arg = TermArg::try_parse(stream, current_scope, parse_helper)?;
-                let length_arg = TermArg::parse_integer(stream, current_scope, parse_helper)?;
-                let target = Target::parse(stream, current_scope, parse_helper)?;
+                let term_arg = TermArg::try_parse(stream, current_scope, evaluator)?;
+                let length_arg = TermArg::parse_integer(stream, current_scope, evaluator)?;
+                let target = Target::parse(stream, current_scope, evaluator)?;
                 Ok(Self::DefToString(((term_arg, length_arg), target)))
             }
             _ => {
                 ignore_invalid_type_error!(
-                    ReferenceTypeOpcode::try_parse(stream, current_scope, parse_helper),
+                    ReferenceTypeOpcode::try_parse(stream, current_scope, evaluator),
                     |r| {
                         return Ok(Self::ReferenceTypeOpcode(r));
                     }
@@ -767,7 +758,7 @@ impl ExpressionOpcode {
                 Ok(Self::MethodInvocation(MethodInvocation::try_parse(
                     stream,
                     current_scope,
-                    parse_helper,
+                    evaluator,
                 )?))
             }
         }

@@ -3,7 +3,6 @@
  */
 
 .code64
-.att_syntax
 
 .global init_long_mode
 .extern multiboot_main, directboot_main, unknown_boot_main

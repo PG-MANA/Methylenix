@@ -18,11 +18,18 @@ pub struct TtyManager {
     input_queue: Fifo<u8, { Self::DEFAULT_INPUT_BUFFER_SIZE }>,
     output_queue: Fifo<u8, { Self::DEFAULT_OUTPUT_BUFFER_SIZE }>,
     output_driver: Option<&'static (dyn Writer)>,
+    text_color: (u32, u32),
     input_wait_queue: WaitQueue,
 }
 
 pub trait Writer {
-    fn write(&self, buf: &[u8], size_to_write: usize) -> fmt::Result;
+    fn write(
+        &self,
+        buf: &[u8],
+        size_to_write: usize,
+        foreground_color: u32,
+        background_color: u32,
+    ) -> fmt::Result;
 }
 
 impl TtyManager {
@@ -36,6 +43,7 @@ impl TtyManager {
             input_queue: Fifo::new(0),
             output_queue: Fifo::new(0),
             output_driver: None,
+            text_color: (0x55FFFF, 0x000000),
             input_wait_queue: WaitQueue::new(),
         }
     }
@@ -138,11 +146,35 @@ impl TtyManager {
             buffer[pointer] = e;
             pointer += 1;
             if pointer == Self::DEFAULT_OUTPUT_BUFFER_SIZE {
-                self.output_driver.unwrap().write(&buffer, pointer)?;
+                self.output_driver.unwrap().write(
+                    &buffer,
+                    pointer,
+                    self.text_color.0,
+                    self.text_color.1,
+                )?;
                 pointer = 0;
             }
         }
-        self.output_driver.unwrap().write(&buffer, pointer)
+        self.output_driver
+            .unwrap()
+            .write(&buffer, pointer, self.text_color.0, self.text_color.1)
+    }
+
+    fn change_font_color(
+        &mut self,
+        foreground_color: u32,
+        background_color: u32,
+    ) -> Option<(u32, u32)> {
+        let _lock = if let Ok(l) = self.output_lock.try_lock() {
+            l
+        } else if is_interrupt_enabled() {
+            self.output_lock.lock()
+        } else {
+            return None;
+        };
+        let old = self.text_color;
+        self.text_color = (foreground_color, background_color);
+        return Some(old);
     }
 }
 
@@ -165,16 +197,25 @@ pub fn kernel_print(args: fmt::Arguments) {
 #[track_caller]
 pub fn print_debug_message(level: usize, args: fmt::Arguments) {
     use core::panic::Location;
-    let level_str = match level {
-        3 => "[ERROR]",
-        4 => "[WARN]",
-        5 => "[NOTICE]",
-        6 => "[INFO]",
-        _ => "[???]",
+    let level = match level {
+        3 => ("[ERROR]", (0xFF0000, 0x000000)),
+        4 => ("[WARN]", (0xFF7F27, 0x000000)),
+        5 => ("[NOTICE]", (0xFFFF00, 0x000000)),
+        6 => ("[INFO]", (0x55FFFF, 0x000000)),
+        7 => ("[DEBUG]", (0x55FFFF, 0x000000)),
+        _ => ("[???]", (0x55FFFF, 0x000000)),
     };
     let file = Location::caller().file(); //THINKING: filename only
     let line = Location::caller().line();
-    kernel_print(format_args!("{} {}:{} | {}", level_str, file, line, args));
+    let original_color = get_kernel_manager_cluster()
+        .kernel_tty_manager
+        .change_font_color(level.1 .0, level.1 .1);
+    kernel_print(format_args!("{} {}:{} | {}", level.0, file, line, args));
+    if let Some(c) = original_color {
+        get_kernel_manager_cluster()
+            .kernel_tty_manager
+            .change_font_color(c.0, c.1);
+    }
 }
 
 // macros
@@ -202,6 +243,12 @@ macro_rules! println {
 macro_rules! kprintln {
     ($fmt:expr) => (print!(concat!($fmt,"\n")));
     ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*));
+}
+
+#[macro_export]
+macro_rules! pr_debug {
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(7, format_args!(concat!($fmt,"\n"))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(7, format_args!(concat!($fmt, "\n"),$($arg)*)));
 }
 
 #[macro_export]
