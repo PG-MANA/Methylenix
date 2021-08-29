@@ -237,11 +237,6 @@ impl AmlVariableTree {
             }
             let scope = name.get_scope_name();
             let mut d = self.clone();
-            pr_warn!(
-                "Change the scope to {} from {} temporary.",
-                scope,
-                self.current.name
-            );
             d.move_current_scope(&scope)?;
             return d.add_data(name, data, allow_overwrite);
         }

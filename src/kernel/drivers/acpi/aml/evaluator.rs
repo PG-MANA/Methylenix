@@ -181,6 +181,11 @@ impl Evaluator {
                         }
                     }
                 }
+                Err(AmlError::InvalidName(n)) => {
+                    if n != ini {
+                        pr_err!("Failed to search {}.", n);
+                    }
+                }
                 Err(e) => {
                     pr_err!("Failed to search {}: {:?}", ini, e);
                 }
@@ -922,13 +927,13 @@ impl Evaluator {
                     }
                     _ => { /* Ignore */ }
                 },
-                TermObj::StatementOpcode(s_o) => {
-                    if let StatementOpcode::DefIfElse(i_e) = s_o {
+                TermObj::StatementOpcode(_s_o) => {
+                    /* if let StatementOpcode::DefIfElse(i_e) = s_o {
                         pr_warn!(
                             "Found IfElse Statement out of a method, currently ignore it: {:?}",
                             i_e
                         );
-                    }
+                    } */
                 }
                 TermObj::ExpressionOpcode(_) => { /* Ignore */ }
             }
