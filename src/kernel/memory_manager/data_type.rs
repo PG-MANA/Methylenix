@@ -205,11 +205,22 @@ macro_rules! into_and_from_usize {
     };
 }
 
+macro_rules! display {
+    ($t:ty) => {
+        impl core::fmt::Display for $t {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_fmt(format_args!("{:#X}", self.0))
+            }
+        }
+    };
+}
+
 /* VAddress */
 address!(VAddress);
 address_bit_operation!(VAddress);
 add_and_sub_shift_with_m_size!(VAddress);
 into_and_from_usize!(VAddress);
+display!(VAddress);
 
 impl VAddress {
     /// Casting from VAddress to PAddress without mapping
@@ -246,6 +257,7 @@ address!(PAddress);
 address_bit_operation!(PAddress);
 add_and_sub_shift_with_m_size!(PAddress);
 into_and_from_usize!(PAddress);
+display!(PAddress);
 
 impl PAddress {
     /// Casting from VAddress to PAddress without mapping
@@ -268,6 +280,7 @@ to_usize!(MSize);
 into_and_from_usize!(MSize);
 address_bit_operation!(MSize);
 add_and_sub_shift_with_m_size!(MSize);
+display!(MSize);
 
 impl MSize {
     pub const fn new(s: usize) -> Self {
@@ -362,6 +375,7 @@ impl MOrder {
 
 /* MPageOrder */
 into_and_from_usize!(MPageOrder);
+display!(MPageOrder);
 impl MPageOrder {
     pub const fn new(o: usize) -> Self {
         Self(o)
@@ -390,6 +404,7 @@ impl MPageOrder {
 
 /* MIndex */
 into_and_from_usize!(MIndex);
+display!(MIndex);
 impl MIndex {
     pub const fn new(i: usize) -> Self {
         Self(i)
