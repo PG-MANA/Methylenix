@@ -95,6 +95,17 @@ impl VirtualMemoryObject {
         return None;
     }
 
+    pub fn get_vm_page_mut(&mut self, p_index: MIndex) -> Option<&mut VirtualMemoryPage> {
+        if let VirtualMemoryObjectType::Page(list) = &mut self.object {
+            for e in unsafe { list.iter_mut(offset_of!(VirtualMemoryPage, list)) } {
+                if e.get_p_index() == p_index {
+                    return Some(e);
+                }
+            }
+        }
+        return None;
+    }
+
     pub fn remove_vm_page(
         &mut self,
         p_index: MIndex,
