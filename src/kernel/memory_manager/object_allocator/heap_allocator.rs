@@ -6,7 +6,6 @@ use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize, VAddr
 use crate::kernel::memory_manager::{
     pool_allocator::PoolAllocator, MemoryError, MemoryManager, MemoryPermissionFlags,
 };
-use crate::kernel::sync::spin_lock::Mutex;
 
 pub struct HeapAllocator {
     slab_64: PoolAllocator<[u8; 64]>,
@@ -34,206 +33,110 @@ impl HeapAllocator {
     }
 
     pub fn init(&mut self, memory_manager: &mut MemoryManager) -> Result<(), MemoryError> {
-        let address = memory_manager.alloc_pages(
-            Self::DEFAULT_ALLOC_PAGE_ORDER,
-            MemoryPermissionFlags::data(),
-        )?;
-        unsafe {
-            self.slab_64.set_initial_pool(
-                address.to_usize(),
-                Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize(),
-            )
-        };
-        let address = memory_manager.alloc_pages(
-            Self::DEFAULT_ALLOC_PAGE_ORDER,
-            MemoryPermissionFlags::data(),
-        )?;
-        unsafe {
-            self.slab_128.set_initial_pool(
-                address.to_usize(),
-                Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize(),
-            )
-        };
-        let address = memory_manager.alloc_pages(
-            Self::DEFAULT_ALLOC_PAGE_ORDER,
-            MemoryPermissionFlags::data(),
-        )?;
-        unsafe {
-            self.slab_256.set_initial_pool(
-                address.to_usize(),
-                Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize(),
-            )
-        };
-        let address = memory_manager.alloc_pages(
-            Self::DEFAULT_ALLOC_PAGE_ORDER,
-            MemoryPermissionFlags::data(),
-        )?;
-        unsafe {
-            self.slab_512.set_initial_pool(
-                address.to_usize(),
-                Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize(),
-            )
-        };
-        let address = memory_manager.alloc_pages(
-            Self::DEFAULT_ALLOC_PAGE_ORDER,
-            MemoryPermissionFlags::data(),
-        )?;
-        unsafe {
-            self.slab_1024.set_initial_pool(
-                address.to_usize(),
-                Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize(),
-            )
-        };
-        let address = memory_manager.alloc_pages(
-            Self::DEFAULT_ALLOC_PAGE_ORDER,
-            MemoryPermissionFlags::data(),
-        )?;
-        unsafe {
-            self.slab_2048.set_initial_pool(
-                address.to_usize(),
-                Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize(),
-            )
-        };
-        let address = memory_manager.alloc_pages(
-            Self::DEFAULT_ALLOC_PAGE_ORDER,
-            MemoryPermissionFlags::data(),
-        )?;
-        unsafe {
-            self.slab_4096.set_initial_pool(
-                address.to_usize(),
-                Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize(),
-            )
-        };
+        macro_rules! alloc_and_set_pool {
+            ($allocator:expr) => {{
+                let address = memory_manager.alloc_pages(
+                    Self::DEFAULT_ALLOC_PAGE_ORDER,
+                    MemoryPermissionFlags::data(),
+                )?;
+                unsafe {
+                    $allocator.set_initial_pool(
+                        address.to_usize(),
+                        Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize(),
+                    )
+                };
+            }};
+        }
+        alloc_and_set_pool!(self.slab_64);
+        alloc_and_set_pool!(self.slab_128);
+        alloc_and_set_pool!(self.slab_256);
+        alloc_and_set_pool!(self.slab_512);
+        alloc_and_set_pool!(self.slab_1024);
+        alloc_and_set_pool!(self.slab_2048);
+        alloc_and_set_pool!(self.slab_4096);
+
         Ok(())
     }
 
-    pub fn alloc(
-        &mut self,
-        size: MSize,
-        memory_manager: &Mutex<MemoryManager>,
-    ) -> Result<VAddress, MemoryError> {
+    pub fn alloc(&mut self, size: MSize) -> Result<VAddress, ()> {
         if size <= MSize::new(64) {
-            match self.slab_64.alloc_ptr() {
-                Ok(a) => Ok(VAddress::new(a as usize)),
-                Err(()) => {
-                    let address = memory_manager.lock().unwrap().alloc_pages(
-                        Self::DEFAULT_ALLOC_PAGE_ORDER,
-                        MemoryPermissionFlags::data(),
-                    )?;
-                    for i in 1
-                        ..(Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize() >> 6/* PAGE_SIZE / 64 */)
-                    {
-                        self.slab_64
-                            .free_ptr((address.to_usize() + (i << 6)) as *mut _);
-                    }
-                    Ok(address)
-                }
-            }
+            self.slab_64
+                .alloc_ptr()
+                .and_then(|a| Ok(VAddress::new(a as usize)))
         } else if size <= MSize::new(128) {
-            match self.slab_128.alloc_ptr() {
-                Ok(a) => Ok(VAddress::new(a as usize)),
-                Err(()) => {
-                    let address = memory_manager.lock().unwrap().alloc_pages(
-                        Self::DEFAULT_ALLOC_PAGE_ORDER,
-                        MemoryPermissionFlags::data(),
-                    )?;
-                    for i in 1
-                        ..(Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize() >> 7/* PAGE_SIZE / 128 */)
-                    {
-                        self.slab_128
-                            .free_ptr((address.to_usize() + (i << 7)) as *mut _);
-                    }
-                    Ok(address)
-                }
-            }
+            self.slab_128
+                .alloc_ptr()
+                .and_then(|a| Ok(VAddress::new(a as usize)))
         } else if size <= MSize::new(256) {
-            match self.slab_256.alloc_ptr() {
-                Ok(a) => Ok(VAddress::new(a as usize)),
-                Err(()) => {
-                    let address = memory_manager.lock().unwrap().alloc_pages(
-                        Self::DEFAULT_ALLOC_PAGE_ORDER,
-                        MemoryPermissionFlags::data(),
-                    )?;
-                    for i in 1
-                        ..(Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize() >> 8/* PAGE_SIZE / 256 */)
-                    {
-                        self.slab_256
-                            .free_ptr((address.to_usize() + (i << 8)) as *mut _);
-                    }
-                    Ok(address)
-                }
-            }
+            self.slab_256
+                .alloc_ptr()
+                .and_then(|a| Ok(VAddress::new(a as usize)))
         } else if size <= MSize::new(512) {
-            match self.slab_512.alloc_ptr() {
-                Ok(a) => Ok(VAddress::new(a as usize)),
-                Err(()) => {
-                    let address = memory_manager.lock().unwrap().alloc_pages(
-                        Self::DEFAULT_ALLOC_PAGE_ORDER,
-                        MemoryPermissionFlags::data(),
-                    )?;
-                    for i in 1
-                        ..(Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize() >> 9/* PAGE_SIZE / 512 */)
-                    {
-                        self.slab_512
-                            .free_ptr((address.to_usize() + (i << 9)) as *mut _);
-                    }
-                    Ok(address)
-                }
-            }
+            self.slab_512
+                .alloc_ptr()
+                .and_then(|a| Ok(VAddress::new(a as usize)))
         } else if size <= MSize::new(1024) {
-            match self.slab_1024.alloc_ptr() {
-                Ok(a) => Ok(VAddress::new(a as usize)),
-                Err(()) => {
-                    let address = memory_manager.lock().unwrap().alloc_pages(
-                        Self::DEFAULT_ALLOC_PAGE_ORDER,
-                        MemoryPermissionFlags::data(),
-                    )?;
-                    for i in 1
-                        ..(Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize() >> 10/* PAGE_SIZE / 512 */)
-                    {
-                        self.slab_1024
-                            .free_ptr((address.to_usize() + (i << 10)) as *mut _);
-                    }
-                    Ok(address)
-                }
-            }
+            self.slab_1024
+                .alloc_ptr()
+                .and_then(|a| Ok(VAddress::new(a as usize)))
         } else if size <= MSize::new(2048) {
-            match self.slab_2048.alloc_ptr() {
-                Ok(a) => Ok(VAddress::new(a as usize)),
-                Err(()) => {
-                    let address = memory_manager.lock().unwrap().alloc_pages(
-                        Self::DEFAULT_ALLOC_PAGE_ORDER,
-                        MemoryPermissionFlags::data(),
-                    )?;
-                    for i in 1
-                        ..(Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize() >> 11/* PAGE_SIZE / 2048 */)
-                    {
-                        self.slab_2048
-                            .free_ptr((address.to_usize() + (i << 11)) as *mut _);
-                    }
-                    Ok(address)
-                }
-            }
+            self.slab_2048
+                .alloc_ptr()
+                .and_then(|a| Ok(VAddress::new(a as usize)))
         } else if size <= MSize::new(4096) {
-            match self.slab_4096.alloc_ptr() {
-                Ok(a) => Ok(VAddress::new(a as usize)),
-                Err(()) => {
-                    let address = memory_manager.lock().unwrap().alloc_pages(
-                        Self::DEFAULT_ALLOC_PAGE_ORDER,
-                        MemoryPermissionFlags::data(),
-                    )?;
-                    for i in 1
-                        ..(Self::DEFAULT_ALLOC_PAGE_ORDER.to_offset().to_usize() >> 12/* PAGE_SIZE / 128 */)
-                    {
-                        self.slab_4096
-                            .free_ptr((address.to_usize() + (i << 12)) as *mut _);
-                    }
-                    Ok(address)
-                }
+            self.slab_4096
+                .alloc_ptr()
+                .and_then(|a| Ok(VAddress::new(a as usize)))
+        } else {
+            Err(())
+        }
+    }
+
+    pub fn add_pool(
+        &mut self,
+        slab_size_to_add: MSize,
+        pool_address: VAddress,
+        pool_size: MSize,
+    ) -> Result<(), ()> {
+        if slab_size_to_add <= MSize::new(64) {
+            unsafe {
+                self.slab_64
+                    .add_pool(pool_address.to_usize(), pool_size.to_usize())
+            }
+        } else if slab_size_to_add <= MSize::new(128) {
+            unsafe {
+                self.slab_128
+                    .add_pool(pool_address.to_usize(), pool_size.to_usize())
+            }
+        } else if slab_size_to_add <= MSize::new(256) {
+            unsafe {
+                self.slab_256
+                    .add_pool(pool_address.to_usize(), pool_size.to_usize())
+            }
+        } else if slab_size_to_add <= MSize::new(512) {
+            unsafe {
+                self.slab_512
+                    .add_pool(pool_address.to_usize(), pool_size.to_usize())
+            }
+        } else if slab_size_to_add <= MSize::new(1024) {
+            unsafe {
+                self.slab_1024
+                    .add_pool(pool_address.to_usize(), pool_size.to_usize())
+            }
+        } else if slab_size_to_add <= MSize::new(2048) {
+            unsafe {
+                self.slab_2048
+                    .add_pool(pool_address.to_usize(), pool_size.to_usize())
+            }
+        } else if slab_size_to_add <= MSize::new(4096) {
+            unsafe {
+                self.slab_4096
+                    .add_pool(pool_address.to_usize(), pool_size.to_usize())
             }
         } else {
-            Err(MemoryError::InvalidSize)
+            return Err(());
         }
+        return Ok(());
     }
 
     pub fn dealloc(&mut self, address: VAddress, size: MSize) {
