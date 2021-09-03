@@ -236,7 +236,7 @@ pub fn init_memory_by_multiboot_information(
 
     /* Store managers to cluster */
     get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
-    get_cpu_manager_cluster().object_allocator = Mutex::new(object_allocator);
+    get_cpu_manager_cluster().object_allocator = object_allocator;
     MultiBootInformation::new(new_mbi_address.to_usize(), false)
 }
 

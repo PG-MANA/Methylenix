@@ -78,8 +78,6 @@ impl ContextManager {
 
         let stack_address = get_cpu_manager_cluster()
             .object_allocator
-            .lock()
-            .unwrap()
             .alloc(stack_size, &get_kernel_manager_cluster().memory_manager)?;
 
         Ok(ContextData::create_context_data_for_system(
@@ -109,8 +107,6 @@ impl ContextManager {
 
         let stack_address = get_cpu_manager_cluster()
             .object_allocator
-            .lock()
-            .unwrap()
             .alloc(stack_size, &get_kernel_manager_cluster().memory_manager)?;
 
         Ok(ContextData::fork_context_data(

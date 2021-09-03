@@ -367,7 +367,7 @@ pub extern "C" fn ap_boot_main() -> ! {
     /* Setup memory management system */
     let mut object_allocator = ObjectAllocator::new();
     object_allocator.init(&mut get_kernel_manager_cluster().memory_manager.lock().unwrap());
-    cpu_manager.object_allocator = Mutex::new(object_allocator);
+    cpu_manager.object_allocator = object_allocator;
 
     /* Copy GDT from BSP and create own TSS */
     let gdt_address = unsafe { &gdt as *const _ as usize };

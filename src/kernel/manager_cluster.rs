@@ -59,7 +59,7 @@ pub struct CpuManagerCluster {
     pub list: PtrLinkedListNode<Self>,
     pub interrupt_manager: InterruptManager,
     pub work_queue: WorkQueue,
-    pub object_allocator: Mutex<ObjectAllocator>,
+    pub object_allocator: ObjectAllocator,
     pub run_queue: RunQueue,
     pub timer_manager: TimerManager,
     pub arch_depend_data: ArchDependedCpuManagerCluster,

@@ -55,9 +55,9 @@ pub fn init_task(
         user_ss,
         unsafe { cpu::get_cr3() },
     );
-    let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
+    let object_allocator = &mut get_cpu_manager_cluster().object_allocator;
     let memory_manager = &get_kernel_manager_cluster().memory_manager;
-    run_queue.init(&mut object_allocator, memory_manager);
+    run_queue.init(object_allocator, memory_manager);
     drop(object_allocator);
 
     let main_context = context_manager
@@ -78,9 +78,9 @@ pub fn init_task(
 ///
 pub fn init_task_ap(idle_task: fn() -> !) {
     let mut run_queue = RunQueue::new();
-    let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
+    let object_allocator = &mut get_cpu_manager_cluster().object_allocator;
     let memory_manager = &get_kernel_manager_cluster().memory_manager;
-    run_queue.init(&mut object_allocator, memory_manager);
+    run_queue.init(object_allocator, memory_manager);
     drop(object_allocator);
 
     get_kernel_manager_cluster()
@@ -275,8 +275,6 @@ pub fn setup_cpu_manager_cluster(
         get_kernel_manager_cluster()
             .boot_strap_cpu_manager /* Allocate from BSP Object Manager */
             .object_allocator
-            .lock()
-            .unwrap()
             .alloc(
                 core::mem::size_of::<CpuManagerCluster>().into(),
                 &get_kernel_manager_cluster().memory_manager,
