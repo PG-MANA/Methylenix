@@ -219,7 +219,7 @@ impl XsdtManager {
     }
 
     fn search_entry(&self, signature: &[u8; 4]) -> Option<VAddress> {
-        let mut memory_manager = &mut get_kernel_manager_cluster().memory_manager;
+        let memory_manager = &mut get_kernel_manager_cluster().memory_manager;
         let mut index = 0;
         while let Some(entry_physical_address) = self.get_entry(index) {
             if let Ok(v_address) = memory_manager.mmap(

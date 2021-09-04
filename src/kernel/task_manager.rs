@@ -19,7 +19,6 @@ use self::thread_entry::ThreadEntry;
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 use crate::arch::target_arch::interrupt::InterruptManager;
 
-use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };

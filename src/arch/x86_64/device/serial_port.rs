@@ -138,7 +138,9 @@ impl SerialPortManager {
             Self::worker,
             get_kernel_manager_cluster().serial_port_manager.read() as usize,
         );
-        get_cpu_manager_cluster().work_queue.add_work(work);
+        if let Err(_) = get_cpu_manager_cluster().work_queue.add_work(work) {
+            pr_err!("Failed to add work for key event");
+        }
         get_cpu_manager_cluster().interrupt_manager.send_eoi();
     }
 

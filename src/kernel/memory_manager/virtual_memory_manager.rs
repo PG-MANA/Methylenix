@@ -1202,6 +1202,7 @@ impl VirtualMemoryManager {
         None
     }
 
+    #[allow(dead_code)]
     fn check_usable_address_range(
         &self,
         vm_start_address: VAddress,

@@ -12,7 +12,7 @@ use self::context_data::ContextData;
 
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize};
 use crate::kernel::memory_manager::MemoryError;
 

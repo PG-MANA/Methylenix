@@ -18,7 +18,6 @@ use crate::kernel::memory_manager::{
     data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags, MemoryManager,
     SystemMemoryManager,
 };
-use crate::kernel::sync::spin_lock::Mutex;
 
 use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use core::mem;
@@ -220,7 +219,9 @@ pub fn init_memory_by_multiboot_information(
 
     /* Set up Kernel Memory Alloc Manager */
     let mut memory_allocator = MemoryAllocator::new();
-    memory_allocator.init();
+    memory_allocator
+        .init()
+        .expect("Failed to init MemoryAllocator");
 
     /* Move Multiboot Information to allocated memory area */
     let new_mbi_address = memory_allocator
@@ -241,7 +242,7 @@ pub fn init_memory_by_multiboot_information(
         .memory_manager
         .free(mapped_multiboot_address_base)
         .expect("Cannot free the map of multiboot information.");
-    get_kernel_manager_cluster()
+    let _ = get_kernel_manager_cluster()
         .memory_manager
         .free_physical_memory(
             multiboot_information.address.into(),

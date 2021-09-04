@@ -6,7 +6,7 @@
 use super::tss::TssManager;
 use crate::arch::target_arch::device::cpu;
 
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize};
 
 /// GateDescriptor

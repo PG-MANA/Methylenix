@@ -56,7 +56,6 @@ impl<T> SlabAllocator<T> {
     }
 
     pub fn alloc(&mut self) -> Result<&'static mut T, MemoryError> {
-        let result = self.allocator.alloc();
         match self.allocator.alloc() {
             Ok(e) => Ok(e),
             Err(_) => {
@@ -85,13 +84,6 @@ impl<T> LocalSlabAllocator<T> {
     pub fn init(&mut self) -> Result<(), MemoryError> {
         let irq = InterruptManager::save_and_disable_local_irq();
         let result = self.slab_allocator.init();
-        InterruptManager::restore_local_irq(irq);
-        return result;
-    }
-
-    fn grow_pool(&mut self) -> Result<(), MemoryError> {
-        let irq = InterruptManager::save_and_disable_local_irq();
-        let result = self.slab_allocator.grow_pool();
         InterruptManager::restore_local_irq(irq);
         return result;
     }
@@ -129,13 +121,6 @@ impl<T> GlobalSlabAllocator<T> {
     pub fn init(&mut self) -> Result<(), MemoryError> {
         let _lock = self.lock.lock();
         let result = self.slab_allocator.init();
-        drop(_lock);
-        return result;
-    }
-
-    fn grow_pool(&mut self) -> Result<(), MemoryError> {
-        let _lock = self.lock.lock();
-        let result = self.slab_allocator.grow_pool();
         drop(_lock);
         return result;
     }

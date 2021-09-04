@@ -36,7 +36,6 @@ impl WorkList {
 }
 
 impl WorkQueue {
-    const WORK_POOL_CACHE_ENTRIES: usize = 64;
     const DEFAULT_PRIORITY: u8 = 10;
 
     pub fn init(&mut self, task_manager: &mut TaskManager) {
