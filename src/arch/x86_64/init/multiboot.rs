@@ -35,7 +35,7 @@ pub fn init_memory_by_multiboot_information(
     /* Set up Physical Memory Manager */
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
-        physical_memory_manager.set_memory_entry_pool(
+        physical_memory_manager.add_memory_entry_pool(
             &MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize,
             mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER),
         );
@@ -43,11 +43,13 @@ pub fn init_memory_by_multiboot_information(
     for entry in multiboot_information.memory_map_info.clone() {
         if entry.m_type == 1 {
             /* Available memory */
-            physical_memory_manager.free(
-                PAddress::new(entry.addr as usize),
-                MSize::new(entry.length as usize),
-                true,
-            );
+            physical_memory_manager
+                .free(
+                    PAddress::new(entry.addr as usize),
+                    MSize::new(entry.length as usize),
+                    true,
+                )
+                .expect("Failed to free available memory");
         }
         let area_name = match entry.m_type {
             1 => "Available",
@@ -80,8 +82,13 @@ pub fn init_memory_by_multiboot_information(
             EfiMemoryType::EfiMemoryMappedIOPortSpace |
             EfiMemoryType::EfiPalCode |
             EfiMemoryType::EfiPersistentMemory => {
-                physical_memory_manager.reserve_memory(PAddress::new(entry.physical_start),MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT),MOrder::new(0));
-
+                if let Err(e) =
+                   physical_memory_manager.reserve_memory(
+                       PAddress::new(entry.physical_start),
+                       MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT),
+                       MOrder::new(0)) {
+                    pr_warn!("Failed to free {:?}: {:?}", entry.memory_type, e);
+                }
             }
             _=>{}
         }
@@ -98,31 +105,39 @@ pub fn init_memory_by_multiboot_information(
     /* Reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
         if section.should_allocate() && section.align_size() == PAGE_SIZE_USIZE {
-            physical_memory_manager.reserve_memory(
-                PAddress::new(section.address()),
-                MSize::new(section.size()),
-                MOrder::new(PAGE_SHIFT),
-            );
+            physical_memory_manager
+                .reserve_memory(
+                    PAddress::new(section.address()),
+                    MSize::new(section.size()),
+                    MOrder::new(PAGE_SHIFT),
+                )
+                .expect("Failed to reserve memory");
         }
     }
     /* reserve Multiboot Information area */
-    physical_memory_manager.reserve_memory(
-        PAddress::new(multiboot_information.address),
-        MSize::new(multiboot_information.size),
-        0.into(),
-    );
+    physical_memory_manager
+        .reserve_memory(
+            PAddress::new(multiboot_information.address),
+            MSize::new(multiboot_information.size),
+            0.into(),
+        )
+        .expect("Failed to reserve memory area of the multiboot information");
 
     /* TEMP: reserve boot code area for application processors */
-    assert!(physical_memory_manager.reserve_memory(0.into(), PAGE_SIZE, 0.into()));
+    assert!(physical_memory_manager
+        .reserve_memory(PAddress::new(0), PAGE_SIZE, MOrder::new(0))
+        .is_ok());
 
     /* Reserve Multiboot modules area */
     for e in multiboot_information.modules.iter() {
         if e.start_address != 0 && e.end_address != 0 {
-            physical_memory_manager.reserve_memory(
-                e.start_address.into(),
-                (e.end_address - e.start_address).into(),
-                0.into(),
-            );
+            physical_memory_manager
+                .reserve_memory(
+                    e.start_address.into(),
+                    (e.end_address - e.start_address).into(),
+                    0.into(),
+                )
+                .expect("Failed to reserve memory area of the multiboot modules");
         }
     }
 

@@ -73,7 +73,7 @@ impl ContextManager {
     ) -> Result<ContextData, MemoryError> {
         let stack_size = stack_size.unwrap_or(MSize::new(Self::DEFAULT_STACK_SIZE_OF_SYSTEM));
         if (stack_size & !PAGE_MASK) != 0 {
-            return Err(MemoryError::SizeNotAligned);
+            return Err(MemoryError::NotAligned);
         }
 
         let stack_address = get_cpu_manager_cluster()
@@ -102,7 +102,7 @@ impl ContextManager {
     ) -> Result<ContextData, MemoryError> {
         let stack_size = stack_size.unwrap_or(MSize::new(Self::DEFAULT_STACK_SIZE_OF_SYSTEM));
         if (stack_size & !PAGE_MASK) != 0 {
-            return Err(MemoryError::SizeNotAligned);
+            return Err(MemoryError::NotAligned);
         }
 
         let stack_address = get_cpu_manager_cluster()

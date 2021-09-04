@@ -13,16 +13,18 @@ pub mod pool_allocator;
 pub mod virtual_memory_manager;
 
 use self::data_type::{
-    Address, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+    Address, MIndex, MOrder, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
+    VAddress,
 };
 use self::physical_memory_manager::PhysicalMemoryManager;
-use self::virtual_memory_manager::VirtualMemoryManager;
+use self::virtual_memory_manager::{VirtualMemoryEntry, VirtualMemoryManager};
 
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
-use crate::kernel::sync::spin_lock::Mutex;
+use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, Mutex};
 
 pub struct MemoryManager {
+    lock: IrqSaveSpinLockFlag,
     physical_memory_manager: &'static Mutex<PhysicalMemoryManager>,
     virtual_memory_manager: VirtualMemoryManager,
 }
@@ -34,18 +36,16 @@ pub struct SystemMemoryManager {
 
 #[derive(Clone, Eq, PartialEq, Copy, Debug)]
 pub enum MemoryError {
-    SizeNotAligned,
+    NotAligned,
     InvalidSize,
-    AddressNotAligned,
-    AllocPhysicalAddressFailed,
+    InvalidAddress,
+    AllocAddressFailed,
     FreeAddressFailed,
-    InvalidPhysicalAddress,
-    MapAddressFailed,
-    InvalidVirtualAddress,
-    InsertEntryFailed,
     AddressNotAvailable,
+    MapAddressFailed,
+    InternalError,
+    EntryPoolRunOut,
     PagingError,
-    MutexError,
 }
 
 impl SystemMemoryManager {
@@ -74,7 +74,25 @@ impl MemoryManager {
         Self {
             physical_memory_manager,
             virtual_memory_manager,
+            lock: IrqSaveSpinLockFlag::new(),
         }
+    }
+
+    fn add_memory_pool_to_physical_memory_manager(
+        &mut self,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        if let Err(e) = self
+            .virtual_memory_manager
+            .add_physical_memory_manager_pool(pm_manager)
+        {
+            pr_err!(
+                "Failed to add memory pool for PhysicalMemoryManager: {:?}",
+                e
+            );
+            return Err(e);
+        }
+        return Ok(());
     }
 
     pub fn alloc_pages(
@@ -85,26 +103,46 @@ impl MemoryManager {
         /* ADD: lazy allocation */
         /* Return physically continuous 2 ^ order pages memory. */
         let size = order.to_offset();
-        let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
-        if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT.into()) {
-            match self.virtual_memory_manager.alloc_address(
-                size,
-                physical_address,
-                permission,
-                MemoryOptionFlags::ALLOC,
-                &mut physical_memory_manager,
-            ) {
-                Ok(address) => {
-                    self.virtual_memory_manager.update_paging(address);
-                    Ok(address)
-                }
-                Err(e) => {
-                    physical_memory_manager.free(physical_address, size, false);
-                    Err(e)
+        let _lock = self.lock.lock();
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        match pm_manager.alloc(size, MOrder::new(PAGE_SHIFT)) {
+            Ok(physical_address) => {
+                match self.virtual_memory_manager.alloc_and_map_virtual_address(
+                    size,
+                    physical_address,
+                    permission,
+                    MemoryOptionFlags::ALLOC,
+                    &mut pm_manager,
+                ) {
+                    Ok(address) => Ok(address),
+                    Err(e) => {
+                        if let Err(e) = pm_manager.free(physical_address, size, false) {
+                            pr_err!("Failed to free physical memory: {:?}", e);
+                        }
+                        Err(e)
+                    }
                 }
             }
-        } else {
-            Err(MemoryError::AllocPhysicalAddressFailed)
+            Err(MemoryError::EntryPoolRunOut) => {
+                if let Err(e) = self
+                    .virtual_memory_manager
+                    .add_physical_memory_manager_pool(&mut pm_manager)
+                {
+                    pr_err!(
+                        "Failed to add memory pool to PhysicalMemoryManager: {:?}",
+                        e
+                    );
+                    Err(e)
+                } else {
+                    drop(pm_manager);
+                    drop(_lock);
+                    self.alloc_pages(order, permission)
+                }
+            }
+            Err(e) => {
+                pr_err!("Failed to allocate physical memory: {:?}", e);
+                Err(e)
+            }
         }
     }
 
@@ -114,46 +152,88 @@ impl MemoryManager {
         order: MPageOrder,
         permission: MemoryPermissionFlags,
     ) -> Result<VAddress, MemoryError> {
-        /* THINK: rename */
-        /* vmalloc */
         let size = order.to_offset();
         if size <= PAGE_SIZE {
             return self.alloc_pages(order, permission);
         }
-        let pm_manager = self.physical_memory_manager.try_lock();
-        if pm_manager.is_err() {
-            return Err(MemoryError::MutexError);
-        }
-        let mut pm_manager = pm_manager.unwrap();
-        let entry = self.virtual_memory_manager.alloc_address_without_mapping(
+        let _lock = self.lock.lock();
+
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        let entry = self.virtual_memory_manager.alloc_virtual_address(
             size,
             permission,
             MemoryOptionFlags::ALLOC,
             &mut pm_manager,
         )?;
         let vm_start_address = entry.get_vm_start_address();
-        for i in 0.into()..size.to_index() {
-            if let Some(physical_address) = pm_manager.alloc(PAGE_SIZE, PAGE_SHIFT.into()) {
-                if let Err(e) = self
+
+        let map_func = |s: &mut Self,
+                        i: MIndex,
+                        p_a: PAddress,
+                        vm_entry: &mut VirtualMemoryEntry,
+                        pm_manager: &mut PhysicalMemoryManager|
+         -> Result<(), MemoryError> {
+            if let Err(e) = s.virtual_memory_manager.map_physical_address_into_vm_entry(
+                vm_entry,
+                vm_start_address + i.to_offset(),
+                p_a,
+                PAGE_SIZE,
+                pm_manager,
+            ) {
+                pr_err!(
+                    "Failed to map virtual address({}) to physical address({}): {:?}",
+                    vm_start_address + i.to_offset(),
+                    p_a,
+                    e
+                );
+                if let Err(e) = s
                     .virtual_memory_manager
-                    .insert_physical_page_into_vm_map_entry(
-                        entry,
-                        vm_start_address + i.to_offset(),
-                        physical_address,
-                        &mut pm_manager,
-                    )
+                    ._free_address(unsafe { &mut *(vm_entry as *mut _) }, pm_manager)
                 {
-                    panic!("Cannot insert physical page into vm_entry Err:{:?}", e);
+                    pr_err!("Failed to free vm_entry: {:?}", e);
+                }
+                return Err(e);
+            }
+            return Ok(());
+        };
+
+        for i in 0.into()..size.to_index() {
+            match pm_manager.alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT)) {
+                Ok(p_a) => {
+                    map_func(self, i, p_a, entry, &mut pm_manager)?;
+                }
+                Err(MemoryError::EntryPoolRunOut) => {
+                    self.add_memory_pool_to_physical_memory_manager(&mut pm_manager)?;
+                    match pm_manager.alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT)) {
+                        Ok(p_a) => {
+                            map_func(self, i, p_a, entry, &mut pm_manager)?;
+                        }
+                        Err(e) => {
+                            pr_err!("Failed to allocate physical memory: {:?}", e);
+                            return Err(MemoryError::AllocAddressFailed);
+                        }
+                    }
+                }
+                Err(e) => {
+                    pr_err!("Failed to allocate physical memory: {:?}", e);
+                    return Err(MemoryError::AllocAddressFailed);
                 }
             }
         }
         if let Err(e) = self
             .virtual_memory_manager
-            .finalize_vm_map_entry(entry, &mut pm_manager)
+            .update_page_table_with_vm_entry(entry, &mut pm_manager)
         {
-            panic!("Cannot finalize vm_map_entry Err:{:?}", e);
+            pr_err!("Failed to update page table: {:?}", e);
+            if let Err(e) = self
+                .virtual_memory_manager
+                ._free_address(entry, &mut pm_manager)
+            {
+                pr_err!("Failed to free vm_entry: {:?}", e);
+            }
+            return Err(MemoryError::PagingError);
         }
-        Ok(vm_start_address)
+        return Ok(vm_start_address);
     }
 
     pub fn alloc_with_option(
@@ -165,6 +245,7 @@ impl MemoryManager {
         let size = order.to_offset();
 
         if option.is_direct_mapped() && permission.is_executable() == false {
+            let _lock = self.lock.lock();
             let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
             return self
                 .virtual_memory_manager
@@ -174,13 +255,14 @@ impl MemoryManager {
     }
 
     pub fn free(&mut self, vm_address: VAddress) -> Result<(), MemoryError> {
+        let _lock = self.lock.lock();
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
         let aligned_vm_address = vm_address & PAGE_MASK;
         if let Err(e) = self
             .virtual_memory_manager
             .free_address(aligned_vm_address.into(), &mut pm_manager)
         {
-            pr_err!("{:?}", e); /* The error of 'free_address' tends to be ignored. */
+            pr_err!("Failed to free memory: {:?}", e); /* The error of 'free_address' tends to be ignored. */
             Err(e)
         } else {
             Ok(())
@@ -192,20 +274,42 @@ impl MemoryManager {
         /* initializing use only */
         /* Returned memory area is not mapped, if you want to access, you must map. */
         let size = order.to_offset();
-        let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
-        if let Some(physical_address) = physical_memory_manager.alloc(size, PAGE_SHIFT.into()) {
-            Ok(physical_address)
-        } else {
-            Err(MemoryError::AllocPhysicalAddressFailed)
+        let _lock = self.lock.lock();
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        match pm_manager.alloc(size, MOrder::new(PAGE_SHIFT)) {
+            Ok(p_a) => {
+                drop(pm_manager);
+                drop(_lock);
+                Ok(p_a)
+            }
+            Err(MemoryError::EntryPoolRunOut) => {
+                self.add_memory_pool_to_physical_memory_manager(&mut pm_manager)?;
+                drop(pm_manager);
+                drop(_lock);
+                self.alloc_physical_memory(order)
+            }
+            Err(e) => {
+                pr_err!("Failed to allocate PhysicalMemory: {:?}", e);
+                drop(pm_manager);
+                drop(_lock);
+                Err(MemoryError::AllocAddressFailed)
+            }
         }
     }
 
     pub fn free_physical_memory(&mut self, physical_address: PAddress, size: MSize) -> bool {
         /* initializing use only */
-        if let Ok(mut pm_manager) = self.physical_memory_manager.try_lock() {
-            pm_manager.free(physical_address, size, false)
-        } else {
+        let _lock = self.lock.lock();
+        if let Err(e) =
+            self.physical_memory_manager
+                .lock()
+                .unwrap()
+                .free(physical_address, size, false)
+        {
+            pr_err!("Failed to free physical memory: {:?}", e);
             false
+        } else {
+            true
         }
     }
 
@@ -219,15 +323,24 @@ impl MemoryManager {
         /* For some data mapping */
         /* should remake...? */
         let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
-        let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
-            p
-        } else {
-            /* ADD: maybe sleep option */
-            return Err(MemoryError::MutexError);
-        };
+        let _lock = self.lock.lock();
+
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
 
         if !option.is_pre_reserved() {
-            pm_manager.reserve_memory(aligned_physical_address, size, 0.into());
+            if let Err(e) =
+                pm_manager.reserve_memory(aligned_physical_address, size, MOrder::new(0))
+            {
+                return if e == MemoryError::EntryPoolRunOut {
+                    self.add_memory_pool_to_physical_memory_manager(&mut pm_manager)?;
+                    drop(pm_manager);
+                    drop(_lock);
+                    self.mmap(physical_address, size, permission, option)
+                } else {
+                    pr_err!("Failed to reserve physical memory: {:?}", e);
+                    Err(MemoryError::AllocAddressFailed)
+                };
+            }
         }
         let virtual_address = self.virtual_memory_manager.map_address(
             aligned_physical_address,
@@ -237,6 +350,9 @@ impl MemoryManager {
             option | MemoryOptionFlags::MEMORY_MAP,
             &mut pm_manager,
         )?;
+
+        drop(physical_address);
+        drop(_lock);
         Ok(virtual_address + (physical_address - aligned_physical_address))
     }
 
@@ -250,13 +366,9 @@ impl MemoryManager {
         /* For IO map */
         /* should remake...? */
         let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
-        let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
-            p
-        } else {
-            /* ADD: maybe sleep option */
-            return Err(MemoryError::MutexError);
-        };
+        let _lock = self.lock.lock();
 
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
         //pm_manager.reserve_memory(aligned_physical_address, size, false);
         /* physical_address must be reserved. */
         /* ADD: check succeeded or failed (failed because of already reserved is ok, but other...) */
@@ -268,6 +380,8 @@ impl MemoryManager {
             option,
             &mut pm_manager,
         )?;
+        drop(pm_manager);
+        drop(_lock);
         Ok(virtual_address + (physical_address - aligned_physical_address))
     }
 
@@ -280,12 +394,8 @@ impl MemoryManager {
         let (aligned_virtual_address, aligned_new_size) =
             Self::page_align(old_virtual_address, new_size);
 
-        let mut pm_manager = if let Ok(p) = self.physical_memory_manager.try_lock() {
-            p
-        } else {
-            /* ADD: maybe sleep option */
-            return Err(MemoryError::MutexError);
-        };
+        let _lock = self.lock.lock();
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
 
         //pm_manager.reserve_memory(aligned_physical_address, size, false);
         /* physical_address must be reserved. */
@@ -295,10 +405,14 @@ impl MemoryManager {
             aligned_new_size,
             &mut pm_manager,
         )?;
+
+        drop(pm_manager);
+        drop(_lock);
         Ok(new_virtual_address + (old_virtual_address - aligned_virtual_address))
     }
 
     pub fn set_paging_table(&mut self) {
+        let _lock = self.lock.lock();
         self.virtual_memory_manager.flush_paging();
     }
 
