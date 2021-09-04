@@ -17,7 +17,6 @@ use self::scheduling_class::{kernel::KernelSchedulingClass, SchedulingClass};
 use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
-use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
@@ -25,10 +24,10 @@ use crate::kernel::manager_cluster::{
 use crate::kernel::memory_manager::data_type::MSize;
 use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
 use crate::kernel::memory_manager::MemoryError;
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 pub struct TaskManager {
-    lock: SpinLockFlag,
+    lock: IrqSaveSpinLockFlag,
     kernel_process: *mut ProcessEntry,
     idle_thread: *mut ThreadEntry,
     context_manager: ContextManager,
@@ -74,12 +73,9 @@ impl From<MemoryError> for TaskError {
 }
 
 impl TaskManager {
-    const NUM_OF_INITIAL_THREAD_ENTRIES: usize = 6;
-    const NUM_OF_INITIAL_PROCESS_ENTRIES: usize = 6;
-
     pub const fn new() -> Self {
         Self {
-            lock: SpinLockFlag::new(),
+            lock: IrqSaveSpinLockFlag::new(),
             kernel_process: core::ptr::null_mut(),
             idle_thread: core::ptr::null_mut(),
             context_manager: ContextManager::new(),
@@ -93,8 +89,6 @@ impl TaskManager {
     /// This function setups memory pools and create kernel process.
     /// The kernel process has two threads created with kernel_main_context and idle_context.
     /// After that, this function will set those threads into run_queue_manager.
-    ///
-    /// **Attention: MemoryManager must be unlocked.**
     pub fn init(
         &mut self,
         context_manager: ContextManager,
@@ -157,6 +151,7 @@ impl TaskManager {
         drop(_idle_thread_lock);
         self.kernel_process = kernel_process;
         self.idle_thread = idle_thread;
+        drop(_lock);
         return;
     }
 
@@ -165,6 +160,7 @@ impl TaskManager {
     /// This function forks idle thread and sets it to run_queue_manager.
     /// This will be used for application processors' initialization.
     pub fn init_idle(&mut self, idle_fn: fn() -> !, run_queue: &mut RunQueue) {
+        let _lock = self.lock.lock();
         let idle_thread = unsafe { &mut *self.idle_thread };
         let forked_thread = self
             .fork_system_thread(
@@ -177,6 +173,7 @@ impl TaskManager {
         run_queue
             .add_thread(forked_thread)
             .expect("Cannot init ap's idle thread");
+        drop(_lock);
         return;
     }
 
@@ -190,7 +187,7 @@ impl TaskManager {
         entry_address: fn() -> !,
         stack_size: Option<MSize>,
     ) -> Result<&'static mut ThreadEntry, TaskError> {
-        /* self.lock must be locked. */
+        assert!(self.lock.is_locked());
         let new_thread = self.thread_entry_pool.alloc()?;
         let _original_thread_lock = thread.lock.lock();
         let new_context = self.context_manager.fork_system_context(
@@ -219,7 +216,6 @@ impl TaskManager {
         stack_size: Option<MSize>,
         kernel_priority: u8,
     ) -> Result<&'static mut ThreadEntry, TaskError> {
-        let interrupt_flag = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let result = try {
             let mut main_thread = unsafe { &mut *self.idle_thread };
@@ -233,7 +229,6 @@ impl TaskManager {
         };
 
         drop(_lock);
-        InterruptManager::restore_local_irq(interrupt_flag);
         return result;
     }
 
@@ -283,6 +278,7 @@ impl TaskManager {
     ///
     /// `thread` must be unlocked.
     fn add_thread_into_run_queue(&self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+        assert!(self.lock.is_locked());
         let _thread_lock = thread.lock.lock();
         let current_cpu_load = get_cpu_manager_cluster()
             .run_queue
@@ -317,6 +313,9 @@ impl TaskManager {
     ///
     /// `thread` must be unlocked.
     pub fn wake_up_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
-        self.add_thread_into_run_queue(thread)
+        let _lock = self.lock.lock();
+        let result = self.add_thread_into_run_queue(thread);
+        drop(_lock);
+        return result;
     }
 }
