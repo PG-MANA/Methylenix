@@ -350,10 +350,9 @@ impl InterruptManager {
     /// This function calls `schedule` if needed.
     pub extern "C" fn post_interrupt_handler(context_data: u64) {
         if get_cpu_manager_cluster().run_queue.should_call_schedule() {
-            get_cpu_manager_cluster().run_queue.schedule(
-                None,
-                Some(unsafe { &*(context_data as *const ContextData) }),
-            );
+            get_cpu_manager_cluster()
+                .run_queue
+                .schedule(Some(unsafe { &*(context_data as *const ContextData) }));
         }
     }
 }
