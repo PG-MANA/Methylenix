@@ -30,7 +30,7 @@ pub struct ThreadEntry {
 }
 
 impl ThreadEntry {
-    pub const THREAD_ENTRY_ALIGN_ORDER: usize = 0;
+    pub const THREAD_ENTRY_ALIGN: usize = 0;
 
     pub fn init(
         &mut self,

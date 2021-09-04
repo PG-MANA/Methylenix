@@ -6,7 +6,7 @@
 
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, PAddress};
 
 pub struct FrameBufferManager {
     frame_buffer_address: usize,
@@ -41,20 +41,16 @@ impl FrameBufferManager {
             return false;
         }
 
-        match get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .io_map(
-                self.frame_buffer_address.into(),
-                MSize::new(
-                    self.frame_buffer_width
-                        * self.frame_buffer_height
-                        * (self.frame_buffer_color_depth >> 3/* /8 */) as usize,
-                ),
-                MemoryPermissionFlags::data(),
-                None,
-            ) {
+        match get_kernel_manager_cluster().memory_manager.io_map(
+            PAddress::new(self.frame_buffer_address),
+            MSize::new(
+                self.frame_buffer_width
+                    * self.frame_buffer_height
+                    * (self.frame_buffer_color_depth >> 3/* /8 */) as usize,
+            ),
+            MemoryPermissionFlags::data(),
+            None,
+        ) {
             Ok(address) => {
                 self.frame_buffer_address = address.to_usize();
                 true

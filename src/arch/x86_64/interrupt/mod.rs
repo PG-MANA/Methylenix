@@ -112,8 +112,6 @@ impl InterruptManager {
     fn set_rsp(&mut self, rsp: u8, stack_size: MSize) -> bool {
         let stack = get_kernel_manager_cluster()
             .memory_manager
-            .lock()
-            .unwrap()
             .alloc_pages(
                 stack_size.to_order(None).to_page_order(),
                 MemoryPermissionFlags::data(),
@@ -131,7 +129,7 @@ impl InterruptManager {
     /// fills all of IDT converted from the allocated page with a invalid handler.
     /// After that, this also init LocalApicManager.
     pub fn init(&mut self, selector: u16) {
-        let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
+        let mut memory_manager = &mut get_kernel_manager_cluster().memory_manager;
         let flag = Self::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         self.main_selector = selector;
@@ -153,13 +151,13 @@ impl InterruptManager {
     /// This will be used to init the application processors.
     /// GDT and TSS Descriptor must be valid.
     pub fn init_ap(&mut self, original: &Self) {
-        let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
+        let memory_manager = &mut get_kernel_manager_cluster().memory_manager;
         let flag = Self::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         self.main_selector = original.main_selector;
-        self.init_idt(&mut memory_manager);
+        self.init_idt(memory_manager);
         self.tss_manager.load_current_tss();
-        self.init_ist(&mut memory_manager);
+        self.init_ist(memory_manager);
         self.local_apic
             .init_from_other_manager(original.get_local_apic_manager());
         drop(memory_manager);

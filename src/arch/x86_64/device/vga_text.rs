@@ -9,7 +9,7 @@ use crate::arch::target_arch::device::crt;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::graphic_manager::text_buffer_driver::TextBufferDriver;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, PAddress};
 
 /// VgaTextDriver
 ///
@@ -89,16 +89,12 @@ impl VgaTextDriver {
     /// otherwise return false including the situation the screen is not text mode.
     pub fn set_frame_buffer_memory_permission(&mut self) -> bool {
         if self.address != 0 {
-            match get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .io_map(
-                    self.address.into(),
-                    MSize::new(self.width * self.height * 2 as usize),
-                    MemoryPermissionFlags::data(),
-                    None,
-                ) {
+            match get_kernel_manager_cluster().memory_manager.io_map(
+                PAddress::new(self.address),
+                MSize::new(self.width * self.height * 2 as usize),
+                MemoryPermissionFlags::data(),
+                None,
+            ) {
                 Ok(address) => {
                     self.address = address.to_usize();
                     true

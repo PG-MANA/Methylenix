@@ -58,25 +58,16 @@ impl<T> PoolAllocator<T> {
         self.linked_count
     }
 
-    pub unsafe fn set_initial_pool(&mut self, pool_address: usize, pool_size: usize) {
-        assert_eq!(self.linked_count, 0);
-        self.add_pool(pool_address, pool_size);
-    }
-
     pub unsafe fn add_pool(&mut self, pool_address: usize, pool_size: usize) {
         let mut address = pool_address;
-        for _i in 0..(pool_size / self.object_size) {
+        for _ in 0..(pool_size / self.object_size) {
             self.free_ptr(address as *mut T);
             address += self.object_size;
         }
     }
 
     pub fn alloc(&mut self) -> Result<&'static mut T, ()> {
-        if let Ok(ptr) = self.alloc_ptr() {
-            Ok(unsafe { &mut *ptr })
-        } else {
-            Err(())
-        }
+        self.alloc_ptr().and_then(|p| Ok(unsafe { &mut *p }))
     }
 
     pub fn alloc_ptr(&mut self) -> Result<*mut T, ()> {

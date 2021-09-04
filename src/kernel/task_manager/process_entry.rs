@@ -7,7 +7,7 @@ use super::{ProcessStatus, TaskError, TaskSignal, ThreadEntry};
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::memory_manager::MemoryManager;
-use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 #[allow(dead_code)]
 pub struct ProcessEntry {
@@ -19,7 +19,7 @@ pub struct ProcessEntry {
     thread: PtrLinkedList<ThreadEntry>,
     signal: TaskSignal,
     status: ProcessStatus,
-    memory_manager: *const Mutex<MemoryManager>,
+    memory_manager: *mut MemoryManager,
     process_id: usize,
     parent: *mut ProcessEntry, /* kernel process has invalid pointer */
     num_of_thread: usize,
@@ -29,7 +29,7 @@ pub struct ProcessEntry {
 }
 
 impl ProcessEntry {
-    pub const PROCESS_ENTRY_ALIGN_ORDER: usize = 0;
+    pub const PROCESS_ENTRY_ALIGN: usize = 0;
 
     /// Init ProcessEntry and set ThreadEntries to `Self::thread`.
     ///
@@ -39,7 +39,7 @@ impl ProcessEntry {
         p_id: usize,
         parent: *mut Self,
         threads: &mut [&mut ThreadEntry],
-        memory_manager: *const Mutex<MemoryManager>,
+        memory_manager: *mut MemoryManager,
         privilege_level: u8,
     ) {
         self.lock = SpinLockFlag::new();
@@ -133,7 +133,7 @@ impl ProcessEntry {
     ///
     /// This function searches the thread having specified t_id.
     /// [Self::lock] must be locked.
-    pub fn get_thread(&mut self, t_id: usize) -> Option<&mut ThreadEntry> {
+    pub fn get_thread_mut(&mut self, t_id: usize) -> Option<&mut ThreadEntry> {
         assert!(self.lock.is_locked());
         if let Some(single_thread) = self.single_thread {
             let s_t = unsafe { &mut *single_thread };

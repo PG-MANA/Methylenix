@@ -46,20 +46,7 @@ impl SsdtManager {
             pr_err!("Not supported SSDT version:{}", ssdt.major_version);
         }
 
-        let ssdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mremap_dev(
-                ssdt_vm_address,
-                INITIAL_MMAP_SIZE.into(),
-                (ssdt.length as usize).into(),
-            ) {
-            a
-        } else {
-            pr_err!("Cannot map memory area of SSDT.");
-            return false;
-        };
+        let ssdt_vm_address = remap_table!(ssdt_vm_address, ssdt.length);
         self.base_address = ssdt_vm_address;
         return true;
     }

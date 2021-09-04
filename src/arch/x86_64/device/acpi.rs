@@ -210,8 +210,6 @@ pub fn read_memory(
     let size = MSize::new(((bit_index + num_of_bits) >> 3).max(1));
     let virtual_address = get_kernel_manager_cluster()
         .memory_manager
-        .lock()
-        .unwrap()
         .io_map(
             address,
             size,
@@ -290,8 +288,6 @@ pub fn read_memory(
     };
     get_kernel_manager_cluster()
         .memory_manager
-        .lock()
-        .unwrap()
         .free(virtual_address)
         .or(Err(AmlError::InvalidOperation))?;
     pr_debug!(
@@ -329,8 +325,6 @@ pub fn write_memory(
     let size = MSize::new(access_size);
     let virtual_address = get_kernel_manager_cluster()
         .memory_manager
-        .lock()
-        .unwrap()
         .io_map(
             address,
             size,
@@ -415,8 +409,6 @@ pub fn write_memory(
     };
     get_kernel_manager_cluster()
         .memory_manager
-        .lock()
-        .unwrap()
         .free(virtual_address)
         .or(Err(AmlError::InvalidOperation))?;
     return result;

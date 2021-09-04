@@ -50,22 +50,8 @@ impl MadtManager {
         if madt.revision > 4 {
             pr_err!("Not supported MADT version: {}", madt.revision);
         }
-        if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mremap_dev(
-                madt_vm_address,
-                INITIAL_MMAP_SIZE.into(),
-                MSize::new(madt.length as usize),
-            )
-        {
-            self.base_address = a;
-            true
-        } else {
-            pr_err!("Cannot map memory area of MADT.");
-            false
-        }
+        self.base_address = remap_table!(madt_vm_address, madt.length);
+        return true;
     }
 
     /// Find the Local APIC ID list
@@ -89,12 +75,11 @@ impl MadtManager {
     /// When you finished your process, this function should be called to free memory mapping.
     pub fn release_memory_map(self) {
         if !self.base_address.is_zero() {
-            if let Ok(mut m) = get_kernel_manager_cluster().memory_manager.try_lock() {
-                if let Err(e) = m.free(self.base_address) {
-                    pr_warn!("Cannot free MADT. Error: {:?}", e);
-                }
-            } else {
-                pr_warn!("Cannot lock MemoryManager.");
+            if let Err(e) = get_kernel_manager_cluster()
+                .memory_manager
+                .free(self.base_address)
+            {
+                pr_warn!("Failed to free MADT: {:?}", e);
             }
         }
         drop(self)

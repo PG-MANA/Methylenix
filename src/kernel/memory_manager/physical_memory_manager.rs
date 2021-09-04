@@ -5,7 +5,7 @@
 //! WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている
 
 use super::data_type::{Address, MOrder, MPageOrder, MSize, PAddress};
-use super::pool_allocator::PoolAllocator;
+use super::slab_allocator::pool_allocator::PoolAllocator;
 use super::MemoryError;
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;

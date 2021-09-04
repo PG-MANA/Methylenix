@@ -46,20 +46,7 @@ impl DsdtManager {
             pr_err!("Not supported DSDT version:{}", dsdt.major_version);
         }
 
-        let dsdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mremap_dev(
-                dsdt_vm_address,
-                INITIAL_MMAP_SIZE.into(),
-                (dsdt.length as usize).into(),
-            ) {
-            a
-        } else {
-            pr_err!("Cannot map memory area of DSDT.");
-            return false;
-        };
+        let dsdt_vm_address = remap_table!(dsdt_vm_address, dsdt.length);
         self.base_address = dsdt_vm_address;
         return true;
     }

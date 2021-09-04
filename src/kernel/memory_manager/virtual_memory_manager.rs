@@ -18,9 +18,8 @@ use self::virtual_memory_page::VirtualMemoryPage;
 use super::data_type::{
     Address, MIndex, MOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
-use super::object_allocator::cache_allocator::CacheAllocator;
 use super::physical_memory_manager::PhysicalMemoryManager;
-use super::pool_allocator::PoolAllocator;
+use super::slab_allocator::pool_allocator::PoolAllocator;
 use super::MemoryError;
 
 use crate::arch::target_arch::context::memory_layout::{
@@ -40,9 +39,9 @@ pub struct VirtualMemoryManager {
     vm_entry: PtrLinkedList<VirtualMemoryEntry>,
     is_system_vm: bool,
     page_manager: PageManager,
-    vm_entry_pool: CacheAllocator<VirtualMemoryEntry>,
+    vm_entry_pool: PoolAllocator<VirtualMemoryEntry>,
     /*vm_object_pool: PoolAllocator<VirtualMemoryObject>,*/
-    vm_page_pool: CacheAllocator<VirtualMemoryPage>,
+    vm_page_pool: PoolAllocator<VirtualMemoryPage>,
     reserved_memory_list: PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
     direct_mapped_area: Option<DirectMappedArea>, /* think algorithm */
 }
@@ -66,9 +65,9 @@ impl VirtualMemoryManager {
             vm_entry: PtrLinkedList::new(),
             is_system_vm: false,
             page_manager: PageManager::new(),
-            vm_entry_pool: CacheAllocator::new(0),
+            vm_entry_pool: PoolAllocator::new(),
             /*vm_object_pool: PoolAllocator::new(),*/
-            vm_page_pool: CacheAllocator::new(0),
+            vm_page_pool: PoolAllocator::new(),
             reserved_memory_list: PoolAllocator::new(),
             direct_mapped_area: None,
         }
@@ -182,12 +181,20 @@ impl VirtualMemoryManager {
         /*let vm_object_pool_address = alloc_func(Self::VM_OBJECT_POOL_SIZE, "vm_object", pm_manager);*/
         let vm_page_pool_address = alloc_func(Self::VM_PAGE_POOL_SIZE, pm_manager);
 
-        self.vm_entry_pool
-            .add_free_area(vm_map_entry_pool_address, Self::VM_MAP_ENTRY_POOL_SIZE);
+        unsafe {
+            self.vm_entry_pool.add_pool(
+                vm_map_entry_pool_address.to_usize(),
+                Self::VM_MAP_ENTRY_POOL_SIZE.to_usize(),
+            )
+        };
         /*self.vm_object_pool
         .set_initial_pool(vm_object_pool_address, Self::VM_OBJECT_POOL_SIZE);*/
-        self.vm_page_pool
-            .add_free_area(vm_page_pool_address, Self::VM_PAGE_POOL_SIZE);
+        unsafe {
+            self.vm_page_pool.add_pool(
+                vm_page_pool_address.to_usize(),
+                Self::VM_PAGE_POOL_SIZE.to_usize(),
+            )
+        };
 
         map_func(
             self,
@@ -660,11 +667,13 @@ impl VirtualMemoryManager {
         source: VirtualMemoryEntry,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
-        let entry = match self.vm_entry_pool.alloc(None) {
+        let entry = match self.vm_entry_pool.alloc() {
             Ok(e) => e,
             Err(_) => {
                 self.add_vm_entry_pool(Some(pm_manager))?;
-                self.vm_entry_pool.alloc(None)?
+                self.vm_entry_pool
+                    .alloc()
+                    .or(Err(MemoryError::EntryPoolRunOut))?
             }
         };
         *entry = source;
@@ -714,11 +723,13 @@ impl VirtualMemoryManager {
 
             let p_index = (current_virtual_address - vm_entry.get_vm_start_address()).to_index()
                 + vm_entry.get_memory_offset().to_index();
-            let vm_page = match self.vm_page_pool.alloc(None) {
+            let vm_page = match self.vm_page_pool.alloc() {
                 Ok(p) => p,
                 Err(_) => {
                     self.add_vm_page_pool(Some(pm_manager))?;
-                    self.vm_page_pool.alloc(None)?
+                    self.vm_page_pool
+                        .alloc()
+                        .or(Err(MemoryError::EntryPoolRunOut))?
                 }
             };
             *vm_page = VirtualMemoryPage::new(current_physical_address, p_index);
@@ -1027,10 +1038,12 @@ impl VirtualMemoryManager {
         &mut self,
         pm_manager: Option<&mut PhysicalMemoryManager>,
     ) -> Result<(), MemoryError> {
-        let f = |m: &mut Self, a: VAddress, s: MSize| m.vm_entry_pool.add_free_area(a, s);
+        let f = |m: &mut Self, a: VAddress, s: MSize| unsafe {
+            m.vm_entry_pool.add_pool(a.to_usize(), s.to_usize())
+        };
         self.add_entry_pool(
             &f,
-            self.vm_entry_pool.len(),
+            self.vm_entry_pool.get_count(),
             Self::VM_MAP_ENTRY_POOL_SIZE,
             pm_manager,
         )
@@ -1040,10 +1053,12 @@ impl VirtualMemoryManager {
         &mut self,
         pm_manager: Option<&mut PhysicalMemoryManager>,
     ) -> Result<(), MemoryError> {
-        let f = |m: &mut Self, a: VAddress, s: MSize| m.vm_page_pool.add_free_area(a, s);
+        let f = |m: &mut Self, a: VAddress, s: MSize| unsafe {
+            m.vm_page_pool.add_pool(a.to_usize(), s.to_usize())
+        };
         self.add_entry_pool(
             &f,
-            self.vm_entry_pool.len(),
+            self.vm_entry_pool.get_count(),
             Self::VM_PAGE_POOL_SIZE,
             pm_manager,
         )
@@ -1053,10 +1068,10 @@ impl VirtualMemoryManager {
         &mut self,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
-        if self.vm_page_pool.len() < Self::VM_PAGE_CACHE_LEN {
+        if self.vm_page_pool.get_count() < Self::VM_PAGE_CACHE_LEN {
             self.add_vm_page_pool(Some(pm_manager))?;
         }
-        if self.vm_entry_pool.len() < Self::VM_MAP_ENTRY_CACHE_LEN {
+        if self.vm_entry_pool.get_count() < Self::VM_MAP_ENTRY_CACHE_LEN {
             self.add_vm_entry_pool(Some(pm_manager))?;
         }
         return Ok(());

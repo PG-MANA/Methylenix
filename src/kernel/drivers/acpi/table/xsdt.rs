@@ -9,7 +9,7 @@ use super::dsdt::DsdtManager;
 use super::fadt::FadtManager;
 use super::madt::MadtManager;
 use super::ssdt::SsdtManager;
-use crate::kernel::drivers::acpi::INITIAL_MMAP_SIZE;
+use super::INITIAL_MMAP_SIZE;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
@@ -33,22 +33,19 @@ impl XsdtManager {
     }
 
     pub fn init(&mut self, xsdt_physical_address: PAddress) -> bool {
-        let xsdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mmap(
-                xsdt_physical_address,
-                MSize::new(INITIAL_MMAP_SIZE),
-                MemoryPermissionFlags::rodata(),
-                MemoryOptionFlags::PRE_RESERVED
-                    | MemoryOptionFlags::MEMORY_MAP
-                    | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
-            ) {
-            a
-        } else {
-            pr_err!("Cannot map XSDT.");
-            return false;
+        let xsdt_vm_address = match get_kernel_manager_cluster().memory_manager.mmap(
+            xsdt_physical_address,
+            MSize::new(INITIAL_MMAP_SIZE),
+            MemoryPermissionFlags::rodata(),
+            MemoryOptionFlags::PRE_RESERVED
+                | MemoryOptionFlags::MEMORY_MAP
+                | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to map XSDT: {:?}", e);
+                return false;
+            }
         };
 
         if unsafe { *(xsdt_vm_address.to_usize() as *const [u8; 4]) } != *b"XSDT" {
@@ -60,42 +57,30 @@ impl XsdtManager {
             return false;
         }
         let xsdt_size = unsafe { *((xsdt_vm_address.to_usize() + 4) as *const u32) };
-        let xsdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mremap_dev(
-                xsdt_vm_address,
-                MSize::new(INITIAL_MMAP_SIZE),
-                MSize::new(xsdt_size as usize),
-            ) {
-            a
-        } else {
-            pr_err!("Cannot remap XSDT.");
-            return false;
-        };
+        let xsdt_vm_address = remap_table!(xsdt_vm_address, xsdt_size);
         self.base_address = xsdt_vm_address;
 
         let mut index = 0;
         while let Some(entry_physical_address) = self.get_entry(index) {
-            let v_address = if let Ok(a) = get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .mmap(
-                    entry_physical_address,
-                    MSize::new(INITIAL_MMAP_SIZE),
-                    MemoryPermissionFlags::rodata(),
-                    MemoryOptionFlags::PRE_RESERVED
-                        | MemoryOptionFlags::MEMORY_MAP
-                        | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
-                ) {
+            let v_address = if let Ok(a) = get_kernel_manager_cluster().memory_manager.mmap(
+                entry_physical_address,
+                MSize::new(INITIAL_MMAP_SIZE),
+                MemoryPermissionFlags::rodata(),
+                MemoryOptionFlags::PRE_RESERVED
+                    | MemoryOptionFlags::MEMORY_MAP
+                    | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
+            ) {
                 a
             } else {
                 pr_err!("Cannot map ACPI Table.");
                 return false;
             };
             drop(entry_physical_address); /* Avoid using it */
+            pr_info!(
+                "{}",
+                core::str::from_utf8(unsafe { &*(v_address.to_usize() as *const [u8; 4]) })
+                    .unwrap_or("----")
+            );
             match unsafe { *(v_address.to_usize() as *const [u8; 4]) } {
                 FadtManager::SIGNATURE => {
                     if !self.fadt_manager.init(v_address) {
@@ -109,29 +94,26 @@ impl XsdtManager {
                         return false;
                     }
                 }
-                _ => { /* Skip */ }
+                _ => {
+                    /* Skip */
+                    if let Err(e) = get_kernel_manager_cluster().memory_manager.free(v_address) {
+                        pr_warn!("Failed to free a ACPI table: {:?}", e)
+                    }
+                }
             };
-            pr_info!(
-                "{}",
-                core::str::from_utf8(unsafe { &*(v_address.to_usize() as *const [u8; 4]) })
-                    .unwrap_or("----")
-            );
+
             index += 1;
         }
 
         if !self.dsdt_manager.is_initialized() {
-            let v_address = if let Ok(a) = get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .mmap(
-                    self.fadt_manager.get_dsdt_address(),
-                    MSize::new(INITIAL_MMAP_SIZE),
-                    MemoryPermissionFlags::rodata(),
-                    MemoryOptionFlags::PRE_RESERVED
-                        | MemoryOptionFlags::MEMORY_MAP
-                        | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
-                ) {
+            let v_address = if let Ok(a) = get_kernel_manager_cluster().memory_manager.mmap(
+                self.fadt_manager.get_dsdt_address(),
+                MSize::new(INITIAL_MMAP_SIZE),
+                MemoryPermissionFlags::rodata(),
+                MemoryOptionFlags::PRE_RESERVED
+                    | MemoryOptionFlags::MEMORY_MAP
+                    | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
+            ) {
                 a
             } else {
                 pr_err!("Cannot reserve memory area of DSDT.");
@@ -152,12 +134,7 @@ impl XsdtManager {
                 return Some(bgrt_manager);
             }
             pr_err!("Cannot init BGRT Manager.");
-            if let Err(e) = get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .free(v_address)
-            {
+            if let Err(e) = get_kernel_manager_cluster().memory_manager.free(v_address) {
                 pr_warn!("Cannot free memory map of BGRT. Error: {:?}", e);
             }
         }
@@ -172,10 +149,10 @@ impl XsdtManager {
     where
         F: FnMut(&SsdtManager) -> bool,
     {
-        let memory_manager = &get_kernel_manager_cluster().memory_manager;
+        let memory_manager = &mut get_kernel_manager_cluster().memory_manager;
         let mut index = 0;
         while let Some(entry_physical_address) = self.get_entry(index) {
-            let result = memory_manager.lock().unwrap().mmap(
+            let result = memory_manager.mmap(
                 entry_physical_address,
                 MSize::new(INITIAL_MMAP_SIZE),
                 MemoryPermissionFlags::rodata(),
@@ -189,14 +166,14 @@ impl XsdtManager {
                 {
                     let mut ssdt_manager = SsdtManager::new();
                     if !ssdt_manager.init(v_address) || !call_back(&ssdt_manager) {
-                        if let Err(e) = memory_manager.lock().unwrap().free(v_address) {
+                        if let Err(e) = memory_manager.free(v_address) {
                             pr_warn!("Cannot Free SSDT: {:?}", e)
                         }
                         pr_err!("Failed initialization of SsdtManager.");
                         return false;
                     }
                 } else {
-                    if let Err(e) = memory_manager.lock().unwrap().free(v_address) {
+                    if let Err(e) = memory_manager.free(v_address) {
                         pr_warn!("Cannot free an ACPI table: {:?}", e)
                     }
                 }
@@ -216,12 +193,7 @@ impl XsdtManager {
                 return Some(madt_manager);
             }
             pr_err!("Cannot init MADT Manager.");
-            if let Err(e) = get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .free(v_address)
-            {
+            if let Err(e) = get_kernel_manager_cluster().memory_manager.free(v_address) {
                 pr_warn!("Cannot free memory map of MADT. Error: {:?}", e);
             }
         }
@@ -247,7 +219,7 @@ impl XsdtManager {
     }
 
     fn search_entry(&self, signature: &[u8; 4]) -> Option<VAddress> {
-        let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
+        let mut memory_manager = &mut get_kernel_manager_cluster().memory_manager;
         let mut index = 0;
         while let Some(entry_physical_address) = self.get_entry(index) {
             if let Ok(v_address) = memory_manager.mmap(

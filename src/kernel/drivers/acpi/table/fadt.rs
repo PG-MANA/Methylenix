@@ -9,7 +9,7 @@ use super::super::GeneralAddress;
 use super::super::INITIAL_MMAP_SIZE;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 
 #[repr(C, packed)]
 struct FADT {
@@ -87,20 +87,7 @@ impl FadtManager {
         if fadt.major_version > 6 {
             pr_err!("Not supported FADT version:{}", fadt.major_version);
         }
-        let fadt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mremap_dev(
-                fadt_vm_address,
-                INITIAL_MMAP_SIZE.into(),
-                (fadt.length as usize).into(),
-            ) {
-            a
-        } else {
-            pr_err!("Cannot map memory area of FADT.");
-            return false;
-        };
+        let fadt_vm_address = remap_table!(fadt_vm_address, fadt.length);
         self.base_address = fadt_vm_address;
 
         return true;

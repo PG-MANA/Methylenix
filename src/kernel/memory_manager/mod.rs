@@ -7,9 +7,9 @@
 
 pub mod data_type;
 pub mod global_allocator;
-pub mod object_allocator;
+pub mod memory_allocator;
 pub mod physical_memory_manager;
-pub mod pool_allocator;
+pub mod slab_allocator;
 pub mod virtual_memory_manager;
 
 use self::data_type::{
@@ -197,7 +197,7 @@ impl MemoryManager {
             return Ok(());
         };
 
-        for i in 0.into()..size.to_index() {
+        for i in MIndex::new(0)..size.to_index() {
             match pm_manager.alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT)) {
                 Ok(p_a) => {
                     map_func(self, i, p_a, entry, &mut pm_manager)?;
@@ -254,10 +254,10 @@ impl MemoryManager {
         unimplemented!()
     }
 
-    pub fn free(&mut self, vm_address: VAddress) -> Result<(), MemoryError> {
+    pub fn free(&mut self, address: VAddress) -> Result<(), MemoryError> {
         let _lock = self.lock.lock();
         let mut pm_manager = self.physical_memory_manager.lock().unwrap();
-        let aligned_vm_address = vm_address & PAGE_MASK;
+        let aligned_vm_address = address & PAGE_MASK;
         if let Err(e) = self
             .virtual_memory_manager
             .free_address(aligned_vm_address.into(), &mut pm_manager)
@@ -297,19 +297,25 @@ impl MemoryManager {
         }
     }
 
-    pub fn free_physical_memory(&mut self, physical_address: PAddress, size: MSize) -> bool {
+    pub fn free_physical_memory(
+        &mut self,
+        address: PAddress,
+        size: MSize,
+    ) -> Result<(), MemoryError> {
         /* initializing use only */
         let _lock = self.lock.lock();
-        if let Err(e) =
-            self.physical_memory_manager
-                .lock()
-                .unwrap()
-                .free(physical_address, size, false)
+        if let Err(e) = self
+            .physical_memory_manager
+            .lock()
+            .unwrap()
+            .free(address, size, false)
         {
+            drop(_lock);
             pr_err!("Failed to free physical memory: {:?}", e);
-            false
+            Err(e)
         } else {
-            true
+            drop(_lock);
+            Ok(())
         }
     }
 
@@ -337,6 +343,8 @@ impl MemoryManager {
                     drop(_lock);
                     self.mmap(physical_address, size, permission, option)
                 } else {
+                    drop(pm_manager);
+                    drop(_lock);
                     pr_err!("Failed to reserve physical memory: {:?}", e);
                     Err(MemoryError::AllocAddressFailed)
                 };

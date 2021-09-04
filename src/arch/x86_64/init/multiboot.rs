@@ -12,7 +12,6 @@ use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress, VAddress};
-use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
 use crate::kernel::memory_manager::{
@@ -21,6 +20,7 @@ use crate::kernel::memory_manager::{
 };
 use crate::kernel::sync::spin_lock::Mutex;
 
+use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use core::mem;
 
 /// Init memory system based on multiboot information.
@@ -216,18 +216,15 @@ pub fn init_memory_by_multiboot_information(
 
     /* Apply paging */
     memory_manager.set_paging_table();
+    get_kernel_manager_cluster().memory_manager = memory_manager;
 
     /* Set up Kernel Memory Alloc Manager */
-    let mut object_allocator = ObjectAllocator::new();
-    object_allocator.init(&mut memory_manager);
+    let mut memory_allocator = MemoryAllocator::new();
+    memory_allocator.init();
 
     /* Move Multiboot Information to allocated memory area */
-    let mutex_memory_manager = Mutex::new(memory_manager);
-    let new_mbi_address = object_allocator
-        .alloc(
-            MSize::new(multiboot_information.size),
-            &mutex_memory_manager,
-        )
+    let new_mbi_address = memory_allocator
+        .kmalloc(MSize::new(multiboot_information.size))
         .expect("Cannot alloc memory for Multiboot Information.");
     unsafe {
         core::ptr::copy_nonoverlapping(
@@ -238,20 +235,20 @@ pub fn init_memory_by_multiboot_information(
             multiboot_information.size,
         )
     };
+    get_cpu_manager_cluster().memory_allocator = memory_allocator;
     /* Free old MultiBootInformation area */
-    mutex_memory_manager
-        .lock()
-        .unwrap()
+    get_kernel_manager_cluster()
+        .memory_manager
         .free(mapped_multiboot_address_base)
         .expect("Cannot free the map of multiboot information.");
-    mutex_memory_manager.lock().unwrap().free_physical_memory(
-        multiboot_information.address.into(),
-        multiboot_information.size.into(),
-    ); /* It may be already freed */
+    get_kernel_manager_cluster()
+        .memory_manager
+        .free_physical_memory(
+            multiboot_information.address.into(),
+            multiboot_information.size.into(),
+        ); /* It may be already freed */
 
     /* Store managers to cluster */
-    get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
-    get_cpu_manager_cluster().object_allocator = object_allocator;
     MultiBootInformation::new(new_mbi_address.to_usize(), false)
 }
 
@@ -267,16 +264,12 @@ pub fn init_graphic(multiboot_information: &MultiBootInformation) {
     /* Load font */
     for module in multiboot_information.modules.iter() {
         if module.name == "font.pf2" {
-            let vm_address = get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .mmap(
-                    module.start_address.into(),
-                    (module.end_address - module.start_address).into(),
-                    MemoryPermissionFlags::rodata(),
-                    MemoryOptionFlags::PRE_RESERVED | MemoryOptionFlags::MEMORY_MAP,
-                );
+            let vm_address = get_kernel_manager_cluster().memory_manager.mmap(
+                module.start_address.into(),
+                (module.end_address - module.start_address).into(),
+                MemoryPermissionFlags::rodata(),
+                MemoryOptionFlags::PRE_RESERVED | MemoryOptionFlags::MEMORY_MAP,
+            );
             if let Ok(vm_address) = vm_address {
                 let result = get_kernel_manager_cluster().graphic_manager.load_font(
                     vm_address,

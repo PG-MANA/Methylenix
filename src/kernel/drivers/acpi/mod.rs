@@ -9,6 +9,22 @@ pub mod aml;
 pub mod device;
 pub mod event;
 pub mod table {
+    const INITIAL_MMAP_SIZE: usize = 36;
+    macro_rules! remap_table {
+        ($address:expr,$new_size:expr) => {
+            match get_kernel_manager_cluster().memory_manager.mremap_dev(
+                $address,
+                INITIAL_MMAP_SIZE.into(),
+                MSize::new($new_size as usize),
+            ) {
+                Ok(a) => a,
+                Err(e) => {
+                    pr_err!("Failed to remap a ACPI table: {:?}", e);
+                    return false;
+                }
+            }
+        };
+    }
     pub mod bgrt;
     pub mod dsdt;
     pub mod fadt;

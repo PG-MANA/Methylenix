@@ -12,11 +12,9 @@ use crate::arch::target_arch::interrupt::{InterruptManager, StoredIrqData};
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize};
-use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
-use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
-use crate::kernel::memory_manager::MemoryManager;
-use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag, SpinLockFlagHolder};
+use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
+use crate::kernel::memory_manager::MemoryError;
+use crate::kernel::sync::spin_lock::{SpinLockFlag, SpinLockFlagHolder};
 use crate::kernel::timer_manager::TimerManager;
 
 struct RunList {
@@ -39,49 +37,37 @@ pub struct RunQueue {
     lock: SpinLockFlag,
     run_list: PtrLinkedList<RunList>,
     running_thread: Option<*mut ThreadEntry>,
-    run_list_allocator: PoolAllocator<RunList>,
+    run_list_allocator: LocalSlabAllocator<RunList>,
     should_recheck_priority: bool,
     should_reschedule: bool,
     number_of_threads: usize,
 }
 
 impl RunQueue {
-    const DEFAULT_RUN_LIST_ALLOC_SIZE: usize = 12;
     pub const fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
             run_list: PtrLinkedList::new(),
             running_thread: None,
-            run_list_allocator: PoolAllocator::new(),
+            run_list_allocator: LocalSlabAllocator::new(0),
             should_recheck_priority: false,
             should_reschedule: false,
             number_of_threads: 0,
         }
     }
 
-    pub fn init(
-        &mut self,
-        object_allocator: &mut ObjectAllocator,
-        memory_manager: &Mutex<MemoryManager>,
-    ) {
-        let size = Self::DEFAULT_RUN_LIST_ALLOC_SIZE * core::mem::size_of::<RunList>();
-        let pool_address = object_allocator
-            .alloc(MSize::new(size), memory_manager)
-            .expect("Cannot alloc pool for RunList");
-        unsafe {
-            self.run_list_allocator
-                .set_initial_pool(pool_address.to_usize(), size);
-        }
+    pub fn init(&mut self) -> Result<(), MemoryError> {
+        self.run_list_allocator.init()
     }
 
     pub fn start(&mut self) -> ! {
-        let _lock = self.lock.lock();
+        let irq = InterruptManager::save_and_disable_local_irq();
         let thread = Self::get_highest_priority_thread(&mut self.run_list)
             .expect("There is no thread to start.");
 
         thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(thread);
-        drop(_lock);
+        InterruptManager::restore_local_irq(irq);
         unsafe {
             get_kernel_manager_cluster()
                 .task_manager
@@ -114,12 +100,10 @@ impl RunQueue {
     }
 
     fn alloc_run_list(
-        allocator: &mut PoolAllocator<RunList>,
+        allocator: &mut LocalSlabAllocator<RunList>,
         priority_level: u8,
     ) -> &'static mut RunList {
-        let run_list = allocator
-            .alloc()
-            .expect("Cannot alloc RunList(TODO: alloc from object allocator)");
+        let run_list = allocator.alloc().expect("Failed to alloc RunList");
         *run_list = RunList::new(priority_level);
         run_list
     }

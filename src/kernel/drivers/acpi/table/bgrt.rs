@@ -7,7 +7,7 @@
 use super::super::INITIAL_MMAP_SIZE;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 
 #[repr(C, packed)]
 struct BGRT {
@@ -47,17 +47,7 @@ impl BgrtManager {
         if bgrt.version != 1 || bgrt.revision != 1 {
             pr_err!("Not supported BGRT version");
         }
-        let bgrt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mremap_dev(bgrt_vm_address, INITIAL_MMAP_SIZE.into(), 56.into())
-        {
-            a
-        } else {
-            pr_err!("Cannot map memory area of BGRT.");
-            return false;
-        };
+        let bgrt_vm_address = remap_table!(bgrt_vm_address, bgrt.length);
         self.base_address = bgrt_vm_address;
         return true;
     }
@@ -80,12 +70,11 @@ impl BgrtManager {
 impl Drop for BgrtManager {
     fn drop(&mut self) {
         if !self.base_address.is_zero() {
-            if let Ok(mut m) = get_kernel_manager_cluster().memory_manager.try_lock() {
-                if let Err(e) = m.free(self.base_address) {
-                    pr_warn!("Cannot free BGRT. Error: {:?}", e);
-                }
-            } else {
-                pr_warn!("Cannot lock MemoryManager.");
+            if let Err(e) = get_kernel_manager_cluster()
+                .memory_manager
+                .free(self.base_address)
+            {
+                pr_warn!("Cannot free BGRT: {:?}", e);
             }
         }
     }

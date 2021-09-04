@@ -27,7 +27,7 @@ use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
 };
-use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
+use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
 
@@ -195,8 +195,6 @@ fn draw_boot_logo() {
     let free_mapped_address = |address: usize| {
         if let Err(e) = get_kernel_manager_cluster()
             .memory_manager
-            .lock()
-            .unwrap()
             .free(VAddress::new(address))
         {
             pr_err!("Freeing the bitmap data of BGRT was failed: {:?}", e);
@@ -220,16 +218,12 @@ fn draw_boot_logo() {
     drop(bgrt_manager);
 
     let original_map_size = MSize::from(54);
-    let result = get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .mmap(
-            boot_logo_physical_address.unwrap(),
-            original_map_size,
-            MemoryPermissionFlags::rodata(),
-            MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::PRE_RESERVED,
-        );
+    let result = get_kernel_manager_cluster().memory_manager.mmap(
+        boot_logo_physical_address.unwrap(),
+        original_map_size,
+        MemoryPermissionFlags::rodata(),
+        MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::PRE_RESERVED,
+    );
     if result.is_err() {
         pr_err!(
             "Mapping the bitmap data of BGRT failed Err:{:?}",
@@ -258,17 +252,13 @@ fn draw_boot_logo() {
     let aligned_bitmap_width =
         ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
 
-    let result = get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .mremap_dev(
-            boot_logo_address.into(),
-            original_map_size,
-            ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
-                + file_offset as usize)
-                .into(),
-        );
+    let result = get_kernel_manager_cluster().memory_manager.mremap_dev(
+        boot_logo_address.into(),
+        original_map_size,
+        ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
+            + file_offset as usize)
+            .into(),
+    );
     if result.is_err() {
         pr_err!(
             "Mapping the bitmap data of BGRT was failed:{:?}",
@@ -357,17 +347,17 @@ pub extern "C" fn ap_boot_main() -> ! {
     /* Apply kernel paging table */
     get_kernel_manager_cluster()
         .memory_manager
-        .lock()
-        .unwrap()
         .set_paging_table();
 
     /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
 
     /* Setup memory management system */
-    let mut object_allocator = ObjectAllocator::new();
-    object_allocator.init(&mut get_kernel_manager_cluster().memory_manager.lock().unwrap());
-    cpu_manager.object_allocator = object_allocator;
+    let mut memory_allocator = MemoryAllocator::new();
+    memory_allocator
+        .init()
+        .expect("Failed to init MemoryAllocator");
+    cpu_manager.memory_allocator = memory_allocator;
 
     /* Copy GDT from BSP and create own TSS */
     let gdt_address = unsafe { &gdt as *const _ as usize };

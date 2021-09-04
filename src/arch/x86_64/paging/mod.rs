@@ -29,7 +29,7 @@ use crate::arch::target_arch::device::cpu;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
 };
-use crate::kernel::memory_manager::pool_allocator::PoolAllocator;
+use crate::kernel::memory_manager::slab_allocator::pool_allocator::PoolAllocator;
 
 /// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
 pub const PAGE_SIZE: MSize = MSize::from(PAGE_SIZE_USIZE);

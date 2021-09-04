@@ -24,7 +24,7 @@ use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
 use crate::kernel::memory_manager::data_type::MSize;
-use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
+use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
 use crate::kernel::memory_manager::MemoryError;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
@@ -33,8 +33,8 @@ pub struct TaskManager {
     kernel_process: *mut ProcessEntry,
     idle_thread: *mut ThreadEntry,
     context_manager: ContextManager,
-    process_entry_pool: CacheAllocator<ProcessEntry>,
-    thread_entry_pool: CacheAllocator<ThreadEntry>,
+    process_entry_pool: GlobalSlabAllocator<ProcessEntry>,
+    thread_entry_pool: GlobalSlabAllocator<ThreadEntry>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -84,8 +84,8 @@ impl TaskManager {
             kernel_process: core::ptr::null_mut(),
             idle_thread: core::ptr::null_mut(),
             context_manager: ContextManager::new(),
-            process_entry_pool: CacheAllocator::new(ProcessEntry::PROCESS_ENTRY_ALIGN_ORDER),
-            thread_entry_pool: CacheAllocator::new(ThreadEntry::THREAD_ENTRY_ALIGN_ORDER),
+            process_entry_pool: GlobalSlabAllocator::new(ProcessEntry::PROCESS_ENTRY_ALIGN),
+            thread_entry_pool: GlobalSlabAllocator::new(ThreadEntry::THREAD_ENTRY_ALIGN),
         }
     }
 
@@ -104,23 +104,19 @@ impl TaskManager {
         run_queue: &mut RunQueue,
     ) {
         let _lock = self.lock.lock();
-        let mut memory_manager = get_kernel_manager_cluster().memory_manager.lock().unwrap();
         self.context_manager = context_manager;
 
         self.process_entry_pool
-            .init(Self::NUM_OF_INITIAL_PROCESS_ENTRIES, &mut memory_manager)
-            .expect("Allocating the pool was failed:");
+            .init()
+            .expect("Failed to init the ProcessEntryPool");
         self.thread_entry_pool
-            .init(Self::NUM_OF_INITIAL_THREAD_ENTRIES, &mut memory_manager)
-            .expect("Allocating the pool was failed: {:?}");
-
-        drop(memory_manager);
-        let memory_manager = &get_kernel_manager_cluster().memory_manager;
+            .init()
+            .expect("Failed to init the ThreadEntryPool");
 
         /* Create the kernel process and threads */
-        let kernel_process = self.process_entry_pool.alloc(Some(memory_manager)).unwrap();
-        let main_thread = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
-        let idle_thread = self.thread_entry_pool.alloc(Some(memory_manager)).unwrap();
+        let kernel_process = self.process_entry_pool.alloc().unwrap();
+        let main_thread = self.thread_entry_pool.alloc().unwrap();
+        let idle_thread = self.thread_entry_pool.alloc().unwrap();
 
         main_thread.init(
             kernel_process,
@@ -137,11 +133,13 @@ impl TaskManager {
             idle_context,
         );
 
+        let memory_manager = &mut get_kernel_manager_cluster().memory_manager;
+
         kernel_process.init(
             0,
             core::ptr::null_mut(),
             &mut [main_thread, idle_thread],
-            memory_manager as *const _,
+            memory_manager,
             0,
         );
 
@@ -194,9 +192,7 @@ impl TaskManager {
         stack_size: Option<MSize>,
     ) -> Result<&'static mut ThreadEntry, TaskError> {
         /* self.lock must be locked. */
-        let new_thread = self
-            .thread_entry_pool
-            .alloc(Some(&get_kernel_manager_cluster().memory_manager))?;
+        let new_thread = self.thread_entry_pool.alloc()?;
         let _original_thread_lock = thread.lock.lock();
         let new_context = self.context_manager.fork_system_context(
             thread.get_context(),

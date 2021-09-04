@@ -77,8 +77,8 @@ impl ContextManager {
         }
 
         let stack_address = get_cpu_manager_cluster()
-            .object_allocator
-            .alloc(stack_size, &get_kernel_manager_cluster().memory_manager)?;
+            .memory_allocator
+            .kmalloc(stack_size)?;
 
         Ok(ContextData::create_context_data_for_system(
             entry_address as *const fn() as usize,
@@ -106,8 +106,8 @@ impl ContextManager {
         }
 
         let stack_address = get_cpu_manager_cluster()
-            .object_allocator
-            .alloc(stack_size, &get_kernel_manager_cluster().memory_manager)?;
+            .memory_allocator
+            .kmalloc(stack_size)?;
 
         Ok(ContextData::fork_context_data(
             original_context_data,

@@ -55,10 +55,8 @@ pub fn init_task(
         user_ss,
         unsafe { cpu::get_cr3() },
     );
-    let object_allocator = &mut get_cpu_manager_cluster().object_allocator;
-    let memory_manager = &get_kernel_manager_cluster().memory_manager;
-    run_queue.init(object_allocator, memory_manager);
-    drop(object_allocator);
+
+    run_queue.init().expect("Failed to init RunQueue");
 
     let main_context = context_manager
         .create_system_context(main_process, None)
@@ -78,10 +76,7 @@ pub fn init_task(
 ///
 pub fn init_task_ap(idle_task: fn() -> !) {
     let mut run_queue = RunQueue::new();
-    let object_allocator = &mut get_cpu_manager_cluster().object_allocator;
-    let memory_manager = &get_kernel_manager_cluster().memory_manager;
-    run_queue.init(object_allocator, memory_manager);
-    drop(object_allocator);
+    run_queue.init().expect("Failed to init RunQueue");
 
     get_kernel_manager_cluster()
         .task_manager
@@ -272,14 +267,12 @@ pub fn setup_cpu_manager_cluster(
     cpu_manager_address: Option<VAddress>,
 ) -> &'static mut CpuManagerCluster {
     let cpu_manager_address = cpu_manager_address.unwrap_or_else(|| {
+        /* ATTENTION: BSP must be sleeping. */
         get_kernel_manager_cluster()
             .boot_strap_cpu_manager /* Allocate from BSP Object Manager */
-            .object_allocator
-            .alloc(
-                core::mem::size_of::<CpuManagerCluster>().into(),
-                &get_kernel_manager_cluster().memory_manager,
-            )
-            .unwrap()
+            .memory_allocator
+            .kmalloc(MSize::new(core::mem::size_of::<CpuManagerCluster>()))
+            .expect("Failed to alloc CpuManagerCluster")
     });
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
     /*
@@ -319,8 +312,6 @@ pub fn init_multiple_processors_ap() {
         pr_info!("ACPI does not have MADT.");
         if let Err(e) = get_kernel_manager_cluster()
             .memory_manager
-            .lock()
-            .unwrap()
             .free(VAddress::new(boot_address))
         {
             pr_err!("Cannot free temporary stack: {:?}", e);
@@ -363,8 +354,6 @@ pub fn init_multiple_processors_ap() {
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
     let stack = get_kernel_manager_cluster()
         .memory_manager
-        .lock()
-        .unwrap()
         .alloc_with_option(
             stack_size.to_order(None).to_page_order(),
             MemoryPermissionFlags::data(),
@@ -428,20 +417,13 @@ pub fn init_multiple_processors_ap() {
     /* Free boot_address */
     if let Err(e) = get_kernel_manager_cluster()
         .memory_manager
-        .lock()
-        .unwrap()
         .free(boot_address.into())
     {
         pr_err!("Cannot free boot_address: {:?}", e);
     }
 
     /* Free temporary stack */
-    if let Err(e) = get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .free(stack)
-    {
+    if let Err(e) = get_kernel_manager_cluster().memory_manager.free(stack) {
         pr_err!("Cannot free temporary stack: {:?}", e);
     }
 

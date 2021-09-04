@@ -76,16 +76,12 @@ impl LocalApicManager {
             }
             self.is_x2apic_enabled = true;
         } else {
-            match get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .io_map(
-                    base_address,
-                    MSize::new(0x1000),
-                    MemoryPermissionFlags::data(),
-                    Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
-                ) {
+            match get_kernel_manager_cluster().memory_manager.io_map(
+                base_address,
+                MSize::new(0x1000),
+                MemoryPermissionFlags::data(),
+                Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
+            ) {
                 Ok(address) => {
                     self.base_address = address;
                 }

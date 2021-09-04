@@ -23,9 +23,10 @@ pub fn panic(info: &panic::PanicInfo) -> ! {
             message.unwrap()
         );
     }
-    if let Ok(m) = get_kernel_manager_cluster().memory_manager.try_lock() {
-        m.dump_memory_manager();
-    }
+    get_kernel_manager_cluster()
+        .memory_manager
+        .dump_memory_manager();
+
     kprintln!("---- End of Debug information ----\nSystem will be halt.");
 
     loop {
