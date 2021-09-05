@@ -17,7 +17,7 @@ use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
 use crate::kernel::memory_manager::MemoryError;
 use crate::kernel::sync::spin_lock::{SpinLockFlag, SpinLockFlagHolder};
-use crate::kernel::timer_manager::TimerManager;
+use crate::kernel::timer_manager::GlobalTimerManager;
 
 struct RunList {
     priority_level: u8,
@@ -264,7 +264,10 @@ impl RunQueue {
             self.should_reschedule = true;
         }
         self.number_of_threads += 1;
-        thread.set_time_slice(self.number_of_threads, TimerManager::TIMER_INTERVAL_MS);
+        thread.set_time_slice(
+            self.number_of_threads,
+            GlobalTimerManager::TIMER_INTERVAL_MS,
+        );
         return Ok(());
     }
 
@@ -379,7 +382,10 @@ impl RunQueue {
                     .expect("Cannot get thread to run")
             }
         } else {
-            running_thread.set_time_slice(self.number_of_threads, TimerManager::TIMER_INTERVAL_MS);
+            running_thread.set_time_slice(
+                self.number_of_threads,
+                GlobalTimerManager::TIMER_INTERVAL_MS,
+            );
             if self.should_recheck_priority {
                 self.should_recheck_priority = false;
                 Self::get_highest_priority_thread(&mut self.run_list)

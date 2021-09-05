@@ -20,7 +20,7 @@ use crate::kernel::memory_manager::{MemoryManager, SystemMemoryManager};
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::work_queue::WorkQueue;
 use crate::kernel::task_manager::TaskManager;
-use crate::kernel::timer_manager::TimerManager;
+use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager};
 use crate::kernel::tty::TtyManager;
 
 use crate::kernel::sync::spin_lock::Mutex;
@@ -43,6 +43,7 @@ pub struct KernelManagerCluster {
     pub acpi_event_manager: AcpiEventManager,
     pub acpi_device_manager: AcpiDeviceManager,
     pub pci_manager: PciManager,
+    pub global_timer_manager: GlobalTimerManager,
     pub boot_strap_cpu_manager: CpuManagerCluster,
     pub cpu_list: PtrLinkedList<CpuManagerCluster>, /* may be changed */
     pub arch_depend_data: ArchDependedKernelManagerCluster,
@@ -61,7 +62,7 @@ pub struct CpuManagerCluster {
     pub work_queue: WorkQueue,
     pub memory_allocator: MemoryAllocator,
     pub run_queue: RunQueue,
-    pub timer_manager: TimerManager,
+    pub local_timer_manager: LocalTimerManager,
     pub arch_depend_data: ArchDependedCpuManagerCluster,
 }
 

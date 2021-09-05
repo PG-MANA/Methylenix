@@ -18,7 +18,7 @@ pub struct ThreadEntry {
     pub(super) run_list: PtrLinkedListNode<Self>,
     pub(super) sleep_list: PtrLinkedListNode<Self>,
     pub(super) lock: SpinLockFlag,
-    pub(super) time_slice: usize,
+    pub(super) time_slice: u64,
 
     status: TaskStatus,
     thread_id: usize,
@@ -137,7 +137,7 @@ impl ThreadEntry {
         }
     }
 
-    pub fn set_time_slice(&mut self, number_of_threads: usize, timer_interval: usize) {
+    pub fn set_time_slice(&mut self, number_of_threads: usize, timer_interval: u64) {
         self.time_slice = self.scheduling_class.calculate_time_slice(
             self.priority_level,
             number_of_threads,

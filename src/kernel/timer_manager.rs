@@ -10,76 +10,120 @@
 
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::arch::target_arch::interrupt::InterruptManager;
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
+#[cfg(not(target_has_atomic = "64"))]
+use crate::kernel::sync::spin_lock::SequenceSpinLock;
+use crate::kernel::task_manager::work_queue::WorkList;
+#[cfg(target_has_atomic = "64")]
+use core::sync::atomic::{AtomicU64, Ordering};
 
-pub struct TimerManager {
-    tick: usize,
-    lock: SpinLockFlag,
+pub struct GlobalTimerManager {
+    #[cfg(target_has_atomic = "64")]
+    tick: AtomicU64,
+    #[cfg(not(target_has_atomic = "64"))]
+    tick: u64,
+    #[cfg(not(target_has_atomic = "64"))]
+    tick_lock: SequenceSpinLock,
+    //lock: IrqSaveSpinLockFlag,
 }
 
-impl TimerManager {
-    pub const TIMER_INTERVAL_MS: usize = 10;
+pub struct TimerList {
+    pub(super) t_list: PtrLinkedListNode<Self>,
+    timeout: u64,
+    function: fn(usize),
+    data: usize,
+}
+
+pub struct LocalTimerManager {
+    timer_list: PtrLinkedList<TimerList>,
+    timer_list_pool: GlobalSlabAllocator<TimerList>,
+    source_timer: Option<&'static dyn Timer>,
+}
+
+impl GlobalTimerManager {
+    pub const TIMER_INTERVAL_MS: u64 = 10;
+    const TICK_INITIAL_VALUE: u64 = 0;
 
     pub fn new() -> Self {
         Self {
-            tick: 0,
-            lock: SpinLockFlag::new(),
+            #[cfg(target_has_atomic = "64")]
+            tick: AtomicU64::new(Self::TICK_INITIAL_VALUE),
+            #[cfg(not(target_has_atomic = "64"))]
+            tick: Self::TICK_INITIAL_VALUE,
+            #[cfg(not(target_has_atomic = "64"))]
+            tick_lock: SequenceSpinLock::new(),
+            //lock: IrqSaveSpinLockFlag::new(),
         }
     }
 
-    pub fn timer_handler(&mut self) {
-        if is_interrupt_enabled() {
-            pr_err!("Interrupt is enabled.");
-            return;
-        }
-        let _lock = if let Ok(t) = self.lock.try_lock() {
-            t
-        } else {
-            pr_err!("Cannot lock Timer Manager.");
-            return;
-        };
-        self.tick = self.tick.overflowing_add(1).0;
-    }
-
-    fn get_end_tick_ms(current_tick: usize, ms: usize) -> (usize, bool) {
+    fn get_end_tick_ms(current_tick: u64, ms: u64) -> (u64, bool) {
         current_tick.overflowing_add(ms / Self::TIMER_INTERVAL_MS)
     }
 
-    pub fn get_current_tick_without_lock(&self) -> usize {
-        unsafe { core::ptr::read_volatile(&self.tick as *const _) }
+    #[cfg(target_has_atomic = "64")]
+    pub fn get_current_tick(&self) -> u64 {
+        self.tick.load(Ordering::Relaxed)
     }
 
-    pub fn get_difference_ms(&self, tick: usize) -> usize {
-        let current_tick = self.get_current_tick_without_lock();
+    #[cfg(not(target_has_atomic = "64"))]
+    pub fn get_current_tick(&self) -> u64 {
+        loop {
+            let seq = self.tick_lock.read_start();
+            let tick: u64 = self.tick;
+            if self.tick_lock.should_read_retry(seq) {
+                continue;
+            }
+            return tick;
+        }
+    }
+
+    #[cfg(target_has_atomic = "64")]
+    fn count_up_tick(&mut self) {
+        self.tick.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[cfg(not(target_has_atomic = "64"))]
+    fn count_up_tick(&mut self) {
+        assert!(self.lock.is_locked());
+        let lock = self.tick_lock.write_lock();
+        self.tick += 1;
+        self.tick_lock.write_unlock(lock);
+    }
+
+    pub fn get_difference_ms(&self, tick: u64) -> u64 {
+        let current_tick = self.get_current_tick();
         let difference = if current_tick < tick {
-            usize::MAX - tick + current_tick
+            u64::MAX - tick + current_tick
         } else {
             current_tick - tick
         };
         difference * Self::TIMER_INTERVAL_MS
     }
 
-    pub fn busy_wait_ms(&self, ms: usize) -> bool {
-        let start_tick = self.get_current_tick_without_lock(); /* get_quickly */
+    pub fn busy_wait_ms(&self, ms: u64) -> bool {
+        let start_tick = self.get_current_tick(); /* get_quickly */
         if !is_interrupt_enabled() {
             pr_err!("Interrupt is disabled.");
             return false;
         }
-        let (end_tick, overflowed) = Self::get_end_tick_ms(start_tick, ms);
+        let (end_tick, overflowed) = Self::get_end_tick_ms(start_tick as u64, ms);
         if overflowed {
-            while self.get_current_tick_without_lock() >= start_tick {
+            while self.get_current_tick() >= start_tick {
                 core::hint::spin_loop();
             }
         }
 
-        while self.get_current_tick_without_lock() <= end_tick {
+        while self.get_current_tick() <= end_tick {
             core::hint::spin_loop();
         }
         return true;
     }
 
-    pub fn busy_wait_us(&self, us: usize) -> bool {
-        let start_tick = self.get_current_tick_without_lock(); /* get_quickly */
+    pub fn busy_wait_us(&self, us: u64) -> bool {
+        let start_tick = self.get_current_tick(); /* get_quickly */
         if !is_interrupt_enabled() {
             pr_err!("Interrupt is disabled.");
             return false;
@@ -92,15 +136,140 @@ impl TimerManager {
         };
         let (end_tick, overflowed) = Self::get_end_tick_ms(start_tick, ms);
         if overflowed {
-            while self.get_current_tick_without_lock() >= start_tick {
+            while self.get_current_tick() >= start_tick {
                 core::hint::spin_loop();
             }
         }
 
-        while self.get_current_tick_without_lock() <= end_tick {
+        while self.get_current_tick() <= end_tick {
             core::hint::spin_loop();
         }
         return true;
+    }
+
+    const fn calculate_timeout(current: u64, ms: u64) -> u64 {
+        current.overflowing_add(ms * Self::TIMER_INTERVAL_MS).0
+    }
+
+    pub fn global_timer_handler(&mut self) {
+        self.count_up_tick();
+    }
+}
+
+impl LocalTimerManager {
+    pub fn new() -> Self {
+        Self {
+            timer_list: PtrLinkedList::new(),
+            timer_list_pool: GlobalSlabAllocator::new(0),
+            source_timer: None,
+        }
+    }
+
+    pub fn add_timer(
+        &mut self,
+        wait_ms: u64,
+        function: fn(usize),
+        data: usize,
+    ) -> Result<usize, ()> {
+        let irq = InterruptManager::save_and_disable_local_irq();
+        let current = get_kernel_manager_cluster()
+            .global_timer_manager
+            .get_current_tick();
+        let list = match self.timer_list_pool.alloc() {
+            Ok(a) => a,
+            Err(e) => {
+                InterruptManager::restore_local_irq(irq);
+                pr_err!("Failed to allocate TimerList: {:?}", e);
+                return Err(());
+            }
+        };
+        list.data = data;
+        list.function = function;
+        list.timeout = GlobalTimerManager::calculate_timeout(current, wait_ms);
+        if let Some(e) = unsafe {
+            self.timer_list
+                .get_first_entry_mut(offset_of!(TimerList, t_list))
+        } {
+            let mut entry = e;
+            loop {
+                if entry.timeout >= current {
+                    if entry.timeout > list.timeout {
+                        self.timer_list
+                            .insert_before(&mut entry.t_list, &mut list.t_list);
+                        break;
+                    }
+                } else {
+                    if entry.timeout < list.timeout {
+                        self.timer_list
+                            .insert_before(&mut entry.t_list, &mut list.t_list);
+                        break;
+                    }
+                }
+                if let Some(e) = unsafe { entry.t_list.get_next_mut(offset_of!(TimerList, t_list)) }
+                {
+                    entry = e;
+                } else {
+                    self.timer_list
+                        .insert_after(&mut entry.t_list, &mut list.t_list);
+                    break;
+                }
+            }
+            InterruptManager::restore_local_irq(irq);
+            Ok(0)
+        } else {
+            self.timer_list.insert_head(&mut list.t_list);
+            InterruptManager::restore_local_irq(irq);
+            Ok(0)
+        }
+    }
+
+    pub fn local_timer_handler(&mut self) {
+        let current_tick = get_kernel_manager_cluster()
+            .global_timer_manager
+            .get_current_tick();
+        while let Some(t) = unsafe {
+            self.timer_list
+                .get_first_entry(offset_of!(TimerList, t_list))
+        } {
+            if t.timeout > current_tick {
+                break;
+            }
+            if let Err(e) = get_cpu_manager_cluster()
+                .work_queue
+                .add_work(WorkList::new(t.function, t.data))
+            {
+                pr_err!("Failed to add the work of timer_list: {:?}", e);
+                break;
+            }
+            self.timer_list_pool.free(unsafe {
+                self.timer_list
+                    .take_first_entry(offset_of!(TimerList, t_list))
+                    .unwrap()
+            });
+        }
+        get_cpu_manager_cluster().run_queue.tick();
+    }
+
+    pub fn set_source_timer(&mut self, timer: &'static dyn Timer) {
+        self.source_timer = Some(timer);
+    }
+
+    pub fn get_monotonic_clock_ns(&self) -> u64 {
+        let nano_second_freq = 1u64.pow(9);
+        if let Some(t) = self.source_timer {
+            if t.is_count_up_timer() {
+                let freq = t.get_frequency_hz() as u64;
+                if freq > nano_second_freq {
+                    return t.get_count() as u64;
+                } else if freq > GlobalTimerManager::TIMER_INTERVAL_MS * 1000 {
+                    return t.get_count() as u64 * (nano_second_freq / freq);
+                }
+            }
+        }
+        return get_kernel_manager_cluster()
+            .global_timer_manager
+            .get_current_tick()
+            * (nano_second_freq / (GlobalTimerManager::TIMER_INTERVAL_MS) * 1000);
     }
 }
 

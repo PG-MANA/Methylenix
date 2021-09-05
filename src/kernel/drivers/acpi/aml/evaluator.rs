@@ -19,7 +19,7 @@ use super::term_object::{MethodInvocation, TermArg, TermList, TermObj};
 use super::variable_tree::AmlVariableTree;
 use super::{eisa_id_to_dword, AcpiInt, AmlError, DataRefObject, ACPI_INT_ONES};
 
-use crate::kernel::manager_cluster::get_cpu_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::Mutex;
 
 use core::mem::MaybeUninit;
@@ -1720,9 +1720,9 @@ impl Evaluator {
             ExpressionOpcode::DefAcquire((mutex_name, wait)) => {
                 let mutex_object = self.search_mutex_object(&mutex_name, current_scope)?;
 
-                let current_tick = get_cpu_manager_cluster()
-                    .timer_manager
-                    .get_current_tick_without_lock();
+                let current_tick = get_kernel_manager_cluster()
+                    .global_timer_manager
+                    .get_current_tick();
                 while mutex_object
                     .0
                     .fetch_update(Ordering::Acquire, Ordering::Relaxed, |current_level| {
@@ -1735,10 +1735,10 @@ impl Evaluator {
                     .is_err()
                 {
                     if wait != 0xFFFF
-                        && get_cpu_manager_cluster()
-                            .timer_manager
+                        && get_kernel_manager_cluster()
+                            .global_timer_manager
                             .get_difference_ms(current_tick)
-                            >= wait as usize
+                            >= wait as u64
                     {
                         pr_warn!("Acquiring Mutex({:?}) was timed out.", mutex_name);
                         return Ok(AmlVariable::ConstData(ConstData::Byte(1)));
@@ -2012,10 +2012,11 @@ impl Evaluator {
                 }
                 Ok(AmlVariable::ConstData(result))
             }
-            ExpressionOpcode::DefTimer => {
-                pr_err!("DefTimer is not supported currently: {:?}", e);
-                Err(AmlError::UnsupportedType)
-            }
+            ExpressionOpcode::DefTimer => Ok(AmlVariable::ConstData(ConstData::QWord(
+                get_cpu_manager_cluster()
+                    .local_timer_manager
+                    .get_monotonic_clock_ns(),
+            ))),
             ExpressionOpcode::DefCondRefOf((source, destination)) => {
                 let result =
                     self.create_aml_variable_reference_from_super_name(&source, current_scope);
@@ -2315,7 +2316,6 @@ impl Evaluator {
     }
 
     fn eval_notify(&mut self, notify: Notify, current_scope: &NameString) -> Result<(), AmlError> {
-        use crate::kernel::manager_cluster::get_kernel_manager_cluster;
         let notify_value = self.eval_term_arg(notify.get_notify_value().clone(), current_scope)?;
         let notify_list = get_kernel_manager_cluster()
             .acpi_event_manager
@@ -2375,9 +2375,9 @@ impl Evaluator {
     ) -> Result<(), AmlError> {
         let seconds = self
             .eval_integer_expression(milli_seconds, current_scope)?
-            .to_int()?;
-        if get_cpu_manager_cluster()
-            .timer_manager
+            .to_int()? as u64;
+        if get_kernel_manager_cluster()
+            .global_timer_manager
             .busy_wait_ms(seconds)
         {
             Ok(())
@@ -2394,10 +2394,10 @@ impl Evaluator {
     ) -> Result<(), AmlError> {
         let seconds = self
             .eval_integer_expression(micro_seconds, current_scope)?
-            .to_int()?;
+            .to_int()? as u64;
 
-        if get_cpu_manager_cluster()
-            .timer_manager
+        if get_kernel_manager_cluster()
+            .global_timer_manager
             .busy_wait_us(seconds)
         {
             Ok(())

@@ -27,7 +27,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;
-use crate::kernel::timer_manager::{Timer, TimerManager};
+use crate::kernel::timer_manager::{LocalTimerManager, Timer};
 
 use core::sync::atomic::AtomicBool;
 
@@ -199,10 +199,12 @@ pub fn init_pci_later() -> bool {
 /// Otherwise, this will calculate the frequency of the Local APIC Timer with ACPI PM Timer or
 /// PIT.(ACPI PM Timer is prioritized.)
 /// After that, this registers the timer to InterruptManager.
-pub fn init_timer() -> LocalApicTimer {
+pub fn init_timer() {
     /* This function assumes that interrupt is not enabled */
     /* This function does not enable interrupt */
-    let mut local_apic_timer = LocalApicTimer::new();
+    let mut local_timer = LocalTimerManager::new();
+    get_cpu_manager_cluster().arch_depend_data.local_apic_timer = LocalApicTimer::new();
+    let local_apic_timer = &mut get_cpu_manager_cluster().arch_depend_data.local_apic_timer;
     local_apic_timer.init();
     if local_apic_timer.enable_deadline_mode(
         InterruptionIndex::LocalApicTimer as u16,
@@ -211,6 +213,7 @@ pub fn init_timer() -> LocalApicTimer {
             .get_local_apic_manager(),
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
+        local_timer.set_source_timer(local_apic_timer);
     } else if let Some(pm_timer) = get_kernel_manager_cluster()
         .acpi_device_manager
         .get_pm_timer()
@@ -223,6 +226,7 @@ pub fn init_timer() -> LocalApicTimer {
                 .get_local_apic_manager(),
             pm_timer,
         );
+        local_timer.set_source_timer(local_apic_timer); /* Temporary, set local APIC Timer */
     } else {
         pr_info!("Using PIT to calculate frequency of Local APIC Timer.");
         let mut pit = PitManager::new();
@@ -235,6 +239,7 @@ pub fn init_timer() -> LocalApicTimer {
             &pit,
         );
         pit.stop_counting();
+        local_timer.set_source_timer(local_apic_timer); /* Temporary, set local APIC Timer */
     }
 
     /* setup IDT */
@@ -255,9 +260,7 @@ pub fn init_timer() -> LocalApicTimer {
         );
 
     /* Setup TimerManager */
-    get_cpu_manager_cluster().timer_manager = TimerManager::new();
-
-    local_apic_timer
+    get_cpu_manager_cluster().local_timer_manager = LocalTimerManager::new();
 }
 
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);

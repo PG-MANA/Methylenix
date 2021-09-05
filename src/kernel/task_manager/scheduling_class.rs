@@ -15,8 +15,8 @@ impl SchedulingClass {
         &self,
         priority_level: u8,
         number_of_threads: usize,
-        interval_ms: usize,
-    ) -> usize {
+        interval_ms: u64,
+    ) -> u64 {
         match self {
             SchedulingClass::KernelThread(s) => {
                 s.calculate_time_slice(priority_level, number_of_threads, interval_ms)

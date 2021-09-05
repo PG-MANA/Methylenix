@@ -26,13 +26,14 @@ impl KernelSchedulingClass {
         &self,
         priority_level: u8,
         number_of_threads: usize,
-        interval_ms: usize,
-    ) -> usize {
+        interval_ms: u64,
+    ) -> u64 {
         if priority_level == Self::get_idle_thread_priority() {
             10
         } else {
             assert!(priority_level >= 80 && priority_level <= 120);
-            let slice = 200 * (120 - priority_level) as usize / (number_of_threads * interval_ms);
+            let slice =
+                200 * (120 - priority_level) as u64 / (number_of_threads as u64 * interval_ms);
             if slice == 0 {
                 1
             } else {

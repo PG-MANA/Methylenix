@@ -116,7 +116,7 @@ pub extern "C" fn multiboot_main(
     }
 
     /* Init Local APIC Timer */
-    get_cpu_manager_cluster().arch_depend_data.local_apic_timer = init_timer();
+    init_timer();
 
     /* Init the task management system */
     init_task(
@@ -376,7 +376,7 @@ pub extern "C" fn ap_boot_main() -> ! {
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
     cpu_manager.interrupt_manager = interrupt_manager;
 
-    cpu_manager.arch_depend_data.local_apic_timer = init_timer();
+    init_timer();
     init_task_ap(ap_idle);
     init_work_queue();
     /* Switch to ap_idle task with own stack */
