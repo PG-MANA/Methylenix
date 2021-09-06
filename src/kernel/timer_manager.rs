@@ -59,8 +59,12 @@ impl GlobalTimerManager {
         }
     }
 
-    fn get_end_tick_ms(current_tick: u64, ms: u64) -> (u64, bool) {
-        current_tick.overflowing_add(ms / Self::TIMER_INTERVAL_MS)
+    const fn get_end_tick_ms(current: u64, ms: u64) -> (u64, bool) {
+        current.overflowing_add(ms / Self::TIMER_INTERVAL_MS)
+    }
+
+    const fn calculate_timeout(current: u64, ms: u64) -> u64 {
+        Self::get_end_tick_ms(current, ms).0
     }
 
     #[cfg(target_has_atomic = "64")]
@@ -145,10 +149,6 @@ impl GlobalTimerManager {
             core::hint::spin_loop();
         }
         return true;
-    }
-
-    const fn calculate_timeout(current: u64, ms: u64) -> u64 {
-        current.overflowing_add(ms * Self::TIMER_INTERVAL_MS).0
     }
 
     pub fn global_timer_handler(&mut self) {
@@ -269,7 +269,7 @@ impl LocalTimerManager {
         return get_kernel_manager_cluster()
             .global_timer_manager
             .get_current_tick()
-            * (nano_second_freq / (GlobalTimerManager::TIMER_INTERVAL_MS) * 1000);
+            * (nano_second_freq / (GlobalTimerManager::TIMER_INTERVAL_MS * 1000));
     }
 }
 

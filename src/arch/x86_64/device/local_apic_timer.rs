@@ -69,10 +69,6 @@ impl LocalApicTimer {
     #[inline(never)]
     pub extern "C" fn local_apic_timer_handler() {
         loop {
-            get_cpu_manager_cluster()
-                .local_timer_manager
-                .local_timer_handler();
-
             if get_cpu_manager_cluster().cpu_id
                 == get_kernel_manager_cluster().boot_strap_cpu_manager.cpu_id
             {
@@ -81,6 +77,11 @@ impl LocalApicTimer {
                     .global_timer_manager
                     .global_timer_handler();
             }
+
+            get_cpu_manager_cluster()
+                .local_timer_manager
+                .local_timer_handler();
+
             if !get_cpu_manager_cluster()
                 .arch_depend_data
                 .local_apic_timer
