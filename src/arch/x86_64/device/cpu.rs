@@ -150,13 +150,13 @@ pub unsafe fn wrmsr(ecx: u32, data: u64) {
 pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) {
     /* EBX is used internally by LLVM */
     asm!(
-        "   xchg edi, ebx
+        "   xchg rdi, rbx
             cpuid
-            xchg edi, ebx
+            xchg rdi, rbx
         ",
         inout("eax") * eax,
         inout("ecx") * ecx,
-        out("edi") * ebx,
+        out("rdi") * ebx,
         out("edx") * edx
     );
 }
