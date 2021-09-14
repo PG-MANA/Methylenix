@@ -376,7 +376,7 @@ pub unsafe extern "C" fn task_switch(
                 mov     [rsi + 512 + 8 * 23], rax   // RFLAGS
                 mov     rax, cs
                 mov     [rsi + 512 + 8 * 24], rax
-                lea     rax, 1f
+                lea     rax, [rip + 1f]
                 mov     [rsi + 512 + 8 * 25], rax   // RIP
                 mov     rax, cr3
                 mov     [rsi + 512 + 8 * 26], rax
