@@ -16,7 +16,7 @@ use crate::kernel::memory_manager::data_type::{Address, MSize};
 ///
 /// ## Structure
 ///
-///  * offset: the virtual address to call when interruption was happened
+///  * offset: the virtual address to call when an interrupt was happened
 ///  * selector: th segment selector which is used when switch to the handler
 ///  * ist: interrupt stack table: if it is not zero,
 ///         CPU will change the stack from the specific stack pointer of TSS
