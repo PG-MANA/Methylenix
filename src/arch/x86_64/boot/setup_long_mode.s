@@ -6,10 +6,11 @@
 
 .global setup_long_mode, fin
 .extern init_long_mode
-.extern main_code_segment_descriptor, tss_descriptor, gdtr0 /* at common.asm */
+.extern main_code_segment_descriptor, tss_descriptor, gdtr_64bit_0 /* at common.asm */
 .extern tss_descriptor_address, tss, pd, pdpt, pml4
+.extern __KERNEL_MAP_START_ADDRESS
 
-.section .text
+.section .text.32
 
 setup_long_mode:
   /* Check if cpu supports x86_64 */
@@ -20,13 +21,6 @@ setup_long_mode:
   out  %al, $0xa1
   cli
 
-  /* Write TSS segment information */
-  mov   $tss, %eax
-  mov   $tss_descriptor_address, %ebp
-  mov   %ax, 2(%ebp)
-  shr   $16, %eax
-  mov   %al, 4(%ebp)
-  mov   %ah, 7(%ebp)
   pushfd
   pop   %eax
   mov   %eax, %ecx
@@ -58,7 +52,7 @@ pde_setup:
   mov   $0x200000, %eax         /* eax = 2MB(direct mapping) */
   mul   %ecx                    /* eax = eax * ecx(0..2048) */
   or    $0b10000011, %eax       /* Present + R/W + Huge */
-  mov   %eax, pd(,%ecx, 8)      /* pd[ecx * 8] = eax (higher 32bit is zero) */
+  mov   %eax, pd(, %ecx, 8)      /* pd[ecx * 8] = eax (higher 32bit is zero) */
   inc   %ecx
   cmp   $2048, %ecx
   jne   pde_setup               /* ecx != 512 * 4 */
@@ -69,7 +63,7 @@ pdpte_setup:
   mul   %ecx
   add   $pd, %eax               /* eax = 4096 * ecx + pd(edx) */
   or    $0b11, %eax             /* Present + R/W */
-  mov   %eax, pdpt(,%ecx, 8)    /* pdpt[ecx * 8] = eax (higher 32bit is zero) */
+  mov   %eax, pdpt(, %ecx, 8)    /* pdpt[ecx * 8] = eax (higher 32bit is zero) */
   inc   %ecx
   cmp   $4, %ecx
   jne   pdpte_setup
@@ -78,6 +72,9 @@ pdpte_setup:
   mov   $pdpt, %eax
   or    $0b11, %eax             /* Present + R/W */
   mov   %eax, (pml4)
+/* Map also KERNEL_MAP_START_ADDRESS */
+  mov   $((KERNEL_MAP_START_ADDRESS >> 39) & 0x1FF), %edx
+  mov   %eax, pml4(, %edx, 8)
 
 /* setup_64: */
   mov   $pml4, %eax
@@ -91,7 +88,7 @@ pdpte_setup:
   wrmsr                         /* Set LME and NXE flags */
   mov   %cr0, %eax
   or    $(1 << 31 | 1), %eax    /* Set PG flag */
-  lgdt  gdtr0
+  lgdt  gdtr_64bit_0
   mov   %eax, %cr0
   ljmp $main_code_segment_descriptor, $init_long_mode
 
@@ -107,7 +104,7 @@ fin:
   hlt
   jmp fin
 
-.section .data
+.section .data.32
 
 .align   4
 

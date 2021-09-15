@@ -5,7 +5,10 @@
 
 use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
-use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::context::memory_layout::{
+    kernel_area_to_physical_address, KERNEL_MAP_START_ADDRESS,
+};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use crate::kernel::drivers::efi::boot_service::memory_map::EfiMemoryType;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
@@ -103,10 +106,16 @@ pub fn init_memory_by_multiboot_information(
 
     /* Reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
-        if section.should_allocate() && section.align_size() == PAGE_SIZE_USIZE {
+        if section.should_allocate() && (section.address() & !PAGE_MASK) == 0 {
+            let virtual_address = VAddress::new(section.address());
+            let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
+                kernel_area_to_physical_address(virtual_address)
+            } else {
+                virtual_address.to_direct_mapped_p_address()
+            };
             physical_memory_manager
                 .reserve_memory(
-                    PAddress::new(section.address()),
+                    physical_address,
                     MSize::new(section.size()),
                     MOrder::new(PAGE_SHIFT),
                 )
@@ -144,10 +153,9 @@ pub fn init_memory_by_multiboot_information(
     let mut virtual_memory_manager = VirtualMemoryManager::new();
     virtual_memory_manager.init(true, &mut physical_memory_manager);
     for section in multiboot_information.elf_info.clone() {
-        if !section.should_allocate() || section.align_size() != PAGE_SIZE_USIZE {
+        if !section.should_allocate() || (section.address() & !PAGE_MASK) != 0 {
             continue;
         }
-        assert_eq!(!PAGE_MASK & section.address(), 0);
         let aligned_size = MSize::new((section.size() - 1) & PAGE_MASK) + PAGE_SIZE;
         let permission = MemoryPermissionFlags::new(
             true,
@@ -155,10 +163,16 @@ pub fn init_memory_by_multiboot_information(
             section.should_excusable(),
             false,
         );
+        let virtual_address = VAddress::new(section.address());
+        let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
+            kernel_area_to_physical_address(virtual_address)
+        } else {
+            virtual_address.to_direct_mapped_p_address()
+        };
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
         match virtual_memory_manager.map_address(
-            PAddress::new(section.address()),
-            Some(VAddress::new(section.address())),
+            physical_address,
+            Some(virtual_address),
             aligned_size,
             permission,
             MemoryOptionFlags::KERNEL,

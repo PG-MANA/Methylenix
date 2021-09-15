@@ -352,6 +352,7 @@ pub fn init_multiple_processors_ap() {
     unsafe {
         core::ptr::copy_nonoverlapping(
             ap_entry_address as *const u8,
+            //physical_address_to_direct_map(PAddress::new(boot_address)).to_usize() as *mut u8,
             boot_address as *mut u8,
             ap_entry_end_address - ap_entry_address,
         )

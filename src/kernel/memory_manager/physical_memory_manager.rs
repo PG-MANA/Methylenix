@@ -53,8 +53,12 @@ impl PhysicalMemoryManager {
         }
     }
 
-    pub fn get_free_memory_size(&self) -> MSize {
+    pub fn get_memory_size(&self) -> MSize {
         self.memory_size
+    }
+
+    pub fn get_free_memory_size(&self) -> MSize {
+        self.free_memory_size
     }
 
     pub fn add_memory_entry_pool(&mut self, pool_address: usize, pool_size: usize) {

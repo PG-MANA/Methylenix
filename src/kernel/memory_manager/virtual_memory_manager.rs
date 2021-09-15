@@ -23,8 +23,7 @@ use super::slab_allocator::pool_allocator::PoolAllocator;
 use super::MemoryError;
 
 use crate::arch::target_arch::context::memory_layout::{
-    adjust_start_address_to_be_canonical, is_address_canonical, MALLOC_END_ADDRESS,
-    MALLOC_START_ADDRESS,
+    MALLOC_END_ADDRESS, MALLOC_START_ADDRESS, MAP_END_ADDRESS, MAP_START_ADDRESS,
 };
 use crate::arch::target_arch::paging::{
     PageManager, PagingError, MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE,
@@ -297,6 +296,19 @@ impl VirtualMemoryManager {
                 .to_end_address(direct_mapped_area_address)
                 .to_direct_mapped_v_address(),
         });
+
+        /*
+        let aligned_memory_size =
+            MSize::new((pm_manager.get_memory_size().to_usize() - 1) & PAGE_MASK) + PAGE_SIZE;
+        self.map_address_into_page_table_with_size(
+            PAddress::new(0),
+            DIRECT_MAP_START_ADDRESS,
+            MSize::from_address(DIRECT_MAP_START_ADDRESS, DIRECT_MAP_END_ADDRESS)
+                .min(aligned_memory_size),
+            MemoryPermissionFlags::data(),
+            pm_manager,
+        )
+        .expect("Failed to direct map");*/
     }
 
     pub fn flush_paging(&mut self) {
@@ -1237,126 +1249,38 @@ impl VirtualMemoryManager {
         size: MSize,
         option: MemoryOptionFlags,
     ) -> Option<VAddress> {
-        let direct_map_start_address = self.direct_mapped_area.as_ref().unwrap().start_address;
-        let direct_map_end_address = self.direct_mapped_area.as_ref().unwrap().end_address;
-        let direct_map_area = direct_map_start_address..=direct_map_end_address;
+        let (virtual_address_limit_start, virtual_address_limit_end) =
+            if option.is_memory_map() || option.is_io_map() {
+                (MAP_START_ADDRESS, MAP_END_ADDRESS)
+            } else if option.is_alloc_area() {
+                (MALLOC_START_ADDRESS, MALLOC_END_ADDRESS)
+            } else {
+                unimplemented!()
+            };
         const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
-        let limit = if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
-            MALLOC_END_ADDRESS
-        } else {
-            MAX_VIRTUAL_ADDRESS
-        };
+        let mut available_start_address = virtual_address_limit_start;
+
         for e in unsafe { self.vm_entry.iter(OFFSET) } {
-            if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
-                if e.get_vm_end_address() < MALLOC_START_ADDRESS {
-                    continue;
-                } else if e.get_vm_start_address() > MALLOC_END_ADDRESS {
-                    return None;
-                }
+            if e.get_vm_end_address() < virtual_address_limit_start {
+                continue;
             }
-            if let Some(prev) = unsafe { e.list.get_prev(OFFSET) } {
-                if e.get_vm_start_address() - (prev.get_vm_end_address() + MSize::new(1)) >= size {
-                    let start_address = prev.get_vm_end_address() + MSize::new(1);
-                    let memory_area = start_address..=size.to_end_address(start_address);
-
-                    if Self::is_overlapped(&direct_map_area, &memory_area) {
-                        if e.get_vm_start_address() - (direct_map_end_address + MSize::new(1))
-                            >= size
-                        {
-                            let start_address = direct_map_end_address + MSize::new(1);
-                            let end_address = size.to_end_address(start_address);
-
-                            if option.is_alloc_area()
-                                || option.is_io_map()
-                                || option.is_memory_map()
-                            {
-                                if !((MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS)
-                                    .contains(&start_address)
-                                    && (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS)
-                                        .contains(&end_address))
-                                {
-                                    continue;
-                                }
-                            }
-                            if is_address_canonical(start_address, end_address) {
-                                return Some(start_address);
-                            } else {
-                                continue;
-                            }
-                        } else {
-                            continue;
-                        }
-                    }
-                    let end_address = size.to_end_address(start_address);
-                    if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
-                        if !((MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&start_address)
-                            && (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&end_address))
-                        {
-                            continue;
-                        }
-                    }
-                    if is_address_canonical(start_address, end_address) {
-                        return Some(start_address);
-                    }
-                }
+            let end_address = size.to_end_address(available_start_address);
+            if end_address > virtual_address_limit_end {
+                return None;
             }
+            if !Self::is_overlapped(
+                &((available_start_address)..=(end_address)),
+                &(e.get_vm_start_address()..=e.get_vm_end_address()),
+            ) {
+                return Some(available_start_address);
+            }
+            available_start_address = e.get_vm_end_address() + MSize::new(1);
         }
-        if let Some(e) = unsafe { self.vm_entry.get_last_entry(OFFSET) } {
-            if e.get_vm_end_address() + MSize::new(1) + size >= limit {
-                None
-            } else {
-                let start_address = e.get_vm_end_address() + MSize::new(1);
-                let end_address = size.to_end_address(start_address);
-                let memory_area = start_address..=end_address;
-                if Self::is_overlapped(&direct_map_area, &memory_area) {
-                    if (direct_map_end_address + MSize::new(1) + size) >= limit {
-                        None
-                    } else {
-                        let start_address = direct_map_end_address + MSize::new(1);
-                        let end_address = size.to_end_address(start_address);
-
-                        if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
-                            if (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&start_address)
-                                && (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS)
-                                    .contains(&end_address)
-                            {
-                                Some(start_address)
-                            } else {
-                                Some(MALLOC_START_ADDRESS)
-                            }
-                        } else {
-                            if is_address_canonical(start_address, end_address) {
-                                Some(start_address)
-                            } else {
-                                adjust_start_address_to_be_canonical(start_address, end_address)
-                            }
-                        }
-                    }
-                } else {
-                    let end_address = size.to_end_address(start_address);
-                    if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
-                        if (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&start_address)
-                            && (MALLOC_START_ADDRESS..=MALLOC_END_ADDRESS).contains(&end_address)
-                        {
-                            Some(start_address)
-                        } else {
-                            Some(MALLOC_START_ADDRESS)
-                        }
-                    } else {
-                        if is_address_canonical(start_address, end_address) {
-                            Some(start_address)
-                        } else {
-                            adjust_start_address_to_be_canonical(start_address, end_address)
-                        }
-                    }
-                }
-            }
+        let end_address = size.to_end_address(available_start_address);
+        if end_address > virtual_address_limit_end {
+            None
         } else {
-            if option.is_alloc_area() || option.is_io_map() || option.is_memory_map() {
-                Some(MALLOC_START_ADDRESS)
-            } else {
-                Some(PAGE_SIZE.to_end_address(VAddress::new(0)))
-            }
+            Some(available_start_address)
         }
     }
 
