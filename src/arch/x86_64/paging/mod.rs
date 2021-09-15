@@ -616,9 +616,10 @@ impl PageManager {
             if e.is_present() {
                 return Ok(());
             }
-            cache_memory_list.free_ptr(pml4e.get_address().unwrap().to_usize() as *mut _); /*free PDPT*/
-            pml4e.set_present(false);
         }
+        cache_memory_list.free_ptr(pml4e.get_address().unwrap().to_usize() as *mut _); /*free PDPT*/
+        pml4e.set_present(false);
+
         Ok(())
     }
 
