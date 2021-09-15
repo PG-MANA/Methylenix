@@ -132,9 +132,9 @@ pub fn init_memory_by_multiboot_information(
         .expect("Failed to reserve memory area of the multiboot information");
 
     /* TEMP: reserve boot code area for application processors */
-    assert!(physical_memory_manager
+    physical_memory_manager
         .reserve_memory(PAddress::new(0), PAGE_SIZE, MOrder::new(0))
-        .is_ok());
+        .expect("Failed to reserve boot code area");
 
     /* Reserve Multiboot modules area */
     for e in multiboot_information.modules.iter() {

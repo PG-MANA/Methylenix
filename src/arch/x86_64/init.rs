@@ -97,10 +97,10 @@ pub fn init_work_queue() {
 pub fn init_interrupt(kernel_selector: u16) {
     pic::disable_8259_pic();
 
-    let mut interrupt_manager = InterruptManager::new();
-    interrupt_manager.init(kernel_selector);
-    get_cpu_manager_cluster().interrupt_manager = interrupt_manager;
-
+    get_cpu_manager_cluster().interrupt_manager = InterruptManager::new();
+    get_cpu_manager_cluster()
+        .interrupt_manager
+        .init(kernel_selector);
     let mut io_apic_manager = IoApicManager::new();
     io_apic_manager.init();
     get_kernel_manager_cluster()
