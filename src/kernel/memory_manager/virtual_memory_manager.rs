@@ -849,11 +849,12 @@ impl VirtualMemoryManager {
     fn unassociate_address_with_size(
         &mut self,
         virtual_address: VAddress,
-        _size: MSize,
+        size: MSize,
         _pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
-        match self.page_manager.unassociate_address(
+        match self.page_manager.unassociate_address_width_size(
             virtual_address,
+            size,
             &mut self.reserved_memory_list,
             true,
         ) {

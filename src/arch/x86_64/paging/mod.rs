@@ -432,9 +432,9 @@ impl PageManager {
             let processing_virtual_address = virtual_address + processed_size;
             let processing_physical_address = physical_address + processed_size;
             let number_of_pde =
-                (processing_virtual_address.to_usize() >> ((4 * 3) + 9 * 1)) & (0x1FF);
+                (processing_virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 1)) & (0x1FF);
             let number_of_pte =
-                (processing_virtual_address.to_usize() >> ((4 * 3) + 9 * 0)) & (0x1FF);
+                (processing_virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 0)) & (0x1FF);
 
             if number_of_pde == 0
                 && number_of_pte == 0
@@ -525,14 +525,12 @@ impl PageManager {
     /// Unmap virtual_address.
     ///
     /// This function searches target page entry(usually PTE) and disable present flag.
-    /// After disabling, this calls [`cleanup_page_table`] to collect freed page tables.
-    /// If target entry is not exists, this function will ignore it and call [`cleanup_page_table`]
+    /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
+    /// If target entry is not exists, this function will ignore it and call [`Self::cleanup_page_table`]
     /// when entry_may_be_deleted == true, otherwise this will return PagingError:PagingError::EntryIsNotFound.
     ///
     /// This does not delete physical address and huge bit from the entry. it  disable present flag only.
-    /// It helps [`cleanup_page_table`].
-    ///
-    /// [`cleanup_page_table`]: #method.cleanup_page_table
+    /// It helps [`Self::cleanup_page_table`].
     pub fn unassociate_address(
         &mut self,
         virtual_address: VAddress,
@@ -555,6 +553,88 @@ impl PageManager {
         }
     }
 
+    /// Unmap virtual_address ~ (virtual_address + size)
+    ///
+    /// This function searches target page entry(PDPTE, PDE, PTE) and disable present flag.
+    /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
+    /// If target entry is not exists, this function will return Error:EntryIsNotFound.
+    /// When huge table was used and the mapped size is different from expected size, this will return error.
+    ///
+    /// This does not delete physical address and huge bit from the entry. it  disable present flag only.
+    pub fn unassociate_address_width_size(
+        &mut self,
+        virtual_address: VAddress,
+        size: MSize,
+        cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
+        entry_may_be_deleted: bool,
+    ) -> Result<(), PagingError> {
+        if (size & !PAGE_MASK) != 0 {
+            return Err(PagingError::AddressIsNotAligned);
+        }
+        if size == PAGE_SIZE {
+            return self.unassociate_address(
+                virtual_address,
+                cache_memory_list,
+                entry_may_be_deleted,
+            );
+        }
+
+        let mut processed_size = MSize::new(0);
+        while processed_size <= size {
+            let processing_virtual_address = virtual_address + processed_size;
+            let pdpte = self.get_target_pdpte(
+                cache_memory_list,
+                processing_virtual_address,
+                false,
+                false,
+                false,
+            )?;
+            if pdpte.is_huge() {
+                if !pdpte.is_present() {
+                    return Err(PagingError::EntryIsNotFound);
+                }
+                let huge_size = MSize::new(0x40000000);
+                if (size - processed_size) < huge_size {
+                    return Err(PagingError::EntryIsNotFound); /* FIX: to better error name*/
+                }
+                pdpte.set_present(false);
+                processed_size += huge_size;
+                self.cleanup_page_table(processing_virtual_address, cache_memory_list)?;
+                continue;
+            }
+            let pde = self.get_target_pde(
+                cache_memory_list,
+                processing_virtual_address,
+                false,
+                false,
+                false,
+                Some(pdpte),
+            )?;
+            if pde.is_huge() {
+                if !pde.is_present() {
+                    return Err(PagingError::EntryIsNotFound);
+                }
+                let huge_size = MSize::new(0x200000);
+                if (size - processed_size) < huge_size {
+                    return Err(PagingError::EntryIsNotFound); /* FIX: to better error name*/
+                }
+                pde.set_present(false);
+                processed_size += huge_size;
+                self.cleanup_page_table(processing_virtual_address, cache_memory_list)?;
+                continue;
+            }
+            let pte =
+                self.get_target_pte(cache_memory_list, virtual_address, false, false, Some(pde))?;
+            if !pte.is_present() {
+                return Err(PagingError::EntryIsNotFound);
+            }
+            pte.set_present(false);
+            self.cleanup_page_table(processing_virtual_address, cache_memory_list)?;
+            processed_size += PAGE_SIZE;
+        }
+        return Ok(());
+    }
+
     /// Clean up the page table.
     ///
     /// This function searches non-used page tables(PDPT, PD, PT) and puts them into cache_memory_list.
@@ -564,9 +644,9 @@ impl PageManager {
         virtual_address: VAddress,
         cache_memory_list: &mut PoolAllocator<[u8; PAGE_SIZE_USIZE]>,
     ) -> Result<(), PagingError> {
-        let number_of_pml4e = (virtual_address.to_usize() >> ((4 * 3) + 9 * 3)) & (0x1FF);
-        let number_of_pdpe = (virtual_address.to_usize() >> ((4 * 3) + 9 * 2)) & (0x1FF);
-        let number_of_pde = (virtual_address.to_usize() >> ((4 * 3) + 9 * 1)) & (0x1FF);
+        let number_of_pml4e = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 3)) & (0x1FF);
+        let number_of_pdpte = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 2)) & (0x1FF);
+        let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 1)) & (0x1FF);
         let pml4e = &mut unsafe { &mut *(self.pml4.to_usize() as *mut [PML4E; PML4_MAX_ENTRY]) }
             [number_of_pml4e];
         if !pml4e.is_address_set() {
@@ -575,7 +655,7 @@ impl PageManager {
 
         let pdpte = &mut unsafe {
             &mut *(pml4e.get_address().unwrap().to_usize() as *mut [PDPTE; PDPT_MAX_ENTRY])
-        }[number_of_pdpe];
+        }[number_of_pdpte];
         if pdpte.is_present() && !pdpte.is_huge() {
             let pde = &mut unsafe {
                 &mut *(pdpte.get_address().unwrap().to_usize() as *mut [PDE; PD_MAX_ENTRY])
