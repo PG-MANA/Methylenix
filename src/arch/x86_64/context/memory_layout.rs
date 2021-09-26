@@ -7,6 +7,7 @@ use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
 
 use core::ops::RangeInclusive;
 
+/// DIRECT_MAP_START_ADDRESS is also defined in arch/target_arch/boot/common.s.
 pub const DIRECT_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_a000_0000_0000);
 pub const DIRECT_MAP_END_ADDRESS: VAddress = VAddress::new(0xffff_bfff_ffff_ffff);
 pub const MALLOC_START_ADDRESS: VAddress = VAddress::new(0xffff_d100_0000_0000);
@@ -26,6 +27,9 @@ const _: () = assert();
 #[allow(dead_code)]
 const fn assert() {
     if (KERNEL_MAP_START_ADDRESS & (1usize << 39) - 1) != 0 {
+        panic!("KERNEL_MAP_START_ADDRESS is not pml4 aligned.");
+    }
+    if (DIRECT_MAP_START_ADDRESS & (1usize << 39) - 1) != 0 {
         panic!("KERNEL_MAP_START_ADDRESS is not pml4 aligned.");
     }
 }

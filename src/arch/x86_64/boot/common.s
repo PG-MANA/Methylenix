@@ -4,6 +4,7 @@
 
 .equ IO_MAP_SIZE,               0xffff
 .equ OS_STACK_SIZE,             0x10000
+.equ DIRECT_MAP_START_ADDRESS,  0xffffa00000000000
 .equ KERNEL_MAP_START_ADDRESS,  0xffffff8000000000
 
 .global os_stack, OS_STACK_SIZE, gdt, gdtr_64bit_0, gdtr_64bit_1, KERNEL_MAP_START_ADDRESS

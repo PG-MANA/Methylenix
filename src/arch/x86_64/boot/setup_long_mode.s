@@ -72,7 +72,10 @@ pdpte_setup:
   mov   $pdpt, %eax
   or    $0b11, %eax             /* Present + R/W */
   mov   %eax, (pml4)
-/* Map also KERNEL_MAP_START_ADDRESS */
+/* Map DIRECT_MAP_START_ADDRESS */
+  mov   $((DIRECT_MAP_START_ADDRESS >> 39) & 0x1FF), %edx
+  mov   %eax, pml4(, %edx, 8)
+/* Map KERNEL_MAP_START_ADDRESS */
   mov   $((KERNEL_MAP_START_ADDRESS >> 39) & 0x1FF), %edx
   mov   %eax, pml4(, %edx, 8)
 
