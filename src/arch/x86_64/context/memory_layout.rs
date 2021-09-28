@@ -3,13 +3,15 @@
 //!
 //! This module defines memory layout of kernel.
 
-use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 
 use core::ops::RangeInclusive;
 
 /// DIRECT_MAP_START_ADDRESS is also defined in arch/target_arch/boot/common.s.
 pub const DIRECT_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_a000_0000_0000);
 pub const DIRECT_MAP_END_ADDRESS: VAddress = VAddress::new(0xffff_bfff_ffff_ffff);
+pub const DIRECT_MAP_BASE_ADDRESS: PAddress = PAddress::new(0);
+pub const DIRECT_MAP_MAX_SIZE: MSize = MSize::new(1024 * 1024 * 1024 * 1024); /* 1TB */
 pub const MALLOC_START_ADDRESS: VAddress = VAddress::new(0xffff_d100_0000_0000);
 pub const MALLOC_END_ADDRESS: VAddress = VAddress::new(0xffff_dfff_ffff_ffff);
 pub const MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_e000_0000_0000);

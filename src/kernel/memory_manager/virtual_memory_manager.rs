@@ -23,7 +23,9 @@ use super::slab_allocator::pool_allocator::PoolAllocator;
 use super::MemoryError;
 
 use crate::arch::target_arch::context::memory_layout::{
-    MALLOC_END_ADDRESS, MALLOC_START_ADDRESS, MAP_END_ADDRESS, MAP_START_ADDRESS,
+    physical_address_to_direct_map, DIRECT_MAP_BASE_ADDRESS, DIRECT_MAP_MAX_SIZE,
+    DIRECT_MAP_START_ADDRESS, MALLOC_END_ADDRESS, MALLOC_START_ADDRESS, MAP_END_ADDRESS,
+    MAP_START_ADDRESS,
 };
 use crate::arch::target_arch::paging::{
     PageManager, PagingError, MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE,
@@ -72,7 +74,12 @@ impl VirtualMemoryManager {
         }
     }
 
-    pub fn init(&mut self, is_system_vm: bool, pm_manager: &mut PhysicalMemoryManager) {
+    pub fn init(
+        &mut self,
+        is_system_vm: bool,
+        max_physical_address: PAddress,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) {
         //MEMO: 勝手にダイレクトマッピング?(ストレートマッピング?)をしているが、
         //      システム起動時・プロセス起動時にダイレクトマッピングされており且つ
         //      PhysicalMemoryManagerにおいて先に利用されているメモリ領域が予約されていることに依存している。
@@ -88,8 +95,10 @@ impl VirtualMemoryManager {
                 .alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT))
                 .expect("Cannot alloc memory for paging cache");
             reserved_memory_list[i] = cache_address;
-            self.reserved_memory_list
-                .free(unsafe { &mut *(cache_address.to_usize() as *mut [u8; PAGE_SIZE_USIZE]) });
+            self.reserved_memory_list.free(unsafe {
+                &mut *(physical_address_to_direct_map(cache_address).to_usize()
+                    as *mut [u8; PAGE_SIZE_USIZE])
+            });
         }
 
         /* Set up page_manager */
@@ -101,17 +110,18 @@ impl VirtualMemoryManager {
 
         /* Insert cached_memory_list entry */
         for i in 0..PAGING_CACHE_LENGTH {
-            let cache_address = reserved_memory_list[i];
+            let cache_physical_address = reserved_memory_list[i];
+            let cache_virtual_address = physical_address_to_direct_map(cache_physical_address);
             let mut entry = VirtualMemoryEntry::new(
-                cache_address.to_direct_mapped_v_address(),
-                PAGE_SIZE.to_end_address(cache_address.to_direct_mapped_v_address()),
+                cache_virtual_address,
+                PAGE_SIZE.to_end_address(cache_virtual_address),
                 MemoryPermissionFlags::data(),
                 MemoryOptionFlags::KERNEL | MemoryOptionFlags::WIRED,
             );
             self._map_address(
                 &mut entry,
-                cache_address,
-                cache_address.to_direct_mapped_v_address(),
+                cache_physical_address,
+                cache_virtual_address,
                 PAGE_SIZE,
                 pm_manager,
             )
@@ -119,16 +129,16 @@ impl VirtualMemoryManager {
 
             self.insert_vm_map_entry(entry, pm_manager)
                 .expect("Cannot insert Virtual Memory Entry for paging cache");
-            self.map_address_into_page_table(
+            /*self.map_address_into_page_table(
                 cache_address,
                 cache_address.to_direct_mapped_v_address(),
                 MemoryPermissionFlags::data(),
                 pm_manager,
             )
-            .expect("Cannot associate address for paging cache");
+            .expect("Cannot associate address for paging cache");*/
         }
 
-        self.setup_direct_mapped_area(pm_manager);
+        self.setup_direct_mapped_area(max_physical_address, pm_manager);
     }
 
     fn setup_pools(&mut self, pm_manager: &mut PhysicalMemoryManager) {
@@ -245,7 +255,11 @@ impl VirtualMemoryManager {
         return Ok(());
     }
 
-    fn setup_direct_mapped_area(&mut self, pm_manager: &mut PhysicalMemoryManager) {
+    fn setup_direct_mapped_area(
+        &mut self,
+        max_physical_address: PAddress,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) {
         /* Direct mapped area is used for page table or io map(needs DMA) (object pools should not use this) */
         /* When use direct mapped area, you must map address into direct_mapped_area.entry. */
         let direct_mapped_area_size =
@@ -297,18 +311,22 @@ impl VirtualMemoryManager {
                 .to_direct_mapped_v_address(),
         });
 
-        /*
-        let aligned_memory_size =
-            MSize::new((pm_manager.get_memory_size().to_usize() - 1) & PAGE_MASK) + PAGE_SIZE;
-        self.map_address_into_page_table_with_size(
-            PAddress::new(0),
+        let aligned_map_size = MSize::new(
+            ((max_physical_address - DIRECT_MAP_BASE_ADDRESS).to_usize() - 1) & PAGE_MASK,
+        ) + PAGE_SIZE;
+        pr_debug!(
+            "Map {} ~ {}",
             DIRECT_MAP_START_ADDRESS,
-            MSize::from_address(DIRECT_MAP_START_ADDRESS, DIRECT_MAP_END_ADDRESS)
-                .min(aligned_memory_size),
+            aligned_map_size.to_end_address(DIRECT_MAP_START_ADDRESS)
+        );
+        self.map_address_into_page_table_with_size(
+            DIRECT_MAP_BASE_ADDRESS,
+            DIRECT_MAP_START_ADDRESS,
+            DIRECT_MAP_MAX_SIZE.min(aligned_map_size),
             MemoryPermissionFlags::data(),
             pm_manager,
         )
-        .expect("Failed to direct map");*/
+        .expect("Failed to map physical memory");
     }
 
     pub fn flush_paging(&mut self) {
