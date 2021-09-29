@@ -170,7 +170,8 @@ impl PageManager {
         let number_of_pml4e = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 3)) & (0x1FF);
         let number_of_pdpte = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 2)) & (0x1FF);
 
-        if !pml4_table[number_of_pml4e].is_address_set() {
+        let pml4e = &mut pml4_table[number_of_pml4e];
+        if !pml4e.is_address_set() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
@@ -180,17 +181,16 @@ impl PageManager {
             for entry in temp_pdpt.iter_mut() {
                 entry.init();
             }
-            pml4_table[number_of_pml4e].set_address(direct_map_to_physical_address(pdpt_address));
+            pml4e.init();
+            pml4e.set_address(direct_map_to_physical_address(pdpt_address));
         }
         if should_set_parent_entry_present {
-            pml4_table[number_of_pml4e].set_present(true);
+            pml4e.set_present(true);
         }
 
         let pdpte = &mut unsafe {
-            &mut *(physical_address_to_direct_map(
-                pml4_table[number_of_pml4e].get_address().unwrap(),
-            )
-            .to_usize() as *mut [PDPTE; PDPT_MAX_ENTRY])
+            &mut *(physical_address_to_direct_map(pml4e.get_address().unwrap()).to_usize()
+                as *mut [PDPTE; PDPT_MAX_ENTRY])
         }[number_of_pdpte];
         if should_set_present {
             pdpte.set_present(true);
@@ -238,6 +238,7 @@ impl PageManager {
             for entry in temp_pd.iter_mut() {
                 entry.init();
             }
+            pdpte.init();
             pdpte.set_address(direct_map_to_physical_address(pd_address));
             if should_set_parent_entry_present {
                 pdpte.set_present(true);
@@ -292,6 +293,7 @@ impl PageManager {
             for entry in temp_pt.iter_mut() {
                 entry.init();
             }
+            pde.init();
             pde.set_address(direct_map_to_physical_address(pt_address));
             if should_set_parent_entry_present {
                 pde.set_present(true);
@@ -400,6 +402,7 @@ impl PageManager {
         pte.set_no_execute(!permission.is_executable());
         pte.set_writable(permission.is_writable());
         pte.set_user_accessible(permission.is_user_accessible());
+        pte.set_present(true);
         /* PageManager::reset_paging_local(virtual_address) */
         Ok(())
     }
