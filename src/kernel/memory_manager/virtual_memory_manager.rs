@@ -790,9 +790,10 @@ impl VirtualMemoryManager {
                 Err(PagingError::MemoryCacheRanOut) => {
                     for _ in 0..PAGING_CACHE_LENGTH {
                         match self.alloc_from_direct_map(PAGE_SIZE, pm_manager) {
-                            Ok(address) => self
-                                .reserved_memory_list
-                                .free_ptr(address.to_usize() as *mut _),
+                            Ok(address) => self.reserved_memory_list.free_ptr(
+                                physical_address_to_direct_map(address.to_direct_mapped_p_address())
+                                    .to_usize() as *mut _,
+                            ),
                             Err(e) => {
                                 pr_err!("Failed to allocate memory for paging: {:?}", e);
                                 return Err(MemoryError::PagingError);
@@ -835,9 +836,10 @@ impl VirtualMemoryManager {
                 Err(PagingError::MemoryCacheRanOut) => {
                     for _ in 0..PAGING_CACHE_LENGTH {
                         match self.alloc_from_direct_map(PAGE_SIZE, pm_manager) {
-                            Ok(address) => self
-                                .reserved_memory_list
-                                .free_ptr(address.to_usize() as *mut _),
+                            Ok(address) => self.reserved_memory_list.free_ptr(
+                                physical_address_to_direct_map(address.to_direct_mapped_p_address())
+                                    .to_usize() as *mut _,
+                            ),
                             Err(e) => {
                                 pr_err!("Failed to allocate memory for paging: {:?}", e);
                                 return Err(MemoryError::PagingError);
