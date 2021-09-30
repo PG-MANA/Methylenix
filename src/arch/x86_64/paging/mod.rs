@@ -613,6 +613,7 @@ impl PageManager {
                     return Err(PagingError::EntryIsNotFound); /* FIX: to better error name*/
                 }
                 pdpte.set_present(false);
+                pdpte.set_address_set(false);
                 processed_size += huge_size;
                 self.cleanup_page_table(processing_virtual_address, cache_memory_list)?;
                 continue;
@@ -634,6 +635,7 @@ impl PageManager {
                     return Err(PagingError::EntryIsNotFound); /* FIX: to better error name*/
                 }
                 pde.set_present(false);
+                pde.set_address_set(false);
                 processed_size += huge_size;
                 self.cleanup_page_table(processing_virtual_address, cache_memory_list)?;
                 continue;
@@ -694,6 +696,7 @@ impl PageManager {
                             as *mut _,
                     ); /* free PT */
                     pde.set_present(false);
+                    pde.set_address_set(false);
                 }
             }
             /* Try to free PD */
@@ -711,6 +714,7 @@ impl PageManager {
                 physical_address_to_direct_map(pdpte.get_address().unwrap()).to_usize() as *mut _,
             ); /* free PD */
             pdpte.set_present(false);
+            pdpte.set_address_set(false);
         }
         /* Try to free PDPT */
         for e in unsafe {
@@ -727,6 +731,7 @@ impl PageManager {
             physical_address_to_direct_map(pml4e.get_address().unwrap()).to_usize() as *mut _,
         ); /*free PDPT*/
         pml4e.set_present(false);
+        pml4e.set_address_set(false);
 
         Ok(())
     }
