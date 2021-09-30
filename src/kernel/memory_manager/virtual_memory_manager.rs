@@ -1322,9 +1322,22 @@ impl VirtualMemoryManager {
                 return None;
             }
             if !Self::is_overlapped(
-                &((available_start_address)..=(end_address)),
+                &(available_start_address..=end_address),
                 &(e.get_vm_start_address()..=e.get_vm_end_address()),
             ) {
+                assert!(unsafe { e.list.get_next(OFFSET) }
+                    .and_then(|n| Some(!Self::is_overlapped(
+                        &(available_start_address..=end_address),
+                        &(n.get_vm_start_address()..=n.get_vm_end_address())
+                    )))
+                    .unwrap_or(true));
+                assert!(unsafe { e.list.get_prev(OFFSET) }
+                    .and_then(|p| Some(!Self::is_overlapped(
+                        &(available_start_address..=end_address),
+                        &(p.get_vm_start_address()..=p.get_vm_end_address())
+                    )))
+                    .unwrap_or(true));
+
                 return Some(available_start_address);
             }
             available_start_address = e.get_vm_end_address() + MSize::new(1);

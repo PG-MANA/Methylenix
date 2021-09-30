@@ -388,12 +388,11 @@ impl PageManager {
         {
             return Err(PagingError::AddressIsNotAligned);
         }
-        if (virtual_address.to_usize() >> 48) != 0 {
-            if (virtual_address.to_usize() >> 48) != 0xffff
-                || ((virtual_address.to_usize() >> 47) & 1) == 0
-            {
-                return Err(PagingError::AddressIsNotCanonical);
-            }
+        if (virtual_address.to_usize() >> 48) != 0
+            && ((virtual_address.to_usize() >> 48) != 0xffff
+                || ((virtual_address.to_usize() >> 47) & 1) == 0)
+        {
+            return Err(PagingError::AddressIsNotCanonical);
         }
 
         let pte = self.get_target_pte(cache_memory_list, virtual_address, true, true, None)?;
