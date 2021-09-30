@@ -595,7 +595,7 @@ impl PageManager {
         }
 
         let mut processed_size = MSize::new(0);
-        while processed_size <= size {
+        while processed_size < size {
             let processing_virtual_address = virtual_address + processed_size;
             let pdpte = self.get_target_pdpte(
                 cache_memory_list,
@@ -640,8 +640,13 @@ impl PageManager {
                 self.cleanup_page_table(processing_virtual_address, cache_memory_list)?;
                 continue;
             }
-            let pte =
-                self.get_target_pte(cache_memory_list, virtual_address, false, false, Some(pde))?;
+            let pte = self.get_target_pte(
+                cache_memory_list,
+                processing_virtual_address,
+                false,
+                false,
+                Some(pde),
+            )?;
             if !pte.is_present() {
                 return Err(PagingError::EntryIsNotFound);
             }
