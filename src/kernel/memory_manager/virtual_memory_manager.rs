@@ -649,28 +649,61 @@ impl VirtualMemoryManager {
         )
         .to_index();
 
-        for i in first_p_index..=last_p_index {
-            if let Some(p) = vm_entry.get_object_mut().remove_vm_page(i) {
-                if let Err(e) = self.unassociate_address(
-                    vm_entry.get_vm_start_address() + i.to_offset(),
-                    pm_manager,
-                ) {
-                    pr_err!(
-                        "Failed to unmap address({}): {:?}",
-                        vm_entry.get_vm_start_address() + i.to_offset(),
-                        e
-                    );
-                    return Err(MemoryError::PagingError);
-                }
-                if !vm_entry
-                    .get_memory_option_flags()
-                    .should_not_free_phy_address()
-                {
-                    if let Err(e) = pm_manager.free(p.get_physical_address(), PAGE_SIZE, false) {
-                        pr_err!("Failed to free physical memory: {:?}", e);
+        if vm_entry.get_memory_option_flags().is_io_map()
+            || vm_entry.get_memory_option_flags().is_memory_map()
+        {
+            if let Err(e) = self.unassociate_address_with_size(
+                vm_entry.get_vm_start_address(),
+                vm_entry.get_size(),
+                pm_manager,
+            ) {
+                pr_err!(
+                    "Failed to unmap address({} ~ {}): {:?}",
+                    vm_entry.get_vm_start_address(),
+                    vm_entry.get_vm_end_address(),
+                    e
+                );
+                return Err(MemoryError::PagingError);
+            }
+            if !vm_entry
+                .get_memory_option_flags()
+                .should_not_free_phy_address()
+            {
+                for i in first_p_index..=last_p_index {
+                    if let Some(p) = vm_entry.get_object_mut().remove_vm_page(i) {
+                        if let Err(e) = pm_manager.free(p.get_physical_address(), PAGE_SIZE, false)
+                        {
+                            pr_err!("Failed to free physical memory: {:?}", e);
+                        }
+                        self.vm_page_pool.free(p);
                     }
                 }
-                self.vm_page_pool.free(p);
+            }
+        } else {
+            for i in first_p_index..=last_p_index {
+                if let Some(p) = vm_entry.get_object_mut().remove_vm_page(i) {
+                    if let Err(e) = self.unassociate_address(
+                        vm_entry.get_vm_start_address() + i.to_offset(),
+                        pm_manager,
+                    ) {
+                        pr_err!(
+                            "Failed to unmap address({}): {:?}",
+                            vm_entry.get_vm_start_address() + i.to_offset(),
+                            e
+                        );
+                        return Err(MemoryError::PagingError);
+                    }
+                    if !vm_entry
+                        .get_memory_option_flags()
+                        .should_not_free_phy_address()
+                    {
+                        if let Err(e) = pm_manager.free(p.get_physical_address(), PAGE_SIZE, false)
+                        {
+                            pr_err!("Failed to free physical memory: {:?}", e);
+                        }
+                    }
+                    self.vm_page_pool.free(p);
+                }
             }
         }
         if vm_entry.get_memory_option_flags().is_direct_mapped() {
