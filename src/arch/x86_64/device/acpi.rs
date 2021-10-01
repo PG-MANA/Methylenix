@@ -134,7 +134,7 @@ pub fn read_io(
                     ))
                 }
                 8 => {
-                    pr_err!("Cannot out qword to I/O port.");
+                    pr_err!("Cannot read 64bit data from I/O port.");
                     Err(AmlError::InvalidOperation)
                 }
                 _ => {
@@ -188,7 +188,7 @@ pub fn write_io(
                     );
                 }
                 8 => {
-                    pr_err!("Cannot out qword to I/O port.");
+                    pr_err!("Cannot write 64bit data into I/O port.");
                     return Err(AmlError::InvalidOperation);
                 }
                 _ => {

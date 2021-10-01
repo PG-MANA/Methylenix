@@ -28,10 +28,10 @@ const _: () = assert();
 
 #[allow(dead_code)]
 const fn assert() {
-    if (KERNEL_MAP_START_ADDRESS & (1usize << 39) - 1) != 0 {
+    if (KERNEL_MAP_START_ADDRESS & ((1usize << 39) - 1)) != 0 {
         panic!("KERNEL_MAP_START_ADDRESS is not pml4 aligned.");
     }
-    if (DIRECT_MAP_START_ADDRESS & (1usize << 39) - 1) != 0 {
+    if (DIRECT_MAP_START_ADDRESS & ((1usize << 39) - 1)) != 0 {
         panic!("KERNEL_MAP_START_ADDRESS is not pml4 aligned.");
     }
 }
@@ -43,14 +43,12 @@ pub fn is_address_canonical(start_address: VAddress, end_address: VAddress) -> b
         } else {
             false
         }
+    } else if CANONICAL_AREA_HIGH.contains(&start_address)
+        && CANONICAL_AREA_HIGH.contains(&end_address)
+    {
+        true
     } else {
-        if CANONICAL_AREA_HIGH.contains(&start_address)
-            && CANONICAL_AREA_HIGH.contains(&end_address)
-        {
-            true
-        } else {
-            false
-        }
+        false
     }
 }
 

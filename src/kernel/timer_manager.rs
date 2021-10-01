@@ -198,12 +198,10 @@ impl LocalTimerManager {
                             .insert_before(&mut entry.t_list, &mut list.t_list);
                         break;
                     }
-                } else {
-                    if entry.timeout < list.timeout {
-                        self.timer_list
-                            .insert_before(&mut entry.t_list, &mut list.t_list);
-                        break;
-                    }
+                } else if entry.timeout < list.timeout {
+                    self.timer_list
+                        .insert_before(&mut entry.t_list, &mut list.t_list);
+                    break;
                 }
                 if let Some(e) = unsafe { entry.t_list.get_next_mut(offset_of!(TimerList, t_list)) }
                 {

@@ -172,10 +172,8 @@ impl XsdtManager {
                         pr_err!("Failed initialization of SsdtManager.");
                         return false;
                     }
-                } else {
-                    if let Err(e) = memory_manager.free(v_address) {
-                        pr_warn!("Cannot free an ACPI table: {:?}", e)
-                    }
+                } else if let Err(e) = memory_manager.free(v_address) {
+                    pr_warn!("Cannot free an ACPI table: {:?}", e)
                 }
             } else {
                 pr_err!("Cannot map ACPI Table: {:?}", result.unwrap_err());
