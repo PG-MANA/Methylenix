@@ -937,6 +937,7 @@ impl Evaluator {
                         self.variable_tree.restore_current_scope(tree_backup);
                         self.term_list_hierarchy.pop();
                     }
+                    NamedObject::DefMethod(_) => { /* Ignore */ }
                     o => {
                         if let Some(term_list) = o.get_term_list() {
                             self.term_list_hierarchy.push(term_list.clone());
@@ -1641,10 +1642,10 @@ impl Evaluator {
 
     fn eval_integer_expression(
         &mut self,
-        e: TermArg,
+        t: TermArg,
         current_scope: &NameString,
     ) -> Result<AmlVariable, AmlError> {
-        let data = self.eval_term_arg(e, current_scope)?;
+        let data = self.eval_term_arg(t, current_scope)?;
         let constant_data = if data.is_constant_data() {
             data
         } else {
