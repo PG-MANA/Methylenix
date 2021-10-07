@@ -203,17 +203,7 @@ pub fn init_memory_by_multiboot_information(
         };
         panic!("Cannot map virtual memory correctly.");
     }
-    /* TEMP: associate boot code area for application processors */
-    virtual_memory_manager
-        .map_address(
-            PAddress::new(0),
-            Some(VAddress::new(0)),
-            PAGE_SIZE,
-            MemoryPermissionFlags::data(),
-            MemoryOptionFlags::MEMORY_MAP,
-            &mut physical_memory_manager,
-        )
-        .expect("Cannot associate memory for boot code of Application Processors.");
+
     let aligned_multiboot = MemoryManager::page_align(
         PAddress::new(multiboot_information.address),
         MSize::new(multiboot_information.size),

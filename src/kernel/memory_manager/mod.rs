@@ -146,6 +146,55 @@ impl MemoryManager {
         }
     }
 
+    pub fn alloc_pages_with_physical_address(
+        &mut self,
+        order: MPageOrder,
+        permission: MemoryPermissionFlags,
+    ) -> Result<(VAddress, PAddress), MemoryError> {
+        let size = order.to_offset();
+        let _lock = self.lock.lock();
+        let mut pm_manager = self.physical_memory_manager.lock().unwrap();
+        match pm_manager.alloc(size, MOrder::new(PAGE_SHIFT)) {
+            Ok(physical_address) => {
+                match self.virtual_memory_manager.alloc_and_map_virtual_address(
+                    size,
+                    physical_address,
+                    permission,
+                    MemoryOptionFlags::ALLOC,
+                    &mut pm_manager,
+                ) {
+                    Ok(virtual_address) => Ok((virtual_address, physical_address)),
+                    Err(e) => {
+                        if let Err(e) = pm_manager.free(physical_address, size, false) {
+                            pr_err!("Failed to free physical memory: {:?}", e);
+                        }
+                        Err(e)
+                    }
+                }
+            }
+            Err(MemoryError::EntryPoolRunOut) => {
+                if let Err(e) = self
+                    .virtual_memory_manager
+                    .add_physical_memory_manager_pool(&mut pm_manager)
+                {
+                    pr_err!(
+                        "Failed to add memory pool to PhysicalMemoryManager: {:?}",
+                        e
+                    );
+                    Err(e)
+                } else {
+                    drop(pm_manager);
+                    drop(_lock);
+                    self.alloc_pages_with_physical_address(order, permission)
+                }
+            }
+            Err(e) => {
+                pr_err!("Failed to allocate physical memory: {:?}", e);
+                Err(e)
+            }
+        }
+    }
+
     /* TODO: check memory access error(sometimes occurs) */
     pub fn alloc_nonlinear_pages(
         &mut self,
@@ -234,24 +283,6 @@ impl MemoryManager {
             return Err(MemoryError::PagingError);
         }
         return Ok(vm_start_address);
-    }
-
-    pub fn alloc_with_option(
-        &mut self,
-        order: MPageOrder,
-        permission: MemoryPermissionFlags,
-        option: MemoryOptionFlags,
-    ) -> Result<VAddress, MemoryError> {
-        let size = order.to_offset();
-
-        if option.is_direct_mapped() && permission.is_executable() == false {
-            let _lock = self.lock.lock();
-            let mut physical_memory_manager = self.physical_memory_manager.lock().unwrap();
-            return self
-                .virtual_memory_manager
-                .alloc_from_direct_map(size, &mut physical_memory_manager);
-        }
-        unimplemented!()
     }
 
     pub fn free(&mut self, address: VAddress) -> Result<(), MemoryError> {

@@ -6,13 +6,14 @@
 
 pub mod multiboot;
 
+use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex, IstIndex};
-use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
@@ -22,7 +23,7 @@ use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
 use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
 };
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::run_queue::RunQueue;
@@ -128,8 +129,11 @@ pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
         get_kernel_manager_cluster().acpi_device_manager = device_manager;
         return false;
     }
-
-    get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
+    /* Temporary fix: avoid to drop uninit data */
+    core::mem::forget(core::mem::replace(
+        &mut get_kernel_manager_cluster().acpi_manager,
+        Mutex::new(acpi_manager),
+    ));
     get_kernel_manager_cluster().acpi_device_manager = device_manager;
     return true;
 }
@@ -306,7 +310,7 @@ pub fn setup_cpu_manager_cluster(
 /// This is in the development
 pub fn init_multiple_processors_ap() {
     /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
-    let boot_address = 0usize;
+    let boot_address = PAddress::new(0);
 
     /* Get available Local APIC IDs from ACPI */
     let madt_manager = get_kernel_manager_cluster()
@@ -317,12 +321,6 @@ pub fn init_multiple_processors_ap() {
         .get_madt_manager();
     if madt_manager.is_none() {
         pr_info!("ACPI does not have MADT.");
-        if let Err(e) = get_kernel_manager_cluster()
-            .memory_manager
-            .free(VAddress::new(boot_address))
-        {
-            pr_err!("Cannot free temporary stack: {:?}", e);
-        }
         return;
     }
     let madt_manager = madt_manager.unwrap();
@@ -348,12 +346,13 @@ pub fn init_multiple_processors_ap() {
     let ap_entry_end_address = ap_entry_end as *const fn() as usize;
 
     /* Copy boot code for application processors */
-    let vector = ((boot_address >> PAGE_SHIFT) & 0xff) as u8;
+    let vector = ((boot_address.to_usize() >> PAGE_SHIFT) & 0xff) as u8;
+    assert!(ap_entry_end_address - ap_entry_address <= PAGE_SIZE_USIZE);
     unsafe {
         core::ptr::copy_nonoverlapping(
             ap_entry_address as *const u8,
             //physical_address_to_direct_map(PAddress::new(boot_address)).to_usize() as *mut u8,
-            boot_address as *mut u8,
+            physical_address_to_direct_map(boot_address).to_usize() as *mut u8,
             ap_entry_end_address - ap_entry_address,
         )
     };
@@ -362,15 +361,18 @@ pub fn init_multiple_processors_ap() {
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
     let stack = get_kernel_manager_cluster()
         .memory_manager
-        .alloc_with_option(
+        .alloc_pages_with_physical_address(
             stack_size.to_order(None).to_page_order(),
             MemoryPermissionFlags::data(),
-            MemoryOptionFlags::DIRECT_MAP,
         )
-        .unwrap();
+        .expect("Failed to alloc stack for AP");
     unsafe {
-        *(((&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address + boot_address)
-            as *mut u64) = (stack + stack_size).to_usize() as u64
+        *(physical_address_to_direct_map(PAddress::new(
+            (&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address
+                + boot_address.to_usize(),
+        ))
+        .to_usize() as *mut u64) =
+            physical_address_to_direct_map(stack.1 + stack_size).to_usize() as u64
     };
 
     let timer = get_kernel_manager_cluster()
@@ -425,13 +427,13 @@ pub fn init_multiple_processors_ap() {
     /* Free boot_address */
     if let Err(e) = get_kernel_manager_cluster()
         .memory_manager
-        .free(boot_address.into())
+        .free_physical_memory(boot_address, PAGE_SIZE)
     {
         pr_err!("Cannot free boot_address: {:?}", e);
     }
 
     /* Free temporary stack */
-    if let Err(e) = get_kernel_manager_cluster().memory_manager.free(stack) {
+    if let Err(e) = get_kernel_manager_cluster().memory_manager.free(stack.0) {
         pr_err!("Cannot free temporary stack: {:?}", e);
     }
 
