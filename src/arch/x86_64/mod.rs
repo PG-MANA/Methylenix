@@ -31,6 +31,8 @@ use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
 
+use core::mem;
+
 pub struct ArchDependedCpuManagerCluster {
     pub local_apic_timer: LocalApicTimer,
     pub self_pointer: usize,
@@ -54,25 +56,36 @@ pub extern "C" fn multiboot_main(
     }
 
     /* Set SerialPortManager(send only) for early debug */
-    get_kernel_manager_cluster().serial_port_manager =
-        SerialPortManager::new(0x3F8 /* COM1 */);
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new(0x3F8 /* COM1 */),
+    ));
 
     /* Load the multiboot information */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
     /* Setup BSP CPU Manager Cluster */
-    get_kernel_manager_cluster().cpu_list = PtrLinkedList::new();
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().cpu_list,
+        PtrLinkedList::new(),
+    ));
     setup_cpu_manager_cluster(Some(VAddress::new(
         &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
     )));
 
     /* Init Graphic & TTY (for panic!) */
-    get_kernel_manager_cluster().graphic_manager = GraphicManager::new();
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().graphic_manager,
+        GraphicManager::new(),
+    ));
     get_kernel_manager_cluster()
         .graphic_manager
         .init(&multiboot_information.framebuffer_info);
     get_kernel_manager_cluster().graphic_manager.clear_screen();
-    get_kernel_manager_cluster().kernel_tty_manager = TtyManager::new();
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().kernel_tty_manager,
+        TtyManager::new(),
+    ));
     get_kernel_manager_cluster()
         .kernel_tty_manager
         .open(&get_kernel_manager_cluster().graphic_manager);
@@ -313,8 +326,10 @@ pub extern "C" fn directboot_main(
     _user_code_segment: u16,
     _user_data_segment: u16,
 ) -> ! {
-    get_kernel_manager_cluster().serial_port_manager =
-        SerialPortManager::new(0x3F8 /* COM1 */);
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new(0x3F8 /* COM1 */),
+    ));
     get_kernel_manager_cluster()
         .serial_port_manager
         .send_str("Booted from DirectBoot\n");
@@ -358,7 +373,10 @@ pub extern "C" fn ap_boot_main() -> ! {
     memory_allocator
         .init()
         .expect("Failed to init MemoryAllocator");
-    cpu_manager.memory_allocator = memory_allocator;
+    mem::forget(mem::replace(
+        &mut cpu_manager.memory_allocator,
+        memory_allocator,
+    ));
 
     /* Copy GDT from BSP and create own TSS */
     let gdt_address = unsafe { &gdt as *const _ as usize };
@@ -375,7 +393,10 @@ pub extern "C" fn ap_boot_main() -> ! {
     );
     interrupt_manager.init_ipi();
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
-    cpu_manager.interrupt_manager = interrupt_manager;
+    mem::forget(mem::replace(
+        &mut cpu_manager.interrupt_manager,
+        interrupt_manager,
+    ));
 
     init_local_timer();
     init_task_ap(ap_idle);

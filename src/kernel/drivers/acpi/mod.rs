@@ -107,12 +107,13 @@ impl AcpiManager {
         return true;
     }
 
-    pub fn init_acpi_event_manager(&self, event_manager: &mut AcpiEventManager) -> bool {
+    pub fn create_acpi_event_manager(&self) -> Option<AcpiEventManager> {
         if self.enabled {
-            *event_manager = AcpiEventManager::new(&self.get_xsdt_manager().get_fadt_manager());
-            true
+            Some(AcpiEventManager::new(
+                &self.get_xsdt_manager().get_fadt_manager(),
+            ))
         } else {
-            false
+            None
         }
     }
 

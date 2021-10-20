@@ -30,6 +30,7 @@ use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager, Timer};
 
+use core::mem;
 use core::sync::atomic::AtomicBool;
 
 /// Memory Areas for PhysicalMemoryManager
@@ -68,8 +69,14 @@ pub fn init_task(
 
     task_manager.init(context_manager, main_context, idle_context, &mut run_queue);
 
-    get_cpu_manager_cluster().run_queue = run_queue;
-    get_kernel_manager_cluster().task_manager = task_manager;
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster().run_queue,
+        run_queue,
+    ));
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().task_manager,
+        task_manager,
+    ));
 }
 
 /// Init application processor's TaskManager
@@ -104,9 +111,12 @@ pub fn init_interrupt(kernel_selector: u16) {
         .init(kernel_selector);
     let mut io_apic_manager = IoApicManager::new();
     io_apic_manager.init();
-    get_kernel_manager_cluster()
-        .arch_depend_data
-        .io_apic_manager = Mutex::new(io_apic_manager);
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster()
+            .arch_depend_data
+            .io_apic_manager,
+        Mutex::new(io_apic_manager),
+    ));
 }
 
 /// Init AcpiManager without parsing AML
@@ -117,24 +127,33 @@ pub fn init_interrupt(kernel_selector: u16) {
 pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
     let mut acpi_manager = AcpiManager::new();
     let mut device_manager = AcpiDeviceManager::new();
+    let set_manger = |a: AcpiManager, d: AcpiDeviceManager| {
+        mem::forget(mem::replace(
+            &mut get_kernel_manager_cluster().acpi_manager,
+            Mutex::new(a),
+        ));
+        mem::forget(mem::replace(
+            &mut get_kernel_manager_cluster().acpi_device_manager,
+            d,
+        ));
+    };
+
     if !acpi_manager.init(rsdp_ptr, &mut device_manager) {
         pr_warn!("Cannot init ACPI.");
-        get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
-        get_kernel_manager_cluster().acpi_device_manager = device_manager;
+        set_manger(acpi_manager, device_manager);
         return false;
     }
-    if !acpi_manager.init_acpi_event_manager(&mut get_kernel_manager_cluster().acpi_event_manager) {
+    if let Some(e) = acpi_manager.create_acpi_event_manager() {
+        mem::forget(mem::replace(
+            &mut get_kernel_manager_cluster().acpi_event_manager,
+            e,
+        ));
+    } else {
         pr_err!("Cannot init ACPI Event Manager");
-        get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
-        get_kernel_manager_cluster().acpi_device_manager = device_manager;
+        set_manger(acpi_manager, device_manager);
         return false;
     }
-    /* Temporary fix: avoid to drop uninit data */
-    core::mem::forget(core::mem::replace(
-        &mut get_kernel_manager_cluster().acpi_manager,
-        Mutex::new(acpi_manager),
-    ));
-    get_kernel_manager_cluster().acpi_device_manager = device_manager;
+    set_manger(acpi_manager, device_manager);
     return true;
 }
 
@@ -186,14 +205,17 @@ pub fn init_acpi_later() -> bool {
 /// This function should be called before `init_acpi_later`.
 pub fn init_pci_early() -> bool {
     let pci_manager = PciManager::new();
-    get_kernel_manager_cluster().pci_manager = pci_manager;
-    true
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().pci_manager,
+        pci_manager,
+    ));
+    return true;
 }
 
 /// Init PciManager with scanning all bus
 pub fn init_pci_later() -> bool {
     get_kernel_manager_cluster().pci_manager.scan_root_bus();
-    true
+    return true;
 }
 
 /// Init Timer
@@ -206,8 +228,14 @@ pub fn init_pci_later() -> bool {
 pub fn init_local_timer() {
     /* This function assumes that interrupt is not enabled */
     /* This function does not enable interrupt */
-    get_cpu_manager_cluster().local_timer_manager = LocalTimerManager::new();
-    get_cpu_manager_cluster().arch_depend_data.local_apic_timer = LocalApicTimer::new();
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster().local_timer_manager,
+        LocalTimerManager::new(),
+    ));
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster().arch_depend_data.local_apic_timer,
+        LocalApicTimer::new(),
+    ));
     let local_apic_timer = &mut get_cpu_manager_cluster().arch_depend_data.local_apic_timer;
     let local_timer_manager = &mut get_cpu_manager_cluster().local_timer_manager;
     local_apic_timer.init();
@@ -268,7 +296,10 @@ pub fn init_local_timer() {
 }
 
 pub fn init_global_timer() {
-    get_kernel_manager_cluster().global_timer_manager = GlobalTimerManager::new();
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().global_timer_manager,
+        GlobalTimerManager::new(),
+    ));
 }
 
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
@@ -297,7 +328,10 @@ pub fn setup_cpu_manager_cluster(
             &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
         )
     };
-    cpu_manager.list = PtrLinkedListNode::new();
+    mem::forget(mem::replace(
+        &mut cpu_manager.list,
+        PtrLinkedListNode::new(),
+    ));
     get_kernel_manager_cluster()
         .cpu_list
         .insert_tail(&mut cpu_manager.list);
@@ -412,7 +446,6 @@ pub fn init_multiple_processors_ap() {
         local_apic_manager
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
 
-        drop(local_apic_manager);
         for _wait in 0..5000
         /* Wait 5s for AP init */
         {
