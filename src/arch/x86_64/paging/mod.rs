@@ -749,6 +749,16 @@ impl PageManager {
         }
     }
 
+    /// Flush page table and apply new page table.
+    ///
+    /// This function will return PML4 address.
+    /// **This function must call after [`init`], otherwise system may crash.**
+    ///
+    /// [`init`]: #method.init
+    pub fn get_page_table_address(&self) -> PAddress {
+        direct_map_to_physical_address(self.pml4)
+    }
+
     /// Delete the paging cache of the target address and update it.
     ///
     /// This function operates invpg.

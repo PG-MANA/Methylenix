@@ -653,7 +653,6 @@ impl GeneralAddress {
     }
 
     pub fn new(a: &[u8; 12]) -> Self {
-        use core::convert::TryInto;
         let address_type = a[0];
         if address_type >= 0x0B {
             return Self::invalid();

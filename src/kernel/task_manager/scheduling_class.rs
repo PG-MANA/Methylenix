@@ -2,12 +2,15 @@
 /// Scheduling Class
 ///
 pub mod kernel;
+pub mod user;
 
 use self::kernel::KernelSchedulingClass;
+use self::user::UserSchedulingClass;
 
 #[derive(Clone, Copy, PartialOrd, PartialEq, Eq, Ord)]
 pub enum SchedulingClass {
     KernelThread(KernelSchedulingClass),
+    UserThread(UserSchedulingClass),
 }
 
 impl SchedulingClass {
@@ -19,6 +22,9 @@ impl SchedulingClass {
     ) -> u64 {
         match self {
             SchedulingClass::KernelThread(s) => {
+                s.calculate_time_slice(priority_level, number_of_threads, interval_ms)
+            }
+            SchedulingClass::UserThread(s) => {
                 s.calculate_time_slice(priority_level, number_of_threads, interval_ms)
             }
         }
