@@ -2,7 +2,6 @@
 //! Physical Memory Manager
 //!
 //! 現時点では連結リスト管理だが、AVL-Treeなども実装してみたい
-//! WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている
 
 use super::data_type::{Address, MOrder, MPageOrder, MSize, PAddress};
 use super::slab_allocator::pool_allocator::PoolAllocator;
@@ -10,7 +9,10 @@ use super::MemoryError;
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
+use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
+
 pub struct PhysicalMemoryManager {
+    lock: IrqSaveSpinLockFlag,
     memory_size: MSize,
     free_memory_size: MSize,
     first_entry: *mut MemoryEntry,
@@ -45,6 +47,7 @@ impl PhysicalMemoryManager {
 
     pub const fn new() -> Self {
         Self {
+            lock: IrqSaveSpinLockFlag::new(),
             memory_size: MSize::new(0),
             free_memory_size: MSize::new(0),
             free_list: [None; Self::NUM_OF_FREE_LIST],
@@ -62,6 +65,7 @@ impl PhysicalMemoryManager {
     }
 
     pub fn add_memory_entry_pool(&mut self, pool_address: usize, pool_size: usize) {
+        let _lock = self.lock.lock();
         unsafe { self.memory_entry_pool.add_pool(pool_address, pool_size) }
     }
 
@@ -316,6 +320,7 @@ impl PhysicalMemoryManager {
             return Err(MemoryError::InvalidSize);
         }
         let page_order = Self::size_to_page_order(size);
+        let _lock = self.lock.lock();
         for i in page_order.to_usize()..Self::NUM_OF_FREE_LIST {
             let first_entry = if let Some(t) = self.free_list[i] {
                 unsafe { &mut *t }
@@ -359,6 +364,7 @@ impl PhysicalMemoryManager {
         align_order: MOrder,
     ) -> Result<(), MemoryError> {
         /* initializing use only */
+        let _lock = self.lock.lock();
         self.define_used_memory(start_address, size, align_order, &mut None)
     }
 
@@ -368,6 +374,7 @@ impl PhysicalMemoryManager {
         size: MSize,
         is_initializing: bool,
     ) -> Result<(), MemoryError> {
+        let _lock = self.lock.lock();
         if self.memory_size < self.free_memory_size + size && !is_initializing {
             return Err(MemoryError::InvalidSize);
         }
@@ -500,11 +507,13 @@ impl PhysicalMemoryManager {
         }
     }
 
-    pub fn dump_memory_entry(&self) {
+    pub fn dump_memory_entry(&self) -> Result<(), ()> {
+        let _lock = self.lock.try_lock()?;
+
         let mut entry = unsafe { &*self.first_entry };
         if !entry.is_enabled() {
             pr_info!("Root Entry is not enabled.");
-            return;
+            return Err(());
         }
         kprintln!(
             "Start:{:>#16X}, Size:{:>#16X}",
@@ -535,6 +544,7 @@ impl PhysicalMemoryManager {
                 );
             }
         }
+        return Ok(());
     }
 }
 
