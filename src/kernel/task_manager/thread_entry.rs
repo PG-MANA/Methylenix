@@ -24,7 +24,6 @@ pub struct ThreadEntry {
     thread_id: usize,
     process: NonNull<ProcessEntry>,
     context_data: ContextData,
-    privilege_level: u8,
     priority_level: u8,
     scheduling_class: SchedulingClass,
 }
@@ -35,7 +34,6 @@ impl ThreadEntry {
     pub fn init(
         &mut self,
         process: *mut ProcessEntry,
-        privilege_level: u8,
         priority_level: u8,
         scheduling_class: SchedulingClass,
         context_data: ContextData,
@@ -50,7 +48,6 @@ impl ThreadEntry {
         self.thread_id = 0;
         self.process = NonNull::new(process).unwrap();
         self.context_data = context_data;
-        self.privilege_level = privilege_level;
         self.priority_level = priority_level;
         self.scheduling_class = scheduling_class;
     }
@@ -96,10 +93,6 @@ impl ThreadEntry {
         self.priority_level
     }
 
-    pub const fn get_privilege_level(&self) -> u8 {
-        self.privilege_level
-    }
-
     pub fn set_priority_level(&mut self, p: u8) {
         self.priority_level = p;
     }
@@ -131,7 +124,6 @@ impl ThreadEntry {
             thread_id: self.thread_id,
             process: self.process,
             context_data: self.context_data.clone(),
-            privilege_level: self.privilege_level,
             priority_level: self.priority_level,
             scheduling_class: self.scheduling_class,
         }

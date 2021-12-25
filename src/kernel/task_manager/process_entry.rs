@@ -44,7 +44,6 @@ impl ProcessEntry {
     ) {
         self.lock = SpinLockFlag::new();
         let _lock = self.lock.lock();
-        assert_ne!(threads.len(), 0);
 
         self.signal = TaskSignal::Normal;
         self.status = ProcessStatus::Normal;
@@ -129,6 +128,10 @@ impl ProcessEntry {
         self.process_id
     }
 
+    pub const fn get_privilege_level(&self) -> u8 {
+        self.privilege_level
+    }
+
     pub fn get_memory_manager(&self) -> *mut MemoryManager {
         let _lock = self.lock.lock();
         let m = self.memory_manager;
@@ -142,6 +145,9 @@ impl ProcessEntry {
     /// [Self::lock] must be locked.
     pub fn get_thread_mut(&mut self, t_id: usize) -> Option<&mut ThreadEntry> {
         assert!(self.lock.is_locked());
+        if self.num_of_thread == 0 {
+            return None;
+        }
         if let Some(single_thread) = self.single_thread {
             let s_t = unsafe { &mut *single_thread };
             if s_t.get_t_id() == t_id {
@@ -166,13 +172,15 @@ impl ProcessEntry {
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());
         assert!(!thread.lock.is_locked());
-        assert_ne!(self.num_of_thread, 0);
 
         thread.set_process(self as *mut _);
         thread.set_t_id(self.next_thread_id);
         self.update_next_thread_id();
-
-        if self.num_of_thread == 1 {
+        if self.num_of_thread == 0 {
+            assert!(self.thread.is_empty());
+            assert!(self.single_thread.is_none());
+            self.single_thread = Some(thread as *mut _)
+        } else if self.num_of_thread == 1 {
             assert!(self.thread.is_empty());
             assert!(self.single_thread.is_some());
             let single_thread = unsafe { &mut *self.single_thread.take().unwrap() };
@@ -195,8 +203,12 @@ impl ProcessEntry {
         assert!(self.lock.is_locked());
         assert!(!thread.lock.is_locked());
 
-        if self.num_of_thread == 1 {
+        if self.num_of_thread == 0 {
             return Err(TaskError::InvalidProcessEntry);
+        } else if self.num_of_thread == 1 {
+            assert!(self.thread.is_empty());
+            assert!(self.single_thread.is_some());
+            self.single_thread = None;
         } else if self.num_of_thread == 2 {
             self.thread.remove(&mut thread.t_list);
             let single_thread = unsafe {

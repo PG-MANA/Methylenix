@@ -328,6 +328,27 @@ impl MemoryManager {
         return result;
     }
 
+    pub fn _clone_kernel_memory_if_needed(&mut self) -> Result<(), MemoryError> {
+        /* Depend on the architecture */
+        if !NEED_COPY_HIGH_MEMORY_PAGE_TABLE {
+            return Ok(());
+        }
+        if self
+            .virtual_memory_manager
+            .is_kernel_virtual_memory_manager()
+        {
+            return Ok(());
+        }
+        assert!(self.lock.is_locked());
+        let kernel_memory_manager = &get_kernel_manager_cluster().memory_manager;
+        let _system_lock = kernel_memory_manager.lock.lock();
+        let result = self
+            .virtual_memory_manager
+            .clone_kernel_area(&kernel_memory_manager.virtual_memory_manager);
+        drop(_system_lock);
+        return result;
+    }
+
     pub fn create_user_memory_manager(&self) -> Result<Self, MemoryError> {
         let mut user_virtual_memory_manager = VirtualMemoryManager::new();
 
@@ -377,7 +398,10 @@ impl MemoryManager {
                     option,
                     pm_manager,
                 ) {
-                    Ok(address) => Ok(address),
+                    Ok(address) => {
+                        self._clone_kernel_memory_if_needed()?;
+                        Ok(address)
+                    }
                     Err(e) => {
                         if let Err(e) = pm_manager.free(physical_address, size, false) {
                             pr_err!("Failed to free physical memory: {:?}", e);
@@ -433,7 +457,10 @@ impl MemoryManager {
                     MemoryOptionFlags::ALLOC,
                     pm_manager,
                 ) {
-                    Ok(virtual_address) => Ok((virtual_address, physical_address)),
+                    Ok(virtual_address) => {
+                        self._clone_kernel_memory_if_needed()?;
+                        Ok((virtual_address, physical_address))
+                    }
                     Err(e) => {
                         if let Err(e) = pm_manager.free(physical_address, size, false) {
                             pr_err!("Failed to free physical memory: {:?}", e);
@@ -548,6 +575,7 @@ impl MemoryManager {
             }
             return Err(MemoryError::PagingError);
         }
+        self._clone_kernel_memory_if_needed()?;
         return Ok(vm_start_address);
     }
 
@@ -560,10 +588,10 @@ impl MemoryManager {
             .free_address(aligned_vm_address.into(), pm_manager)
         {
             pr_err!("Failed to free memory: {:?}", e); /* The error of 'free_address' tends to be ignored. */
-            Err(e)
-        } else {
-            Ok(())
+            return Err(e);
         }
+        self._clone_kernel_memory_if_needed()?;
+        return Ok(());
         /* Freeing Physical Memory will be done by Virtual Memory Manager, if it be needed. */
     }
 
@@ -646,6 +674,7 @@ impl MemoryManager {
             pm_manager,
         )?;
 
+        self._clone_kernel_memory_if_needed()?;
         drop(physical_address);
         drop(_lock);
         Ok(virtual_address + (physical_address - aligned_physical_address))
@@ -675,6 +704,7 @@ impl MemoryManager {
             option,
             pm_manager,
         )?;
+        self._clone_kernel_memory_if_needed()?;
         drop(_lock);
         Ok(virtual_address + (physical_address - aligned_physical_address))
     }
@@ -700,6 +730,7 @@ impl MemoryManager {
             pm_manager,
         )?;
 
+        self._clone_kernel_memory_if_needed()?;
         drop(_lock);
         Ok(new_virtual_address + (old_virtual_address - aligned_virtual_address))
     }

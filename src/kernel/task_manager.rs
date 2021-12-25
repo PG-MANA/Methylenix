@@ -18,6 +18,7 @@ use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
@@ -34,6 +35,7 @@ pub struct TaskManager {
     context_manager: ContextManager,
     process_entry_pool: GlobalSlabAllocator<ProcessEntry>,
     thread_entry_pool: GlobalSlabAllocator<ThreadEntry>,
+    p_list: PtrLinkedList<ProcessEntry>,
     next_process_id: usize,
 }
 
@@ -83,6 +85,7 @@ impl TaskManager {
             context_manager: ContextManager::new(),
             process_entry_pool: GlobalSlabAllocator::new(ProcessEntry::PROCESS_ENTRY_ALIGN),
             thread_entry_pool: GlobalSlabAllocator::new(ThreadEntry::THREAD_ENTRY_ALIGN),
+            p_list: PtrLinkedList::new(),
             next_process_id: 1,
         }
     }
@@ -116,14 +119,12 @@ impl TaskManager {
 
         main_thread.init(
             kernel_process,
-            0,
             KernelSchedulingClass::get_normal_priority(),
             SchedulingClass::KernelThread(KernelSchedulingClass::new()),
             kernel_main_context,
         );
         idle_thread.init(
             kernel_process,
-            0,
             KernelSchedulingClass::get_idle_thread_priority(),
             SchedulingClass::KernelThread(KernelSchedulingClass::new()),
             idle_context,
@@ -275,11 +276,8 @@ impl TaskManager {
 
     pub fn create_user_process(
         &mut self,
-        entry_address: fn() -> !,
-        default_stack_size: Option<MSize>,
         parent_process: *mut ProcessEntry,
         privilege_level: u8,
-        priority_level: u8,
     ) -> Result<&'static mut ProcessEntry, TaskError> {
         /* Create Memory Manager */
         let mut user_memory_manger = get_kernel_manager_cluster()
@@ -294,23 +292,6 @@ impl TaskManager {
             user_memory_manger.disable();
             return Err(TaskError::MemoryError(e));
         }
-        /* TODO: Lazy allocation*/
-        let stack_size =
-            default_stack_size.unwrap_or(MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_USER));
-        let stack_address = get_cpu_manager_cluster()
-            .memory_allocator
-            .kmalloc(stack_size);
-        if let Err(e) = stack_address {
-            pr_err!("Failed to allocate Stack for user: {:?}", e);
-            user_memory_manger.disable();
-            if let Err(e) = get_cpu_manager_cluster().memory_allocator.kfree(
-                allocated_user_memory_manager_address.unwrap(),
-                MEMORY_MANAGER_SIZE,
-            ) {
-                pr_err!("Failed to free the MemoryManager: {:?}", e);
-            }
-            return Err(TaskError::MemoryError(e));
-        }
         let allocated_user_memory_manager = unsafe {
             &mut *(allocated_user_memory_manager_address.unwrap().to_usize() as *mut MemoryManager)
         };
@@ -318,34 +299,21 @@ impl TaskManager {
             allocated_user_memory_manager,
             user_memory_manger,
         ));
-        let stack_start_address = stack_address.unwrap() + stack_size;
 
         let _lock = self.lock.lock();
         let result = try {
-            /* Create VirtualMemoryManager */
-            let new_thread = self.thread_entry_pool.alloc()?;
             let new_process = self.process_entry_pool.alloc()?;
-            let context_data = self
-                .get_context_manager()
-                .create_user_context(entry_address, stack_start_address)?;
-
-            new_thread.init(
-                new_process,
-                privilege_level,
-                priority_level,
-                SchedulingClass::UserThread(UserSchedulingClass::new()),
-                context_data,
-            );
             if parent_process.is_null() {
                 assert_eq!(self.next_process_id, 1);
             }
             new_process.init(
                 self.next_process_id,
                 parent_process,
-                &mut [new_thread],
+                &mut [],
                 allocated_user_memory_manager as *mut _,
                 privilege_level,
             );
+            self.p_list.insert_tail(&mut new_process.p_list);
             self.update_next_p_id();
             new_process
         };
@@ -360,6 +328,62 @@ impl TaskManager {
             ) {
                 pr_err!("Failed to free the MemoryManager: {:?}", e);
             }
+        }
+        return result;
+    }
+
+    pub fn create_user_thread(
+        &mut self,
+        process: &mut ProcessEntry,
+        entry_address: fn() -> !,
+        default_stack_size: Option<MSize>,
+        priority_level: u8,
+    ) -> Result<&mut ThreadEntry, TaskError> {
+        assert_ne!(process.get_pid(), 0);
+        /* TODO: Lazy allocation*/
+        let stack_size =
+            default_stack_size.unwrap_or(MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_USER));
+        let stack_address = get_cpu_manager_cluster()
+            .memory_allocator
+            .kmalloc(stack_size);
+        if let Err(e) = stack_address {
+            pr_err!("Failed to allocate Stack for user: {:?}", e);
+            return Err(TaskError::MemoryError(e));
+        }
+        let stack_start_address = stack_address.unwrap() + stack_size;
+        let _lock = self.lock.lock();
+        let result = try {
+            let new_thread = self.thread_entry_pool.alloc()?;
+            let context_data = self
+                .get_context_manager()
+                .create_user_context(entry_address, stack_start_address);
+            if let Err(e) = context_data {
+                pr_err!("Failed to create thread context: {:?}", e);
+                self.thread_entry_pool.free(new_thread);
+                Err(TaskError::MemoryError(e))?;
+                unreachable!() /* To avoid compile error */
+            }
+
+            new_thread.init(
+                process,
+                priority_level,
+                SchedulingClass::UserThread(UserSchedulingClass::new()),
+                context_data.unwrap(),
+            );
+            new_thread.set_priority_level(UserSchedulingClass::get_custom_priority(priority_level));
+            new_thread.set_task_status(TaskStatus::New);
+            let _process_lock = process.lock.lock();
+            if let Err(e) = process.add_thread(new_thread) {
+                pr_err!("Failed to add a thread into the process: {:?}", e);
+                self.thread_entry_pool.free(new_thread);
+                Err(e)?;
+                unreachable!() /* To avoid compile error */
+            }
+            new_thread
+        };
+        drop(_lock);
+        if let Err(e) = &result {
+            pr_err!("Failed to create a thread for user: {:?}", e);
             if let Err(e) = get_cpu_manager_cluster()
                 .memory_allocator
                 .kfree(stack_address.unwrap(), stack_size)
