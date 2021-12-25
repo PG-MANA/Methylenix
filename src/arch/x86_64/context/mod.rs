@@ -11,7 +11,7 @@ pub mod memory_layout;
 use self::context_data::ContextData;
 
 use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::paging::{PageManager, PAGE_MASK, PAGE_SIZE};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize, VAddress};
 use crate::kernel::memory_manager::MemoryError;
@@ -85,7 +85,7 @@ impl ContextManager {
             (stack_address + stack_size).to_usize() - 8, /* For SystemV ABI Stack Alignment */
             self.system_cs as u64,
             self.system_ss as u64,
-            self.system_page_table_address,
+            //self.system_page_table_address,
         ))
     }
 
@@ -125,14 +125,14 @@ impl ContextManager {
         &self,
         entry_address: fn() -> !,
         stack_address: VAddress,
-        pg_manager: &PageManager,
+        //pg_manager: &PageManager,
     ) -> Result<ContextData, MemoryError> {
         Ok(ContextData::create_context_data_for_system(
             entry_address as *const fn() as usize,
             stack_address.to_usize() - 8, /* For SystemV ABI Stack Alignment */
             self.user_cs as u64,
             self.user_ss as u64,
-            pg_manager.get_page_table_address().to_usize(),
+            //pg_manager.get_page_table_address().to_usize(),
         ))
     }
 

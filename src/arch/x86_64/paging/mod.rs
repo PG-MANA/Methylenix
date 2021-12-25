@@ -23,7 +23,7 @@ use self::pml4e::{PML4E, PML4_MAX_ENTRY};
 use self::pte::{PTE, PT_MAX_ENTRY};
 
 use crate::arch::target_arch::context::memory_layout::{
-    direct_map_to_physical_address, physical_address_to_direct_map,
+    direct_map_to_physical_address, physical_address_to_direct_map, CANONICAL_AREA_HIGH,
 };
 use crate::arch::target_arch::device::cpu;
 

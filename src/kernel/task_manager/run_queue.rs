@@ -402,27 +402,39 @@ impl RunQueue {
             }
         };
 
-        let running_thread_t_id = running_thread.get_t_id();
         let running_thread_p_id = running_thread.get_process().get_pid();
-        drop(_running_thread_lock);
 
         assert_eq!(next_thread.get_task_status(), TaskStatus::Running);
 
-        if running_thread_t_id == next_thread.get_t_id()
+        if running_thread.get_t_id() == next_thread.get_t_id()
             && running_thread_p_id == next_thread.get_process().get_pid()
         {
             /* Same Task */
+            drop(_running_thread_lock);
             drop(_lock);
             InterruptManager::restore_local_irq(interrupt_flag);
             return;
         }
 
+        let mut should_use_switch_context = true;
+        if let Some(c) = current_context {
+            running_thread.set_context(c);
+            should_use_switch_context = false;
+        }
+        drop(_running_thread_lock);
+
         self.should_reschedule = false;
         self.running_thread = Some(next_thread);
-        if let Some(c) = current_context {
-            let _running_thread_lock = running_thread.lock.lock();
-            running_thread.set_context(c);
-            drop(_running_thread_lock);
+
+        if running_thread_p_id != next_thread.get_process().get_pid() {
+            let memory_manager = next_thread.get_process().get_memory_manager();
+            if !memory_manager.is_null() {
+                let memory_manager = unsafe { &mut *memory_manager };
+
+                memory_manager.set_paging_table();
+            }
+        }
+        if !should_use_switch_context {
             drop(_lock);
             InterruptManager::restore_local_irq(interrupt_flag); /* not good */
             unsafe {
@@ -440,7 +452,6 @@ impl RunQueue {
                     .get_context_manager()
                     .switch_context(running_thread.get_context(), next_thread.get_context());
             }
-            return;
         }
     }
 

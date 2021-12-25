@@ -18,10 +18,11 @@ pub const MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_e000_0000_0000);
 pub const MAP_END_ADDRESS: VAddress = VAddress::new(0xffff_efff_ffff_ffff);
 /// KERNEL_MAP_START_ADDRESS is also defined in arch/target_arch/boot/common.s and linker script.
 pub const KERNEL_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_ff80_0000_0000);
+pub const USER_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff);
 //pub const KERNEL_MAP_END_ADDRESS: VAddress = VAddress::new(0xffffffefffffffff);
 const CANONICAL_AREA_LOW: RangeInclusive<VAddress> =
     VAddress::new(0)..=VAddress::new(0x0000_7fff_ffff_ffff);
-const CANONICAL_AREA_HIGH: RangeInclusive<VAddress> =
+pub const CANONICAL_AREA_HIGH: RangeInclusive<VAddress> =
     VAddress::new(0xffff_8000_0000_0000)..=VAddress::new(0xffff_ffff_ffff_ffff);
 
 const _: () = assert();

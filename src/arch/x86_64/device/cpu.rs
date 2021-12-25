@@ -313,7 +313,7 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 swapgs
 3:
                 mov     rax, [rdi + 512 + 8 * 26]
-                mov     cr3, rax
+                //mov     cr3, rax
                 mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]
                 iretq
@@ -378,7 +378,7 @@ pub unsafe extern "C" fn task_switch(
                 mov     [rsi + 512 + 8 * 24], rax
                 lea     rax, [rip + 1f]
                 mov     [rsi + 512 + 8 * 25], rax   // RIP
-                mov     rax, cr3
+                //mov     rax, cr3
                 mov     [rsi + 512 + 8 * 26], rax
 
                 jmp     {}
