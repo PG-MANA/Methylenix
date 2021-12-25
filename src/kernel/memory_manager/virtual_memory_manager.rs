@@ -27,7 +27,7 @@ use crate::arch::target_arch::context::memory_layout::{
     MAP_START_ADDRESS,
 };
 use crate::arch::target_arch::paging::{
-    PageManager, MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE,
+    PageManager, MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE,
 };
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
@@ -42,9 +42,6 @@ pub struct VirtualMemoryManager {
 }
 
 impl VirtualMemoryManager {
-    const VM_MAP_ENTRY_CACHE_LEN: usize = 12;
-    const VM_PAGE_CACHE_LEN: usize = 12;
-
     pub const fn new() -> Self {
         Self {
             vm_entry: PtrLinkedList::new(),
@@ -53,22 +50,62 @@ impl VirtualMemoryManager {
         }
     }
 
-    pub fn init(
+    pub fn disable(&mut self) {
+
+        /* TODO: */
+    }
+
+    pub const fn is_kernel_virtual_memory_manager(&self) -> bool {
+        self.is_system_vm
+    }
+
+    pub fn clone_kernel_area(
         &mut self,
-        is_system_vm: bool,
+        kernel_virtual_memory_manager: &Self,
+    ) -> Result<(), MemoryError> {
+        assert!(!self.is_kernel_virtual_memory_manager());
+        assert!(kernel_virtual_memory_manager.is_kernel_virtual_memory_manager());
+        if let Err(e) = self
+            .page_manager
+            .copy_system_area(&kernel_virtual_memory_manager.page_manager)
+        {
+            pr_err!("Failed to copy kernel area: {:?}", e);
+            return Err(MemoryError::PagingError);
+        }
+        return Ok(());
+    }
+
+    pub fn init_system(
+        &mut self,
         max_physical_address: PAddress,
         pm_manager: &mut PhysicalMemoryManager,
     ) {
-        self.is_system_vm = is_system_vm;
+        self.is_system_vm = true;
 
         /* Set up page_manager */
         self.page_manager
             .init(pm_manager)
             .expect("Cannot init PageManager");
 
-        if is_system_vm {
-            self.setup_direct_mapped_area(max_physical_address, pm_manager);
+        self.setup_direct_mapped_area(max_physical_address, pm_manager);
+    }
+
+    pub fn init_user(
+        &mut self,
+        system_virtual_memory_manager: &VirtualMemoryManager,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        self.is_system_vm = false;
+
+        /* Set up page_manager */
+        if let Err(e) = self
+            .page_manager
+            .init_user(&system_virtual_memory_manager.page_manager, pm_manager)
+        {
+            pr_err!("Failed to init PageManager for user: {:?}", e);
+            return Err(MemoryError::PagingError);
         }
+        return Ok(());
     }
 
     #[inline]
@@ -280,6 +317,10 @@ impl VirtualMemoryManager {
 
         if !option.is_for_kernel() && !option.is_for_user() {
             option = option | MemoryOptionFlags::KERNEL;
+        }
+        if option.is_for_kernel() && permission.is_user_accessible() {
+            pr_err!("Invalid Memory Permission");
+            return Err(MemoryError::InternalError);
         }
 
         let mut entry = if let Some(vm_start_address) = virtual_address {
@@ -737,62 +778,6 @@ impl VirtualMemoryManager {
         } else {
             Err(MemoryError::InvalidAddress)
         }
-    }
-
-    fn add_entry_pool(
-        &mut self,
-        func_to_add_pool: &dyn Fn(&mut Self, VAddress, MSize),
-        current_pool_len: usize,
-        new_pool_size: MSize,
-        mut pm_manager: Option<&mut PhysicalMemoryManager>,
-    ) -> Result<(), MemoryError> {
-        if current_pool_len > 0 && pm_manager.is_some() {
-            let pm_manager = pm_manager.as_mut().unwrap();
-            match pm_manager.alloc(new_pool_size, MOrder::new(PAGE_SHIFT)) {
-                Ok(address) => {
-                    match self.alloc_and_map_virtual_address(
-                        new_pool_size,
-                        address,
-                        MemoryPermissionFlags::data(),
-                        MemoryOptionFlags::ALLOC,
-                        pm_manager,
-                    ) {
-                        Ok(v_address) => {
-                            self.update_paging(v_address);
-                            func_to_add_pool(self, v_address, new_pool_size);
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            pr_err!("Failed to allocate vm_entry's pool: {:?}", e);
-                            if let Err(e) = pm_manager.free(address, new_pool_size, false) {
-                                pr_err!(
-                                    "Failed to free physical memory for VirtualMemoryManager: {:?}",
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(MemoryError::EntryPoolRunOut) => {
-                    return if let Err(e) = self.add_physical_memory_manager_pool(pm_manager) {
-                        pr_err!("Failed to add PhysicalMemoryManager's memory pool: {:?}", e);
-                        Err(e)
-                    } else {
-                        self.add_entry_pool(
-                            func_to_add_pool,
-                            current_pool_len,
-                            new_pool_size,
-                            Some(pm_manager),
-                        )
-                    };
-                }
-                Err(e) => {
-                    pr_err!("Failed to add PhysicalMemoryManager's memory pool: {:?}", e);
-                    return Err(e);
-                }
-            }
-        }
-        return Err(MemoryError::AddressNotAvailable);
     }
 
     pub(super) fn add_physical_memory_manager_pool(

@@ -12,6 +12,7 @@ pub const PML4_MAX_ENTRY: usize = 512;
 
 /* 53th bit(1 << 52) of PML4E is used to check if the address is valid. */
 
+#[derive(Clone)]
 pub struct PML4E {
     flags: u64,
 }

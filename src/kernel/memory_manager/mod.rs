@@ -20,7 +20,9 @@ use self::physical_memory_manager::PhysicalMemoryManager;
 use self::virtual_memory_manager::{VirtualMemoryEntry, VirtualMemoryManager, VirtualMemoryPage};
 
 use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
-use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
+use crate::arch::target_arch::paging::{
+    NEED_COPY_HIGH_MEMORY_PAGE_TABLE, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE,
+};
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::slab_allocator::pool_allocator::PoolAllocator;
@@ -297,6 +299,45 @@ impl MemoryManager {
             virtual_memory_manager,
             lock: IrqSaveSpinLockFlag::new(),
         }
+    }
+
+    pub fn disable(&mut self) {
+        let _lock = self.lock.lock();
+        self.virtual_memory_manager.disable();
+    }
+
+    pub fn clone_kernel_memory_if_needed(&mut self) -> Result<(), MemoryError> {
+        /* Depend on the architecture */
+        if !NEED_COPY_HIGH_MEMORY_PAGE_TABLE {
+            return Ok(());
+        }
+        if self
+            .virtual_memory_manager
+            .is_kernel_virtual_memory_manager()
+        {
+            return Ok(());
+        }
+        let _lock = self.lock.lock();
+        let kernel_memory_manager = &get_kernel_manager_cluster().memory_manager;
+        let _system_lock = kernel_memory_manager.lock.lock();
+        let result = self
+            .virtual_memory_manager
+            .clone_kernel_area(&kernel_memory_manager.virtual_memory_manager);
+        drop(_system_lock);
+        drop(_lock);
+        return result;
+    }
+
+    pub fn create_user_memory_manager(&self) -> Result<Self, MemoryError> {
+        let mut user_virtual_memory_manager = VirtualMemoryManager::new();
+
+        let _lock = self.lock.lock();
+        user_virtual_memory_manager
+            .init_user(&self.virtual_memory_manager, get_physical_memory_manager())?;
+        drop(_lock);
+        return Ok(get_kernel_manager_cluster()
+            .system_memory_manager
+            .create_new_memory_manager(user_virtual_memory_manager));
     }
 
     fn add_memory_pool_to_physical_memory_manager(

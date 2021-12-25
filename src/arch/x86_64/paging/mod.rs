@@ -54,6 +54,8 @@ pub const MAX_VIRTUAL_ADDRESS: VAddress = VAddress::new(MAX_VIRTUAL_ADDRESS_USIZ
 /// Max virtual address of x86_64(Type = usize)
 pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0xFFFF_FFFF_FFFF_FFFF;
 
+pub const NEED_COPY_HIGH_MEMORY_PAGE_TABLE: bool = true;
+
 /// PageManager
 ///
 /// This controls paging system.
@@ -134,6 +136,33 @@ impl PageManager {
         let pml4_table = self.get_top_level_table();
         for pml4 in pml4_table.iter_mut() {
             pml4.init();
+        }
+        return Ok(());
+    }
+
+    pub fn init_user(
+        &mut self,
+        system_page_manager: &Self,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), PagingError> {
+        self.is_1gb_paging_supported = false;
+        let pml4_address = Self::alloc_page_table(pm_manager)?;
+        self.pml4 = pml4_address;
+        self.copy_system_area(system_page_manager)?;
+        return Ok(());
+    }
+
+    pub fn copy_system_area(&mut self, system_page_manager: &Self) -> Result<(), PagingError> {
+        let pml4_table = self.get_top_level_table();
+
+        let high_area_start =
+            (CANONICAL_AREA_HIGH.start().to_usize() >> (PAGE_SHIFT + 9 * 3)) & (0x1FF);
+        for pml4e in pml4_table[0..high_area_start].iter_mut() {
+            pml4e.init();
+        }
+        let system_pml4_table = system_page_manager.get_top_level_table();
+        for i in high_area_start..pml4_table.len() {
+            pml4_table[i] = system_pml4_table[i].clone();
         }
         return Ok(());
     }

@@ -129,6 +129,13 @@ impl ProcessEntry {
         self.process_id
     }
 
+    pub fn get_memory_manager(&self) -> *mut MemoryManager {
+        let _lock = self.lock.lock();
+        let m = self.memory_manager;
+        drop(_lock);
+        return m;
+    }
+
     /// Search the thread from [Self::thread]
     ///
     /// This function searches the thread having specified t_id.

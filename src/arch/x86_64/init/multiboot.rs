@@ -156,8 +156,7 @@ pub fn init_memory_by_multiboot_information(
 
     /* Set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
-    virtual_memory_manager.init(
-        true,
+    virtual_memory_manager.init_system(
         PAddress::new(max_available_address),
         &mut physical_memory_manager,
     );
