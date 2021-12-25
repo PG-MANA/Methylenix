@@ -18,8 +18,8 @@ use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress,
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
 use crate::kernel::memory_manager::{
-    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags, MemoryManager,
-    SystemMemoryManager,
+    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags, get_physical_memory_manager,
+    MemoryManager, SystemMemoryManager,
 };
 
 use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
@@ -161,6 +161,14 @@ pub fn init_memory_by_multiboot_information(
         PAddress::new(max_available_address),
         &mut physical_memory_manager,
     );
+    core::mem::forget(core::mem::replace(
+        &mut get_kernel_manager_cluster().system_memory_manager,
+        SystemMemoryManager::new(physical_memory_manager),
+    ));
+    get_kernel_manager_cluster()
+        .system_memory_manager
+        .init_pools(&mut virtual_memory_manager);
+
     for section in multiboot_information.elf_info.clone() {
         if !section.should_allocate() || (section.address() & !PAGE_MASK) != 0 {
             continue;
@@ -185,7 +193,7 @@ pub fn init_memory_by_multiboot_information(
             aligned_size,
             permission,
             MemoryOptionFlags::KERNEL,
-            &mut physical_memory_manager,
+            get_physical_memory_manager(),
         ) {
             Ok(address) => {
                 if address == VAddress::new(section.address()) {
@@ -215,13 +223,11 @@ pub fn init_memory_by_multiboot_information(
             aligned_multiboot.1,
             MemoryPermissionFlags::rodata(),
             MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
-            &mut physical_memory_manager,
+            get_physical_memory_manager(),
         )
         .expect("Cannot map multiboot information");
 
     /* Set up Memory Manager */
-    get_kernel_manager_cluster().system_memory_manager =
-        SystemMemoryManager::new(physical_memory_manager);
     let mut memory_manager = get_kernel_manager_cluster()
         .system_memory_manager
         .create_new_memory_manager(virtual_memory_manager);
