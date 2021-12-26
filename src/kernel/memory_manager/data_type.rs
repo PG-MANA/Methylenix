@@ -541,7 +541,7 @@ impl MemoryOptionFlags {
     pub const ALLOC: Self = Self(1 << 7);
 
     pub fn is_for_kernel(&self) -> bool {
-        (*self & Self::KERNEL).0 != 0
+        !self.is_for_user()
     }
 
     pub fn is_for_user(&self) -> bool {
