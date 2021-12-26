@@ -63,7 +63,6 @@ impl ThreadEntry {
         self.status = TaskStatus::New;
         self.thread_id = 0;
         self.process = original_thread.process;
-        self.privilege_level = original_thread.privilege_level;
         self.priority_level = original_thread.priority_level;
         self.scheduling_class = original_thread.scheduling_class;
         self.context_data = context_data;
