@@ -7,6 +7,8 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
+use core::arch::asm;
+
 #[inline(always)]
 pub unsafe fn sti() {
     asm!("sti");
