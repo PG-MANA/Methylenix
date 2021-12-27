@@ -6,6 +6,7 @@
 
 use super::super::device::pm_timer::AcpiPmTimer;
 use super::super::GeneralAddress;
+use super::AcpiTable;
 
 use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
 
@@ -70,27 +71,29 @@ pub struct FadtManager {
     base_address: VAddress,
 }
 
-impl FadtManager {
-    pub const SIGNATURE: [u8; 4] = *b"FACP";
+impl AcpiTable for FadtManager {
+    const SIGNATURE: [u8; 4] = *b"FACP";
 
-    pub const fn new() -> Self {
+    fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
         }
     }
 
-    pub fn init(&mut self, fadt_vm_address: VAddress) -> bool {
+    fn init(&mut self, vm_address: VAddress) -> Result<(), ()> {
         /* fadt_vm_address must be accessible */
-        let fadt = unsafe { &*(fadt_vm_address.to_usize() as *const FADT) };
+        let fadt = unsafe { &*(vm_address.to_usize() as *const FADT) };
         if fadt.major_version > 6 {
             pr_err!("Not supported FADT version:{}", fadt.major_version);
         }
-        let fadt_vm_address = remap_table!(fadt_vm_address, fadt.length);
+        let fadt_vm_address = remap_table!(vm_address, fadt.length);
         self.base_address = fadt_vm_address;
 
-        return true;
+        return Ok(());
     }
+}
 
+impl FadtManager {
     pub fn get_acpi_pm_timer(&self) -> Option<AcpiPmTimer> {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
         let address = GeneralAddress::new(&fadt.x_pm_tmr_block).address;

@@ -4,6 +4,8 @@
 //! This manager contains the information of MADT
 //! MADT has the list of Local APIC IDs.
 
+use super::{AcpiTable, OptionalAcpiTable};
+
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
@@ -33,25 +35,29 @@ pub struct LocalApicIdIter {
     length: MSize,
 }
 
-impl MadtManager {
-    pub const SIGNATURE: [u8; 4] = *b"APIC";
+impl AcpiTable for MadtManager {
+    const SIGNATURE: [u8; 4] = *b"APIC";
 
-    pub const fn new() -> Self {
+    fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
         }
     }
 
-    pub fn init(&mut self, madt_vm_address: VAddress) -> bool {
+    fn init(&mut self, vm_address: VAddress) -> Result<(), ()> {
         /* madt_vm_address must be accessible */
-        let madt = unsafe { &*(madt_vm_address.to_usize() as *const MADT) };
+        let madt = unsafe { &*(vm_address.to_usize() as *const MADT) };
         if madt.revision > 4 {
             pr_err!("Not supported MADT version: {}", madt.revision);
         }
-        self.base_address = remap_table!(madt_vm_address, madt.length);
-        return true;
+        self.base_address = remap_table!(vm_address, madt.length);
+        return Ok(());
     }
+}
 
+impl OptionalAcpiTable for MadtManager {}
+
+impl MadtManager {
     /// Find the Local APIC ID list
     ///
     /// This function will search the Local APIC ID from the Interrupt Controller Structures.

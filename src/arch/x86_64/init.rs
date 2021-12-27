@@ -17,6 +17,7 @@ use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
+use crate::kernel::drivers::acpi::table::{madt::MadtManager, mcfg::McfgManager};
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::manager_cluster::{
@@ -351,8 +352,8 @@ pub fn init_multiple_processors_ap() {
         .acpi_manager
         .lock()
         .unwrap()
-        .get_xsdt_manager()
-        .get_madt_manager();
+        .get_table_manager()
+        .get_table_manager::<MadtManager>();
     if madt_manager.is_none() {
         pr_info!("ACPI does not have MADT.");
         return;

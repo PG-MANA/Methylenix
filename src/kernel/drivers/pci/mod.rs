@@ -2,8 +2,6 @@
 //! PCI
 //!
 
-pub mod pcie;
-
 use crate::arch::target_arch::device::pci::{
     read_config_data_register, setup_arch_depend_pci_device, write_config_address_register,
     write_config_data_register,

@@ -20,6 +20,7 @@ use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
+use crate::kernel::drivers::acpi::table::bgrt::BgrtManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
@@ -217,7 +218,9 @@ fn draw_boot_logo() {
     };
     let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
 
-    let bgrt_manager = acpi_manager.get_xsdt_manager().get_bgrt_manager();
+    let bgrt_manager = acpi_manager
+        .get_table_manager()
+        .get_table_manager::<BgrtManager>();
     drop(acpi_manager);
     if bgrt_manager.is_none() {
         pr_info!("ACPI does not have the BGRT information.");

@@ -9,6 +9,8 @@ pub mod aml;
 pub mod device;
 pub mod event;
 pub mod table {
+    use crate::kernel::memory_manager::data_type::VAddress;
+
     const INITIAL_MMAP_SIZE: usize = 36;
     macro_rules! remap_table {
         ($address:expr,$new_size:expr) => {{
@@ -23,11 +25,20 @@ pub mod table {
                 Ok(a) => a,
                 Err(e) => {
                     pr_err!("Failed to remap a ACPI table: {:?}", e);
-                    return false;
+                    return Err(());
                 }
             }
         }};
     }
+
+    pub trait AcpiTable {
+        const SIGNATURE: [u8; 4];
+        fn new() -> Self;
+        fn init(&mut self, vm_address: VAddress) -> Result<(), ()>;
+    }
+
+    pub trait OptionalAcpiTable {}
+
     pub mod bgrt;
     pub mod dsdt;
     pub mod fadt;
@@ -97,11 +108,11 @@ impl AcpiManager {
             return false;
         }
         //ADD: checksum verification
-        if !self
+        if let Err(e) = self
             .xsdt_manager
             .init(PAddress::new(rsdp.xsdt_address as usize))
         {
-            pr_err!("Cannot init XSDT Manager.");
+            pr_err!("Failed to initialize XSDT Manager: {:?}", e);
             return false;
         }
         self.enabled = true;
@@ -114,7 +125,7 @@ impl AcpiManager {
     pub fn create_acpi_event_manager(&self) -> Option<AcpiEventManager> {
         if self.enabled {
             Some(AcpiEventManager::new(
-                &self.get_xsdt_manager().get_fadt_manager(),
+                &self.get_table_manager().get_fadt_manager(),
             ))
         } else {
             None
@@ -171,7 +182,7 @@ impl AcpiManager {
         self.enabled
     }
 
-    pub fn get_xsdt_manager(&self) -> &XsdtManager {
+    pub fn get_table_manager(&self) -> &XsdtManager {
         &self.xsdt_manager
     }
 
@@ -284,7 +295,7 @@ impl AcpiManager {
         let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block();
 
         let sleep_control_register = self
-            .get_xsdt_manager()
+            .get_table_manager()
             .get_fadt_manager()
             .get_sleep_control_register();
         if sleep_control_register.is_some() {
