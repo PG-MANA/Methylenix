@@ -130,7 +130,7 @@ impl TaskManager {
             idle_context,
         );
 
-        let memory_manager = &mut get_kernel_manager_cluster().memory_manager;
+        let memory_manager = &mut get_kernel_manager_cluster().kernel_memory_manager;
 
         kernel_process.init(
             0,
@@ -281,7 +281,7 @@ impl TaskManager {
     ) -> Result<&'static mut ProcessEntry, TaskError> {
         /* Create Memory Manager */
         let mut user_memory_manger = get_kernel_manager_cluster()
-            .memory_manager
+            .kernel_memory_manager
             .create_user_memory_manager()?;
         const MEMORY_MANAGER_SIZE: MSize = MSize::new(core::mem::size_of::<MemoryManager>());
         let allocated_user_memory_manager_address = get_cpu_manager_cluster()

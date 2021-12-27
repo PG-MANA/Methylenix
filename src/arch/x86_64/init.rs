@@ -160,7 +160,7 @@ pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
 /// Init AcpiManager and AcpiEventManager with parsing AML
 ///
 /// This function will setup some devices like power button.
-/// They will call malloc, therefore this function should be called after init of memory_manager
+/// They will call malloc, therefore this function should be called after init of kernel_memory_manager
 pub fn init_acpi_later() -> bool {
     let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
     if !acpi_manager.is_available() {
@@ -394,10 +394,11 @@ pub fn init_multiple_processors_ap() {
     /* Allocate and set temporary stack */
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
     let stack = get_kernel_manager_cluster()
-        .memory_manager
+        .kernel_memory_manager
         .alloc_pages_with_physical_address(
             stack_size.to_order(None).to_page_order(),
             MemoryPermissionFlags::data(),
+            None,
         )
         .expect("Failed to alloc stack for AP");
     unsafe {
@@ -459,14 +460,17 @@ pub fn init_multiple_processors_ap() {
 
     /* Free boot_address */
     if let Err(e) = get_kernel_manager_cluster()
-        .memory_manager
+        .kernel_memory_manager
         .free_physical_memory(boot_address, PAGE_SIZE)
     {
         pr_err!("Cannot free boot_address: {:?}", e);
     }
 
     /* Free temporary stack */
-    if let Err(e) = get_kernel_manager_cluster().memory_manager.free(stack.0) {
+    if let Err(e) = get_kernel_manager_cluster()
+        .kernel_memory_manager
+        .free(stack.0)
+    {
         pr_err!("Cannot free temporary stack: {:?}", e);
     }
 

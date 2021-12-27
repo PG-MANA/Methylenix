@@ -5,11 +5,13 @@
 //! This mode will be enabled when boot from legacy BIOS. Under the UEFI BIOS, this mode will be unusable.
 
 use crate::arch::target_arch::device::crt;
+use crate::io_remap;
 
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::graphic_manager::text_buffer_driver::TextBufferDriver;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, PAddress};
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
+};
 
 /// VgaTextDriver
 ///
@@ -89,11 +91,11 @@ impl VgaTextDriver {
     /// otherwise return false including the situation the screen is not text mode.
     pub fn set_frame_buffer_memory_permission(&mut self) -> bool {
         if self.address != 0 {
-            match get_kernel_manager_cluster().memory_manager.io_map(
+            match io_remap!(
                 PAddress::new(self.address),
                 MSize::new(self.width * self.height * 2 as usize),
                 MemoryPermissionFlags::data(),
-                None,
+                MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS
             ) {
                 Ok(address) => {
                     self.address = address.to_usize();

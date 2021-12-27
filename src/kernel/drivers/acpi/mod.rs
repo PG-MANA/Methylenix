@@ -11,11 +11,14 @@ pub mod event;
 pub mod table {
     const INITIAL_MMAP_SIZE: usize = 36;
     macro_rules! remap_table {
-        ($address:expr,$new_size:expr) => {
-            match get_kernel_manager_cluster().memory_manager.mremap_dev(
+        ($address:expr,$new_size:expr) => {{
+            use crate::kernel::drivers::acpi::INITIAL_MMAP_SIZE;
+            use crate::kernel::memory_manager::data_type::MSize;
+            use crate::mremap;
+            match mremap!(
                 $address,
-                INITIAL_MMAP_SIZE.into(),
-                MSize::new($new_size as usize),
+                MSize::new(INITIAL_MMAP_SIZE),
+                MSize::new($new_size as usize)
             ) {
                 Ok(a) => a,
                 Err(e) => {
@@ -23,12 +26,13 @@ pub mod table {
                     return false;
                 }
             }
-        };
+        }};
     }
     pub mod bgrt;
     pub mod dsdt;
     pub mod fadt;
     pub mod madt;
+    pub mod mcfg;
     pub mod ssdt;
     pub mod xsdt;
 }

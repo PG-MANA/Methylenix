@@ -30,6 +30,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
+use crate::{io_remap, mremap};
 
 use core::mem;
 
@@ -208,7 +209,7 @@ fn idle() -> ! {
 fn draw_boot_logo() {
     let free_mapped_address = |address: usize| {
         if let Err(e) = get_kernel_manager_cluster()
-            .memory_manager
+            .kernel_memory_manager
             .free(VAddress::new(address))
         {
             pr_err!("Freeing the bitmap data of BGRT was failed: {:?}", e);
@@ -232,11 +233,11 @@ fn draw_boot_logo() {
     drop(bgrt_manager);
 
     let original_map_size = MSize::from(54);
-    let result = get_kernel_manager_cluster().memory_manager.mmap(
+    let result = io_remap!(
         boot_logo_physical_address.unwrap(),
         original_map_size,
         MemoryPermissionFlags::rodata(),
-        MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::PRE_RESERVED,
+        MemoryOptionFlags::PRE_RESERVED
     );
     if result.is_err() {
         pr_err!(
@@ -266,12 +267,13 @@ fn draw_boot_logo() {
     let aligned_bitmap_width =
         ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
 
-    let result = get_kernel_manager_cluster().memory_manager.mremap_dev(
+    let result = mremap!(
         boot_logo_address.into(),
         original_map_size,
-        ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
-            + file_offset as usize)
-            .into(),
+        MSize::new(
+            (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
+                + file_offset as usize
+        )
     );
     if result.is_err() {
         pr_err!(
@@ -362,7 +364,7 @@ pub extern "C" fn ap_boot_main() -> ! {
 
     /* Apply kernel paging table */
     get_kernel_manager_cluster()
-        .memory_manager
+        .kernel_memory_manager
         .set_paging_table();
 
     /* Setup CPU Manager, it contains individual data of CPU */

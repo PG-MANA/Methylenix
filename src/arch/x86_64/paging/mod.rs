@@ -27,7 +27,7 @@ use crate::arch::target_arch::context::memory_layout::{
 };
 use crate::arch::target_arch::device::cpu;
 
-//use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+//use crate::kernel::kernel_memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::data_type::{
     Address, MOrder, MSize, MemoryPermissionFlags, PAddress, VAddress,
 };

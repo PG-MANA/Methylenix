@@ -431,7 +431,7 @@ impl RunQueue {
             if !memory_manager.is_null() {
                 let memory_manager = unsafe { &mut *memory_manager };
                 memory_manager
-                    .clone_kernel_memory_if_needed()
+                    .clone_kernel_memory_pages_if_needed()
                     .expect("Failed to copy the page table of kernel area");
                 memory_manager.set_paging_table();
             }

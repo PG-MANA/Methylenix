@@ -4,9 +4,11 @@
 //! This manager is used to write image or text.
 //!
 
+use crate::io_remap;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, PAddress};
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
+};
 
 pub struct FrameBufferManager {
     frame_buffer_address: usize,
@@ -41,7 +43,7 @@ impl FrameBufferManager {
             return false;
         }
 
-        match get_kernel_manager_cluster().memory_manager.io_map(
+        match io_remap!(
             PAddress::new(self.frame_buffer_address),
             MSize::new(
                 self.frame_buffer_width
@@ -49,7 +51,7 @@ impl FrameBufferManager {
                     * (self.frame_buffer_color_depth >> 3/* /8 */) as usize,
             ),
             MemoryPermissionFlags::data(),
-            None,
+            MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS
         ) {
             Ok(address) => {
                 self.frame_buffer_address = address.to_usize();

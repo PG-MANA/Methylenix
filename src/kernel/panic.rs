@@ -24,7 +24,7 @@ pub fn panic(info: &panic::PanicInfo) -> ! {
         );
     }
     get_kernel_manager_cluster()
-        .memory_manager
+        .kernel_memory_manager
         .dump_memory_manager();
 
     kprintln!("---- End of Debug information ----\nSystem will be halt.");

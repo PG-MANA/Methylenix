@@ -12,7 +12,7 @@ use super::{MemoryError, MemoryPermissionFlags};
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::Address;
+use crate::kernel::memory_manager::data_type::{Address, MemoryOptionFlags};
 
 struct SizeAllocator {
     size_64: LocalSlabAllocator<[u8; 64]>,
@@ -130,10 +130,13 @@ impl MemoryAllocator {
             Err(MemoryError::InvalidSize)
         } else if size > SizeAllocator::MAX_SIZE {
             let page_aligned_size = MSize::new((size - MSize::new(1)) & PAGE_MASK) + PAGE_SIZE;
-            get_kernel_manager_cluster().memory_manager.alloc_pages(
-                page_aligned_size.to_order(None).to_page_order(),
-                MemoryPermissionFlags::data(),
-            )
+            get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .alloc_pages(
+                    page_aligned_size.to_order(None).to_page_order(),
+                    MemoryPermissionFlags::data(),
+                    Some(MemoryOptionFlags::KERNEL | MemoryOptionFlags::ALLOC),
+                )
         } else {
             self.size_allocator.alloc(size)
         }
@@ -143,7 +146,9 @@ impl MemoryAllocator {
         if size.is_zero() {
             Err(MemoryError::InvalidSize)
         } else if size > SizeAllocator::MAX_SIZE {
-            get_kernel_manager_cluster().memory_manager.free(address)
+            get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .free(address)
         } else {
             self.size_allocator.dealloc(address, size);
             Ok(())
@@ -156,14 +161,17 @@ impl MemoryAllocator {
         }
         let page_aligned_size = MSize::new((size - MSize::new(1)) & PAGE_MASK) + PAGE_SIZE;
         get_kernel_manager_cluster()
-            .memory_manager
+            .kernel_memory_manager
             .alloc_nonlinear_pages(
                 page_aligned_size.to_order(None).to_page_order(),
                 MemoryPermissionFlags::data(),
+                Some(MemoryOptionFlags::KERNEL | MemoryOptionFlags::ALLOC),
             )
     }
 
     pub fn vfree(&mut self, address: VAddress) -> Result<(), MemoryError> {
-        get_kernel_manager_cluster().memory_manager.free(address)
+        get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .free(address)
     }
 }

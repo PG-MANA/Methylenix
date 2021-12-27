@@ -6,10 +6,8 @@
 
 use super::super::device::pm_timer::AcpiPmTimer;
 use super::super::GeneralAddress;
-use super::super::INITIAL_MMAP_SIZE;
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
 
 #[repr(C, packed)]
 struct FADT {

@@ -5,8 +5,7 @@
 //!
 
 use crate::arch::target_arch::device::cpu;
-
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::io_remap;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
@@ -76,11 +75,11 @@ impl LocalApicManager {
             }
             self.is_x2apic_enabled = true;
         } else {
-            match get_kernel_manager_cluster().memory_manager.io_map(
+            match io_remap!(
                 base_address,
                 MSize::new(0x1000),
                 MemoryPermissionFlags::data(),
-                Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
+                MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS
             ) {
                 Ok(address) => {
                     self.base_address = address;

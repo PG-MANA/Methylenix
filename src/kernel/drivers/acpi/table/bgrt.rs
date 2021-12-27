@@ -4,10 +4,8 @@
 //! This manager contains the information of BGRT.
 //! BGRT is usually vendor logo.
 
-use super::super::INITIAL_MMAP_SIZE;
-
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
 
 #[repr(C, packed)]
 struct BGRT {
@@ -71,7 +69,7 @@ impl Drop for BgrtManager {
     fn drop(&mut self) {
         if !self.base_address.is_zero() {
             if let Err(e) = get_kernel_manager_cluster()
-                .memory_manager
+                .kernel_memory_manager
                 .free(self.base_address)
             {
                 pr_warn!("Cannot free BGRT: {:?}", e);

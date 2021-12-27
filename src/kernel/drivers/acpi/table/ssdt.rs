@@ -5,9 +5,6 @@
 //! Definition block is treated by AML module.
 //!
 
-use super::super::INITIAL_MMAP_SIZE;
-
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 #[repr(C, packed)]

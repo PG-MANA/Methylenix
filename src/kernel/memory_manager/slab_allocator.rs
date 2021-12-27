@@ -8,12 +8,13 @@ pub mod pool_allocator;
 
 use self::pool_allocator::PoolAllocator;
 
-use super::data_type::MPageOrder;
+use super::data_type::{Address, MPageOrder};
 use super::{MemoryError, MemoryPermissionFlags};
 
 use crate::arch::target_arch::interrupt::InterruptManager;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::Address;
+
+use crate::alloc_pages;
+
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 struct SlabAllocator<T> {
@@ -43,9 +44,7 @@ impl<T> SlabAllocator<T> {
     }
 
     fn grow_pool(&mut self) -> Result<(), MemoryError> {
-        let page = get_kernel_manager_cluster()
-            .memory_manager
-            .alloc_pages(Self::DEFAULT_ALLOC_ORDER, MemoryPermissionFlags::data())?;
+        let page = alloc_pages!(Self::DEFAULT_ALLOC_ORDER, MemoryPermissionFlags::data())?;
         unsafe {
             self.allocator.add_pool(
                 page.to_usize(),

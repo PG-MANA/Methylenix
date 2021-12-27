@@ -18,11 +18,13 @@ use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress,
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
 use crate::kernel::memory_manager::{
-    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags, get_physical_memory_manager,
-    MemoryManager, SystemMemoryManager,
+    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags,
+    system_memory_manager::get_physical_memory_manager, MemoryManager,
 };
 
+use crate::io_remap;
 use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
+use crate::kernel::memory_manager::system_memory_manager::SystemMemoryManager;
 use core::mem;
 
 /// Init memory system based on multiboot information.
@@ -221,19 +223,20 @@ pub fn init_memory_by_multiboot_information(
             None,
             aligned_multiboot.1,
             MemoryPermissionFlags::rodata(),
-            MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
+            MemoryOptionFlags::IO_MAP | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
             get_physical_memory_manager(),
         )
         .expect("Cannot map multiboot information");
 
     /* Set up Memory Manager */
-    let mut memory_manager = get_kernel_manager_cluster()
-        .system_memory_manager
-        .create_new_memory_manager(virtual_memory_manager);
-
+    core::mem::forget(core::mem::replace(
+        &mut get_kernel_manager_cluster().kernel_memory_manager,
+        MemoryManager::new(virtual_memory_manager),
+    ));
     /* Apply paging */
-    memory_manager.set_paging_table();
-    get_kernel_manager_cluster().memory_manager = memory_manager;
+    get_kernel_manager_cluster()
+        .kernel_memory_manager
+        .set_paging_table();
 
     /* Set up Kernel Memory Alloc Manager */
     let mut memory_allocator = MemoryAllocator::new();
@@ -257,11 +260,11 @@ pub fn init_memory_by_multiboot_information(
     get_cpu_manager_cluster().memory_allocator = memory_allocator;
     /* Free old MultiBootInformation area */
     get_kernel_manager_cluster()
-        .memory_manager
+        .kernel_memory_manager
         .free(mapped_multiboot_address_base)
         .expect("Cannot free the map of multiboot information.");
     let _ = get_kernel_manager_cluster()
-        .memory_manager
+        .kernel_memory_manager
         .free_physical_memory(
             multiboot_information.address.into(),
             multiboot_information.size.into(),
@@ -283,11 +286,11 @@ pub fn init_graphic(multiboot_information: &MultiBootInformation) {
     /* Load font */
     for module in multiboot_information.modules.iter() {
         if module.name == "font.pf2" {
-            let vm_address = get_kernel_manager_cluster().memory_manager.mmap(
+            let vm_address = io_remap!(
                 module.start_address.into(),
                 (module.end_address - module.start_address).into(),
                 MemoryPermissionFlags::rodata(),
-                MemoryOptionFlags::PRE_RESERVED | MemoryOptionFlags::MEMORY_MAP,
+                MemoryOptionFlags::PRE_RESERVED
             );
             if let Ok(vm_address) = vm_address {
                 let result = get_kernel_manager_cluster().graphic_manager.load_font(

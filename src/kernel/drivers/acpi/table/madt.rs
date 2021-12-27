@@ -4,8 +4,6 @@
 //! This manager contains the information of MADT
 //! MADT has the list of Local APIC IDs.
 
-use super::super::INITIAL_MMAP_SIZE;
-
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
@@ -76,7 +74,7 @@ impl MadtManager {
     pub fn release_memory_map(self) {
         if !self.base_address.is_zero() {
             if let Err(e) = get_kernel_manager_cluster()
-                .memory_manager
+                .kernel_memory_manager
                 .free(self.base_address)
             {
                 pr_warn!("Failed to free MADT: {:?}", e);

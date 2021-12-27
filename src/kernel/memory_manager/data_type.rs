@@ -536,9 +536,9 @@ impl MemoryOptionFlags {
     pub const DO_NOT_FREE_PHYSICAL_ADDRESS: Self = Self(1 << 2);
     pub const WIRED: Self = Self(1 << 3); /* Disallow swap out */
     pub const IO_MAP: Self = Self(1 << 4);
-    pub const DIRECT_MAP: Self = Self(1 << 5);
-    pub const MEMORY_MAP: Self = Self(1 << 6);
-    pub const ALLOC: Self = Self(1 << 7);
+    pub const ALLOC: Self = Self(1 << 5);
+    pub const NO_WAIT: Self = Self(1 << 6);
+    pub const CRITICAL: Self = Self(1 << 7);
 
     pub fn is_for_kernel(&self) -> bool {
         !self.is_for_user()
@@ -564,16 +564,16 @@ impl MemoryOptionFlags {
         (*self & Self::IO_MAP).0 != 0
     }
 
-    pub fn is_direct_mapped(&self) -> bool {
-        (*self & Self::DIRECT_MAP).0 != 0
-    }
-
-    pub fn is_memory_map(&self) -> bool {
-        (*self & Self::MEMORY_MAP).0 != 0
-    }
-
     pub fn is_alloc_area(&self) -> bool {
         (*self & Self::ALLOC).0 != 0
+    }
+
+    pub fn is_no_wait(&self) -> bool {
+        (*self & Self::NO_WAIT).0 != 0
+    }
+
+    pub fn is_critical(&self) -> bool {
+        (*self & Self::CRITICAL).0 != 0
     }
 }
 

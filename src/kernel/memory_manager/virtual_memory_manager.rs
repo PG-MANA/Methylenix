@@ -37,7 +37,6 @@ use core::ops::RangeInclusive;
 
 pub struct VirtualMemoryManager {
     vm_entry: PtrLinkedList<VirtualMemoryEntry>,
-    is_system_vm: bool,
     page_manager: PageManager,
 }
 
@@ -45,7 +44,6 @@ impl VirtualMemoryManager {
     pub const fn new() -> Self {
         Self {
             vm_entry: PtrLinkedList::new(),
-            is_system_vm: false,
             page_manager: PageManager::new(),
         }
     }
@@ -55,16 +53,17 @@ impl VirtualMemoryManager {
         /* TODO: */
     }
 
-    pub const fn is_kernel_virtual_memory_manager(&self) -> bool {
-        self.is_system_vm
+    pub fn is_kernel_virtual_memory_manager(&self) -> bool {
+        self as *const _
+            == &get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .virtual_memory_manager as *const _
     }
 
     pub fn clone_kernel_area(
         &mut self,
         kernel_virtual_memory_manager: &Self,
     ) -> Result<(), MemoryError> {
-        assert!(!self.is_kernel_virtual_memory_manager());
-        assert!(kernel_virtual_memory_manager.is_kernel_virtual_memory_manager());
         if let Err(e) = self
             .page_manager
             .copy_system_area(&kernel_virtual_memory_manager.page_manager)
@@ -80,8 +79,6 @@ impl VirtualMemoryManager {
         max_physical_address: PAddress,
         pm_manager: &mut PhysicalMemoryManager,
     ) {
-        self.is_system_vm = true;
-
         /* Set up page_manager */
         self.page_manager
             .init(pm_manager)
@@ -95,8 +92,6 @@ impl VirtualMemoryManager {
         system_virtual_memory_manager: &VirtualMemoryManager,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
-        self.is_system_vm = false;
-
         /* Set up page_manager */
         if let Err(e) = self
             .page_manager
@@ -216,7 +211,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::AddressNotAvailable);
         };
 
-        self.insert_vm_map_entry(entry)
+        self.insert_vm_map_entry(entry, option)
     }
 
     /// Map virtual_address to physical_address with size.
@@ -245,7 +240,13 @@ impl VirtualMemoryManager {
             );
             return Err(MemoryError::InvalidAddress);
         }
-        self._map_address(vm_entry, physical_address, virtual_address, size)
+        self._map_address(
+            vm_entry,
+            physical_address,
+            virtual_address,
+            size,
+            vm_entry.get_memory_option_flags(),
+        )
     }
 
     fn _update_page_table_with_vm_entry(
@@ -347,13 +348,11 @@ impl VirtualMemoryManager {
         };
 
         let vm_start_address = entry.get_vm_start_address();
-        self._map_address(&mut entry, physical_address, vm_start_address, size)?;
+        self._map_address(&mut entry, physical_address, vm_start_address, size, option)?;
 
-        let entry = self.insert_vm_map_entry(entry)?;
+        let entry = self.insert_vm_map_entry(entry, option)?;
 
-        if entry.get_memory_option_flags().is_io_map()
-            || entry.get_memory_option_flags().is_memory_map()
-        {
+        if entry.get_memory_option_flags().is_io_map() {
             if let Err(e) = self.map_address_into_page_table_with_size(
                 physical_address,
                 vm_start_address,
@@ -470,9 +469,7 @@ impl VirtualMemoryManager {
         )
         .to_index();
 
-        if vm_entry.get_memory_option_flags().is_io_map()
-            || vm_entry.get_memory_option_flags().is_memory_map()
-        {
+        if vm_entry.get_memory_option_flags().is_io_map() {
             if let Err(e) = self.unassociate_address_with_size(
                 vm_entry.get_vm_start_address(),
                 vm_entry.get_size(),
@@ -498,7 +495,7 @@ impl VirtualMemoryManager {
                         }
                         get_kernel_manager_cluster()
                             .system_memory_manager
-                            .free_vm_page(p);
+                            .free_vm_page(p, p.get_physical_address());
                     }
                 }
             }
@@ -527,7 +524,7 @@ impl VirtualMemoryManager {
                     }
                     get_kernel_manager_cluster()
                         .system_memory_manager
-                        .free_vm_page(p);
+                        .free_vm_page(p, p.get_physical_address());
                 }
             }
         }
@@ -546,10 +543,11 @@ impl VirtualMemoryManager {
     fn insert_vm_map_entry(
         &mut self,
         source: VirtualMemoryEntry,
+        option: MemoryOptionFlags,
     ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
         let entry = get_kernel_manager_cluster()
             .system_memory_manager
-            .alloc_vm_entry(self.is_system_vm)?;
+            .alloc_vm_entry(self.is_kernel_virtual_memory_manager(), option)?;
         *entry = source;
         if self.vm_entry.is_empty() {
             self.vm_entry.insert_head(&mut entry.list);
@@ -584,6 +582,7 @@ impl VirtualMemoryManager {
         physical_address: PAddress,
         virtual_address: VAddress,
         size: MSize,
+        option: MemoryOptionFlags,
     ) -> Result<(), MemoryError> {
         assert_eq!(physical_address & !PAGE_MASK, 0);
         assert_eq!(virtual_address & !PAGE_MASK, 0);
@@ -598,7 +597,11 @@ impl VirtualMemoryManager {
                 + vm_entry.get_memory_offset().to_index();
             let vm_page = get_kernel_manager_cluster()
                 .system_memory_manager
-                .alloc_vm_page(self.is_system_vm)?;
+                .alloc_vm_page(
+                    current_physical_address,
+                    self.is_kernel_virtual_memory_manager(),
+                    option,
+                )?;
 
             *vm_page = VirtualMemoryPage::new(current_physical_address, p_index);
             vm_page.set_page_status(vm_entry.get_memory_option_flags());
@@ -718,6 +721,7 @@ impl VirtualMemoryManager {
             not_associated_physical_address,
             not_associated_virtual_address,
             new_size - old_size,
+            vm_entry.get_memory_option_flags(),
         ) {
             pr_err!("Failed to map expanded area: {:?}", e);
             return false;
@@ -748,9 +752,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::InvalidAddress); /* Is it ok? */
         }
         if let Some(entry) = self.find_entry_mut(virtual_address) {
-            if !(entry.get_memory_option_flags().is_io_map()
-                || entry.get_memory_option_flags().is_memory_map())
-            {
+            if !entry.get_memory_option_flags().is_io_map() {
                 pr_err!("Not mapped entry.");
                 return Err(MemoryError::InvalidAddress);
             }
@@ -832,14 +834,13 @@ impl VirtualMemoryManager {
         size: MSize,
         option: MemoryOptionFlags,
     ) -> Option<VAddress> {
-        let (virtual_address_limit_start, virtual_address_limit_end) =
-            if option.is_memory_map() || option.is_io_map() {
-                (MAP_START_ADDRESS, MAP_END_ADDRESS)
-            } else if option.is_alloc_area() {
-                (MALLOC_START_ADDRESS, MALLOC_END_ADDRESS)
-            } else {
-                unimplemented!()
-            };
+        let (virtual_address_limit_start, virtual_address_limit_end) = if option.is_io_map() {
+            (MAP_START_ADDRESS, MAP_END_ADDRESS)
+        } else if option.is_alloc_area() {
+            (MALLOC_START_ADDRESS, MALLOC_END_ADDRESS)
+        } else {
+            unimplemented!()
+        };
         const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
         let mut available_start_address = virtual_address_limit_start;
 
@@ -898,7 +899,10 @@ impl VirtualMemoryManager {
     ) {
         let start = start_vm_address.unwrap_or(VAddress::new(0));
         let end = end_vm_address.unwrap_or(MAX_VIRTUAL_ADDRESS);
-        kprintln!("Is system's vm :{}", self.is_system_vm);
+        kprintln!(
+            "Is kernel virtual memory manager:{}",
+            self.is_kernel_virtual_memory_manager()
+        );
         if self.vm_entry.is_empty() {
             kprintln!("There is no root entry.");
             return;
