@@ -10,6 +10,7 @@ use crate::arch::target_arch::device::pci::{setup_arch_depend_devices, ArchDepen
 
 use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
 use crate::kernel::drivers::device::lpc::LpcManager;
+use crate::kernel::drivers::device::nvme::NvmeManager;
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 
 use alloc::vec::Vec;
@@ -209,6 +210,10 @@ impl PciManager {
                 && class_code.sub == LpcManager::SUB_CLASS_CODE
             {
                 LpcManager::setup_device(e, class_code);
+            } else if class_code.base == NvmeManager::BASE_CLASS_CODE
+                && class_code.sub == NvmeManager::SUB_CLASS_CODE
+            {
+                NvmeManager::setup_device(e, class_code);
             } else {
                 setup_arch_depend_devices(e, class_code);
             }
