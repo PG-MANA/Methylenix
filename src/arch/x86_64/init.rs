@@ -10,6 +10,7 @@ use crate::arch::target_arch::context::memory_layout::physical_address_to_direct
 use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
+use crate::arch::target_arch::device::pci::ArchDependPciManager;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex, IstIndex};
@@ -205,17 +206,36 @@ pub fn init_acpi_later() -> bool {
 ///
 /// This function should be called before `init_acpi_later`.
 pub fn init_pci_early() -> bool {
-    let pci_manager = PciManager::new();
+    let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+
+    let pci_manager;
+    if acpi_manager.is_available() {
+        if let Some(mcfg_manager) = acpi_manager
+            .get_table_manager()
+            .get_table_manager::<McfgManager>()
+        {
+            drop(acpi_manager);
+            pci_manager = PciManager::new_ecam(mcfg_manager);
+        } else {
+            pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
+        }
+    } else {
+        pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
+    }
     mem::forget(mem::replace(
         &mut get_kernel_manager_cluster().pci_manager,
         pci_manager,
     ));
+    if let Err(e) = get_kernel_manager_cluster().pci_manager.build_device_tree() {
+        pr_err!("Failed to build PCI device tree: {:?}", e);
+        return false;
+    }
     return true;
 }
 
 /// Init PciManager with scanning all bus
 pub fn init_pci_later() -> bool {
-    get_kernel_manager_cluster().pci_manager.scan_root_bus();
+    get_kernel_manager_cluster().pci_manager.setup_devices();
     return true;
 }
 

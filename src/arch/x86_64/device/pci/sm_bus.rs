@@ -6,58 +6,61 @@ use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 use crate::arch::target_arch::interrupt::{InterruptManager, IstIndex};
 
 use crate::kernel::drivers::acpi::aml::ResourceData;
-use crate::kernel::drivers::pci::PciManager;
+use crate::kernel::drivers::pci::{ClassCode, PciDevice, PciDeviceDriver};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 
 pub struct SmbusManager {}
 
-impl SmbusManager {
-    pub const BASE_ID: u8 = 0x0C;
-    pub const SUB_ID: u8 = 0x05;
+impl PciDeviceDriver for SmbusManager {
+    const BASE_CLASS_CODE: u8 = 0x0C;
+    const SUB_CLASS_CODE: u8 = 0x05;
 
-    const PCI_CMD: u8 = 0x04;
-    const SMB_BASE: u8 = 0x20;
-    const INT_LINE: u8 = 0x3C;
-    const HOST_CONFIG: u8 = 0x40;
-
-    const IO_SPACE_ENABLE: u32 = 1;
-    const INTERRUPT_DISABLE: u32 = 1 << 10;
-    const INTERRUPT_STATUS: u32 = 1 << 3;
-    const SMBUS_HOST_ENABLE: u32 = 1;
-
-    const SMBUS_HOST_STATUS: u16 = 0;
-    const SMBUS_HOST_CONTROL: u16 = 0x02;
-    const SMBUS_SLV_STATUS: u16 = 0x10;
-    const SMBUS_SLV_CMD: u16 = 0x11;
-
-    const SMBUS_INTERRUPT_ENABLE: u8 = 1;
-    const SMBUS_INTERRUPT: u8 = 1 << 1;
-    const SMBUS_HOST_NOTIFY_STATUS: u8 = 1;
-    const SMBUS_HOST_NOTIFY_INTERRUPT_ENABLE: u8 = 1;
-
-    pub fn setup(pci_manager: &PciManager, bus: u8, device: u8, function: u8, _header_type: u8) {
-        pci_manager.write_config_address_register(bus, device, function, Self::PCI_CMD);
-        let status = pci_manager.read_config_data_register() >> 16;
-        if (status & Self::INTERRUPT_STATUS) != 0 {
-            pr_info!("SMBus interrupt is pending.");
+    fn setup_device(pci_dev: &PciDevice, _class_code: ClassCode) {
+        let pci_manager = &get_kernel_manager_cluster().pci_manager;
+        macro_rules! read_pci {
+            ($offset:expr, $size:expr) => {
+                match pci_manager.read_data(pci_dev, $offset, $size) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        pr_err!("Failed to read PCI configuration space: {:?},", e);
+                        return;
+                    }
+                }
+            };
         }
-        pci_manager.write_config_address_register(bus, device, function, Self::SMB_BASE);
-        let smbus_base_address = ((pci_manager.read_config_data_register() & !0b1) & 0xFFFF) as u16;
-        pr_info!("Base address of SMBus: {:#X}", smbus_base_address);
+        macro_rules! write_pci {
+            ($offset:expr, $data:expr) => {
+                if let Err(e) = pci_manager.write_data(pci_dev, $offset, $data) {
+                    pr_err!("Failed to read PCI configuration space: {:?},", e);
+                    return;
+                }
+            };
+        }
 
-        pci_manager.write_config_address_register(bus, device, function, Self::INT_LINE);
-        let interrupt_pin = ((pci_manager.read_config_data_register() >> 8) & 0xFF) as u8;
+        let status = read_pci!(Self::PCI_CMD, 4) >> 16;
+        if (status & Self::INTERRUPT_STATUS) != 0 {
+            pr_debug!("SMBus interrupt is pending.");
+        }
+        let smbus_base_address = read_pci!(Self::SMB_BASE, 4);
+        if (smbus_base_address & 0b1) == 0 {
+            pr_err!("Invalid base address.");
+            return;
+        }
+        let smbus_base_address = ((smbus_base_address & !0b1) & 0xFFFF) as u16;
+        pr_debug!("SMBus Base Address: {:#X}", smbus_base_address);
+
+        let interrupt_pin = read_pci!(Self::INT_PIN, 1) as u8;
         if interrupt_pin == 0 || interrupt_pin > 5 {
             pr_err!("SMBus interrupt is disabled.");
             return;
         }
         let int_pin = interrupt_pin - 1;
-        pr_info!("Interrupt Pin: INT{}#", (int_pin + b'A') as char);
+        pr_debug!("SMBus Interrupt Pin: INT{}#", (int_pin + b'A') as char);
         let resource_data = get_kernel_manager_cluster()
             .acpi_manager
             .lock()
             .unwrap()
-            .search_interrupt_information_with_evaluation_aml(bus, device, int_pin);
+            .search_interrupt_information_with_evaluation_aml(pci_dev.bus, pci_dev.device, int_pin);
         if resource_data.is_none() {
             pr_err!("Cannot detect irq.");
             return;
@@ -66,7 +69,7 @@ impl SmbusManager {
             ResourceData::Irq(i) => i,
             ResourceData::Interrupt(i) => i as u8, /* OK...? */
         };
-        pr_info!("IRQ: {}", irq);
+        pr_debug!("SMBus IRQ: {}", irq);
 
         make_device_interrupt_handler!(handler, smbus_handler);
         if !get_cpu_manager_cluster()
@@ -80,21 +83,20 @@ impl SmbusManager {
                 false,
             )
         {
-            pr_err!("Cannot setup interrupt.");
+            pr_err!("Failed to setup interrupt.");
             return;
         }
 
         /* Clear Interrupt Disable and enable I/O Space */
-        pci_manager.write_config_address_register(bus, device, function, Self::PCI_CMD);
-        pci_manager.write_config_data_register(
-            (pci_manager.read_config_data_register() | Self::IO_SPACE_ENABLE)
-                & !(Self::INTERRUPT_DISABLE),
+        write_pci!(
+            Self::PCI_CMD,
+            (read_pci!(Self::PCI_CMD, 4) | Self::IO_SPACE_ENABLE) & !(Self::INTERRUPT_DISABLE)
         );
 
         /* Set SMBus Host Enable Bit */
-        pci_manager.write_config_address_register(bus, device, function, Self::HOST_CONFIG);
-        pci_manager.write_config_data_register(
-            pci_manager.read_config_data_register() | Self::SMBUS_HOST_ENABLE,
+        write_pci!(
+            Self::HOST_CONFIG,
+            read_pci!(Self::HOST_CONFIG, 4) | Self::SMBUS_HOST_ENABLE
         );
 
         unsafe {
@@ -124,6 +126,29 @@ impl SmbusManager {
             );
         }
     }
+}
+
+impl SmbusManager {
+    const PCI_CMD: u32 = 0x04;
+    const SMB_BASE: u32 = 0x20;
+    //const INT_LINE: u32 = 0x3C;
+    const INT_PIN: u32 = 0x3D;
+    const HOST_CONFIG: u32 = 0x40;
+
+    const IO_SPACE_ENABLE: u32 = 1;
+    const INTERRUPT_DISABLE: u32 = 1 << 10;
+    const INTERRUPT_STATUS: u32 = 1 << 3;
+    const SMBUS_HOST_ENABLE: u32 = 1;
+
+    const SMBUS_HOST_STATUS: u16 = 0;
+    const SMBUS_HOST_CONTROL: u16 = 0x02;
+    const SMBUS_SLV_STATUS: u16 = 0x10;
+    const SMBUS_SLV_CMD: u16 = 0x11;
+
+    const SMBUS_INTERRUPT_ENABLE: u8 = 1;
+    const SMBUS_INTERRUPT: u8 = 1 << 1;
+    const SMBUS_HOST_NOTIFY_STATUS: u8 = 1;
+    const SMBUS_HOST_NOTIFY_INTERRUPT_ENABLE: u8 = 1;
 }
 
 extern "C" fn smbus_handler() {

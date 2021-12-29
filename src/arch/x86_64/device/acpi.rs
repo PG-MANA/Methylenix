@@ -418,16 +418,6 @@ pub fn read_pci(
     _align: usize,
     num_of_bits: usize,
 ) -> Result<ConstData, AmlError> {
-    if pci_config.bus > u8::MAX as u16
-        || pci_config.device > u8::MAX as u16
-        || pci_config.function > u8::MAX as u16
-    {
-        pr_err!("PCI Express(R) is not supported.");
-        return Err(AmlError::UnsupportedType);
-    } else if pci_config.function >= 8 {
-        pr_err!("Function({}) must be less than 8.", pci_config.function);
-        return Err(AmlError::InvalidOperation);
-    }
     let offset = pci_config.offset + byte_index;
     let aligned_offset = offset & !0b11;
     let bit_offset_base = (offset - aligned_offset) << 3;
@@ -447,29 +437,32 @@ pub fn read_pci(
         bit_mask |= 1;
     }
     let mut result = 0u64;
-    let pci_manager = &get_kernel_manager_cluster().pci_manager;
-    pci_manager.write_config_address_register(
-        pci_config.bus as _,
-        pci_config.device as _,
-        pci_config.function as _,
-        aligned_offset as _,
-    );
-    let first_byte_data = pci_manager.read_config_data_register();
+    let first_byte_data = get_kernel_manager_cluster()
+        .pci_manager
+        .read_data_by_device_number(
+            pci_config.bus as _,
+            pci_config.device as _,
+            pci_config.function as _,
+            aligned_offset as _,
+            4,
+        )
+        .or(Err(AmlError::InvalidOperation))?;
 
     result |= ((first_byte_data >> bit_offset) as u64) & bit_mask;
     let mut index = 1;
     bit_mask >>= 32 - bit_offset;
 
     while bit_mask != 0 {
-        get_kernel_manager_cluster()
+        result |= get_kernel_manager_cluster()
             .pci_manager
-            .write_config_address_register(
+            .read_data_by_device_number(
                 pci_config.bus as _,
                 pci_config.device as _,
                 pci_config.function as _,
                 (aligned_offset + index) as _,
-            );
-        result |= pci_manager.read_config_data_register() as u64 & bit_mask;
+                4,
+            )
+            .or(Err(AmlError::InvalidOperation))? as u64;
         index += 1;
         bit_mask >>= 32;
     }
@@ -542,36 +535,56 @@ pub fn write_pci(
         bit_mask |= 1;
     }
     let mut write_data = data.to_int();
-    let pci_manager = &get_kernel_manager_cluster().pci_manager;
-    pci_manager.write_config_address_register(
-        pci_config.bus as _,
-        pci_config.device as _,
-        pci_config.function as _,
-        aligned_offset as _,
-    );
-
-    let first_byte_data = pci_manager.read_config_data_register();
+    let first_byte_data = get_kernel_manager_cluster()
+        .pci_manager
+        .read_data_by_device_number(
+            pci_config.bus as _,
+            pci_config.device as _,
+            pci_config.function as _,
+            aligned_offset as _,
+            4,
+        )
+        .or(Err(AmlError::InvalidOperation))?;
     let buffer = (first_byte_data & !(bit_mask << bit_offset) as u32)
         | ((write_data & bit_mask) << bit_offset) as u32;
-    pci_manager.write_config_data_register(buffer);
+    get_kernel_manager_cluster()
+        .pci_manager
+        .write_data_by_device_number(
+            pci_config.bus as _,
+            pci_config.device as _,
+            pci_config.function as _,
+            aligned_offset as _,
+            buffer,
+        )
+        .or(Err(AmlError::InvalidOperation))?;
 
     let mut index = 1;
     bit_mask >>= 32 - bit_offset;
     write_data >>= 32 - bit_offset;
 
     while bit_mask != 0 {
-        get_kernel_manager_cluster()
+        let read_data = get_kernel_manager_cluster()
             .pci_manager
-            .write_config_address_register(
+            .read_data_by_device_number(
                 pci_config.bus as _,
                 pci_config.device as _,
                 pci_config.function as _,
                 (aligned_offset + index) as _,
-            );
-        let read_data = pci_manager.read_config_data_register();
+                4,
+            )
+            .or(Err(AmlError::InvalidOperation))?;
         let buffer =
             (read_data & !(bit_mask as u32)) | (write_data as u32 & bit_mask as u32) as u32;
-        pci_manager.write_config_data_register(buffer);
+        get_kernel_manager_cluster()
+            .pci_manager
+            .write_data_by_device_number(
+                pci_config.bus as _,
+                pci_config.device as _,
+                pci_config.function as _,
+                (aligned_offset + index) as _,
+                buffer,
+            )
+            .or(Err(AmlError::InvalidOperation))?;
         index += 1;
         bit_mask >>= 32;
         write_data >>= 32;
