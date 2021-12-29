@@ -3,20 +3,19 @@
 //!
 //! This module manages delay-interrupt process.
 //! The structure may be changed.
+//! Work Queue will be in per-cpu structure, therefore this uses disabling interrupt as a lock.
 
 use super::{TaskManager, TaskStatus, ThreadEntry};
 
 use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::object_allocator::cache_allocator::CacheAllocator;
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
+use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
 
 pub struct WorkQueue {
     work_queue: PtrLinkedList<WorkList>,
-    lock: SpinLockFlag,
-    work_pool: CacheAllocator<WorkList>,
+    work_pool: LocalSlabAllocator<WorkList>,
     daemon_thread: *mut ThreadEntry,
 }
 
@@ -37,40 +36,39 @@ impl WorkList {
 }
 
 impl WorkQueue {
-    const WORK_POOL_CACHE_ENTRIES: usize = 64;
     const DEFAULT_PRIORITY: u8 = 10;
 
     pub fn init(&mut self, task_manager: &mut TaskManager) {
-        self.lock = SpinLockFlag::new();
-        let _lock = self.lock.lock();
+        let irq = InterruptManager::save_and_disable_local_irq();
         self.work_queue = PtrLinkedList::new();
-        self.work_pool = CacheAllocator::new(0);
+        self.work_pool = LocalSlabAllocator::new(0);
 
         self.work_pool
-            .init(
-                Self::WORK_POOL_CACHE_ENTRIES,
-                &mut get_kernel_manager_cluster().memory_manager.lock().unwrap(),
-            )
-            .expect("Cannot init memory pool for WorkList.");
+            .init()
+            .expect("Failed to init memory pool for WorkList");
 
         let thread = task_manager
             .create_kernel_thread_for_init(Self::work_queue_thread, None, Self::DEFAULT_PRIORITY)
             .expect("Cannot add the soft interrupt daemon.");
         self.daemon_thread = thread as *mut _;
+        InterruptManager::restore_local_irq(irq);
     }
 
-    pub fn add_work(&mut self, w: WorkList) {
+    pub fn add_work(&mut self, w: WorkList) -> Result<(), ()> {
         /* This will be called in the interrupt */
-        let irq_data = InterruptManager::save_and_disable_local_irq();
-        let _lock = self.lock.lock();
+        let irq = InterruptManager::save_and_disable_local_irq();
 
-        let work = self
-            .work_pool
-            .alloc(Some(&get_kernel_manager_cluster().memory_manager))
-            .expect("Cannot allocate work struct.");
-        /* CacheAllocator will try lock memory_manager and if that was failed and pool is not enough, it will return Err. */
-        *work = w;
-        work.list = PtrLinkedListNode::new();
+        let work = match self.work_pool.alloc() {
+            Ok(work) => {
+                *work = w;
+                work.list = PtrLinkedListNode::new();
+                work
+            }
+            Err(e) => {
+                pr_err!("Failed to allocate work list: {:?}", e);
+                return Err(());
+            }
+        };
 
         self.work_queue.insert_tail(&mut work.list);
 
@@ -86,23 +84,21 @@ impl WorkQueue {
             }
         }
         drop(_worker_thread_lock);
-        drop(_lock);
-        InterruptManager::restore_local_irq(irq_data);
+        InterruptManager::restore_local_irq(irq);
+        return Ok(());
     }
 
     fn work_queue_thread() -> ! {
         let manager = &mut get_cpu_manager_cluster().work_queue;
         loop {
-            let interrupt_flag = InterruptManager::save_and_disable_local_irq();
-            let _lock = manager.lock.lock();
+            let irq = InterruptManager::save_and_disable_local_irq();
             if manager.work_queue.is_empty() {
                 assert!(!unsafe { &mut *manager.daemon_thread }.lock.is_locked());
-                drop(_lock);
                 if let Err(e) = get_cpu_manager_cluster()
                     .run_queue
-                    .sleep_current_thread(Some(interrupt_flag), TaskStatus::Interruptible)
+                    .sleep_current_thread(Some(irq), TaskStatus::Interruptible)
                 {
-                    pr_err!("Cannot sleep work queue thread. Error: {:?}", e);
+                    pr_err!("Failed to sleep work queue thread: {:?}", e);
                 }
                 /* Woke up */
                 continue;
@@ -116,8 +112,7 @@ impl WorkQueue {
             let work_function = work.worker_function;
             let work_data = work.data;
             manager.work_pool.free(work);
-            drop(_lock);
-            InterruptManager::restore_local_irq(interrupt_flag);
+            InterruptManager::restore_local_irq(irq);
             /* Execute the work function */
             work_function(work_data);
         }

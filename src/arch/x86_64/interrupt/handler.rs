@@ -55,6 +55,7 @@ macro_rules! make_device_interrupt_handler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
         pub unsafe extern fn $handler_name() {
+            use core::arch::asm;
             asm!(
                 "
                 push    rax
@@ -125,6 +126,7 @@ macro_rules! make_context_switch_interrupt_handler {
     ($handler_name:ident, $handler_func:path) => {
         #[naked]
         pub unsafe extern fn $handler_name() {
+            use core::arch::asm;
             asm!("
                 sub     rsp, ({1} + 1) * 8 // +1 is for stack alignment
                 mov     [rsp +  0 * 8] ,rax
@@ -228,6 +230,7 @@ macro_rules! make_error_interrupt_handler {
     ($handler_name: ident, $handler_func: path) => {
         #[naked]
         pub unsafe extern fn $ handler_name() {
+            use core::arch::asm;
             asm!("
                 push    rdi
                 mov     rdi, [rsp + 8]

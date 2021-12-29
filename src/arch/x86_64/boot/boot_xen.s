@@ -5,17 +5,17 @@
 .code32
 
 .global boot_xen, BOOT_FROM_DIRECTBOOT_MARK
-.extern setup_long_mode, fin                /* at init_long_mode.s */
-.extern OS_STACK_SIZE, os_stack             /* at common.s */
+.extern setup_long_mode, fin                                /* at init_long_mode.s */
+.extern OS_STACK_SIZE, os_stack, KERNEL_MAP_START_ADDRESS   /* at common.s */
 
-.equ XEN_START_INFO_MAGIC, 0x336ec578       /* strat info magic code */
+.equ XEN_START_INFO_MAGIC, 0x336ec578                       /* strat info magic code */
 .equ BOOT_FROM_DIRECTBOOT_MARK, 2
 
-.section .text
+.section .text.32
 .align 4
 
 boot_xen:
-  mov   $(os_stack + OS_STACK_SIZE), %esp
+  mov   $(os_stack + OS_STACK_SIZE - KERNEL_MAP_START_ADDRESS), %esp
 
   push  $0
   popfd                             /* Clear eflags */
@@ -35,7 +35,7 @@ xen_bad_magic:
   rep   movsb
   jmp   fin
 
-.section .data
+.section .data.32
 
 .align   4
 

@@ -79,7 +79,7 @@ impl ContextData {
         stack: usize,
         cs: u64,
         ss: u64,
-        cr3: usize,
+        //cr3: usize,
     ) -> Self {
         let mut data = Self::new();
         data.registers.rip = entry_address as u64;
@@ -87,7 +87,7 @@ impl ContextData {
         data.registers.ss = ss;
         data.registers.rflags = 0x202;
         data.registers.rsp = stack as u64;
-        data.registers.cr3 = cr3 as u64;
+        //data.registers.cr3 = cr3 as u64;
         return data;
     }
 
@@ -103,12 +103,5 @@ impl ContextData {
         forked_data.registers.rflags = 0x202;
         forked_data.registers.rsp = stack as u64;
         return forked_data;
-    }
-
-    /// Get Paging table address(address of PML4)
-    ///
-    /// This function returns pml4's address.
-    pub fn get_paging_table_address(&self) -> usize {
-        self.registers.cr3 as usize
     }
 }

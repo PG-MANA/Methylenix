@@ -11,11 +11,11 @@
 .equ MULTIBOOT_CHECK_MAGIC, 0x36d76289      /* multiboot2 magic code */
 .equ BOOT_FROM_MULTIBOOT_MARK, 1
 
-.section .text
+.section .text.32
 .align 4
 
 boot_multiboot:
-  mov   $(os_stack + OS_STACK_SIZE), %esp
+  mov   $(os_stack + OS_STACK_SIZE - KERNEL_MAP_START_ADDRESS), %esp
 
   push  $0
   popfd                             /* Clear eflags */
@@ -35,7 +35,7 @@ bad_magic:
   rep   movsb
   jmp   fin
 
-.section .data
+.section .data.32
 
 .align   4
 

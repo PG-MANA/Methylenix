@@ -205,11 +205,22 @@ macro_rules! into_and_from_usize {
     };
 }
 
+macro_rules! display {
+    ($t:ty) => {
+        impl core::fmt::Display for $t {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_fmt(format_args!("{:#X}", self.0))
+            }
+        }
+    };
+}
+
 /* VAddress */
 address!(VAddress);
 address_bit_operation!(VAddress);
 add_and_sub_shift_with_m_size!(VAddress);
 into_and_from_usize!(VAddress);
+display!(VAddress);
 
 impl VAddress {
     /// Casting from VAddress to PAddress without mapping
@@ -246,6 +257,7 @@ address!(PAddress);
 address_bit_operation!(PAddress);
 add_and_sub_shift_with_m_size!(PAddress);
 into_and_from_usize!(PAddress);
+display!(PAddress);
 
 impl PAddress {
     /// Casting from VAddress to PAddress without mapping
@@ -268,6 +280,7 @@ to_usize!(MSize);
 into_and_from_usize!(MSize);
 address_bit_operation!(MSize);
 add_and_sub_shift_with_m_size!(MSize);
+display!(MSize);
 
 impl MSize {
     pub const fn new(s: usize) -> Self {
@@ -362,6 +375,7 @@ impl MOrder {
 
 /* MPageOrder */
 into_and_from_usize!(MPageOrder);
+display!(MPageOrder);
 impl MPageOrder {
     pub const fn new(o: usize) -> Self {
         Self(o)
@@ -390,6 +404,7 @@ impl MPageOrder {
 
 /* MIndex */
 into_and_from_usize!(MIndex);
+display!(MIndex);
 impl MIndex {
     pub const fn new(i: usize) -> Self {
         Self(i)
@@ -521,12 +536,12 @@ impl MemoryOptionFlags {
     pub const DO_NOT_FREE_PHYSICAL_ADDRESS: Self = Self(1 << 2);
     pub const WIRED: Self = Self(1 << 3); /* Disallow swap out */
     pub const IO_MAP: Self = Self(1 << 4);
-    pub const DIRECT_MAP: Self = Self(1 << 5);
-    pub const MEMORY_MAP: Self = Self(1 << 6);
-    pub const ALLOC: Self = Self(1 << 7);
+    pub const ALLOC: Self = Self(1 << 5);
+    pub const NO_WAIT: Self = Self(1 << 6);
+    pub const CRITICAL: Self = Self(1 << 7);
 
     pub fn is_for_kernel(&self) -> bool {
-        (*self & Self::KERNEL).0 != 0
+        !self.is_for_user()
     }
 
     pub fn is_for_user(&self) -> bool {
@@ -549,16 +564,16 @@ impl MemoryOptionFlags {
         (*self & Self::IO_MAP).0 != 0
     }
 
-    pub fn is_direct_mapped(&self) -> bool {
-        (*self & Self::DIRECT_MAP).0 != 0
-    }
-
-    pub fn is_memory_map(&self) -> bool {
-        (*self & Self::MEMORY_MAP).0 != 0
-    }
-
     pub fn is_alloc_area(&self) -> bool {
         (*self & Self::ALLOC).0 != 0
+    }
+
+    pub fn is_no_wait(&self) -> bool {
+        (*self & Self::NO_WAIT).0 != 0
+    }
+
+    pub fn is_critical(&self) -> bool {
+        (*self & Self::CRITICAL).0 != 0
     }
 }
 

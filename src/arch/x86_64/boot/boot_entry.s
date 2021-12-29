@@ -7,9 +7,7 @@
 .global boot_entry
 .extern boot_multiboot     /* at boot_multiboot.s */
 
-.section .text
-
-.code32
+.section .text.32
 
 boot_entry:
   jmp boot_multiboot

@@ -18,24 +18,22 @@ pub struct ThreadEntry {
     pub(super) run_list: PtrLinkedListNode<Self>,
     pub(super) sleep_list: PtrLinkedListNode<Self>,
     pub(super) lock: SpinLockFlag,
-    pub(super) time_slice: usize,
+    pub(super) time_slice: u64,
 
     status: TaskStatus,
     thread_id: usize,
     process: NonNull<ProcessEntry>,
     context_data: ContextData,
-    privilege_level: u8,
     priority_level: u8,
     scheduling_class: SchedulingClass,
 }
 
 impl ThreadEntry {
-    pub const THREAD_ENTRY_ALIGN_ORDER: usize = 0;
+    pub const THREAD_ENTRY_ALIGN: usize = 0;
 
     pub fn init(
         &mut self,
         process: *mut ProcessEntry,
-        privilege_level: u8,
         priority_level: u8,
         scheduling_class: SchedulingClass,
         context_data: ContextData,
@@ -50,7 +48,6 @@ impl ThreadEntry {
         self.thread_id = 0;
         self.process = NonNull::new(process).unwrap();
         self.context_data = context_data;
-        self.privilege_level = privilege_level;
         self.priority_level = priority_level;
         self.scheduling_class = scheduling_class;
     }
@@ -66,7 +63,6 @@ impl ThreadEntry {
         self.status = TaskStatus::New;
         self.thread_id = 0;
         self.process = original_thread.process;
-        self.privilege_level = original_thread.privilege_level;
         self.priority_level = original_thread.priority_level;
         self.scheduling_class = original_thread.scheduling_class;
         self.context_data = context_data;
@@ -94,10 +90,6 @@ impl ThreadEntry {
 
     pub const fn get_priority_level(&self) -> u8 {
         self.priority_level
-    }
-
-    pub const fn get_privilege_level(&self) -> u8 {
-        self.privilege_level
     }
 
     pub fn set_priority_level(&mut self, p: u8) {
@@ -131,13 +123,12 @@ impl ThreadEntry {
             thread_id: self.thread_id,
             process: self.process,
             context_data: self.context_data.clone(),
-            privilege_level: self.privilege_level,
             priority_level: self.priority_level,
             scheduling_class: self.scheduling_class,
         }
     }
 
-    pub fn set_time_slice(&mut self, number_of_threads: usize, timer_interval: usize) {
+    pub fn set_time_slice(&mut self, number_of_threads: usize, timer_interval: u64) {
         self.time_slice = self.scheduling_class.calculate_time_slice(
             self.priority_level,
             number_of_threads,

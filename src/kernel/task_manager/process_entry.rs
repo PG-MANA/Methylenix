@@ -7,7 +7,7 @@ use super::{ProcessStatus, TaskError, TaskSignal, ThreadEntry};
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::memory_manager::MemoryManager;
-use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 #[allow(dead_code)]
 pub struct ProcessEntry {
@@ -19,7 +19,7 @@ pub struct ProcessEntry {
     thread: PtrLinkedList<ThreadEntry>,
     signal: TaskSignal,
     status: ProcessStatus,
-    memory_manager: *const Mutex<MemoryManager>,
+    memory_manager: *mut MemoryManager,
     process_id: usize,
     parent: *mut ProcessEntry, /* kernel process has invalid pointer */
     num_of_thread: usize,
@@ -29,7 +29,7 @@ pub struct ProcessEntry {
 }
 
 impl ProcessEntry {
-    pub const PROCESS_ENTRY_ALIGN_ORDER: usize = 0;
+    pub const PROCESS_ENTRY_ALIGN: usize = 0;
 
     /// Init ProcessEntry and set ThreadEntries to `Self::thread`.
     ///
@@ -39,12 +39,11 @@ impl ProcessEntry {
         p_id: usize,
         parent: *mut Self,
         threads: &mut [&mut ThreadEntry],
-        memory_manager: *const Mutex<MemoryManager>,
+        memory_manager: *mut MemoryManager,
         privilege_level: u8,
     ) {
         self.lock = SpinLockFlag::new();
         let _lock = self.lock.lock();
-        assert_ne!(threads.len(), 0);
 
         self.signal = TaskSignal::Normal;
         self.status = ProcessStatus::Normal;
@@ -129,12 +128,26 @@ impl ProcessEntry {
         self.process_id
     }
 
+    pub const fn get_privilege_level(&self) -> u8 {
+        self.privilege_level
+    }
+
+    pub fn get_memory_manager(&self) -> *mut MemoryManager {
+        let _lock = self.lock.lock();
+        let m = self.memory_manager;
+        drop(_lock);
+        return m;
+    }
+
     /// Search the thread from [Self::thread]
     ///
     /// This function searches the thread having specified t_id.
     /// [Self::lock] must be locked.
-    pub fn get_thread(&mut self, t_id: usize) -> Option<&mut ThreadEntry> {
+    pub fn get_thread_mut(&mut self, t_id: usize) -> Option<&mut ThreadEntry> {
         assert!(self.lock.is_locked());
+        if self.num_of_thread == 0 {
+            return None;
+        }
         if let Some(single_thread) = self.single_thread {
             let s_t = unsafe { &mut *single_thread };
             if s_t.get_t_id() == t_id {
@@ -159,13 +172,15 @@ impl ProcessEntry {
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());
         assert!(!thread.lock.is_locked());
-        assert_ne!(self.num_of_thread, 0);
 
         thread.set_process(self as *mut _);
         thread.set_t_id(self.next_thread_id);
         self.update_next_thread_id();
-
-        if self.num_of_thread == 1 {
+        if self.num_of_thread == 0 {
+            assert!(self.thread.is_empty());
+            assert!(self.single_thread.is_none());
+            self.single_thread = Some(thread as *mut _)
+        } else if self.num_of_thread == 1 {
             assert!(self.thread.is_empty());
             assert!(self.single_thread.is_some());
             let single_thread = unsafe { &mut *self.single_thread.take().unwrap() };
@@ -188,8 +203,12 @@ impl ProcessEntry {
         assert!(self.lock.is_locked());
         assert!(!thread.lock.is_locked());
 
-        if self.num_of_thread == 1 {
+        if self.num_of_thread == 0 {
             return Err(TaskError::InvalidProcessEntry);
+        } else if self.num_of_thread == 1 {
+            assert!(self.thread.is_empty());
+            assert!(self.single_thread.is_some());
+            self.single_thread = None;
         } else if self.num_of_thread == 2 {
             self.thread.remove(&mut thread.t_list);
             let single_thread = unsafe {

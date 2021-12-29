@@ -6,7 +6,7 @@
 use super::tss::TssManager;
 use crate::arch::target_arch::device::cpu;
 
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize};
 
 /// GateDescriptor
@@ -16,7 +16,7 @@ use crate::kernel::memory_manager::data_type::{Address, MSize};
 ///
 /// ## Structure
 ///
-///  * offset: the virtual address to call when interruption was happened
+///  * offset: the virtual address to call when an interrupt was happened
 ///  * selector: th segment selector which is used when switch to the handler
 ///  * ist: interrupt stack table: if it is not zero,
 ///         CPU will change the stack from the specific stack pointer of TSS
@@ -61,18 +61,16 @@ impl GateDescriptor {
     }
 
     pub fn fork_gdt_from_other_and_create_tss_and_set(original_gdt: usize, copy_size: u16) {
-        let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
-        let memory_manager = &get_kernel_manager_cluster().memory_manager;
+        let object_allocator = &mut get_cpu_manager_cluster().memory_allocator;
 
         let new_gdt_address = object_allocator
-            .alloc(
-                MSize::new(copy_size as usize + 16 /*For TSS descriptor*/),
-                memory_manager,
-            )
+            .kmalloc(MSize::new(
+                copy_size as usize + 16, /*For TSS descriptor*/
+            ))
             .expect("Cannot alloc the memory for GDT");
 
         let tss_address = object_allocator
-            .alloc(TssManager::SIZE_OF_TSS, memory_manager)
+            .kmalloc(TssManager::SIZE_OF_TSS)
             .expect("Cannot alloc the memory for TSS");
 
         TssManager::init_tss(tss_address);

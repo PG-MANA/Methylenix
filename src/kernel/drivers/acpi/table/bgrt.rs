@@ -4,7 +4,7 @@
 //! This manager contains the information of BGRT.
 //! BGRT is usually vendor logo.
 
-use super::super::INITIAL_MMAP_SIZE;
+use super::{AcpiTable, OptionalAcpiTable};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
@@ -32,36 +32,30 @@ pub struct BgrtManager {
     base_address: VAddress,
 }
 
-impl BgrtManager {
-    pub const SIGNATURE: [u8; 4] = *b"BGRT";
+impl AcpiTable for BgrtManager {
+    const SIGNATURE: [u8; 4] = *b"BGRT";
 
-    pub const fn new() -> Self {
+    fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
         }
     }
 
-    pub fn init(&mut self, bgrt_vm_address: VAddress) -> bool {
+    fn init(&mut self, vm_address: VAddress) -> Result<(), ()> {
         /* bgrt_vm_address must be accessible */
-        let bgrt = unsafe { &*(bgrt_vm_address.to_usize() as *const BGRT) };
+        let bgrt = unsafe { &*(vm_address.to_usize() as *const BGRT) };
         if bgrt.version != 1 || bgrt.revision != 1 {
             pr_err!("Not supported BGRT version");
         }
-        let bgrt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mremap_dev(bgrt_vm_address, INITIAL_MMAP_SIZE.into(), 56.into())
-        {
-            a
-        } else {
-            pr_err!("Cannot map memory area of BGRT.");
-            return false;
-        };
+        let bgrt_vm_address = remap_table!(vm_address, bgrt.length);
         self.base_address = bgrt_vm_address;
-        return true;
+        return Ok(());
     }
+}
 
+impl OptionalAcpiTable for BgrtManager {}
+
+impl BgrtManager {
     pub fn get_bitmap_physical_address(&self) -> Option<PAddress> {
         let bgrt = unsafe { &*(self.base_address.to_usize() as *const BGRT) };
         if bgrt.image_type == 0 {
@@ -80,12 +74,11 @@ impl BgrtManager {
 impl Drop for BgrtManager {
     fn drop(&mut self) {
         if !self.base_address.is_zero() {
-            if let Ok(mut m) = get_kernel_manager_cluster().memory_manager.try_lock() {
-                if let Err(e) = m.free(self.base_address) {
-                    pr_warn!("Cannot free BGRT. Error: {:?}", e);
-                }
-            } else {
-                pr_warn!("Cannot lock MemoryManager.");
+            if let Err(e) = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .free(self.base_address)
+            {
+                pr_warn!("Cannot free BGRT: {:?}", e);
             }
         }
     }

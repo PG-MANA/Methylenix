@@ -51,6 +51,13 @@ impl VirtualMemoryPage {
         }
     }
 
+    pub fn inactivate(&mut self) {
+        let _lock = self.lock.lock();
+        if self.status == PageStatus::Active {
+            self.status = PageStatus::InActive;
+        }
+    }
+
     pub const fn get_p_index(&self) -> MIndex {
         self.p_index
     }

@@ -9,10 +9,41 @@ pub mod aml;
 pub mod device;
 pub mod event;
 pub mod table {
+    use crate::kernel::memory_manager::data_type::VAddress;
+
+    const INITIAL_MMAP_SIZE: usize = 36;
+    macro_rules! remap_table {
+        ($address:expr,$new_size:expr) => {{
+            use crate::kernel::drivers::acpi::INITIAL_MMAP_SIZE;
+            use crate::kernel::memory_manager::data_type::MSize;
+            use crate::mremap;
+            match mremap!(
+                $address,
+                MSize::new(INITIAL_MMAP_SIZE),
+                MSize::new($new_size as usize)
+            ) {
+                Ok(a) => a,
+                Err(e) => {
+                    pr_err!("Failed to remap a ACPI table: {:?}", e);
+                    return Err(());
+                }
+            }
+        }};
+    }
+
+    pub trait AcpiTable {
+        const SIGNATURE: [u8; 4];
+        fn new() -> Self;
+        fn init(&mut self, vm_address: VAddress) -> Result<(), ()>;
+    }
+
+    pub trait OptionalAcpiTable {}
+
     pub mod bgrt;
     pub mod dsdt;
     pub mod fadt;
     pub mod madt;
+    pub mod mcfg;
     pub mod ssdt;
     pub mod xsdt;
 }
@@ -77,11 +108,11 @@ impl AcpiManager {
             return false;
         }
         //ADD: checksum verification
-        if !self
+        if let Err(e) = self
             .xsdt_manager
             .init(PAddress::new(rsdp.xsdt_address as usize))
         {
-            pr_err!("Cannot init XSDT Manager.");
+            pr_err!("Failed to initialize XSDT Manager: {:?}", e);
             return false;
         }
         self.enabled = true;
@@ -91,12 +122,13 @@ impl AcpiManager {
         return true;
     }
 
-    pub fn init_acpi_event_manager(&self, event_manager: &mut AcpiEventManager) -> bool {
+    pub fn create_acpi_event_manager(&self) -> Option<AcpiEventManager> {
         if self.enabled {
-            *event_manager = AcpiEventManager::new(&self.get_xsdt_manager().get_fadt_manager());
-            true
+            Some(AcpiEventManager::new(
+                &self.get_table_manager().get_fadt_manager(),
+            ))
         } else {
-            false
+            None
         }
     }
 
@@ -150,7 +182,7 @@ impl AcpiManager {
         self.enabled
     }
 
-    pub fn get_xsdt_manager(&self) -> &XsdtManager {
+    pub fn get_table_manager(&self) -> &XsdtManager {
         &self.xsdt_manager
     }
 
@@ -263,7 +295,7 @@ impl AcpiManager {
         let pm1_b_port = self.get_fadt_manager().get_pm1b_control_block();
 
         let sleep_control_register = self
-            .get_xsdt_manager()
+            .get_table_manager()
             .get_fadt_manager()
             .get_sleep_control_register();
         if sleep_control_register.is_some() {
@@ -636,7 +668,6 @@ impl GeneralAddress {
     }
 
     pub fn new(a: &[u8; 12]) -> Self {
-        use core::convert::TryInto;
         let address_type = a[0];
         if address_type >= 0x0B {
             return Self::invalid();

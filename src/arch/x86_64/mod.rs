@@ -20,6 +20,7 @@ use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
+use crate::kernel::drivers::acpi::table::bgrt::BgrtManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::GraphicManager;
@@ -27,9 +28,12 @@ use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
 };
-use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
+use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
+use crate::{io_remap, mremap};
+
+use core::mem;
 
 pub struct ArchDependedCpuManagerCluster {
     pub local_apic_timer: LocalApicTimer,
@@ -54,25 +58,36 @@ pub extern "C" fn multiboot_main(
     }
 
     /* Set SerialPortManager(send only) for early debug */
-    get_kernel_manager_cluster().serial_port_manager =
-        SerialPortManager::new(0x3F8 /* COM1 */);
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new(0x3F8 /* COM1 */),
+    ));
 
     /* Load the multiboot information */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
     /* Setup BSP CPU Manager Cluster */
-    get_kernel_manager_cluster().cpu_list = PtrLinkedList::new();
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().cpu_list,
+        PtrLinkedList::new(),
+    ));
     setup_cpu_manager_cluster(Some(VAddress::new(
         &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
     )));
 
     /* Init Graphic & TTY (for panic!) */
-    get_kernel_manager_cluster().graphic_manager = GraphicManager::new();
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().graphic_manager,
+        GraphicManager::new(),
+    ));
     get_kernel_manager_cluster()
         .graphic_manager
         .init(&multiboot_information.framebuffer_info);
     get_kernel_manager_cluster().graphic_manager.clear_screen();
-    get_kernel_manager_cluster().kernel_tty_manager = TtyManager::new();
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().kernel_tty_manager,
+        TtyManager::new(),
+    ));
     get_kernel_manager_cluster()
         .kernel_tty_manager
         .open(&get_kernel_manager_cluster().graphic_manager);
@@ -115,8 +130,9 @@ pub extern "C" fn multiboot_main(
         get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
     }
 
-    /* Init Local APIC Timer */
-    get_cpu_manager_cluster().arch_depend_data.local_apic_timer = init_timer();
+    /* Init Timers */
+    init_local_timer();
+    init_global_timer();
 
     /* Init the task management system */
     init_task(
@@ -194,9 +210,7 @@ fn idle() -> ! {
 fn draw_boot_logo() {
     let free_mapped_address = |address: usize| {
         if let Err(e) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
+            .kernel_memory_manager
             .free(VAddress::new(address))
         {
             pr_err!("Freeing the bitmap data of BGRT was failed: {:?}", e);
@@ -204,7 +218,9 @@ fn draw_boot_logo() {
     };
     let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
 
-    let bgrt_manager = acpi_manager.get_xsdt_manager().get_bgrt_manager();
+    let bgrt_manager = acpi_manager
+        .get_table_manager()
+        .get_table_manager::<BgrtManager>();
     drop(acpi_manager);
     if bgrt_manager.is_none() {
         pr_info!("ACPI does not have the BGRT information.");
@@ -220,16 +236,12 @@ fn draw_boot_logo() {
     drop(bgrt_manager);
 
     let original_map_size = MSize::from(54);
-    let result = get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .mmap(
-            boot_logo_physical_address.unwrap(),
-            original_map_size,
-            MemoryPermissionFlags::rodata(),
-            MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::PRE_RESERVED,
-        );
+    let result = io_remap!(
+        boot_logo_physical_address.unwrap(),
+        original_map_size,
+        MemoryPermissionFlags::rodata(),
+        MemoryOptionFlags::PRE_RESERVED
+    );
     if result.is_err() {
         pr_err!(
             "Mapping the bitmap data of BGRT failed Err:{:?}",
@@ -258,17 +270,14 @@ fn draw_boot_logo() {
     let aligned_bitmap_width =
         ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
 
-    let result = get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .mremap_dev(
-            boot_logo_address.into(),
-            original_map_size,
-            ((aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
-                + file_offset as usize)
-                .into(),
-        );
+    let result = mremap!(
+        boot_logo_address.into(),
+        original_map_size,
+        MSize::new(
+            (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
+                + file_offset as usize
+        )
+    );
     if result.is_err() {
         pr_err!(
             "Mapping the bitmap data of BGRT was failed:{:?}",
@@ -322,8 +331,10 @@ pub extern "C" fn directboot_main(
     _user_code_segment: u16,
     _user_data_segment: u16,
 ) -> ! {
-    get_kernel_manager_cluster().serial_port_manager =
-        SerialPortManager::new(0x3F8 /* COM1 */);
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new(0x3F8 /* COM1 */),
+    ));
     get_kernel_manager_cluster()
         .serial_port_manager
         .send_str("Booted from DirectBoot\n");
@@ -356,18 +367,21 @@ pub extern "C" fn ap_boot_main() -> ! {
 
     /* Apply kernel paging table */
     get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
+        .kernel_memory_manager
         .set_paging_table();
 
     /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
 
     /* Setup memory management system */
-    let mut object_allocator = ObjectAllocator::new();
-    object_allocator.init(&mut get_kernel_manager_cluster().memory_manager.lock().unwrap());
-    cpu_manager.object_allocator = Mutex::new(object_allocator);
+    let mut memory_allocator = MemoryAllocator::new();
+    memory_allocator
+        .init()
+        .expect("Failed to init MemoryAllocator");
+    mem::forget(mem::replace(
+        &mut cpu_manager.memory_allocator,
+        memory_allocator,
+    ));
 
     /* Copy GDT from BSP and create own TSS */
     let gdt_address = unsafe { &gdt as *const _ as usize };
@@ -384,9 +398,12 @@ pub extern "C" fn ap_boot_main() -> ! {
     );
     interrupt_manager.init_ipi();
     cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
-    cpu_manager.interrupt_manager = interrupt_manager;
+    mem::forget(mem::replace(
+        &mut cpu_manager.interrupt_manager,
+        interrupt_manager,
+    ));
 
-    cpu_manager.arch_depend_data.local_apic_timer = init_timer();
+    init_local_timer();
     init_task_ap(ap_idle);
     init_work_queue();
     /* Switch to ap_idle task with own stack */

@@ -12,8 +12,8 @@ use self::context_data::ContextData;
 
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize, VAddress};
 use crate::kernel::memory_manager::MemoryError;
 
 /// This manager contains system/user stack/code segment pointer.
@@ -73,21 +73,19 @@ impl ContextManager {
     ) -> Result<ContextData, MemoryError> {
         let stack_size = stack_size.unwrap_or(MSize::new(Self::DEFAULT_STACK_SIZE_OF_SYSTEM));
         if (stack_size & !PAGE_MASK) != 0 {
-            return Err(MemoryError::SizeNotAligned);
+            return Err(MemoryError::NotAligned);
         }
 
         let stack_address = get_cpu_manager_cluster()
-            .object_allocator
-            .lock()
-            .unwrap()
-            .alloc(stack_size, &get_kernel_manager_cluster().memory_manager)?;
+            .memory_allocator
+            .kmalloc(stack_size)?;
 
         Ok(ContextData::create_context_data_for_system(
             entry_address as *const fn() as usize,
             (stack_address + stack_size).to_usize() - 8, /* For SystemV ABI Stack Alignment */
             self.system_cs as u64,
             self.system_ss as u64,
-            self.system_page_table_address,
+            //self.system_page_table_address,
         ))
     }
 
@@ -104,19 +102,37 @@ impl ContextManager {
     ) -> Result<ContextData, MemoryError> {
         let stack_size = stack_size.unwrap_or(MSize::new(Self::DEFAULT_STACK_SIZE_OF_SYSTEM));
         if (stack_size & !PAGE_MASK) != 0 {
-            return Err(MemoryError::SizeNotAligned);
+            return Err(MemoryError::NotAligned);
         }
 
         let stack_address = get_cpu_manager_cluster()
-            .object_allocator
-            .lock()
-            .unwrap()
-            .alloc(stack_size, &get_kernel_manager_cluster().memory_manager)?;
+            .memory_allocator
+            .kmalloc(stack_size)?;
 
         Ok(ContextData::fork_context_data(
             original_context_data,
             entry_address as *const fn() as usize,
             (stack_address + stack_size).to_usize() - 8, /* For SystemV ABI Stack Alignment */
+        ))
+    }
+
+    /// Create user context data
+    ///
+    /// This function makes a context data with user code/stack segment.
+    ///
+    /// `entry_address` must not return.
+    pub fn create_user_context(
+        &self,
+        entry_address: fn() -> !,
+        stack_address: VAddress,
+        //pg_manager: &PageManager,
+    ) -> Result<ContextData, MemoryError> {
+        Ok(ContextData::create_context_data_for_system(
+            entry_address as *const fn() as usize,
+            stack_address.to_usize() - 8, /* For SystemV ABI Stack Alignment */
+            self.user_cs as u64,
+            self.user_ss as u64,
+            //pg_manager.get_page_table_address().to_usize(),
         ))
     }
 

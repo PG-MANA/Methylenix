@@ -11,5 +11,6 @@
   "disable-redzone": true,
   "features": "-mmx,-sse,+soft-float",
   "panic-strategy": "abort",
-  "vendor": "unknown"
+  "vendor": "unknown",
+  "code-model": "kernel"
 }

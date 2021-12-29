@@ -203,3 +203,52 @@ impl<'m, T: ?Sized> DerefMut for MutexGuard<'m, T> {
         &mut *self.data
     }
 }
+
+pub struct SequenceSpinLock {
+    write_lock: SpinLockFlag,
+    sequence: usize,
+}
+
+/* Non-smart implementation... */
+pub struct SequenceSpinLockWriteHolder {
+    lock: SpinLockFlagHolder,
+}
+
+pub struct SequenceSpinLockReadHolder {
+    sequence: usize,
+}
+
+impl SequenceSpinLock {
+    pub const fn new() -> Self {
+        Self {
+            write_lock: SpinLockFlag::new(),
+            sequence: 0,
+        }
+    }
+
+    pub fn write_lock(&mut self) -> SequenceSpinLockWriteHolder {
+        let lock = self.write_lock.lock();
+        self.sequence += 1;
+        SequenceSpinLockWriteHolder { lock }
+    }
+
+    pub fn write_unlock(&mut self, holder: SequenceSpinLockWriteHolder) {
+        core::sync::atomic::fence(Ordering::Release);
+        drop(holder.lock);
+    }
+
+    pub fn read_start(&self) -> SequenceSpinLockReadHolder {
+        loop {
+            let sequence = unsafe { core::ptr::read_volatile(&self.sequence) };
+            if (sequence & 1) == 0 {
+                return SequenceSpinLockReadHolder { sequence };
+            }
+            core::hint::spin_loop()
+        }
+    }
+
+    pub fn should_read_retry(&self, holder: SequenceSpinLockReadHolder) -> bool {
+        let sequence = unsafe { core::ptr::read_volatile(&self.sequence) };
+        holder.sequence != sequence
+    }
+}

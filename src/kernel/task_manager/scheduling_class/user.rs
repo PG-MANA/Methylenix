@@ -1,11 +1,11 @@
 //!
-//! Scheduling Class for Kernel
+//! Scheduling Class for User
 //!
 
 #[derive(Clone, Copy, PartialOrd, PartialEq, Eq, Ord)]
-pub struct KernelSchedulingClass {}
+pub struct UserSchedulingClass {}
 
-impl KernelSchedulingClass {
+impl UserSchedulingClass {
     pub const fn new() -> Self {
         Self {}
     }
@@ -13,13 +13,10 @@ impl KernelSchedulingClass {
     pub fn get_normal_priority() -> u8 {
         Self::get_custom_priority(20)
     }
-    pub fn get_idle_thread_priority() -> u8 {
-        0xff
-    }
 
     pub fn get_custom_priority(level: u8) -> u8 {
         assert!(level < 40);
-        80 + level
+        100 + level
     }
 
     pub(crate) fn calculate_time_slice(
@@ -28,11 +25,7 @@ impl KernelSchedulingClass {
         number_of_threads: usize,
         interval_ms: u64,
     ) -> u64 {
-        if priority_level == Self::get_idle_thread_priority() {
-            10
-        } else {
-            assert!(priority_level >= 80 && priority_level <= 120);
-            (200 * (120 - priority_level) as u64 / (number_of_threads as u64 * interval_ms)).max(10)
-        }
+        assert!(priority_level >= 100 && priority_level <= 140);
+        (200 * (140 - priority_level) as u64 / (number_of_threads as u64 * interval_ms)).max(10)
     }
 }

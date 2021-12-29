@@ -2,21 +2,22 @@
 //! Physical Memory Manager
 //!
 //! 現時点では連結リスト管理だが、AVL-Treeなども実装してみたい
-//! WARN: このコードはPhysicalMemoryManager全体がMutexで処理されることを前提としているので、メモリの並行アクセス性を完全に無視してできている
+
+use super::data_type::{Address, MOrder, MPageOrder, MSize, PAddress};
+use super::slab_allocator::pool_allocator::PoolAllocator;
+use super::MemoryError;
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
-use crate::kernel::memory_manager::data_type::{Address, MOrder, MPageOrder, MSize, PAddress};
-
-const MEMORY_ENTRY_SIZE: usize = core::mem::size_of::<MemoryEntry>();
+use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 pub struct PhysicalMemoryManager {
+    lock: IrqSaveSpinLockFlag,
     memory_size: MSize,
     free_memory_size: MSize,
     first_entry: *mut MemoryEntry,
     free_list: [Option<*mut MemoryEntry>; Self::NUM_OF_FREE_LIST],
-    memory_entry_pool: usize,
-    memory_entry_pool_size: usize,
+    memory_entry_pool: PoolAllocator<MemoryEntry>,
 }
 
 struct MemoryEntry {
@@ -31,56 +32,55 @@ struct MemoryEntry {
 }
 
 /* ATTENTION: free_list's Iter(not normal next)*/
-struct MemoryEntryListIter {
+struct FreeListIter {
     entry: Option<*const MemoryEntry>,
 }
 
 /* ATTENTION: free_list's Iter(not normal next)*/
-struct MemoryEntryListIterMut {
+struct FreeListIterMut {
     entry: Option<*mut MemoryEntry>,
 }
 
 impl PhysicalMemoryManager {
     const NUM_OF_FREE_LIST: usize = 12;
+    const POOL_THRESHOLD: usize = 3;
 
     pub const fn new() -> Self {
         Self {
+            lock: IrqSaveSpinLockFlag::new(),
             memory_size: MSize::new(0),
             free_memory_size: MSize::new(0),
             free_list: [None; Self::NUM_OF_FREE_LIST],
-            memory_entry_pool: 0,
-            memory_entry_pool_size: 0,
+            memory_entry_pool: PoolAllocator::new(),
             first_entry: core::ptr::null_mut(),
         }
     }
 
-    pub const fn get_free_memory_size(&self) -> MSize {
+    pub fn get_memory_size(&self) -> MSize {
+        self.memory_size
+    }
+
+    pub fn get_free_memory_size(&self) -> MSize {
         self.free_memory_size
     }
 
-    pub fn set_memory_entry_pool(&mut self, free_address: usize, free_address_size: usize) {
-        self.memory_entry_pool = free_address;
-        self.memory_entry_pool_size = free_address_size;
-        for i in 0..(free_address_size / MEMORY_ENTRY_SIZE) {
-            unsafe {
-                (*((free_address + i * MEMORY_ENTRY_SIZE) as *mut MemoryEntry)).set_disabled()
-            }
-        }
-        self.first_entry = self.memory_entry_pool as *mut _;
+    pub fn add_memory_entry_pool(&mut self, pool_address: usize, pool_size: usize) {
+        let _lock = self.lock.lock();
+        unsafe { self.memory_entry_pool.add_pool(pool_address, pool_size) }
     }
 
-    fn create_memory_entry(&mut self) -> Option<&'static mut MemoryEntry> {
-        for i in 0..(self.memory_entry_pool_size / MEMORY_ENTRY_SIZE) {
-            let entry = unsafe {
-                &mut *((self.memory_entry_pool + i * MEMORY_ENTRY_SIZE) as *mut MemoryEntry)
-            };
-            if !entry.is_enabled() {
-                entry.set_enabled();
-                entry.init();
-                return Some(entry);
-            }
+    pub fn should_add_entry_pool(&self) -> bool {
+        self.memory_entry_pool.get_count() <= Self::POOL_THRESHOLD
+    }
+
+    fn create_memory_entry(&mut self) -> Result<&'static mut MemoryEntry, MemoryError> {
+        if let Ok(e) = self.memory_entry_pool.alloc() {
+            e.set_enabled();
+            e.init();
+            Ok(e)
+        } else {
+            Err(MemoryError::EntryPoolRunOut)
         }
-        None
     }
 
     fn search_entry_containing_address_mut(
@@ -125,10 +125,10 @@ impl PhysicalMemoryManager {
         start_address: PAddress,
         size: MSize,
         align_order: MOrder,
-        target_entry: Option<&mut MemoryEntry>,
-    ) -> bool {
+        target_entry: &mut Option<&mut MemoryEntry>,
+    ) -> Result<(), MemoryError> {
         if size.is_zero() || self.free_memory_size < size {
-            return false;
+            return Err(MemoryError::InvalidSize);
         }
         if !align_order.is_zero() {
             assert!(PAGE_SHIFT >= align_order.to_usize());
@@ -148,7 +148,7 @@ impl PhysicalMemoryManager {
         } else if let Some(t) = self.search_entry_containing_address_mut(start_address) {
             t
         } else {
-            return false;
+            return Err(MemoryError::InvalidAddress);
         };
 
         if entry.get_start_address() == start_address {
@@ -158,20 +158,23 @@ impl PhysicalMemoryManager {
                     if let Some(next) = entry.get_next_entry() {
                         self.first_entry = next as *mut _;
                     } else {
-                        panic!("Memory ran out.");
+                        return Err(MemoryError::AddressNotAvailable);
                     }
                 }
                 self.unchain_entry_from_free_list(entry);
                 entry.delete();
+                self.memory_entry_pool.free_ptr(entry as *mut MemoryEntry);
+                if target_entry.is_some() {
+                    *target_entry = None;
+                }
             } else {
                 let old_size = entry.get_size();
                 entry.set_range(start_address + size, entry.get_end_address());
-
                 self.chain_entry_to_free_list(entry, Some(old_size));
             }
         } else if entry.get_end_address() == start_address {
             if size.to_usize() != 1 {
-                return false;
+                return Err(MemoryError::InvalidAddress);
             }
             /* Allocate 1 byte of end_address */
             entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
@@ -181,12 +184,7 @@ impl PhysicalMemoryManager {
             entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
             self.chain_entry_to_free_list(entry, Some(old_size));
         } else {
-            let new_entry = if let Some(t) = self.create_memory_entry() {
-                t
-            } else {
-                /* TODO: Alloc bigger memory pool... */
-                return false;
-            };
+            let new_entry = self.create_memory_entry()?;
             let old_size = entry.get_size();
             new_entry.set_range(start_address + size, entry.get_end_address());
             entry.set_range(entry.get_start_address(), start_address - MSize::new(1));
@@ -198,135 +196,131 @@ impl PhysicalMemoryManager {
             self.chain_entry_to_free_list(new_entry, None);
         }
         self.free_memory_size -= size;
-        true
+        return Ok(());
     }
 
-    fn define_free_memory(&mut self, start_address: PAddress, size: MSize) -> bool {
+    fn define_free_memory(
+        &mut self,
+        start_address: PAddress,
+        size: MSize,
+    ) -> Result<(), MemoryError> {
         if size.is_zero() {
-            return false;
+            return Err(MemoryError::InvalidSize);
         }
         let entry = self
             .search_entry_previous_address_mut(start_address)
             .unwrap_or(unsafe { &mut *self.first_entry });
+        let end_address = size.to_end_address(start_address);
 
-        if entry.get_start_address() <= start_address
-            && entry.get_end_address() >= size.to_end_address(start_address)
-        {
+        if entry.get_start_address() <= start_address && entry.get_end_address() >= end_address {
             /* already freed */
-            false
+            return Err(MemoryError::InvalidAddress);
         } else if entry.get_end_address() >= start_address && !entry.is_first_entry() {
             /* Free duplicated area */
-            self.define_free_memory(
+            return self.define_free_memory(
                 entry.get_end_address() + MSize::new(1),
-                MSize::from_address(
-                    entry.get_end_address() + MSize::new(1),
-                    size.to_end_address(start_address),
-                ),
-            )
-        } else if entry.get_end_address() == size.to_end_address(start_address) {
+                MSize::from_address(entry.get_end_address() + MSize::new(1), end_address),
+            );
+        } else if entry.get_end_address() == end_address {
             /* Free duplicated area */
             /* entry may be first entry */
-            self.define_free_memory(start_address, size - entry.get_size())
-        } else {
-            let mut processed = false;
-            let old_size = entry.get_size();
-            if entry.get_end_address() + MSize::new(1) == start_address {
+            return self.define_free_memory(start_address, size - entry.get_size());
+        }
+
+        let mut processed = false;
+        let old_size = entry.get_size();
+        let address_after_entry = entry.get_end_address() + MSize::new(1);
+
+        if address_after_entry == start_address {
+            entry.set_range(entry.get_start_address(), end_address);
+            processed = true;
+        }
+
+        if entry.is_first_entry() && entry.get_start_address() == end_address + MSize::new(1) {
+            entry.set_range(start_address, entry.get_end_address());
+            processed = true;
+        }
+
+        if let Some(next) = entry.get_next_entry() {
+            if next.get_start_address() <= start_address {
+                assert!(!processed);
+                return if next.get_end_address() >= end_address {
+                    Err(MemoryError::InvalidAddress) /* already freed */
+                } else {
+                    self.define_free_memory(
+                        next.get_end_address() + MSize::new(1),
+                        end_address - next.get_end_address(),
+                    )
+                };
+            }
+            if next.get_start_address() == end_address + MSize::new(1) {
+                let next_old_size = next.get_size();
+                next.set_range(start_address, next.get_end_address());
+                self.chain_entry_to_free_list(next, Some(next_old_size));
+                processed = true;
+            }
+
+            if (next.get_start_address() == entry.get_end_address() + MSize::new(1))
+                || (processed && address_after_entry >= next.get_start_address())
+            {
                 entry.set_range(
                     entry.get_start_address(),
-                    size.to_end_address(start_address),
+                    core::cmp::max(entry.get_end_address(), next.get_end_address()),
                 );
-                processed = true;
-            }
-            if entry.is_first_entry()
-                && entry.get_start_address() == size.to_end_address(start_address) + MSize::new(1)
-            {
-                entry.set_range(start_address, entry.get_end_address());
-                processed = true;
-            }
-            if let Some(next) = entry.get_next_entry() {
-                if next.get_start_address() <= start_address {
-                    assert!(!processed);
-                    return if next.get_end_address() >= size.to_end_address(start_address) {
-                        false /* already freed */
-                    } else {
-                        self.define_free_memory(
-                            next.get_end_address() + MSize::new(1),
-                            size.to_end_address(start_address) - next.get_end_address(),
-                        )
-                    };
-                }
-                if next.get_start_address() == size.to_end_address(start_address) + MSize::new(1) {
-                    let next_old_size = next.get_size();
-                    next.set_range(start_address, next.get_end_address());
-                    self.chain_entry_to_free_list(next, Some(next_old_size));
-                    processed = true;
-                }
-                if (next.get_start_address() == entry.get_end_address() + MSize::new(1))
-                    || (processed
-                        && (entry.get_end_address() + MSize::new(1)) >= next.get_start_address())
-                {
-                    entry.set_range(
-                        entry.get_start_address(),
-                        core::cmp::max(entry.get_end_address(), next.get_end_address()),
-                    );
 
-                    self.unchain_entry_from_free_list(next);
-                    next.delete();
-                }
-                if processed {
-                    self.free_memory_size += size;
-                    self.chain_entry_to_free_list(entry, Some(old_size));
-                    return true;
-                }
-                let new_entry = if let Some(t) = self.create_memory_entry() {
-                    t
-                } else {
-                    /* TODO: Alloc bigger memory pool... */
-                    return false;
-                };
-                new_entry.set_range(start_address, size.to_end_address(start_address));
-                if entry.is_first_entry() && new_entry.get_end_address() < entry.get_start_address()
-                {
-                    self.first_entry = new_entry as *mut _;
-                    new_entry.unset_prev_entry();
-                    new_entry.chain_after_me(entry);
-                } else {
-                    next.set_prev_entry(new_entry);
-                    new_entry.set_next_entry(next);
-                    entry.chain_after_me(new_entry);
-                }
-                self.free_memory_size += size;
-                self.chain_entry_to_free_list(entry, Some(old_size));
-                self.chain_entry_to_free_list(new_entry, None);
-                true
-            } else {
-                if processed {
-                    self.free_memory_size += size;
-                    self.chain_entry_to_free_list(entry, Some(old_size));
-                    return true;
-                }
-                let new_entry = if let Some(t) = self.create_memory_entry() {
-                    t
-                } else {
-                    /* TODO: Alloc bigger memory pool... */
-                    return false;
-                };
-                new_entry.set_range(start_address, size.to_end_address(start_address));
-                new_entry.unset_next_entry();
-                entry.chain_after_me(new_entry);
-                self.free_memory_size += size;
-                self.chain_entry_to_free_list(entry, Some(old_size));
-                self.chain_entry_to_free_list(new_entry, None);
-                true
+                self.unchain_entry_from_free_list(next);
+                next.delete();
             }
+            if processed {
+                self.free_memory_size += size;
+                self.chain_entry_to_free_list(entry, Some(old_size));
+                if !next.is_enabled() {
+                    self.memory_entry_pool.free(next);
+                }
+                return Ok(());
+            }
+            let new_entry = self.create_memory_entry()?;
+            new_entry.set_range(start_address, end_address);
+            if entry.is_first_entry() && new_entry.get_end_address() < entry.get_start_address() {
+                self.first_entry = new_entry as *mut _;
+                new_entry.unset_prev_entry();
+                new_entry.chain_after_me(entry);
+            } else {
+                next.set_prev_entry(new_entry);
+                new_entry.set_next_entry(next);
+                entry.chain_after_me(new_entry);
+            }
+            self.free_memory_size += size;
+            self.chain_entry_to_free_list(entry, Some(old_size));
+            self.chain_entry_to_free_list(new_entry, None);
+            if !next.is_enabled() {
+                /* Maybe needless */
+                self.memory_entry_pool.free(next);
+            }
+            Ok(())
+        } else {
+            if processed {
+                self.free_memory_size += size;
+                self.chain_entry_to_free_list(entry, Some(old_size));
+                return Ok(());
+            }
+            let new_entry = self.create_memory_entry()?;
+            new_entry.set_range(start_address, end_address);
+            new_entry.unset_next_entry();
+            entry.chain_after_me(new_entry);
+            self.free_memory_size += size;
+            self.chain_entry_to_free_list(entry, Some(old_size));
+            self.chain_entry_to_free_list(new_entry, None);
+            Ok(())
         }
     }
 
-    pub fn alloc(&mut self, size: MSize, align_order: MOrder) -> Option<PAddress> {
+    pub fn alloc(&mut self, size: MSize, align_order: MOrder) -> Result<PAddress, MemoryError> {
         if size.is_zero() || self.free_memory_size <= size {
-            return None;
+            return Err(MemoryError::InvalidSize);
         }
         let page_order = Self::size_to_page_order(size);
+        let _lock = self.lock.lock();
         for i in page_order.to_usize()..Self::NUM_OF_FREE_LIST {
             let first_entry = if let Some(t) = self.free_list[i] {
                 unsafe { &mut *t }
@@ -350,20 +344,17 @@ impl PhysicalMemoryManager {
                     } else {
                         entry.get_start_address()
                     };
-                    return if self.define_used_memory(
+                    self.define_used_memory(
                         address_to_allocate,
                         size,
                         MOrder::new(0),
-                        Some(entry),
-                    ) {
-                        Some(address_to_allocate)
-                    } else {
-                        None
-                    };
+                        &mut Some(entry),
+                    )?;
+                    return Ok(address_to_allocate);
                 }
             }
         }
-        None
+        Err(MemoryError::AddressNotAvailable)
     }
 
     pub fn reserve_memory(
@@ -371,35 +362,39 @@ impl PhysicalMemoryManager {
         start_address: PAddress,
         size: MSize,
         align_order: MOrder,
-    ) -> bool {
+    ) -> Result<(), MemoryError> {
         /* initializing use only */
-        self.define_used_memory(start_address, size, align_order, None)
+        let _lock = self.lock.lock();
+        self.define_used_memory(start_address, size, align_order, &mut None)
     }
 
-    pub fn free(&mut self, start_address: PAddress, size: MSize, is_initializing: bool) -> bool {
+    pub fn free(
+        &mut self,
+        start_address: PAddress,
+        size: MSize,
+        is_initializing: bool,
+    ) -> Result<(), MemoryError> {
+        let _lock = self.lock.lock();
         if self.memory_size < self.free_memory_size + size && !is_initializing {
-            return false;
+            return Err(MemoryError::InvalidSize);
         }
         if self.memory_size.is_zero() {
-            if self.memory_entry_pool_size < MEMORY_ENTRY_SIZE {
-                return false;
-            }
-            let first_entry = unsafe { &mut *(self.memory_entry_pool as *mut MemoryEntry) };
+            let first_entry = self.create_memory_entry()?;
+
             first_entry.init();
             first_entry.set_range(start_address, size.to_end_address(start_address));
             first_entry.set_enabled();
             self.chain_entry_to_free_list(first_entry, None);
+            self.first_entry = first_entry;
             self.memory_size = size;
             self.free_memory_size = size;
         } else {
-            if !self.define_free_memory(start_address, size) {
-                return false;
-            }
+            self.define_free_memory(start_address, size)?;
             if self.memory_size < self.free_memory_size {
                 self.memory_size = self.free_memory_size;
             }
         }
-        return true;
+        return Ok(());
     }
 
     fn unchain_entry_from_free_list(&mut self, entry: &mut MemoryEntry) {
@@ -512,11 +507,13 @@ impl PhysicalMemoryManager {
         }
     }
 
-    pub fn dump_memory_entry(&self) {
+    pub fn dump_memory_entry(&self) -> Result<(), ()> {
+        let _lock = self.lock.try_lock()?;
+
         let mut entry = unsafe { &*self.first_entry };
         if !entry.is_enabled() {
             pr_info!("Root Entry is not enabled.");
-            return;
+            return Err(());
         }
         kprintln!(
             "Start:{:>#16X}, Size:{:>#16X}",
@@ -547,6 +544,7 @@ impl PhysicalMemoryManager {
                 );
             }
         }
+        return Ok(());
     }
 }
 
@@ -659,20 +657,20 @@ impl MemoryEntry {
         self.list_prev = None;
     }
 
-    pub fn list_iter(&self) -> MemoryEntryListIter {
-        MemoryEntryListIter {
+    pub fn list_iter(&self) -> FreeListIter {
+        FreeListIter {
             entry: Some(self as *const _),
         }
     }
 
-    pub fn list_iter_mut(&mut self) -> MemoryEntryListIterMut {
-        MemoryEntryListIterMut {
+    pub fn list_iter_mut(&mut self) -> FreeListIterMut {
+        FreeListIterMut {
             entry: Some(self as *mut _),
         }
     }
 }
 
-impl Iterator for MemoryEntryListIter {
+impl Iterator for FreeListIter {
     type Item = &'static MemoryEntry;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(address) = self.entry {
@@ -685,7 +683,7 @@ impl Iterator for MemoryEntryListIter {
     }
 }
 
-impl Iterator for MemoryEntryListIterMut {
+impl Iterator for FreeListIterMut {
     type Item = &'static mut MemoryEntry;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(address) = self.entry {

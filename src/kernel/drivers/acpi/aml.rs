@@ -120,16 +120,14 @@ impl AmlInterpreter {
                             None
                         }
                     }
+                } else if cloned_v.is_constant_data() {
+                    Some(cloned_v)
                 } else {
-                    if cloned_v.is_constant_data() {
-                        Some(cloned_v)
-                    } else {
-                        match cloned_v.get_constant_data() {
-                            Ok(constant_data) => Some(constant_data),
-                            Err(e) => {
-                                pr_err!("Failed to get the constant data({}): {:?}", name, e);
-                                None
-                            }
+                    match cloned_v.get_constant_data() {
+                        Ok(constant_data) => Some(constant_data),
+                        Err(e) => {
+                            pr_err!("Failed to get the constant data({}): {:?}", name, e);
+                            None
                         }
                     }
                 }

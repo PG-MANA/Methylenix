@@ -5,7 +5,7 @@
 
 .global ap_entry, ap_entry_end, ap_os_stack_address
 
-.extern main_code_segment_descriptor, tss_descriptor, gdtr0 /* at common.asm */
+.extern main_code_segment_descriptor, tss_descriptor, gdtr_64bit_0, gdtr_64bit_1 /* at common.asm */
 .extern tss_descriptor_address, tss, pml4
 .extern ap_boot_main
 
@@ -63,7 +63,7 @@ ap_setup_long_mode:
     wrmsr                               /* Set LME and NXE flags */
     mov     %cr0, %eax
     or      $(1 << 31 | 1), %eax        /* Set PG flag */
-    lgdt    gdtr0
+    lgdt    gdtr_64bit_0
     mov     %eax, %cr0
 
     /* Long JMP */
@@ -81,11 +81,12 @@ ap_init_long_mode:
     mov     %ax, %ds
     mov     %ax, %fs
     mov     %ax, %gs
+    lgdt    gdtr_64bit_1
     /* Set stack */
     mov     $(ap_os_stack_address - ap_entry), %eax
     add     %ebx, %eax                  /* EBX has base address */
     mov     (%eax), %rsp
-    lea     ap_boot_main, %rax
+    movabs  $ap_boot_main, %rax
     jmp    *%rax                        /* "*" means absolute jmp */
 
 

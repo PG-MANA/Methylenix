@@ -6,29 +6,33 @@
 
 pub mod multiboot;
 
+use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
+use crate::arch::target_arch::device::pci::ArchDependPciManager;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex, IstIndex};
-use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
+use crate::kernel::drivers::acpi::table::{madt::MadtManager, mcfg::McfgManager};
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
 use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
 };
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;
-use crate::kernel::timer_manager::{Timer, TimerManager};
+use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager, Timer};
 
+use core::mem;
 use core::sync::atomic::AtomicBool;
 
 /// Memory Areas for PhysicalMemoryManager
@@ -55,10 +59,8 @@ pub fn init_task(
         user_ss,
         unsafe { cpu::get_cr3() },
     );
-    let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
-    let memory_manager = &get_kernel_manager_cluster().memory_manager;
-    run_queue.init(&mut object_allocator, memory_manager);
-    drop(object_allocator);
+
+    run_queue.init().expect("Failed to init RunQueue");
 
     let main_context = context_manager
         .create_system_context(main_process, None)
@@ -69,8 +71,14 @@ pub fn init_task(
 
     task_manager.init(context_manager, main_context, idle_context, &mut run_queue);
 
-    get_cpu_manager_cluster().run_queue = run_queue;
-    get_kernel_manager_cluster().task_manager = task_manager;
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster().run_queue,
+        run_queue,
+    ));
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().task_manager,
+        task_manager,
+    ));
 }
 
 /// Init application processor's TaskManager
@@ -78,10 +86,7 @@ pub fn init_task(
 ///
 pub fn init_task_ap(idle_task: fn() -> !) {
     let mut run_queue = RunQueue::new();
-    let mut object_allocator = get_cpu_manager_cluster().object_allocator.lock().unwrap();
-    let memory_manager = &get_kernel_manager_cluster().memory_manager;
-    run_queue.init(&mut object_allocator, memory_manager);
-    drop(object_allocator);
+    run_queue.init().expect("Failed to init RunQueue");
 
     get_kernel_manager_cluster()
         .task_manager
@@ -102,15 +107,18 @@ pub fn init_work_queue() {
 pub fn init_interrupt(kernel_selector: u16) {
     pic::disable_8259_pic();
 
-    let mut interrupt_manager = InterruptManager::new();
-    interrupt_manager.init(kernel_selector);
-    get_cpu_manager_cluster().interrupt_manager = interrupt_manager;
-
+    get_cpu_manager_cluster().interrupt_manager = InterruptManager::new();
+    get_cpu_manager_cluster()
+        .interrupt_manager
+        .init(kernel_selector);
     let mut io_apic_manager = IoApicManager::new();
     io_apic_manager.init();
-    get_kernel_manager_cluster()
-        .arch_depend_data
-        .io_apic_manager = Mutex::new(io_apic_manager);
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster()
+            .arch_depend_data
+            .io_apic_manager,
+        Mutex::new(io_apic_manager),
+    ));
 }
 
 /// Init AcpiManager without parsing AML
@@ -121,28 +129,40 @@ pub fn init_interrupt(kernel_selector: u16) {
 pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
     let mut acpi_manager = AcpiManager::new();
     let mut device_manager = AcpiDeviceManager::new();
+    let set_manger = |a: AcpiManager, d: AcpiDeviceManager| {
+        mem::forget(mem::replace(
+            &mut get_kernel_manager_cluster().acpi_manager,
+            Mutex::new(a),
+        ));
+        mem::forget(mem::replace(
+            &mut get_kernel_manager_cluster().acpi_device_manager,
+            d,
+        ));
+    };
+
     if !acpi_manager.init(rsdp_ptr, &mut device_manager) {
         pr_warn!("Cannot init ACPI.");
-        get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
-        get_kernel_manager_cluster().acpi_device_manager = device_manager;
+        set_manger(acpi_manager, device_manager);
         return false;
     }
-    if !acpi_manager.init_acpi_event_manager(&mut get_kernel_manager_cluster().acpi_event_manager) {
+    if let Some(e) = acpi_manager.create_acpi_event_manager() {
+        mem::forget(mem::replace(
+            &mut get_kernel_manager_cluster().acpi_event_manager,
+            e,
+        ));
+    } else {
         pr_err!("Cannot init ACPI Event Manager");
-        get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
-        get_kernel_manager_cluster().acpi_device_manager = device_manager;
+        set_manger(acpi_manager, device_manager);
         return false;
     }
-
-    get_kernel_manager_cluster().acpi_manager = Mutex::new(acpi_manager);
-    get_kernel_manager_cluster().acpi_device_manager = device_manager;
+    set_manger(acpi_manager, device_manager);
     return true;
 }
 
 /// Init AcpiManager and AcpiEventManager with parsing AML
 ///
 /// This function will setup some devices like power button.
-/// They will call malloc, therefore this function should be called after init of memory_manager
+/// They will call malloc, therefore this function should be called after init of kernel_memory_manager
 pub fn init_acpi_later() -> bool {
     let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
     if !acpi_manager.is_available() {
@@ -186,15 +206,37 @@ pub fn init_acpi_later() -> bool {
 ///
 /// This function should be called before `init_acpi_later`.
 pub fn init_pci_early() -> bool {
-    let pci_manager = PciManager::new();
-    get_kernel_manager_cluster().pci_manager = pci_manager;
-    true
+    let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+
+    let pci_manager;
+    if acpi_manager.is_available() {
+        if let Some(mcfg_manager) = acpi_manager
+            .get_table_manager()
+            .get_table_manager::<McfgManager>()
+        {
+            drop(acpi_manager);
+            pci_manager = PciManager::new_ecam(mcfg_manager);
+        } else {
+            pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
+        }
+    } else {
+        pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
+    }
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().pci_manager,
+        pci_manager,
+    ));
+    if let Err(e) = get_kernel_manager_cluster().pci_manager.build_device_tree() {
+        pr_err!("Failed to build PCI device tree: {:?}", e);
+        return false;
+    }
+    return true;
 }
 
 /// Init PciManager with scanning all bus
 pub fn init_pci_later() -> bool {
-    get_kernel_manager_cluster().pci_manager.scan_root_bus();
-    true
+    get_kernel_manager_cluster().pci_manager.setup_devices();
+    return true;
 }
 
 /// Init Timer
@@ -204,10 +246,19 @@ pub fn init_pci_later() -> bool {
 /// Otherwise, this will calculate the frequency of the Local APIC Timer with ACPI PM Timer or
 /// PIT.(ACPI PM Timer is prioritized.)
 /// After that, this registers the timer to InterruptManager.
-pub fn init_timer() -> LocalApicTimer {
+pub fn init_local_timer() {
     /* This function assumes that interrupt is not enabled */
     /* This function does not enable interrupt */
-    let mut local_apic_timer = LocalApicTimer::new();
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster().local_timer_manager,
+        LocalTimerManager::new(),
+    ));
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster().arch_depend_data.local_apic_timer,
+        LocalApicTimer::new(),
+    ));
+    let local_apic_timer = &mut get_cpu_manager_cluster().arch_depend_data.local_apic_timer;
+    let local_timer_manager = &mut get_cpu_manager_cluster().local_timer_manager;
     local_apic_timer.init();
     if local_apic_timer.enable_deadline_mode(
         InterruptionIndex::LocalApicTimer as u16,
@@ -216,6 +267,7 @@ pub fn init_timer() -> LocalApicTimer {
             .get_local_apic_manager(),
     ) {
         pr_info!("Using Local APIC TSC Deadline Mode");
+        local_timer_manager.set_source_timer(local_apic_timer);
     } else if let Some(pm_timer) = get_kernel_manager_cluster()
         .acpi_device_manager
         .get_pm_timer()
@@ -228,6 +280,7 @@ pub fn init_timer() -> LocalApicTimer {
                 .get_local_apic_manager(),
             pm_timer,
         );
+        local_timer_manager.set_source_timer(local_apic_timer); /* Temporary, set local APIC Timer */
     } else {
         pr_info!("Using PIT to calculate frequency of Local APIC Timer.");
         let mut pit = PitManager::new();
@@ -240,6 +293,7 @@ pub fn init_timer() -> LocalApicTimer {
             &pit,
         );
         pit.stop_counting();
+        local_timer_manager.set_source_timer(local_apic_timer); /* Temporary, set local APIC Timer */
     }
 
     /* setup IDT */
@@ -260,9 +314,13 @@ pub fn init_timer() -> LocalApicTimer {
         );
 
     /* Setup TimerManager */
-    get_cpu_manager_cluster().timer_manager = TimerManager::new();
+}
 
-    local_apic_timer
+pub fn init_global_timer() {
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().global_timer_manager,
+        GlobalTimerManager::new(),
+    ));
 }
 
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
@@ -272,16 +330,12 @@ pub fn setup_cpu_manager_cluster(
     cpu_manager_address: Option<VAddress>,
 ) -> &'static mut CpuManagerCluster {
     let cpu_manager_address = cpu_manager_address.unwrap_or_else(|| {
+        /* ATTENTION: BSP must be sleeping. */
         get_kernel_manager_cluster()
             .boot_strap_cpu_manager /* Allocate from BSP Object Manager */
-            .object_allocator
-            .lock()
-            .unwrap()
-            .alloc(
-                core::mem::size_of::<CpuManagerCluster>().into(),
-                &get_kernel_manager_cluster().memory_manager,
-            )
-            .unwrap()
+            .memory_allocator
+            .kmalloc(MSize::new(core::mem::size_of::<CpuManagerCluster>()))
+            .expect("Failed to alloc CpuManagerCluster")
     });
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
     /*
@@ -295,7 +349,10 @@ pub fn setup_cpu_manager_cluster(
             &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
         )
     };
-    cpu_manager.list = PtrLinkedListNode::new();
+    mem::forget(mem::replace(
+        &mut cpu_manager.list,
+        PtrLinkedListNode::new(),
+    ));
     get_kernel_manager_cluster()
         .cpu_list
         .insert_tail(&mut cpu_manager.list);
@@ -308,25 +365,17 @@ pub fn setup_cpu_manager_cluster(
 /// This is in the development
 pub fn init_multiple_processors_ap() {
     /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
-    let boot_address = 0usize;
+    let boot_address = PAddress::new(0);
 
     /* Get available Local APIC IDs from ACPI */
     let madt_manager = get_kernel_manager_cluster()
         .acpi_manager
         .lock()
         .unwrap()
-        .get_xsdt_manager()
-        .get_madt_manager();
+        .get_table_manager()
+        .get_table_manager::<MadtManager>();
     if madt_manager.is_none() {
         pr_info!("ACPI does not have MADT.");
-        if let Err(e) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .free(VAddress::new(boot_address))
-        {
-            pr_err!("Cannot free temporary stack: {:?}", e);
-        }
         return;
     }
     let madt_manager = madt_manager.unwrap();
@@ -352,11 +401,13 @@ pub fn init_multiple_processors_ap() {
     let ap_entry_end_address = ap_entry_end as *const fn() as usize;
 
     /* Copy boot code for application processors */
-    let vector = ((boot_address >> PAGE_SHIFT) & 0xff) as u8;
+    let vector = ((boot_address.to_usize() >> PAGE_SHIFT) & 0xff) as u8;
+    assert!(ap_entry_end_address - ap_entry_address <= PAGE_SIZE_USIZE);
     unsafe {
         core::ptr::copy_nonoverlapping(
             ap_entry_address as *const u8,
-            boot_address as *mut u8,
+            //physical_address_to_direct_map(PAddress::new(boot_address)).to_usize() as *mut u8,
+            physical_address_to_direct_map(boot_address).to_usize() as *mut u8,
             ap_entry_end_address - ap_entry_address,
         )
     };
@@ -364,18 +415,20 @@ pub fn init_multiple_processors_ap() {
     /* Allocate and set temporary stack */
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
     let stack = get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .alloc_with_option(
+        .kernel_memory_manager
+        .alloc_pages_with_physical_address(
             stack_size.to_order(None).to_page_order(),
             MemoryPermissionFlags::data(),
-            MemoryOptionFlags::DIRECT_MAP,
+            None,
         )
-        .unwrap();
+        .expect("Failed to alloc stack for AP");
     unsafe {
-        *(((&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address + boot_address)
-            as *mut u64) = (stack + stack_size).to_usize() as u64
+        *(physical_address_to_direct_map(PAddress::new(
+            (&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address
+                + boot_address.to_usize(),
+        ))
+        .to_usize() as *mut u64) =
+            physical_address_to_direct_map(stack.1 + stack_size).to_usize() as u64
     };
 
     let timer = get_kernel_manager_cluster()
@@ -415,7 +468,6 @@ pub fn init_multiple_processors_ap() {
         local_apic_manager
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
 
-        drop(local_apic_manager);
         for _wait in 0..5000
         /* Wait 5s for AP init */
         {
@@ -429,20 +481,16 @@ pub fn init_multiple_processors_ap() {
 
     /* Free boot_address */
     if let Err(e) = get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .free(boot_address.into())
+        .kernel_memory_manager
+        .free_physical_memory(boot_address, PAGE_SIZE)
     {
         pr_err!("Cannot free boot_address: {:?}", e);
     }
 
     /* Free temporary stack */
     if let Err(e) = get_kernel_manager_cluster()
-        .memory_manager
-        .lock()
-        .unwrap()
-        .free(stack)
+        .kernel_memory_manager
+        .free(stack.0)
     {
         pr_err!("Cannot free temporary stack: {:?}", e);
     }

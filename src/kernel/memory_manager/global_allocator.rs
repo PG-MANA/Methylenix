@@ -3,10 +3,8 @@
 //!
 //! This is the allocator for core::alloc::GlobalAlloc
 
-use crate::arch::target_arch::paging::PAGE_SHIFT;
-
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 use core::alloc::{GlobalAlloc, Layout};
 
@@ -28,13 +26,9 @@ fn alloc_error_oom(layout: Layout) -> ! {
 
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let memory_manager = &get_kernel_manager_cluster().memory_manager;
-        assert_eq!(layout.align() >> PAGE_SHIFT, 0);
         match get_cpu_manager_cluster()
-            .object_allocator
-            .lock()
-            .unwrap()
-            .alloc(layout_to_size(layout), memory_manager)
+            .memory_allocator
+            .kmalloc(layout_to_size(layout))
         {
             Ok(address) => address.to_usize() as *mut u8,
             Err(e) => {
@@ -45,17 +39,9 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let memory_manager = &get_kernel_manager_cluster().memory_manager;
-        assert_eq!(layout.align() >> PAGE_SHIFT, 0);
         if let Err(e) = get_cpu_manager_cluster()
-            .object_allocator
-            .lock()
-            .unwrap()
-            .dealloc(
-                (ptr as usize).into(),
-                layout_to_size(layout),
-                memory_manager,
-            )
+            .memory_allocator
+            .kfree(VAddress::new(ptr as usize), layout_to_size(layout))
         {
             pr_err!("Cannot dealloc memory for {:?}. Error: {:?}", layout, e);
         }

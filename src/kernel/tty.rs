@@ -6,7 +6,7 @@ use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 
 use crate::kernel::collections::fifo::Fifo;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
 use crate::kernel::task_manager::wait_queue::WaitQueue;
 
 use core::fmt;
@@ -14,7 +14,7 @@ use core::mem::MaybeUninit;
 
 pub struct TtyManager {
     input_lock: SpinLockFlag,
-    output_lock: SpinLockFlag,
+    output_lock: IrqSaveSpinLockFlag,
     input_queue: Fifo<u8, { Self::DEFAULT_INPUT_BUFFER_SIZE }>,
     output_queue: Fifo<u8, { Self::DEFAULT_OUTPUT_BUFFER_SIZE }>,
     output_driver: Option<&'static (dyn Writer)>,
@@ -39,7 +39,7 @@ impl TtyManager {
     pub const fn new() -> Self {
         Self {
             input_lock: SpinLockFlag::new(),
-            output_lock: SpinLockFlag::new(),
+            output_lock: IrqSaveSpinLockFlag::new(),
             input_queue: Fifo::new(0),
             output_queue: Fifo::new(0),
             output_driver: None,
@@ -96,13 +96,7 @@ impl TtyManager {
     }
 
     pub fn puts(&mut self, s: &str) -> fmt::Result {
-        let _lock = if let Ok(l) = self.output_lock.try_lock() {
-            l
-        } else if is_interrupt_enabled() {
-            self.output_lock.lock()
-        } else {
-            return Err(fmt::Error {});
-        };
+        let _lock = self.output_lock.lock();
 
         if self.output_driver.is_none() {
             return Err(fmt::Error {});
@@ -123,17 +117,7 @@ impl TtyManager {
     }
 
     pub fn flush(&mut self) -> fmt::Result {
-        let _lock = if let Ok(l) = self.output_lock.try_lock() {
-            l
-        } else if is_interrupt_enabled() {
-            self.output_lock.lock()
-        } else {
-            return Err(fmt::Error {});
-        };
-
-        if self.output_driver.is_none() {
-            return Err(fmt::Error {});
-        }
+        let _lock = self.output_lock.lock();
         self._flush()
     }
 
@@ -165,13 +149,8 @@ impl TtyManager {
         foreground_color: u32,
         background_color: u32,
     ) -> Option<(u32, u32)> {
-        let _lock = if let Ok(l) = self.output_lock.try_lock() {
-            l
-        } else if is_interrupt_enabled() {
-            self.output_lock.lock()
-        } else {
-            return None;
-        };
+        let _lock = self.output_lock.lock();
+        let _ = self._flush();
         let old = self.text_color;
         self.text_color = (foreground_color, background_color);
         return Some(old);

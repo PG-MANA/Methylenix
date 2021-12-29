@@ -7,6 +7,8 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
+use core::arch::asm;
+
 #[inline(always)]
 pub unsafe fn sti() {
     asm!("sti");
@@ -150,13 +152,13 @@ pub unsafe fn wrmsr(ecx: u32, data: u64) {
 pub unsafe fn cpuid(eax: &mut u32, ebx: &mut u32, ecx: &mut u32, edx: &mut u32) {
     /* EBX is used internally by LLVM */
     asm!(
-        "   xchg edi, ebx
+        "   xchg rdi, rbx
             cpuid
-            xchg edi, ebx
+            xchg rdi, rbx
         ",
         inout("eax") * eax,
         inout("ecx") * ecx,
-        out("edi") * ebx,
+        out("rdi") * ebx,
         out("edx") * edx
     );
 }
@@ -313,7 +315,7 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 swapgs
 3:
                 mov     rax, [rdi + 512 + 8 * 26]
-                mov     cr3, rax
+                //mov     cr3, rax
                 mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]
                 iretq
@@ -376,9 +378,9 @@ pub unsafe extern "C" fn task_switch(
                 mov     [rsi + 512 + 8 * 23], rax   // RFLAGS
                 mov     rax, cs
                 mov     [rsi + 512 + 8 * 24], rax
-                lea     rax, 1f
+                lea     rax, [rip + 1f]
                 mov     [rsi + 512 + 8 * 25], rax   // RIP
-                mov     rax, cr3
+                //mov     rax, cr3
                 mov     [rsi + 512 + 8 * 26], rax
 
                 jmp     {}

@@ -5,9 +5,8 @@
 //! Definition block is treated by AML module.
 //!
 
-use super::super::INITIAL_MMAP_SIZE;
+use super::AcpiTable;
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 #[repr(C, packed)]
@@ -27,41 +26,31 @@ pub struct DsdtManager {
     base_address: VAddress,
 }
 
-impl DsdtManager {
-    pub const SIGNATURE: [u8; 4] = *b"DSDT";
-    pub const fn new() -> Self {
+impl AcpiTable for DsdtManager {
+    const SIGNATURE: [u8; 4] = *b"DSDT";
+
+    fn new() -> Self {
         Self {
             base_address: VAddress::new(0),
         }
     }
 
-    pub const fn is_initialized(&self) -> bool {
-        !self.base_address.is_zero()
-    }
-
-    pub fn init(&mut self, dsdt_vm_address: VAddress) -> bool {
+    fn init(&mut self, vm_address: VAddress) -> Result<(), ()> {
         /* dsdt_vm_address must be accessible */
-        let dsdt = unsafe { &*(dsdt_vm_address.to_usize() as *const DSDT) };
+        let dsdt = unsafe { &*(vm_address.to_usize() as *const DSDT) };
         if dsdt.major_version > 2 {
             pr_err!("Not supported DSDT version:{}", dsdt.major_version);
         }
 
-        let dsdt_vm_address = if let Ok(a) = get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .mremap_dev(
-                dsdt_vm_address,
-                INITIAL_MMAP_SIZE.into(),
-                (dsdt.length as usize).into(),
-            ) {
-            a
-        } else {
-            pr_err!("Cannot map memory area of DSDT.");
-            return false;
-        };
+        let dsdt_vm_address = remap_table!(vm_address, dsdt.length);
         self.base_address = dsdt_vm_address;
-        return true;
+        return Ok(());
+    }
+}
+
+impl DsdtManager {
+    pub const fn is_initialized(&self) -> bool {
+        !self.base_address.is_zero()
     }
 
     pub const fn get_definition_block_address_and_size(&self) -> (VAddress, MSize) {

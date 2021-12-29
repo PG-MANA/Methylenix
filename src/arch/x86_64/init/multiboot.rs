@@ -5,6 +5,9 @@
 
 use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
+use crate::arch::target_arch::context::memory_layout::{
+    kernel_area_to_physical_address, KERNEL_MAP_START_ADDRESS,
+};
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::drivers::efi::boot_service::memory_map::EfiMemoryType;
@@ -12,15 +15,16 @@ use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress, VAddress};
-use crate::kernel::memory_manager::object_allocator::ObjectAllocator;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
 use crate::kernel::memory_manager::{
-    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags, MemoryManager,
-    SystemMemoryManager,
+    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags,
+    system_memory_manager::get_physical_memory_manager, MemoryManager,
 };
-use crate::kernel::sync::spin_lock::Mutex;
 
+use crate::io_remap;
+use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
+use crate::kernel::memory_manager::system_memory_manager::SystemMemoryManager;
 use core::mem;
 
 /// Init memory system based on multiboot information.
@@ -35,19 +39,26 @@ pub fn init_memory_by_multiboot_information(
     /* Set up Physical Memory Manager */
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
-        physical_memory_manager.set_memory_entry_pool(
+        physical_memory_manager.add_memory_entry_pool(
             &MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize,
             mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER),
         );
     }
+    let mut max_available_address = 0;
     for entry in multiboot_information.memory_map_info.clone() {
         if entry.m_type == 1 {
             /* Available memory */
-            physical_memory_manager.free(
-                PAddress::new(entry.addr as usize),
-                MSize::new(entry.length as usize),
-                true,
-            );
+            physical_memory_manager
+                .free(
+                    PAddress::new(entry.addr as usize),
+                    MSize::new(entry.length as usize),
+                    true,
+                )
+                .expect("Failed to free available memory");
+            if max_available_address < (entry.addr + entry.length) as usize {
+                max_available_address =
+                    ((((entry.addr + entry.length) as usize) - 1) & PAGE_MASK) + PAGE_SIZE_USIZE;
+            }
         }
         let area_name = match entry.m_type {
             1 => "Available",
@@ -80,8 +91,13 @@ pub fn init_memory_by_multiboot_information(
             EfiMemoryType::EfiMemoryMappedIOPortSpace |
             EfiMemoryType::EfiPalCode |
             EfiMemoryType::EfiPersistentMemory => {
-                physical_memory_manager.reserve_memory(PAddress::new(entry.physical_start),MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT),MOrder::new(0));
-
+                if let Err(e) =
+                   physical_memory_manager.reserve_memory(
+                       PAddress::new(entry.physical_start),
+                       MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT),
+                       MOrder::new(0)) {
+                    pr_warn!("Failed to free {:?}: {:?}", entry.memory_type, e);
+                }
             }
             _=>{}
         }
@@ -97,43 +113,67 @@ pub fn init_memory_by_multiboot_information(
 
     /* Reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
-        if section.should_allocate() && section.align_size() == PAGE_SIZE_USIZE {
-            physical_memory_manager.reserve_memory(
-                PAddress::new(section.address()),
-                MSize::new(section.size()),
-                MOrder::new(PAGE_SHIFT),
-            );
+        if section.should_allocate() && (section.address() & !PAGE_MASK) == 0 {
+            let virtual_address = VAddress::new(section.address());
+            let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
+                kernel_area_to_physical_address(virtual_address)
+            } else {
+                virtual_address.to_direct_mapped_p_address()
+            };
+            physical_memory_manager
+                .reserve_memory(
+                    physical_address,
+                    MSize::new(section.size()),
+                    MOrder::new(PAGE_SHIFT),
+                )
+                .expect("Failed to reserve memory");
         }
     }
     /* reserve Multiboot Information area */
-    physical_memory_manager.reserve_memory(
-        PAddress::new(multiboot_information.address),
-        MSize::new(multiboot_information.size),
-        0.into(),
-    );
+    physical_memory_manager
+        .reserve_memory(
+            PAddress::new(multiboot_information.address),
+            MSize::new(multiboot_information.size),
+            0.into(),
+        )
+        .expect("Failed to reserve memory area of the multiboot information");
 
     /* TEMP: reserve boot code area for application processors */
-    assert!(physical_memory_manager.reserve_memory(0.into(), PAGE_SIZE, 0.into()));
+    physical_memory_manager
+        .reserve_memory(PAddress::new(0), PAGE_SIZE, MOrder::new(0))
+        .expect("Failed to reserve boot code area");
 
     /* Reserve Multiboot modules area */
     for e in multiboot_information.modules.iter() {
         if e.start_address != 0 && e.end_address != 0 {
-            physical_memory_manager.reserve_memory(
-                e.start_address.into(),
-                (e.end_address - e.start_address).into(),
-                0.into(),
-            );
+            physical_memory_manager
+                .reserve_memory(
+                    e.start_address.into(),
+                    (e.end_address - e.start_address).into(),
+                    0.into(),
+                )
+                .expect("Failed to reserve memory area of the multiboot modules");
         }
     }
 
     /* Set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
-    virtual_memory_manager.init(true, &mut physical_memory_manager);
+    virtual_memory_manager.init_system(
+        PAddress::new(max_available_address),
+        &mut physical_memory_manager,
+    );
+    core::mem::forget(core::mem::replace(
+        &mut get_kernel_manager_cluster().system_memory_manager,
+        SystemMemoryManager::new(physical_memory_manager),
+    ));
+    get_kernel_manager_cluster()
+        .system_memory_manager
+        .init_pools(&mut virtual_memory_manager);
+
     for section in multiboot_information.elf_info.clone() {
-        if !section.should_allocate() || section.align_size() != PAGE_SIZE_USIZE {
+        if !section.should_allocate() || (section.address() & !PAGE_MASK) != 0 {
             continue;
         }
-        assert_eq!(!PAGE_MASK & section.address(), 0);
         let aligned_size = MSize::new((section.size() - 1) & PAGE_MASK) + PAGE_SIZE;
         let permission = MemoryPermissionFlags::new(
             true,
@@ -141,14 +181,20 @@ pub fn init_memory_by_multiboot_information(
             section.should_excusable(),
             false,
         );
+        let virtual_address = VAddress::new(section.address());
+        let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
+            kernel_area_to_physical_address(virtual_address)
+        } else {
+            virtual_address.to_direct_mapped_p_address()
+        };
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
         match virtual_memory_manager.map_address(
-            PAddress::new(section.address()),
-            Some(VAddress::new(section.address())),
+            physical_address,
+            Some(virtual_address),
             aligned_size,
             permission,
             MemoryOptionFlags::KERNEL,
-            &mut physical_memory_manager,
+            get_physical_memory_manager(),
         ) {
             Ok(address) => {
                 if address == VAddress::new(section.address()) {
@@ -166,17 +212,7 @@ pub fn init_memory_by_multiboot_information(
         };
         panic!("Cannot map virtual memory correctly.");
     }
-    /* TEMP: associate boot code area for application processors */
-    virtual_memory_manager
-        .map_address(
-            PAddress::new(0),
-            Some(VAddress::new(0)),
-            PAGE_SIZE,
-            MemoryPermissionFlags::data(),
-            MemoryOptionFlags::MEMORY_MAP,
-            &mut physical_memory_manager,
-        )
-        .expect("Cannot associate memory for boot code of Application Processors.");
+
     let aligned_multiboot = MemoryManager::page_align(
         PAddress::new(multiboot_information.address),
         MSize::new(multiboot_information.size),
@@ -187,32 +223,30 @@ pub fn init_memory_by_multiboot_information(
             None,
             aligned_multiboot.1,
             MemoryPermissionFlags::rodata(),
-            MemoryOptionFlags::MEMORY_MAP | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
-            &mut physical_memory_manager,
+            MemoryOptionFlags::IO_MAP | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
+            get_physical_memory_manager(),
         )
         .expect("Cannot map multiboot information");
 
     /* Set up Memory Manager */
-    get_kernel_manager_cluster().system_memory_manager =
-        SystemMemoryManager::new(physical_memory_manager);
-    let mut memory_manager = get_kernel_manager_cluster()
-        .system_memory_manager
-        .create_new_memory_manager(virtual_memory_manager);
-
+    core::mem::forget(core::mem::replace(
+        &mut get_kernel_manager_cluster().kernel_memory_manager,
+        MemoryManager::new(virtual_memory_manager),
+    ));
     /* Apply paging */
-    memory_manager.set_paging_table();
+    get_kernel_manager_cluster()
+        .kernel_memory_manager
+        .set_paging_table();
 
     /* Set up Kernel Memory Alloc Manager */
-    let mut object_allocator = ObjectAllocator::new();
-    object_allocator.init(&mut memory_manager);
+    let mut memory_allocator = MemoryAllocator::new();
+    memory_allocator
+        .init()
+        .expect("Failed to init MemoryAllocator");
 
     /* Move Multiboot Information to allocated memory area */
-    let mutex_memory_manager = Mutex::new(memory_manager);
-    let new_mbi_address = object_allocator
-        .alloc(
-            MSize::new(multiboot_information.size),
-            &mutex_memory_manager,
-        )
+    let new_mbi_address = memory_allocator
+        .kmalloc(MSize::new(multiboot_information.size))
         .expect("Cannot alloc memory for Multiboot Information.");
     unsafe {
         core::ptr::copy_nonoverlapping(
@@ -223,20 +257,20 @@ pub fn init_memory_by_multiboot_information(
             multiboot_information.size,
         )
     };
+    get_cpu_manager_cluster().memory_allocator = memory_allocator;
     /* Free old MultiBootInformation area */
-    mutex_memory_manager
-        .lock()
-        .unwrap()
+    get_kernel_manager_cluster()
+        .kernel_memory_manager
         .free(mapped_multiboot_address_base)
         .expect("Cannot free the map of multiboot information.");
-    mutex_memory_manager.lock().unwrap().free_physical_memory(
-        multiboot_information.address.into(),
-        multiboot_information.size.into(),
-    ); /* It may be already freed */
+    let _ = get_kernel_manager_cluster()
+        .kernel_memory_manager
+        .free_physical_memory(
+            multiboot_information.address.into(),
+            multiboot_information.size.into(),
+        ); /* It may be already freed */
 
     /* Store managers to cluster */
-    get_kernel_manager_cluster().memory_manager = mutex_memory_manager;
-    get_cpu_manager_cluster().object_allocator = Mutex::new(object_allocator);
     MultiBootInformation::new(new_mbi_address.to_usize(), false)
 }
 
@@ -252,16 +286,12 @@ pub fn init_graphic(multiboot_information: &MultiBootInformation) {
     /* Load font */
     for module in multiboot_information.modules.iter() {
         if module.name == "font.pf2" {
-            let vm_address = get_kernel_manager_cluster()
-                .memory_manager
-                .lock()
-                .unwrap()
-                .mmap(
-                    module.start_address.into(),
-                    (module.end_address - module.start_address).into(),
-                    MemoryPermissionFlags::rodata(),
-                    MemoryOptionFlags::PRE_RESERVED | MemoryOptionFlags::MEMORY_MAP,
-                );
+            let vm_address = io_remap!(
+                module.start_address.into(),
+                (module.end_address - module.start_address).into(),
+                MemoryPermissionFlags::rodata(),
+                MemoryOptionFlags::PRE_RESERVED
+            );
             if let Ok(vm_address) = vm_address {
                 let result = get_kernel_manager_cluster().graphic_manager.load_font(
                     vm_address,

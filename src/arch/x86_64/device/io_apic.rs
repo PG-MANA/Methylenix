@@ -8,7 +8,7 @@
 
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::io_remap;
 use crate::kernel::memory_manager::data_type::{
     Address, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
@@ -31,19 +31,15 @@ impl IoApicManager {
 
     /// Init this manager.
     ///
-    /// This function calls memory_manager.mmap_dev()
+    /// This function calls kernel_memory_manager.mmap_dev()
     /// This will panic when mmap_dev() was failed.
     pub fn init(&mut self) {
-        match get_kernel_manager_cluster()
-            .memory_manager
-            .lock()
-            .unwrap()
-            .io_map(
-                PAddress::new(0xfec00000),
-                PAGE_SIZE, /* is it ok?*/
-                MemoryPermissionFlags::data(),
-                Some(MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS),
-            ) {
+        match io_remap!(
+            PAddress::new(0xfec00000),
+            PAGE_SIZE, /* is it ok?*/
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS
+        ) {
             Ok(address) => {
                 self.base_address = address;
             }
