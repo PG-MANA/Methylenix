@@ -173,7 +173,6 @@ impl MemoryManager {
             }
             p
         };
-
         loop {
             match self.virtual_memory_manager.alloc_and_map_virtual_address(
                 size,
@@ -388,7 +387,9 @@ impl MemoryManager {
 
         let pm_manager = get_physical_memory_manager();
         /* TODO: check physical_address is not allocatble */
-        let option = option.unwrap_or(MemoryOptionFlags::KERNEL) | MemoryOptionFlags::IO_MAP;
+        let option = option.unwrap_or(MemoryOptionFlags::KERNEL)
+            | MemoryOptionFlags::IO_MAP
+            | MemoryOptionFlags::DEVICE_MEMORY;
         let virtual_address = {
             let v: VAddress;
             loop {
@@ -538,28 +539,42 @@ macro_rules! mremap {
 
 #[macro_export]
 macro_rules! alloc_pages {
-    ($len:expr, $permission:expr) => {
+    ($order:expr, $permission:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_pages($len, $permission, None)
+            .alloc_pages($order, $permission, None)
     };
-    ($len:expr, $permission:expr, $option:expr) => {
+    ($order:expr, $permission:expr, $option:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_pages($len, $permission, Some($option))
+            .alloc_pages($order, $permission, Some($option))
+    };
+}
+
+#[macro_export]
+macro_rules! alloc_pages_with_physical_address {
+    ($order:expr, $permission:expr) => {
+        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .alloc_pages_with_physical_address($order, $permission, None)
+    };
+    ($order:expr, $permission:expr, $option:expr) => {
+        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .alloc_pages_with_physical_address($order, $permission, Some($option))
     };
 }
 
 #[macro_export]
 macro_rules! alloc_non_linear_pages {
-    ($len:expr, $permission:expr) => {
+    ($order:expr, $permission:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_nonlinear_pages($len, $permission, None)
+            .alloc_nonlinear_pages($order, $permission, None)
     };
-    ($len:expr, $permission:expr, $option:expr) => {
+    ($order:expr, $permission:expr, $option:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_nonlinear_pages($len, $permission, Some($option))
+            .alloc_nonlinear_pages($order, $permission, Some($option))
     };
 }
