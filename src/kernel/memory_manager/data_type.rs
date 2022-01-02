@@ -539,6 +539,7 @@ impl MemoryOptionFlags {
     pub const ALLOC: Self = Self(1 << 5);
     pub const NO_WAIT: Self = Self(1 << 6);
     pub const CRITICAL: Self = Self(1 << 7);
+    pub const DEVICE_MEMORY: Self = Self(1 << 8);
 
     pub fn is_for_kernel(&self) -> bool {
         !self.is_for_user()
@@ -574,6 +575,10 @@ impl MemoryOptionFlags {
 
     pub fn is_critical(&self) -> bool {
         (*self & Self::CRITICAL).0 != 0
+    }
+
+    pub fn is_device_memory(&self) -> bool {
+        (*self & Self::DEVICE_MEMORY).0 != 0
     }
 }
 
