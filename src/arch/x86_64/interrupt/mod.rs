@@ -43,6 +43,8 @@ pub struct InterruptManager {
 /// This enum is used to decide which index the specific device should use.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum InterruptionIndex {
+    SerialPort = 0x24,
+    Nvme = 0xee,
     LocalApicTimer = 0xef,
     RescheduleIpi = 0xf8,
 }

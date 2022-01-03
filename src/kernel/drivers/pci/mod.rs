@@ -49,6 +49,12 @@ pub struct ClassCode {
 
 impl PciManager {
     const INVALID_VENDOR_ID: u16 = 0xffff;
+    pub const PCI_CONFIGURATION_COMMAND: u32 = 0x04;
+    pub const COMMAND_MEMORY_SPACE_BIT: u32 = 1 << 1;
+    pub const COMMAND_BUS_MASTER_BIT: u32 = 1 << 2;
+    pub const COMMAND_INTERRUPT_DISABLE_BIT: u32 = 1 << 10;
+    pub const PCI_BAR_0: u32 = 0x10;
+    pub const PCI_BAR_1: u32 = 0x14;
 
     pub fn new_arch_depend(arch_pci_manager: ArchDependPciManager) -> Self {
         Self {
