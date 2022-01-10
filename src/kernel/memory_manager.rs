@@ -580,6 +580,15 @@ macro_rules! alloc_non_linear_pages {
 }
 
 #[macro_export]
+macro_rules! free_pages {
+    ($address:expr) => {
+        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .free($address)
+    };
+}
+
+#[macro_export]
 macro_rules! kmalloc {
     ($size:expr) => {
         crate::kernel::manager_cluster::get_cpu_manager_cluster()

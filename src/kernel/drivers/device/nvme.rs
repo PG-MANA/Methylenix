@@ -10,7 +10,7 @@ use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
 
-use crate::{alloc_pages_with_physical_address, io_remap, kmalloc};
+use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
 
 use crate::kernel::block_device::{BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceInfo};
 use alloc::vec::Vec;
@@ -241,12 +241,8 @@ impl PciDeviceDriver for NvmeManager {
                 max_queue
             );
 
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(admin_completion_queue_virtual_address);
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(admin_submission_queue_virtual_address);
+            let _ = free_pages!(admin_completion_queue_virtual_address);
+            let _ = free_pages!(admin_submission_queue_virtual_address);
             return;
         }
 
@@ -478,21 +474,13 @@ impl PciDeviceDriver for NvmeManager {
         }
         if nsid_table[0] == 0 {
             pr_err!("There is no usable name space");
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(identify_info_virtual_address);
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(admin_completion_queue_virtual_address);
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(admin_submission_queue_virtual_address);
+            let _ = free_pages!(identify_info_virtual_address);
+            let _ = free_pages!(admin_completion_queue_virtual_address);
+            let _ = free_pages!(admin_submission_queue_virtual_address);
             return;
         }
 
-        let _ = get_kernel_manager_cluster()
-            .kernel_memory_manager
-            .free(identify_info_virtual_address);
+        let _ = free_pages!(identify_info_virtual_address);
         return;
     }
 }
@@ -506,6 +494,19 @@ impl BlockDeviceDriver for NvmeManager {
         pages_to_write: PAddress,
     ) -> Result<(), ()> {
         self._read_data(0x01, info.device_id as u32, offset, size, pages_to_write)
+    }
+
+    fn read_data_by_lba(
+        &mut self,
+        info: &BlockDeviceInfo,
+        lba: usize,
+        sectors: usize,
+    ) -> Result<VAddress, ()> {
+        self._read_data_lba(0x01, info.device_id as u32, lba, sectors)
+    }
+
+    fn get_lba_sector_size(&self, info: &BlockDeviceInfo) -> usize {
+        1 << self.namespace_list[info.device_id].sector_size_exp_index as usize
     }
 }
 
@@ -898,6 +899,117 @@ impl NvmeManager {
             return Err(());
         }
         return Ok(());
+    }
+
+    fn _read_data_lba(
+        &mut self,
+        queue_id: u16,
+        name_space_list_index: u32,
+        lba: usize,
+        number_of_sectors: usize,
+    ) -> Result<VAddress, ()> {
+        if number_of_sectors == 0 {
+            pr_err!("Size is zero");
+            return Err(());
+        }
+
+        if name_space_list_index as usize > self.namespace_list.len() {
+            pr_err!(
+                "Invalid name_space_list's index: {:#X}",
+                name_space_list_index
+            );
+            return Err(());
+        }
+        let name_space = &self.namespace_list[name_space_list_index as usize];
+        if lba + (number_of_sectors << name_space.sector_size_exp_index as usize)
+            >= name_space.name_space_lba_size as usize
+        {
+            pr_err!(
+                "The staring LBA({:#X}) and the number of blocks({:#X}) are exceeded from the disk size",
+                lba,
+                number_of_sectors
+            );
+            return Err(());
+        }
+
+        let allocate_size = number_of_sectors << name_space.sector_size_exp_index as usize;
+        let (io_virtual_address, io_physical_address) = match alloc_pages_with_physical_address!(
+            MSize::new(allocate_size).to_order(None).to_page_order(),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::DEVICE_MEMORY
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to alloc memory for the I/O: {:?}", e);
+                return Err(());
+            }
+        };
+
+        let mut command = [0u32; 16];
+        command[0] = 0x02;
+        command[1] = 0x01;
+        unsafe {
+            *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) =
+                io_physical_address.to_usize() as u64
+        };
+
+        let mut pre_list_virtual_address: Option<VAddress> = None;
+        if allocate_size > 0x1000 {
+            let (v, prp_list_physical_address) = match alloc_pages_with_physical_address!(
+                MSize::new(0x1000).to_order(None).to_page_order(),
+                MemoryPermissionFlags::data(),
+                MemoryOptionFlags::DEVICE_MEMORY
+            ) {
+                Ok(a) => a,
+                Err(e) => {
+                    pr_err!("Failed to alloc memory for the  PRP List: {:?}", e);
+                    return Err(());
+                }
+            };
+
+            for i in 0..(allocate_size / 0x1000) {
+                unsafe {
+                    *((v.to_usize() + i * 8) as *mut u64) =
+                        (io_physical_address + MSize::new(0x1000)).to_usize() as u64
+                };
+            }
+            unsafe {
+                *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
+                    prp_list_physical_address.to_usize() as u64
+            };
+            pre_list_virtual_address = Some(v);
+        }
+
+        command[10] = (lba & u32::MAX as usize) as u32; /* LBA[0:31] */
+        command[11] = (lba >> 32) as u32; /* LBA[32:63] */
+        command[12] = (number_of_sectors - 1) as u32; /* [0:15]: Number of Logical Blocks */
+        let id = self.submit_command(queue_id, command);
+        if let Err(e) = id {
+            pr_err!("Failed to submit command: {:?}", e);
+            return Err(());
+        }
+
+        let id = id.unwrap();
+        /* TODO: sleep thread */
+        self.wait_completion_of_command_by_spin(queue_id, id)
+            .expect("Failed to wait command");
+        let result = self.take_completed_command(queue_id).unwrap();
+        if !Self::is_command_successful(&result) {
+            pr_err!(
+                "Failed the read command is failed:  {:#X?}(Status: {:#X})",
+                result,
+                (result[3] >> 16) & !1
+            );
+            let _ = free_pages!(io_virtual_address);
+            if let Some(v) = pre_list_virtual_address {
+                let _ = free_pages!(v);
+            }
+            return Err(());
+        }
+        if let Some(v) = pre_list_virtual_address {
+            let _ = free_pages!(v);
+        }
+        return Ok(io_virtual_address);
     }
 }
 

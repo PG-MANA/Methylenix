@@ -24,6 +24,7 @@ use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::table::bgrt::BgrtManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
+use crate::kernel::file;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
@@ -195,18 +196,12 @@ fn main_process() -> ! {
         pr_err!("Cannot init PCI devices.");
     }
 
-    match get_kernel_manager_cluster()
+    let number_of_block_devices = get_kernel_manager_cluster()
         .block_device_manager
-        .read(0x00, 0, 0x1000)
-    {
-        Ok(v_a) => {
-            pr_debug!("Block Device 0x00: {:#X?}", unsafe {
-                &*((v_a.to_usize()) as *const [u8; 32])
-            });
-            let _ = get_kernel_manager_cluster().kernel_memory_manager.free(v_a);
-        }
-        Err(_) => {
-            pr_debug!("No block device is detected.");
+        .get_number_of_devices();
+    if number_of_block_devices != 0 {
+        for i in 0..number_of_block_devices {
+            file::detect_partitions(i);
         }
     }
 

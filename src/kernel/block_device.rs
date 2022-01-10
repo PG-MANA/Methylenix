@@ -20,6 +20,15 @@ pub trait BlockDeviceDriver {
         size: usize,
         pages_to_write: PAddress,
     ) -> Result<(), ()>;
+
+    fn read_data_by_lba(
+        &mut self,
+        info: &BlockDeviceInfo,
+        lba: usize,
+        sectors: usize,
+    ) -> Result<VAddress, ()>;
+
+    fn get_lba_sector_size(&self, info: &BlockDeviceInfo) -> usize;
 }
 
 #[derive(Clone)]
@@ -54,6 +63,10 @@ impl BlockDeviceManager {
         drop(_lock);
     }
 
+    pub fn get_number_of_devices(&self) -> usize {
+        self.device_list.len()
+    }
+
     pub fn read(&self, id: usize, offset: usize, size: usize) -> Result<VAddress, ()> {
         let (page, physical_page) = match alloc_pages_with_physical_address!(
             MSize::new(size).to_order(None).to_page_order(),
@@ -86,6 +99,36 @@ impl BlockDeviceManager {
             return Err(());
         }
         return Ok(page);
+    }
+
+    pub fn read_by_lba(&self, id: usize, lba: usize, sectors: usize) -> Result<VAddress, ()> {
+        let _lock = self.lock.lock();
+        if id >= self.device_list.len() {
+            drop(_lock);
+            return Err(());
+        }
+
+        let d = &self.device_list[id];
+        let result = unsafe { &mut *d.driver }.read_data_by_lba(&d.info, lba, sectors);
+        if let Err(e) = result {
+            pr_err!("Failed to read data: {:?}", e);
+            drop(_lock);
+            return Err(());
+        }
+        return result;
+    }
+
+    pub fn get_lba_sector_size(&self, device_id: usize) -> usize {
+        let _lock = self.lock.lock();
+        if device_id >= self.device_list.len() {
+            drop(_lock);
+            pr_err!("Invalid device_id: {}", device_id);
+            return 0;
+        }
+        let size = unsafe { &*self.device_list[device_id].driver }
+            .get_lba_sector_size(&self.device_list[device_id].info);
+        drop(_lock);
+        return size;
     }
 }
 
