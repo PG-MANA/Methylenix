@@ -19,6 +19,7 @@ use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
 
+use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::table::bgrt::BgrtManager;
 use crate::kernel::drivers::acpi::AcpiManager;
@@ -176,6 +177,12 @@ fn main_process() -> ! {
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
 
+    /* Initialize block device manager */
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().block_device_manager,
+        BlockDeviceManager::new(),
+    ));
+
     if init_pci_early() {
         if !init_acpi_later() {
             pr_err!("Cannot init ACPI devices.");
@@ -187,6 +194,22 @@ fn main_process() -> ! {
     if !init_pci_later() {
         pr_err!("Cannot init PCI devices.");
     }
+
+    match get_kernel_manager_cluster()
+        .block_device_manager
+        .read(0x00, 0, 0x1000)
+    {
+        Ok(v_a) => {
+            pr_debug!("Block Device 0x00: {:#X?}", unsafe {
+                &*((v_a.to_usize()) as *const [u8; 32])
+            });
+            let _ = get_kernel_manager_cluster().kernel_memory_manager.free(v_a);
+        }
+        Err(_) => {
+            pr_debug!("No block device is detected.");
+        }
+    }
+
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
         let c = tty.getc(true);

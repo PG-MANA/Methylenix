@@ -8,6 +8,7 @@ use crate::arch::target_arch::device::serial_port::SerialPortManager;
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::{ArchDependedCpuManagerCluster, ArchDependedKernelManagerCluster};
 
+use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
@@ -38,7 +39,7 @@ pub struct KernelManagerCluster {
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
     pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
-    //input_manager:
+    pub block_device_manager: BlockDeviceManager,
     pub acpi_manager: Mutex<AcpiManager>,
     pub acpi_event_manager: AcpiEventManager,
     pub acpi_device_manager: AcpiDeviceManager,

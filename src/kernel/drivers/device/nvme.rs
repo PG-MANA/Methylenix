@@ -10,8 +10,9 @@ use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
 
-use crate::{alloc_pages_with_physical_address, io_remap};
+use crate::{alloc_pages_with_physical_address, io_remap, kmalloc};
 
+use crate::kernel::block_device::{BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceInfo};
 use alloc::vec::Vec;
 
 pub struct NvmeManager {
@@ -20,7 +21,7 @@ pub struct NvmeManager {
     controller_properties_size: MSize,
     admin_queue: Queue,
     stride: usize,
-    namespace_id: u32, /* Temporary */
+    namespace_list: Vec<NameSpace>,
     io_queue_list: Vec<Queue>,
 }
 
@@ -30,8 +31,16 @@ struct Queue {
     id: usize,
     submission_current_pointer: u16,
     completion_current_pointer: u16,
+    next_command_id: u16,
     number_of_completion_queue_entries: u16,
     number_of_submission_queue_entries: u16,
+}
+
+#[derive(Clone)]
+struct NameSpace {
+    name_space_id: u32,
+    name_space_lba_size: u64,
+    sector_size_exp_index: u8,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -286,12 +295,21 @@ impl PciDeviceDriver for NvmeManager {
             admin_completion_queue_size,
             admin_submission_queue_size,
         );
-        let mut nvme_manager = NvmeManager::new(
-            controller_properties_base_address,
-            controller_properties_map_size,
-            admin_queue,
-            stride,
-        );
+        let nvme_manager = match kmalloc!(
+            NvmeManager,
+            NvmeManager::new(
+                controller_properties_base_address,
+                controller_properties_map_size,
+                admin_queue,
+                stride,
+            )
+        ) {
+            Ok(n) => n,
+            Err(e) => {
+                pr_err!("Failed to allocate memory for NVMe manager: {:?}", e);
+                return;
+            }
+        };
 
         let (identify_info_virtual_address, identify_info_physical_address) = match alloc_pages_with_physical_address!(
             MSize::new(0x1000).to_order(None).to_page_order(),
@@ -305,21 +323,24 @@ impl PciDeviceDriver for NvmeManager {
             }
         };
 
-        let mut command_id = 0x01;
-
-        nvme_manager.submit_identify_command(
-            command_id,
+        let command_id = nvme_manager.submit_identify_command(
             identify_info_physical_address,
             IdentifyCommandCNS::IdentifyControllerDataStructure,
             0,
         );
         nvme_manager.wait_completion_of_admin_command_by_spin(command_id);
         let result = nvme_manager.take_completed_admin_command();
-        pr_debug!(
-            "Identify command is finished, Result: {:#X?}(Status: {:#X})",
-            result,
-            (result[3] >> 16) & !1
-        );
+        if !Self::is_command_successful(&result) {
+            pr_err!(
+                "Identify command is failed, Result: {:#X?}(Status: {:#X})",
+                result,
+                (result[3] >> 16) & !1
+            );
+            let _ = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .free(identify_info_virtual_address);
+            return;
+        }
         pr_debug!(
             "Vendor ID: {:#X}, SerialNumber: {}",
             unsafe {
@@ -337,43 +358,6 @@ impl PciDeviceDriver for NvmeManager {
         let max_transfer_size =
             unsafe { *((identify_info_virtual_address.to_usize() + 77) as *const u8) };
         pr_debug!("Max Transfer Size: 2^{}", max_transfer_size);
-
-        command_id += 1;
-        nvme_manager.submit_identify_command(
-            command_id,
-            identify_info_physical_address,
-            IdentifyCommandCNS::ActiveNamespaceIdList,
-            0x00,
-        );
-        nvme_manager.wait_completion_of_admin_command_by_spin(command_id);
-        let result = nvme_manager.take_completed_admin_command();
-        pr_debug!(
-            "Identify command is finished, Result: {:#X?}(Status: {:#X})",
-            result,
-            (result[3] >> 16) & !1
-        );
-        let nsid_table =
-            unsafe { &*(identify_info_virtual_address.to_usize() as *const [u32; 0x1000 / 4]) };
-        for nsid in nsid_table {
-            if *nsid == 0 {
-                break;
-            }
-            pr_debug!("Active NSID: {:#X}", *nsid);
-        }
-        if nsid_table[0] == 0 {
-            pr_err!("There is no usable name space");
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(identify_info_virtual_address);
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(admin_completion_queue_virtual_address);
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(admin_submission_queue_virtual_address);
-            return;
-        }
-        nvme_manager.add_name_space_id(nsid_table[0]);
 
         /* Add I/O Completion/Submission Queue */
         let io_queue_size = MSize::new(0x1000);
@@ -400,14 +384,12 @@ impl PciDeviceDriver for NvmeManager {
             }
         };
 
-        command_id += 1;
         let num_of_completion_queue_entries =
             (io_queue_size.to_usize() / 2usize.pow(completion_queue_entry_size)) as u16;
         if num_of_completion_queue_entries > max_queue {
             pr_err!("Invalid Queue Size");
         }
-        nvme_manager.submit_create_completion_command(
-            command_id,
+        let command_id = nvme_manager.submit_create_completion_command(
             io_completion_queue_physical_address,
             num_of_completion_queue_entries,
             0x01,
@@ -422,14 +404,12 @@ impl PciDeviceDriver for NvmeManager {
             (result[3] >> 16) & !1
         );
 
-        command_id += 1;
         let num_of_submission_queue_entries =
             (io_queue_size.to_usize() / 2usize.pow(submission_queue_entry_size)) as u16;
         if num_of_submission_queue_entries > max_queue {
             pr_err!("Invalid Queue Size");
         }
-        nvme_manager.submit_create_submission_command(
-            command_id,
+        let command_id = nvme_manager.submit_create_submission_command(
             io_submission_queue_physical_address,
             num_of_submission_queue_entries as u16,
             0x01,
@@ -455,87 +435,77 @@ impl PciDeviceDriver for NvmeManager {
             .add_io_queue(io_queue)
             .expect("Failed to add I/O queue");
 
-        /* Read Test */
-        let (prp_list_virtual_address, prp_list_physical_address) = match alloc_pages_with_physical_address!(
-            MSize::new(0x1000).to_order(None).to_page_order(),
-            MemoryPermissionFlags::data(),
-            MemoryOptionFlags::DEVICE_MEMORY
-        ) {
-            Ok(a) => a,
-            Err(e) => {
-                pr_err!("Failed to alloc memory for the  PRP List: {:?}", e);
-                let _ = get_kernel_manager_cluster()
-                    .kernel_memory_manager
-                    .free(identify_info_virtual_address);
-                return;
-            }
-        };
-        unsafe {
-            core::ptr::write_bytes(prp_list_virtual_address.to_usize() as *mut u8, 0, 0x1000)
-        };
-        unsafe {
-            *(prp_list_virtual_address.to_usize() as *mut u64) =
-                identify_info_physical_address.to_usize() as u64
-        };
-
-        let mut command = [0u32; 16];
-        command[0] = 0x02 | ((0x01 as u32) << 16);
-        command[1] = 0x01;
-        unsafe {
-            *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) =
-                identify_info_physical_address.to_usize() as u64
-        };
-        unsafe {
-            *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
-                prp_list_physical_address.to_usize() as u64
-        };
-        command[10] = 0; /* LBA[0:32] */
-        command[12] = 0x1000 / 512 - 1;
-        nvme_manager
-            .submit_command(0x01, command)
-            .expect("Failed to submit command");
-        nvme_manager
-            .wait_completion_of_command_by_spin(0x01, 0x01)
-            .expect("Failed to wait command");
-        let result = nvme_manager
-            .take_completed_command(0x01)
-            .expect("Failed to get result");
-        pr_debug!(
-            "Data read command is finished,  Result: {:#X?}(Status: {:#X})",
-            result,
-            (result[3] >> 16) & !1
+        let command_id = nvme_manager.submit_identify_command(
+            identify_info_physical_address,
+            IdentifyCommandCNS::ActiveNamespaceIdList,
+            0x00,
         );
-        pr_debug!("Data: {:#X?}", unsafe {
-            &*(identify_info_virtual_address.to_usize() as *const [u8; 8])
-        });
-        let mut len = 0;
-        for e in unsafe { *(identify_info_virtual_address.to_usize() as *const [u8; 256]) } {
-            if e == 0 {
+        nvme_manager.wait_completion_of_admin_command_by_spin(command_id);
+        let result = nvme_manager.take_completed_admin_command();
+        if !Self::is_command_successful(&result) {
+            pr_err!(
+                "Identify command is failed, Result: {:#X?}(Status: {:#X})",
+                result,
+                (result[3] >> 16) & !1
+            );
+            let _ = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .free(identify_info_virtual_address);
+            return;
+        }
+
+        let nsid_table =
+            unsafe { &*(identify_info_virtual_address.to_usize() as *const [u32; 0x1000 / 4]) };
+        for nsid in nsid_table {
+            if *nsid == 0 {
                 break;
             }
-
-            len += 1;
+            pr_debug!("Active NSID: {:#X}", *nsid);
+            match nvme_manager.detect_name_space(*nsid, false) {
+                Ok(n) => {
+                    nvme_manager.add_name_space(n);
+                }
+                Err(e) => {
+                    pr_err!("Failed to detect Name Space {:#X}: {:?}", nsid, e);
+                    continue;
+                }
+            }
+            let name_space_index = nvme_manager.namespace_list.len() - 1;
+            let descriptor = BlockDeviceDescriptor::new(name_space_index, nvme_manager as *mut _);
+            get_kernel_manager_cluster()
+                .block_device_manager
+                .add_block_device(descriptor);
         }
-        if len != 256 {
-            pr_debug!(
-                "Text: {}",
-                core::str::from_utf8(unsafe {
-                    core::slice::from_raw_parts(
-                        identify_info_virtual_address.to_usize() as *const u8,
-                        len,
-                    )
-                })
-                .unwrap_or("Failed to convert")
-            );
+        if nsid_table[0] == 0 {
+            pr_err!("There is no usable name space");
+            let _ = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .free(identify_info_virtual_address);
+            let _ = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .free(admin_completion_queue_virtual_address);
+            let _ = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .free(admin_submission_queue_virtual_address);
+            return;
         }
 
-        let _ = get_kernel_manager_cluster()
-            .kernel_memory_manager
-            .free(prp_list_virtual_address);
         let _ = get_kernel_manager_cluster()
             .kernel_memory_manager
             .free(identify_info_virtual_address);
         return;
+    }
+}
+
+impl BlockDeviceDriver for NvmeManager {
+    fn read_data(
+        &mut self,
+        info: &BlockDeviceInfo,
+        offset: usize,
+        size: usize,
+        pages_to_write: PAddress,
+    ) -> Result<(), ()> {
+        self._read_data(0x01, info.device_id as u32, offset, size, pages_to_write)
     }
 }
 
@@ -582,23 +552,33 @@ impl NvmeManager {
             controller_properties_size,
             admin_queue,
             stride,
-            namespace_id: 0,
+            namespace_list: Vec::new(),
             io_queue_list: Vec::new(),
         }
     }
 
-    /// Temporary
-    fn add_name_space_id(&mut self, name_space_id: u32) {
-        self.namespace_id = name_space_id;
+    fn add_name_space(&mut self, name_space: NameSpace) {
+        assert!(
+            self.namespace_list
+                .last()
+                .and_then(|n| Some(n.name_space_id))
+                .unwrap_or(0)
+                < name_space.name_space_id
+        );
+        self.namespace_list.push(name_space);
     }
 
     fn _submit_command(
         base_address: VAddress,
         stride: usize,
         queue: &mut Queue,
-        command: [u32; 16],
-    ) {
-        assert_ne!(command[0] >> 16, 0);
+        mut command: [u32; 16],
+    ) -> u16 {
+        if queue.next_command_id == 0 {
+            queue.next_command_id = 1;
+        }
+        command[0] = (command[0] & 0xffff) | ((queue.next_command_id as u32) << 16);
+
         write_mmio::<[u32; 16]>(
             queue.submit_queue,
             (queue.submission_current_pointer as usize) * core::mem::size_of::<[u32; 16]>(),
@@ -614,9 +594,12 @@ impl NvmeManager {
             next_pointer as u32,
         );
         queue.submission_current_pointer = next_pointer;
+        let command_id = queue.next_command_id;
+        queue.next_command_id += 1;
+        return command_id;
     }
 
-    fn submit_command(&mut self, queue_id: u16, command: [u32; 16]) -> Result<(), ()> {
+    fn submit_command(&mut self, queue_id: u16, command: [u32; 16]) -> Result<u16, ()> {
         if queue_id as usize > self.io_queue_list.len() || queue_id == 0 {
             return Err(());
         }
@@ -628,7 +611,7 @@ impl NvmeManager {
         ));
     }
 
-    fn submit_admin_command(&mut self, command: [u32; 16]) {
+    fn submit_admin_command(&mut self, command: [u32; 16]) -> u16 {
         return Self::_submit_command(
             self.controller_properties_base_address,
             self.stride,
@@ -693,60 +676,57 @@ impl NvmeManager {
 
     fn submit_identify_command(
         &mut self,
-        id: u16,
         output_physical_address: PAddress,
         cns: IdentifyCommandCNS,
         namespace_id: u32,
-    ) {
+    ) -> u16 {
         let mut command = [0u32; 16];
-        command[0] = Self::QUEUE_COMMAND_IDENTIFY | ((id as u32) << 16);
+        command[0] = Self::QUEUE_COMMAND_IDENTIFY;
         command[1] = namespace_id;
         unsafe {
             *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) =
                 output_physical_address.to_usize() as u64
         };
         command[10] = cns as u32;
-        self.submit_admin_command(command);
+        return self.submit_admin_command(command);
     }
 
     fn submit_create_completion_command(
         &mut self,
-        command_id: u16,
         queue_physical_address: PAddress,
         queue_size: u16,
         queue_id: u16,
         interrupt_vector: u16,
         interrupts_enabled: bool,
-    ) {
+    ) -> u16 {
         let mut command = [0u32; 16];
-        command[0] = Self::QUEUE_COMMAND_CREATE_IO_COMPLETION_QUEUE | ((command_id as u32) << 16);
+        command[0] = Self::QUEUE_COMMAND_CREATE_IO_COMPLETION_QUEUE;
         unsafe {
             *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) =
                 queue_physical_address.to_usize() as u64
         };
         command[10] = ((queue_size as u32 - 1) << 16) | (queue_id as u32);
         command[11] = ((interrupt_vector as u32) << 16) | ((interrupts_enabled as u32) << 1) | 1;
-        self.submit_admin_command(command);
+        return self.submit_admin_command(command);
     }
 
     fn submit_create_submission_command(
         &mut self,
-        command_id: u16,
         queue_physical_address: PAddress,
         queue_size: u16,
         completion_queue_id: u16,
         submission_queue_id: u16,
         queue_priority: u8,
-    ) {
+    ) -> u16 {
         let mut command = [0u32; 16];
-        command[0] = Self::QUEUE_COMMAND_CREATE_IO_SUBMISSION_QUEUE | ((command_id as u32) << 16);
+        command[0] = Self::QUEUE_COMMAND_CREATE_IO_SUBMISSION_QUEUE;
         unsafe {
             *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) =
                 queue_physical_address.to_usize() as u64
         };
         command[10] = ((queue_size as u32 - 1) << 16) | (submission_queue_id as u32);
         command[11] = ((completion_queue_id as u32) << 16) | ((queue_priority as u32) << 1) | 1;
-        self.submit_admin_command(command);
+        return self.submit_admin_command(command);
     }
 
     fn add_io_queue(&mut self, queue: Queue) -> Result<(), ()> {
@@ -755,6 +735,168 @@ impl NvmeManager {
             return Err(());
         }
         self.io_queue_list.push(queue);
+        return Ok(());
+    }
+
+    pub const fn is_command_successful(result: &[u32; 4]) -> bool {
+        ((result[3] >> 16) & !1) == 0
+    }
+
+    fn detect_name_space(
+        &mut self,
+        name_space_id: u32,
+        allow_sleep: bool,
+    ) -> Result<NameSpace, ()> {
+        let (identify_info_virtual_address, identify_info_physical_address) = match alloc_pages_with_physical_address!(
+            MSize::new(0x1000).to_order(None).to_page_order(),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::DEVICE_MEMORY
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
+                return Err(());
+            }
+        };
+        let command_id = self.submit_identify_command(
+            identify_info_physical_address,
+            IdentifyCommandCNS::NameSpace,
+            name_space_id,
+        );
+        if allow_sleep {
+            unimplemented!()
+        } else {
+            self.wait_completion_of_admin_command_by_spin(command_id);
+        }
+        let result = self.take_completed_admin_command();
+        if !Self::is_command_successful(&result) {
+            pr_err!(
+                "Identify command is failed, Result: {:#X?}(Status: {:#X})",
+                result,
+                (result[3] >> 16) & !1
+            );
+            let _ = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .free(identify_info_virtual_address);
+            return Err(());
+        }
+        let name_space_lba_size =
+            unsafe { *((identify_info_virtual_address.to_usize() + 0) as *const u64) };
+        let formatted_lba_size =
+            unsafe { *((identify_info_virtual_address.to_usize() + 26) as *const u8) };
+        pr_debug!("Formatted LBA Size: {:#X}", formatted_lba_size);
+        let lba_index =
+            (((formatted_lba_size & (0b11 << 5)) >> 5) << 4) | (formatted_lba_size & 0b1111);
+        pr_debug!("LBA Index: {}", lba_index);
+        let lba_format_info = unsafe {
+            *((identify_info_virtual_address.to_usize() + 128 + (lba_index as usize) * 4)
+                as *const u32)
+        };
+        let lba_data_size = (lba_format_info >> 16) & 0xff;
+        pr_debug!("LBA Data Size: 2^{}", lba_data_size);
+        let _ = get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .free(identify_info_virtual_address);
+        return Ok(NameSpace {
+            name_space_id,
+            name_space_lba_size,
+            sector_size_exp_index: lba_data_size as u8,
+        });
+    }
+
+    fn _read_data(
+        &mut self,
+        queue_id: u16,
+        name_space_list_index: u32,
+        offset: usize,
+        size: usize,
+        pages_to_write: PAddress,
+    ) -> Result<(), ()> {
+        if size == 0 {
+            pr_err!("Size is zero");
+            return Err(());
+        }
+        /*let (prp_list_virtual_address, prp_list_physical_address) = match alloc_pages_with_physical_address!(
+            MSize::new(0x1000).to_order(None).to_page_order(),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::DEVICE_MEMORY
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to alloc memory for the  PRP List: {:?}", e);
+                return Err(());
+            }
+        };
+        unsafe {
+            core::ptr::write_bytes(prp_list_virtual_address.to_usize() as *mut u8, 0, 0x1000)
+        };
+        unsafe {
+            *(prp_list_virtual_address.to_usize() as *mut u64) =
+                pages_to_write.to_usize() as u64
+        };*/
+        if name_space_list_index as usize > self.namespace_list.len() {
+            pr_err!(
+                "Invalid name_space_list's index: {:#X}",
+                name_space_list_index
+            );
+            return Err(());
+        }
+        let name_space = &self.namespace_list[name_space_list_index as usize];
+
+        if ((offset as u64) & ((2u64 << name_space.sector_size_exp_index) - 1)) != 0 {
+            pr_err!("Unaligned offset: {:#X}", offset);
+            return Err(());
+        }
+        let starting_lba = (offset as u64) >> name_space.sector_size_exp_index;
+        let number_of_blocks = (((size as u64) - 1) >> name_space.sector_size_exp_index) + 1;
+        if (number_of_blocks << name_space.sector_size_exp_index) > 0x1000 {
+            pr_err!("Unsupported Size: {:#X}", size);
+            return Err(());
+        } else if number_of_blocks - 1 > 0xffff {
+            pr_err!("The size({:#X}) is too big", size);
+            return Err(());
+        } else if starting_lba + number_of_blocks >= name_space.name_space_lba_size {
+            pr_err!(
+                "The offset({:#X}) and size({:#X}) are exceeded from the disk size",
+                offset,
+                size
+            );
+            return Err(());
+        }
+
+        let mut command = [0u32; 16];
+        command[0] = 0x02;
+        command[1] = 0x01;
+        unsafe {
+            *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) =
+                pages_to_write.to_usize() as u64
+        };
+        /*unsafe {
+            *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
+                prp_list_physical_address.to_usize() as u64
+        };*/
+        command[10] = (starting_lba & u32::MAX as u64) as u32; /* LBA[0:31] */
+        command[11] = (starting_lba >> 32) as u32; /* LBA[32:63] */
+        command[12] = (number_of_blocks - 1) as u32; /* [0:15]: Number of Logical Blocks */
+        let id = self.submit_command(queue_id, command);
+        if let Err(e) = id {
+            pr_err!("Failed to submit command: {:?}", e);
+            return Err(());
+        }
+
+        let id = id.unwrap();
+        /* TODO: sleep thread */
+        self.wait_completion_of_command_by_spin(queue_id, id)
+            .expect("Failed to wait command");
+        let result = self.take_completed_command(queue_id).unwrap();
+        if !Self::is_command_successful(&result) {
+            pr_err!(
+                "Failed the read command is failed:  {:#X?}(Status: {:#X})",
+                result,
+                (result[3] >> 16) & !1
+            );
+            return Err(());
+        }
         return Ok(());
     }
 }
@@ -775,6 +917,7 @@ impl Queue {
             completion_current_pointer: 0,
             number_of_completion_queue_entries,
             number_of_submission_queue_entries,
+            next_command_id: 0,
         }
     }
 }

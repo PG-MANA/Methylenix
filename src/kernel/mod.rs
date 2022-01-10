@@ -11,6 +11,7 @@ pub mod collections {
     #[macro_use]
     pub mod ptr_linked_list;
 }
+pub mod block_device;
 pub mod drivers;
 pub mod graphic_manager;
 pub mod manager_cluster;

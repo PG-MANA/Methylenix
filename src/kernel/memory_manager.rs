@@ -578,3 +578,25 @@ macro_rules! alloc_non_linear_pages {
             .alloc_nonlinear_pages($order, $permission, Some($option))
     };
 }
+
+#[macro_export]
+macro_rules! kmalloc {
+    ($size:expr) => {
+        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+            .memory_allocator
+            .kmalloc($size)
+    };
+
+    ($t:ty, $initial_value:expr) => {
+        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+            .memory_allocator
+            .kmalloc(crate::kernel::memory_manager::data_type::MSize::new(
+                core::mem::size_of::<$t>(),
+            ))
+            .and_then(|addr| {
+                let o = unsafe { &mut *(addr.to_usize() as *mut $t) };
+                core::mem::forget(core::mem::replace(o, $initial_value));
+                Ok(o)
+            })
+    };
+}
