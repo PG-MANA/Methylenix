@@ -189,7 +189,7 @@ pub fn print_debug_message(level: usize, args: fmt::Arguments) {
     let original_color = get_kernel_manager_cluster()
         .kernel_tty_manager
         .change_font_color(level.1 .0, level.1 .1);
-    kernel_print(format_args!("{} {}:{} | {}", level.0, file, line, args));
+    kernel_print(format_args!("{} {}:{} | {}\n", level.0, file, line, args));
     if let Some(c) = original_color {
         get_kernel_manager_cluster()
             .kernel_tty_manager
@@ -199,51 +199,39 @@ pub fn print_debug_message(level: usize, args: fmt::Arguments) {
 
 // macros
 #[macro_export]
-macro_rules! puts {
-    ($fmt:expr) => {
-        print!($fmt);
-    };
-}
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {
-        $crate::kernel::tty::kernel_print(format_args!($($arg)*));
-    };
-}
-
-#[macro_export]
-macro_rules! println {
-    ($fmt:expr) => (print!(concat!($fmt,"\n")));
-    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*));
+macro_rules! kprint {
+    () => ($crate::kernel::tty::kernel_print(format_args!("")));
+    ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args!($fmt, $($arg)*)));
 }
 
 #[macro_export]
 macro_rules! kprintln {
-    ($fmt:expr) => (print!(concat!($fmt,"\n")));
-    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"),$($arg)*));
+    () => ($crate::kernel::tty::kernel_print(format_args_nl!("")));
+    ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args_nl!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args_nl!($fmt, $($arg)*)));
 }
 
 #[macro_export]
 macro_rules! pr_debug {
-    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(7, format_args!(concat!($fmt,"\n"))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(7, format_args!(concat!($fmt, "\n"),$($arg)*)));
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(7, format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(7, format_args!($fmt, $($arg)*)));
 }
 
 #[macro_export]
 macro_rules! pr_info {
-    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(6, format_args!(concat!($fmt,"\n"))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(6, format_args!(concat!($fmt, "\n"),$($arg)*)));
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(6, format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(6, format_args!($fmt, $($arg)*)));
 }
 
 #[macro_export]
 macro_rules! pr_warn {
-    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(4, format_args!(concat!($fmt,"\n"))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(4, format_args!(concat!($fmt, "\n"),$($arg)*)));
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(4, format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(4, format_args!($fmt, $($arg)*)));
 }
 
 #[macro_export]
 macro_rules! pr_err {
-    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(3, format_args!(concat!($fmt,"\n"))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(3, format_args!(concat!($fmt, "\n"),$($arg)*)));
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt, $($arg)*)));
 }

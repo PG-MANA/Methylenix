@@ -207,12 +207,11 @@ fn main_process() -> ! {
 
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
-        let c = tty.getc(true);
-        if c.is_some() {
-            print!("{}", c.unwrap() as char);
-        }
-        if tty.flush().is_err() {
-            pr_err!("Cannot flush text.");
+        if let Some(c) = tty.getc(true) {
+            kprint!("{}", c as char);
+            if tty.flush().is_err() {
+                pr_err!("Cannot flush text.");
+            }
         }
     }
 }

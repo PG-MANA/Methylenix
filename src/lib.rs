@@ -11,9 +11,9 @@
 #![feature(const_refs_to_cell)]
 #![feature(const_size_of_val)]
 #![feature(const_trait_impl)]
+#![feature(format_args_nl)]
 #![feature(lang_items)]
 #![feature(maybe_uninit_array_assume_init)]
-#![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
@@ -22,7 +22,6 @@
 #![feature(try_blocks)]
 #![feature(type_name_of_val)]
 
-#[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
 
