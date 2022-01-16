@@ -10,7 +10,7 @@ use super::data_type::{
 use super::physical_memory_manager::PhysicalMemoryManager;
 use super::slab_allocator::pool_allocator::PoolAllocator;
 use super::virtual_memory_manager::{VirtualMemoryEntry, VirtualMemoryManager, VirtualMemoryPage};
-use super::MemoryError;
+use super::{MemoryError, MemoryManager};
 
 use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE};
@@ -96,11 +96,7 @@ impl SystemMemoryManager {
             Err(MemoryError::EntryPoolRunOut) => {
                 /* TODO: Remake */
                 let pm_manager = &mut self.original_physical_memory_manager;
-                if let Err(e) = get_kernel_manager_cluster()
-                    .kernel_memory_manager
-                    .virtual_memory_manager
-                    .add_physical_memory_manager_pool(pm_manager)
-                {
+                if let Err(e) = MemoryManager::add_physical_memory_manager_pool(pm_manager) {
                     pr_err!("Failed to add PhysicalMemoryManager's memory pool: {:?}", e);
                     Err(e)
                 } else {
@@ -134,12 +130,8 @@ impl SystemMemoryManager {
             }
             Err(MemoryError::EntryPoolRunOut) => {
                 /* TODO: Remake */
-                let mut pm_manager = &mut self.original_physical_memory_manager;
-                if let Err(e) = get_kernel_manager_cluster()
-                    .kernel_memory_manager
-                    .virtual_memory_manager
-                    .add_physical_memory_manager_pool(&mut pm_manager)
-                {
+                let pm_manager = &mut self.original_physical_memory_manager;
+                if let Err(e) = MemoryManager::add_physical_memory_manager_pool(pm_manager) {
                     pr_err!("Failed to add PhysicalMemoryManager's memory pool: {:?}", e);
                     Err(e)
                 } else {
