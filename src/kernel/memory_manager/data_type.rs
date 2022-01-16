@@ -475,20 +475,12 @@ impl Step for MIndex {
 
     #[inline]
     fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        if let Some(n) = start.0.checked_add(count) {
-            Some(n.into())
-        } else {
-            None
-        }
+        start.0.checked_add(count).and_then(|n| Some(Self(n)))
     }
 
     #[inline]
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        if let Some(n) = start.0.checked_sub(count) {
-            Some(n.into())
-        } else {
-            None
-        }
+        start.0.checked_sub(count).and_then(|n| Some(Self(n)))
     }
 }
 

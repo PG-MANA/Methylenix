@@ -12,7 +12,6 @@
 #![feature(const_size_of_val)]
 #![feature(const_trait_impl)]
 #![feature(format_args_nl)]
-#![feature(lang_items)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
