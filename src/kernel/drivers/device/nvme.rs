@@ -147,8 +147,7 @@ impl PciDeviceDriver for NvmeManager {
             return;
         }
         if (((controller_capability & Self::CAP_CSS) >> Self::CAP_CSS_OFFSET) & (1 << 7)) != 0 {
-            pr_err!("I/O command set is not supported.");
-            //return;
+            pr_warn!("I/O command set is not supported.");
         }
 
         let controller_configuration = read_mmio::<u32>(
@@ -219,6 +218,7 @@ impl PciDeviceDriver for NvmeManager {
                 Ok(a) => a,
                 Err(e) => {
                     pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
+                    let _ = free_pages!(admin_submission_queue_virtual_address);
                     return;
                 }
             };
@@ -262,6 +262,13 @@ impl PciDeviceDriver for NvmeManager {
             admin_completion_queue_physical_address.to_usize() as u64,
         );
 
+        if let Err(e) = setup_interrupt(pci_dev) {
+            pr_debug!("Failed to setup interrupt: {:?}", e);
+            let _ = free_pages!(admin_completion_queue_virtual_address);
+            let _ = free_pages!(admin_submission_queue_virtual_address);
+            return;
+        }
+
         /* Set Controller Configuration and Enable */
         write_mmio::<u32>(
             controller_properties_base_address,
@@ -277,11 +284,6 @@ impl PciDeviceDriver for NvmeManager {
             == 0
         {
             core::hint::spin_loop()
-        }
-
-        if let Err(e) = setup_interrupt(pci_dev) {
-            pr_debug!("Failed to setup interrupt: {:?}", e);
-            return;
         }
 
         let admin_queue = Queue::new(
@@ -332,9 +334,7 @@ impl PciDeviceDriver for NvmeManager {
                 result,
                 (result[3] >> 16) & !1
             );
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(identify_info_virtual_address);
+            let _ = free_pages!(identify_info_virtual_address);
             return;
         }
         pr_debug!(
@@ -365,6 +365,7 @@ impl PciDeviceDriver for NvmeManager {
             Ok(a) => a,
             Err(e) => {
                 pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
+                let _ = free_pages!(identify_info_virtual_address);
                 return;
             }
         };
@@ -376,6 +377,8 @@ impl PciDeviceDriver for NvmeManager {
             Ok(a) => a,
             Err(e) => {
                 pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
+                let _ = free_pages!(identify_info_virtual_address);
+                let _ = free_pages!(io_submission_queue_virtual_address);
                 return;
             }
         };
@@ -384,6 +387,7 @@ impl PciDeviceDriver for NvmeManager {
             (io_queue_size.to_usize() / 2usize.pow(completion_queue_entry_size)) as u16;
         if num_of_completion_queue_entries > max_queue {
             pr_err!("Invalid Queue Size");
+            /* TODO: adjust queue size */
         }
         let command_id = nvme_manager.submit_create_completion_command(
             io_completion_queue_physical_address,
@@ -404,6 +408,7 @@ impl PciDeviceDriver for NvmeManager {
             (io_queue_size.to_usize() / 2usize.pow(submission_queue_entry_size)) as u16;
         if num_of_submission_queue_entries > max_queue {
             pr_err!("Invalid Queue Size");
+            /* TODO: adjust queue size */
         }
         let command_id = nvme_manager.submit_create_submission_command(
             io_submission_queue_physical_address,
@@ -444,9 +449,7 @@ impl PciDeviceDriver for NvmeManager {
                 result,
                 (result[3] >> 16) & !1
             );
-            let _ = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(identify_info_virtual_address);
+            let _ = free_pages!(identify_info_virtual_address);
             return;
         }
 

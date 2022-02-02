@@ -4,6 +4,7 @@
 
 use crate::free_pages;
 use crate::kernel::collections::guid::Guid;
+use crate::kernel::file::analysis_partition;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::Address;
 
@@ -28,7 +29,7 @@ const PARTITION_GUID_LINUX_DATA: Guid =
 
 pub fn detect_file_system(block_device_id: usize) {
     /* Read the first 4KiB */
-    let initial_read_size = 0x1000;
+    let initial_read_size = 512 * 2;
     let first_sector_data = match get_kernel_manager_cluster().block_device_manager.read(
         block_device_id,
         0,
@@ -122,19 +123,22 @@ pub fn detect_file_system(block_device_id: usize) {
             let partition_type_guid = Guid::new_le(partition_type_guid);
             let partition_guid =
                 Guid::new_le(unsafe { &*((partition_entry + 0x10) as *const [u8; 16]) });
-            unsafe {
-                pr_debug!("Partition Type GUID: {}({}), Partition GUID: {}, LBA: {:#X}~{:#X}, PartitionName:{}",
+            let starting_lba = unsafe { *((partition_entry + 0x20) as *const u64) };
+            let ending_lba = unsafe { *((partition_entry + 0x28) as *const u64) };
+
+            pr_debug!(
+                "Partition Type GUID: {}({}), Partition GUID: {}, LBA: {:#X}~{:#X}",
                 partition_type_guid,
-                    match partition_type_guid{
-                        PARTITION_GUID_UEFI=>"EFI system partition",
-                        PARTITION_GUID_LINUX_DATA=>"Linux Data",
-                        _=>"Unknown"
-                    },
+                match partition_type_guid {
+                    PARTITION_GUID_UEFI => "EFI system partition",
+                    PARTITION_GUID_LINUX_DATA => "Linux Data",
+                    _ => "Unknown",
+                },
                 partition_guid,
-                *((partition_entry +0x20) as *const u64),
-                *((partition_entry +0x28) as *const u64),
-                core::str::from_utf8(&*((partition_entry + 0x38) as *const [u8;72])).unwrap_or("N/A"));
-            }
+                starting_lba,
+                ending_lba,
+            );
+            analysis_partition(block_device_id, starting_lba as usize, ending_lba as usize);
         }
         let _ = free_pages!(partition_entries);
     }
