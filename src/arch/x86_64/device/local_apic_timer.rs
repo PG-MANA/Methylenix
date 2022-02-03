@@ -66,8 +66,7 @@ impl LocalApicTimer {
     ///
     /// This function is called when the interrupt occurred.
     /// Currently, this function sends end of interrupt and switches to next thread.
-    #[inline(never)]
-    pub extern "C" fn local_apic_timer_handler() {
+    pub fn local_apic_timer_handler(_: usize) {
         loop {
             if get_cpu_manager_cluster().cpu_id
                 == get_kernel_manager_cluster().boot_strap_cpu_manager.cpu_id

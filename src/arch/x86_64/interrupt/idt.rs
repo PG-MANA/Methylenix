@@ -22,6 +22,7 @@ use crate::kernel::memory_manager::data_type::{Address, MSize};
 ///         CPU will change the stack from the specific stack pointer of TSS
 ///  * type_attr: GateDescriptor's type(task gate, interrupt gate, and call gate) and privilege level
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct GateDescriptor {
     offset_low: u16,
     selector: u16,
@@ -39,25 +40,36 @@ pub struct DescriptorTableRegister {
 }
 
 impl GateDescriptor {
+    /// Create zero-cleared Gate Descriptor
+    pub const fn invalid() -> Self {
+        Self {
+            offset_low: 0,
+            selector: 0,
+            ist: 0,
+            type_attr: 0,
+            offset_middle: 0,
+            offset_high: 0,
+            reserved: 0,
+        }
+    }
+
     /// Create Gate Descriptor
     ///
     /// the detail is above.
-    pub fn new(
-        offset: unsafe extern "C" fn(),
-        selector: u16,
-        ist: u8,
-        type_attr: u8,
-    ) -> GateDescriptor {
-        let c = offset as *const unsafe fn() as usize;
+    pub fn new(offset: usize, selector: u16, ist: u8, type_attr: u8) -> GateDescriptor {
         GateDescriptor {
-            offset_low: (c & 0xffff) as u16,
-            offset_middle: ((c & 0xffff0000) >> 16) as u16,
-            offset_high: (c >> 32) as u32,
+            offset_low: (offset & 0xffff) as u16,
+            offset_middle: ((offset & 0xffff0000) >> 16) as u16,
+            offset_high: (offset >> 32) as u32,
             selector,
             ist: ist & 0x07,
             type_attr,
             reserved: 0,
         }
+    }
+
+    pub fn set_type_attributes(&mut self, type_attr: u8) {
+        self.type_attr = type_attr;
     }
 
     pub fn fork_gdt_from_other_and_create_tss_and_set(original_gdt: usize, copy_size: u16) {

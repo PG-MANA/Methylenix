@@ -4,7 +4,7 @@
 //! This manages general serial communication.
 
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
-use crate::arch::target_arch::interrupt::{InterruptionIndex, IstIndex};
+use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
@@ -45,20 +45,18 @@ impl SerialPortManager {
     /// This function makes interrupt handler and registers it to InterruptManager.
     /// After registering, send the controller to allow IRQ interruption.  
     pub fn init(&self) {
+        get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
+            .interrupt_manager
+            .set_device_interrupt_function(
+                Self::int_handler24_main,
+                Some(4),
+                InterruptManager::irq_to_index(4),
+                0,
+                false,
+            );
+        let _lock = self.write_lock.lock();
         unsafe {
-            make_device_interrupt_handler!(inthandler24, SerialPortManager::int_handler24_main);
-            get_kernel_manager_cluster()
-                .boot_strap_cpu_manager
-                .interrupt_manager
-                .set_device_interrupt_function(
-                    inthandler24,
-                    Some(4),
-                    IstIndex::NormalInterrupt,
-                    InterruptionIndex::SerialPort as u16,
-                    0,
-                    false,
-                );
-            let _lock = self.write_lock.lock();
             out_byte(self.port + 1, 0x00); // Off the FIFO of controller
             out_byte(self.port + 3, 0x80); // Enable DLAB
                                            //out_byte(self.port + 0, 0x03); // Set lower of the rate
@@ -132,8 +130,7 @@ impl SerialPortManager {
     ///
     /// First, this will get data from serial port controller, and push it into FIFO.
     /// Currently, this wakes the main process up.
-    #[inline(never)]
-    fn int_handler24_main() {
+    fn int_handler24_main(_: usize) {
         let work = WorkList::new(
             Self::worker,
             get_kernel_manager_cluster().serial_port_manager.read() as usize,

@@ -13,7 +13,7 @@ use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pci::ArchDependPciManager;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
-use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex, IstIndex};
+use crate::arch::target_arch::interrupt::{InterruptIndex, InterruptManager};
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
@@ -261,7 +261,7 @@ pub fn init_local_timer() {
     let local_timer_manager = &mut get_cpu_manager_cluster().local_timer_manager;
     local_apic_timer.init();
     if local_apic_timer.enable_deadline_mode(
-        InterruptionIndex::LocalApicTimer as u16,
+        InterruptIndex::LocalApicTimer as u16,
         get_cpu_manager_cluster()
             .interrupt_manager
             .get_local_apic_manager(),
@@ -274,7 +274,7 @@ pub fn init_local_timer() {
     {
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
         local_apic_timer.set_up_interrupt(
-            InterruptionIndex::LocalApicTimer as u16,
+            InterruptIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
                 .get_local_apic_manager(),
@@ -286,7 +286,7 @@ pub fn init_local_timer() {
         let mut pit = PitManager::new();
         pit.init();
         local_apic_timer.set_up_interrupt(
-            InterruptionIndex::LocalApicTimer as u16,
+            InterruptIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
                 .get_local_apic_manager(),
@@ -296,19 +296,12 @@ pub fn init_local_timer() {
         local_timer_manager.set_source_timer(local_apic_timer); /* Temporary, set local APIC Timer */
     }
 
-    /* setup IDT */
-    make_context_switch_interrupt_handler!(
-        local_apic_timer_handler,
-        LocalApicTimer::local_apic_timer_handler
-    );
-
     get_cpu_manager_cluster()
         .interrupt_manager
         .set_device_interrupt_function(
-            local_apic_timer_handler,
+            LocalApicTimer::local_apic_timer_handler,
             None,
-            IstIndex::TaskSwitch,
-            InterruptionIndex::LocalApicTimer as u16,
+            InterruptIndex::LocalApicTimer as usize,
             0,
             false,
         );
@@ -388,7 +381,6 @@ pub fn init_multiple_processors_ap() {
         .get_local_apic_manager()
         .get_apic_id();
     cpu_manager.cpu_id = bsp_apic_id as usize;
-    cpu_manager.interrupt_manager.init_ipi();
 
     /* Extern Assembly Symbols */
     extern "C" {
