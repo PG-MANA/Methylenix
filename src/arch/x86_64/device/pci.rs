@@ -2,6 +2,7 @@
 //! PCI arch-depend
 //!
 
+pub mod msi;
 pub mod nvme;
 pub mod sm_bus;
 
