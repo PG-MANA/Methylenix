@@ -23,7 +23,6 @@ use core::arch::global_asm;
 
 const IDT_DEVICE_MIN: usize = 0x20;
 const IDT_MAX: usize = 0xff;
-const IDT_MSI_START: usize = 0x40;
 
 pub struct StoredIrqData {
     r_flags: u64,
@@ -52,15 +51,14 @@ pub struct InterruptManager {
 #[derive(Clone, Copy, Eq, PartialEq)]
 #[repr(usize)]
 pub enum InterruptIndex {
-    Nvme = 0xee,
     LocalApicTimer = 0xef,
     RescheduleIpi = 0xf8,
 }
 
 /// IST index for each interrupt.
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum IstIndex {
-    NormalInterrupt = 0,
+//#[derive(Clone, Copy, Eq, PartialEq)]
+enum IstIndex {
+    //NormalInterrupt = 0,
     TaskSwitch = 1,
 }
 
@@ -183,10 +181,11 @@ impl InterruptManager {
         self.set_device_interrupt_function(
             InterruptManager::reschedule_ipi_handler,
             None,
-            InterruptIndex::RescheduleIpi as _,
+            Some(InterruptIndex::RescheduleIpi as _),
             0,
             false,
-        );
+        )
+        .expect("Failed to setup IPI");
     }
 
     /// Flush IDT to cpu and apply it.
@@ -226,27 +225,44 @@ impl InterruptManager {
         &mut self,
         function: fn(usize),
         irq: Option<u8>,
-        index: usize,
+        index: Option<usize>,
         privilege_level: u8,
         is_level_trigger: bool,
-    ) -> bool {
-        if index <= IDT_DEVICE_MIN || index > IDT_MAX {
-            /* CPU exception interrupt */
-            /* intel reserved */
-            return false;
+    ) -> Result<usize, ()> {
+        if let Some(index) = index {
+            if index <= IDT_DEVICE_MIN || index > IDT_MAX {
+                /* CPU exception interrupt */
+                /* intel reserved */
+                return Err(());
+            }
+            if let Some(irq) = irq {
+                if Self::irq_to_index(irq) != index {
+                    return Err(());
+                }
+            }
         }
         let _self_lock = self.lock.lock();
         let _lock = unsafe { IDT_LOCK.lock() };
-        let handler_index = index - IDT_DEVICE_MIN;
+        let handler_index = if let Some(i) = index {
+            i - IDT_DEVICE_MIN
+        } else if let Some(irq) = irq {
+            Self::irq_to_index(irq)
+        } else if let Some(i) = Self::search_available_handler_index() {
+            i
+        } else {
+            pr_err!("No available interrupt vector");
+            return Err(());
+        };
+        let index = handler_index + IDT_DEVICE_MIN;
         let handler_address = unsafe { INTERRUPT_HANDLER[handler_index] };
         if handler_address != 0 {
             drop(_lock);
             drop(_self_lock);
             if handler_address == function as *const fn(usize) as usize {
-                return true;
+                return Ok(index);
             }
             pr_err!("Index is in use.");
-            return false;
+            return Err(());
         }
         unsafe { INTERRUPT_HANDLER[handler_index] = function as *const fn(usize) as usize };
         let type_attr: u8 = 0xe | (privilege_level & 0x3) << 5 | 1 << 7;
@@ -266,7 +282,16 @@ impl InterruptManager {
                     is_level_trigger,
                 );
         }
-        return true;
+        return Ok(index);
+    }
+
+    fn search_available_handler_index() -> Option<usize> {
+        for (index, e) in unsafe { INTERRUPT_HANDLER.iter().enumerate() } {
+            if *e == 0 {
+                return Some(index);
+            }
+        }
+        return None;
     }
 
     /// Save current the interrupt status and disable interrupt

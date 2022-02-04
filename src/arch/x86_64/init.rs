@@ -301,10 +301,11 @@ pub fn init_local_timer() {
         .set_device_interrupt_function(
             LocalApicTimer::local_apic_timer_handler,
             None,
-            InterruptIndex::LocalApicTimer as usize,
+            Some(InterruptIndex::LocalApicTimer as _),
             0,
             false,
-        );
+        )
+        .expect("Failed to setup the interrupt for Local APIC Timer");
 
     /* Setup TimerManager */
 }

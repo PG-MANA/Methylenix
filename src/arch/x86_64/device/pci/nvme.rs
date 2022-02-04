@@ -3,7 +3,6 @@
 //!
 
 use crate::arch::target_arch::device::pci::msi::{setup_msi, MsiDeliveryMode, MsiTriggerMode};
-use crate::arch::target_arch::interrupt::InterruptIndex;
 
 use crate::kernel::drivers::device::nvme::NvmeManager;
 use crate::kernel::drivers::pci::PciDevice;
@@ -12,10 +11,9 @@ use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use alloc::collections::LinkedList;
 
 pub fn setup_interrupt(pci_dev: &PciDevice, nvme_manager: &mut NvmeManager) -> Result<(), ()> {
-    let vector = InterruptIndex::Nvme as usize;
-    get_cpu_manager_cluster()
+    let vector = get_cpu_manager_cluster()
         .interrupt_manager
-        .set_device_interrupt_function(nvme_handler, None, vector, 0, true);
+        .set_device_interrupt_function(nvme_handler, None, None, 0, true)?;
     setup_msi(
         pci_dev,
         get_cpu_manager_cluster()

@@ -3,7 +3,6 @@
 //!
 
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
-use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::drivers::acpi::aml::ResourceData;
 use crate::kernel::drivers::pci::{ClassCode, PciDevice, PciDeviceDriver};
@@ -70,17 +69,11 @@ impl PciDeviceDriver for SmbusManager {
             ResourceData::Interrupt(i) => i as u8, /* OK...? */
         };
         pr_debug!("SMBus IRQ: {}", irq);
-        if !get_cpu_manager_cluster()
+        if let Err(e) = get_cpu_manager_cluster()
             .interrupt_manager
-            .set_device_interrupt_function(
-                smbus_handler,
-                Some(irq),
-                InterruptManager::irq_to_index(irq),
-                0,
-                false,
-            )
+            .set_device_interrupt_function(smbus_handler, Some(irq), None, 0, false)
         {
-            pr_err!("Failed to setup interrupt.");
+            pr_err!("Failed to setup interrupt: {:?}", e);
             return;
         }
 

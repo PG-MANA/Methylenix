@@ -5,7 +5,6 @@
 use crate::arch::target_arch::device::cpu::{
     in_byte, in_dword, in_word, out_byte, out_dword, out_word,
 };
-use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::drivers::acpi::aml::{AmlError, AmlVariable, ConstData};
 use crate::kernel::drivers::acpi::AcpiManager;
@@ -16,10 +15,10 @@ use alloc::sync::Arc;
 
 pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
     let irq = acpi_manager.get_fadt_manager().get_sci_int();
-    let index = InterruptManager::irq_to_index(irq as u8);
     get_cpu_manager_cluster()
         .interrupt_manager
-        .set_device_interrupt_function(acpi_event_handler, Some(irq as u8), index, 0, true)
+        .set_device_interrupt_function(acpi_event_handler, Some(irq as u8), None, 0, true)
+        .is_ok()
 }
 
 fn acpi_event_handler(index: usize) {
