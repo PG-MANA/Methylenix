@@ -14,7 +14,7 @@ pub mod work_queue;
 use self::process_entry::ProcessEntry;
 use self::run_queue::RunQueue;
 use self::scheduling_class::{kernel::KernelSchedulingClass, SchedulingClass};
-use self::thread_entry::ThreadEntry;
+pub use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 

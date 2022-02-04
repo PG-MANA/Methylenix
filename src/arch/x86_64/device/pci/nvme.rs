@@ -5,13 +5,17 @@
 use crate::arch::target_arch::device::pci::msi::{setup_msi, MsiDeliveryMode, MsiTriggerMode};
 use crate::arch::target_arch::interrupt::InterruptIndex;
 
+use crate::kernel::drivers::device::nvme::NvmeManager;
 use crate::kernel::drivers::pci::PciDevice;
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 
-pub fn setup_interrupt(pci_dev: &PciDevice) -> Result<(), ()> {
+use alloc::collections::LinkedList;
+
+pub fn setup_interrupt(pci_dev: &PciDevice, nvme_manager: &mut NvmeManager) -> Result<(), ()> {
+    let vector = InterruptIndex::Nvme as usize;
     get_cpu_manager_cluster()
         .interrupt_manager
-        .set_device_interrupt_function(nvme_handler, None, InterruptIndex::Nvme as usize, 0, true);
+        .set_device_interrupt_function(nvme_handler, None, vector, 0, true);
     setup_msi(
         pci_dev,
         get_cpu_manager_cluster()
@@ -21,14 +25,26 @@ pub fn setup_interrupt(pci_dev: &PciDevice) -> Result<(), ()> {
         MsiTriggerMode::Level,
         true,
         MsiDeliveryMode::Fixed,
-        InterruptIndex::Nvme as u16,
+        vector as u16,
     )?;
 
+    unsafe { NVME_LIST.push_back((vector, nvme_manager as *mut _)) };
     return Ok(());
 }
 
+static mut NVME_LIST: LinkedList<(usize, *mut NvmeManager)> = LinkedList::new();
+
 fn nvme_handler(index: usize) {
-    pr_info!("NVMe Interrupt: {:#X}", index);
+    if let Some(nvme) = unsafe {
+        NVME_LIST
+            .iter()
+            .find(|x| (**x).0 == index)
+            .and_then(|x| Some(x.1.clone()))
+    } {
+        unsafe { &mut *(nvme) }.interrupt_handler();
+    } else {
+        pr_err!("Unknown NVMe Device");
+    }
 
     get_cpu_manager_cluster()
         .interrupt_manager

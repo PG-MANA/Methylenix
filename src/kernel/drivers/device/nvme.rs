@@ -3,16 +3,20 @@
 //!
 
 use crate::arch::target_arch::device::pci::nvme::setup_interrupt;
+use crate::arch::target_arch::interrupt::InterruptManager;
 
+use crate::kernel::block_device::{BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceInfo};
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::drivers::pci::{ClassCode, PciDevice, PciDeviceDriver, PciManager};
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
+use crate::kernel::task_manager::{TaskStatus, ThreadEntry};
 
 use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
 
-use crate::kernel::block_device::{BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceInfo};
 use alloc::vec::Vec;
 
 pub struct NvmeManager {
@@ -26,6 +30,7 @@ pub struct NvmeManager {
 }
 
 struct Queue {
+    lock: IrqSaveSpinLockFlag,
     submit_queue: VAddress,
     completion_queue: VAddress,
     id: usize,
@@ -34,6 +39,13 @@ struct Queue {
     next_command_id: u16,
     number_of_completion_queue_entries: u16,
     number_of_submission_queue_entries: u16,
+    wait_list: PtrLinkedList<WaitListEntry>,
+}
+
+struct WaitListEntry {
+    list: PtrLinkedListNode<Self>,
+    result: [u32; 4],
+    thread: &'static mut ThreadEntry,
 }
 
 #[derive(Clone)]
@@ -262,30 +274,6 @@ impl PciDeviceDriver for NvmeManager {
             admin_completion_queue_physical_address.to_usize() as u64,
         );
 
-        if let Err(e) = setup_interrupt(pci_dev) {
-            pr_debug!("Failed to setup interrupt: {:?}", e);
-            let _ = free_pages!(admin_completion_queue_virtual_address);
-            let _ = free_pages!(admin_submission_queue_virtual_address);
-            return;
-        }
-
-        /* Set Controller Configuration and Enable */
-        write_mmio::<u32>(
-            controller_properties_base_address,
-            Self::CONTROLLER_PROPERTIES_CONFIGURATION,
-            (completion_queue_entry_size << 20)
-                | (submission_queue_entry_size << 16)
-                | Self::CC_ENABLE,
-        );
-        while (read_mmio::<u32>(
-            controller_properties_base_address,
-            Self::CONTROLLER_PROPERTIES_STATUS,
-        ) & Self::CSTS_READY)
-            == 0
-        {
-            core::hint::spin_loop()
-        }
-
         let admin_queue = Queue::new(
             admin_submission_queue_virtual_address,
             admin_completion_queue_virtual_address,
@@ -309,6 +297,30 @@ impl PciDeviceDriver for NvmeManager {
             }
         };
 
+        if let Err(e) = setup_interrupt(pci_dev, nvme_manager) {
+            pr_debug!("Failed to setup interrupt: {:?}", e);
+            let _ = free_pages!(admin_completion_queue_virtual_address);
+            let _ = free_pages!(admin_submission_queue_virtual_address);
+            return;
+        }
+
+        /* Set Controller Configuration and Enable */
+        write_mmio::<u32>(
+            controller_properties_base_address,
+            Self::CONTROLLER_PROPERTIES_CONFIGURATION,
+            (completion_queue_entry_size << 20)
+                | (submission_queue_entry_size << 16)
+                | Self::CC_ENABLE,
+        );
+        while (read_mmio::<u32>(
+            controller_properties_base_address,
+            Self::CONTROLLER_PROPERTIES_STATUS,
+        ) & Self::CSTS_READY)
+            == 0
+        {
+            core::hint::spin_loop()
+        }
+
         let (identify_info_virtual_address, identify_info_physical_address) = match alloc_pages_with_physical_address!(
             MSize::new(0x1000).to_order(None).to_page_order(),
             MemoryPermissionFlags::data(),
@@ -326,7 +338,13 @@ impl PciDeviceDriver for NvmeManager {
             IdentifyCommandCNS::IdentifyControllerDataStructure,
             0,
         );
-        nvme_manager.wait_completion_of_admin_command_by_spin(command_id);
+        if let Err(e) = nvme_manager
+            .wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
+        {
+            pr_err!("Failed to wait the command: {:?}", e);
+            let _ = free_pages!(identify_info_virtual_address);
+            return;
+        }
         let result = nvme_manager.take_completed_admin_command();
         if !Self::is_command_successful(&result) {
             pr_err!(
@@ -389,20 +407,41 @@ impl PciDeviceDriver for NvmeManager {
             pr_err!("Invalid Queue Size");
             /* TODO: adjust queue size */
         }
+        unsafe {
+            core::ptr::write_bytes(
+                io_completion_queue_virtual_address.to_usize() as *mut u8,
+                0,
+                io_queue_size.to_usize(),
+            )
+        };
         let command_id = nvme_manager.submit_create_completion_command(
             io_completion_queue_physical_address,
             num_of_completion_queue_entries,
             0x01,
-            0,
-            false,
+            0x00,
+            true,
         );
-        nvme_manager.wait_completion_of_admin_command_by_spin(command_id);
+        if let Err(e) = nvme_manager
+            .wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
+        {
+            pr_err!("Failed to wait the command: {:?}", e);
+            let _ = free_pages!(identify_info_virtual_address);
+            let _ = free_pages!(io_completion_queue_virtual_address);
+            let _ = free_pages!(io_submission_queue_virtual_address);
+            return;
+        }
         let result = nvme_manager.take_completed_admin_command();
-        pr_debug!(
-            "Create completion queue command is finished, Result: {:#X?}(Status: {:#X})",
-            result,
-            (result[3] >> 16) & !1
-        );
+        if !Self::is_command_successful(&result) {
+            pr_err!(
+                "Create completion queue command is is failed, Result: {:#X?}(Status: {:#X})",
+                result,
+                (result[3] >> 16) & !1
+            );
+            let _ = free_pages!(identify_info_virtual_address);
+            let _ = free_pages!(io_completion_queue_virtual_address);
+            let _ = free_pages!(io_submission_queue_virtual_address);
+            return;
+        }
 
         let num_of_submission_queue_entries =
             (io_queue_size.to_usize() / 2usize.pow(submission_queue_entry_size)) as u16;
@@ -417,13 +456,27 @@ impl PciDeviceDriver for NvmeManager {
             0x01,
             0,
         );
-        nvme_manager.wait_completion_of_admin_command_by_spin(command_id);
+        if let Err(e) = nvme_manager
+            .wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
+        {
+            pr_err!("Failed to wait the command: {:?}", e);
+            let _ = free_pages!(identify_info_virtual_address);
+            let _ = free_pages!(io_completion_queue_virtual_address);
+            let _ = free_pages!(io_submission_queue_virtual_address);
+            return;
+        }
         let result = nvme_manager.take_completed_admin_command();
-        pr_debug!(
-            "Create submission queue command is finished, Result: {:#X?}(Status: {:#X})",
-            result,
-            (result[3] >> 16) & !1
-        );
+        if !Self::is_command_successful(&result) {
+            pr_err!(
+                "Create submission queue command is is failed, Result: {:#X?}(Status: {:#X})",
+                result,
+                (result[3] >> 16) & !1
+            );
+            let _ = free_pages!(identify_info_virtual_address);
+            let _ = free_pages!(io_completion_queue_virtual_address);
+            let _ = free_pages!(io_submission_queue_virtual_address);
+            return;
+        }
 
         let io_queue = Queue::new(
             io_submission_queue_virtual_address,
@@ -441,7 +494,13 @@ impl PciDeviceDriver for NvmeManager {
             IdentifyCommandCNS::ActiveNamespaceIdList,
             0x00,
         );
-        nvme_manager.wait_completion_of_admin_command_by_spin(command_id);
+        if let Err(e) = nvme_manager
+            .wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
+        {
+            pr_err!("Failed to wait the command: {:?}", e);
+            let _ = free_pages!(identify_info_virtual_address);
+            return;
+        }
         let result = nvme_manager.take_completed_admin_command();
         if !Self::is_command_successful(&result) {
             pr_err!(
@@ -545,6 +604,8 @@ impl NvmeManager {
     const QUEUE_COMMAND_CREATE_IO_COMPLETION_QUEUE: u32 = 0x05;
     const QUEUE_COMMAND_IDENTIFY: u32 = 0x06;
 
+    const SPIN_WAIT_TIMEOUT_MS: usize = 1500;
+
     const fn new(
         controller_properties_base_address: VAddress,
         controller_properties_size: MSize,
@@ -570,6 +631,30 @@ impl NvmeManager {
                 < name_space.name_space_id
         );
         self.namespace_list.push(name_space);
+    }
+
+    fn _read_completion_queue_head_doorbell(
+        base_address: VAddress,
+        stride: usize,
+        queue: &Queue,
+    ) -> u16 {
+        (read_mmio::<u32>(
+            base_address,
+            Self::PCIE_SPECIFIC_DEFINITIONS_BASE + (2 * queue.id + 1) * stride,
+        ) & 0xffff) as u16
+    }
+
+    fn _write_completion_queue_head_doorbell(
+        base_address: VAddress,
+        stride: usize,
+        queue: &mut Queue,
+        pointer: u16,
+    ) {
+        write_mmio::<u32>(
+            base_address,
+            Self::PCIE_SPECIFIC_DEFINITIONS_BASE + (2 * queue.id + 1) * stride,
+            pointer as u32,
+        )
     }
 
     fn _submit_command(
@@ -603,18 +688,6 @@ impl NvmeManager {
         return command_id;
     }
 
-    fn submit_command(&mut self, queue_id: u16, command: [u32; 16]) -> Result<u16, ()> {
-        if queue_id as usize > self.io_queue_list.len() || queue_id == 0 {
-            return Err(());
-        }
-        return Ok(Self::_submit_command(
-            self.controller_properties_base_address,
-            self.stride,
-            &mut self.io_queue_list[queue_id as usize - 1],
-            command,
-        ));
-    }
-
     fn submit_admin_command(&mut self, command: [u32; 16]) -> u16 {
         return Self::_submit_command(
             self.controller_properties_base_address,
@@ -624,58 +697,107 @@ impl NvmeManager {
         );
     }
 
-    fn _wait_completion_of_command_by_spin(queue: &Queue, command_id: u16) {
-        while (read_mmio::<[u32; 4]>(
-            queue.completion_queue,
-            (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>(),
-        )[3] & 0xffff) as u16
-            != command_id
-        {
-            core::hint::spin_loop()
+    fn _wait_completion_of_command_by_spin(
+        queue: &Queue,
+        command_id: u16,
+        time_out_ms: usize,
+    ) -> Result<(), ()> {
+        let mut time = 0;
+        while time < time_out_ms {
+            if (read_mmio::<[u32; 4]>(
+                queue.completion_queue,
+                (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>(),
+            )[3] & 0xffff) as u16
+                == command_id
+            {
+                return Ok(());
+            }
+            if !get_kernel_manager_cluster()
+                .global_timer_manager
+                .busy_wait_ms(1)
+            {
+                return Err(());
+            }
+            time += 1;
         }
+        return Err(());
     }
 
-    fn wait_completion_of_command_by_spin(&self, queue_id: u16, command_id: u16) -> Result<(), ()> {
+    fn wait_completion_of_admin_command_by_spin(
+        &self,
+        command_id: u16,
+        timeout_ms: usize,
+    ) -> Result<(), ()> {
+        Self::_wait_completion_of_command_by_spin(&self.admin_queue, command_id, timeout_ms)
+    }
+
+    fn submit_command_and_wait(
+        &mut self,
+        queue_id: u16,
+        command: [u32; 16],
+    ) -> Result<[u32; 4], ()> {
         if queue_id as usize > self.io_queue_list.len() || queue_id == 0 {
             return Err(());
         }
-        return Ok(Self::_wait_completion_of_command_by_spin(
-            &self.io_queue_list[queue_id as usize - 1],
-            command_id,
-        ));
+        let irq = InterruptManager::save_and_disable_local_irq();
+        let mut wait_list = WaitListEntry {
+            list: PtrLinkedListNode::new(),
+            result: [0u32; 4],
+            thread: get_cpu_manager_cluster().run_queue.get_running_thread(),
+        };
+        let queue = &mut self.io_queue_list[queue_id as usize - 1];
+        let _lock = queue.lock.lock();
+        let command_id = Self::_submit_command(
+            self.controller_properties_base_address,
+            self.stride,
+            queue,
+            command,
+        );
+        wait_list.result[3] = command_id as u32;
+        queue.wait_list.insert_tail(&mut wait_list.list);
+        drop(_lock);
+        get_cpu_manager_cluster()
+            .run_queue
+            .sleep_current_thread(Some(irq), TaskStatus::Interruptible)
+            .or(Err(()))?;
+        return Ok(wait_list.result);
     }
 
-    fn wait_completion_of_admin_command_by_spin(&self, command_id: u16) {
-        Self::_wait_completion_of_command_by_spin(&self.admin_queue, command_id);
-    }
-
-    fn _take_completed_admin_command(queue: &mut Queue) -> [u32; 4] {
+    fn _take_completed_command(
+        queue: &mut Queue,
+        base_address: VAddress,
+        stride: usize,
+    ) -> [u32; 4] {
         let data = read_mmio::<[u32; 4]>(
             queue.completion_queue,
             (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>(),
         );
-        write_mmio::<[u32; 4]>(
+        /* Clear the command id and phase tag */
+        write_mmio::<u32>(
             queue.completion_queue,
-            (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>(),
-            [0; 4],
+            (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>()
+                + core::mem::size_of::<u32>() * 3,
+            0,
         );
         queue.completion_current_pointer += 1;
         if queue.completion_current_pointer >= queue.number_of_completion_queue_entries {
             queue.completion_current_pointer = 0;
         }
+        Self::_write_completion_queue_head_doorbell(
+            base_address,
+            stride,
+            queue,
+            queue.completion_current_pointer,
+        );
         return data;
     }
 
-    fn take_completed_command(&mut self, queue_id: u16) -> Result<[u32; 4], ()> {
-        if queue_id as usize > self.io_queue_list.len() || queue_id == 0 {
-            return Err(());
-        }
-        let queue = &mut self.io_queue_list[queue_id as usize - 1];
-        return Ok(Self::_take_completed_admin_command(queue));
-    }
-
     fn take_completed_admin_command(&mut self) -> [u32; 4] {
-        return Self::_take_completed_admin_command(&mut self.admin_queue);
+        return Self::_take_completed_command(
+            &mut self.admin_queue,
+            self.controller_properties_base_address,
+            self.stride,
+        );
     }
 
     fn submit_identify_command(
@@ -769,8 +891,12 @@ impl NvmeManager {
         );
         if allow_sleep {
             unimplemented!()
-        } else {
-            self.wait_completion_of_admin_command_by_spin(command_id);
+        } else if let Err(e) =
+            self.wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
+        {
+            pr_err!("Failed to wait the command: {:?}", e);
+            let _ = free_pages!(identify_info_virtual_address);
+            return Err(e);
         }
         let result = self.take_completed_admin_command();
         if !Self::is_command_successful(&result) {
@@ -882,17 +1008,13 @@ impl NvmeManager {
         command[10] = (starting_lba & u32::MAX as u64) as u32; /* LBA[0:31] */
         command[11] = (starting_lba >> 32) as u32; /* LBA[32:63] */
         command[12] = (number_of_blocks - 1) as u32; /* [0:15]: Number of Logical Blocks */
-        let id = self.submit_command(queue_id, command);
-        if let Err(e) = id {
-            pr_err!("Failed to submit command: {:?}", e);
+        let result = self.submit_command_and_wait(queue_id, command);
+        if let Err(e) = result {
+            pr_err!("Failed to execute the command: {:?}", e);
             return Err(());
         }
 
-        let id = id.unwrap();
-        /* TODO: sleep thread */
-        self.wait_completion_of_command_by_spin(queue_id, id)
-            .expect("Failed to wait command");
-        let result = self.take_completed_command(queue_id).unwrap();
+        let result = result.unwrap();
         if !Self::is_command_successful(&result) {
             pr_err!(
                 "Failed the read command is failed:  {:#X?}(Status: {:#X})",
@@ -986,17 +1108,13 @@ impl NvmeManager {
         command[10] = (lba & u32::MAX as usize) as u32; /* LBA[0:31] */
         command[11] = (lba >> 32) as u32; /* LBA[32:63] */
         command[12] = (number_of_sectors - 1) as u32; /* [0:15]: Number of Logical Blocks */
-        let id = self.submit_command(queue_id, command);
-        if let Err(e) = id {
-            pr_err!("Failed to submit command: {:?}", e);
+        let result = self.submit_command_and_wait(queue_id, command);
+        if let Err(e) = result {
+            pr_err!("Failed to execute the command: {:?}", e);
             return Err(());
         }
 
-        let id = id.unwrap();
-        /* TODO: sleep thread */
-        self.wait_completion_of_command_by_spin(queue_id, id)
-            .expect("Failed to wait command");
-        let result = self.take_completed_command(queue_id).unwrap();
+        let result = result.unwrap();
         if !Self::is_command_successful(&result) {
             pr_err!(
                 "Failed the read command is failed:  {:#X?}(Status: {:#X})",
@@ -1014,6 +1132,38 @@ impl NvmeManager {
         }
         return Ok(io_virtual_address);
     }
+
+    pub fn interrupt_handler(&mut self) {
+        for queue in &mut self.io_queue_list {
+            let _lock = queue.lock.lock();
+            if (read_mmio::<u32>(
+                queue.completion_queue,
+                (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>()
+                    + core::mem::size_of::<u32>() * 3,
+            ) & (1 << 16))
+                != 0
+            {
+                let data = Self::_take_completed_command(
+                    queue,
+                    self.controller_properties_base_address,
+                    self.stride,
+                );
+                for e in unsafe { queue.wait_list.iter_mut(offset_of!(WaitListEntry, list)) } {
+                    if (e.result[3] & 0xffff) == data[3] & 0xffff {
+                        e.result = data;
+                        if let Err(error) = get_kernel_manager_cluster()
+                            .task_manager
+                            .wake_up_thread(e.thread)
+                        {
+                            pr_err!("Failed to wake up the thread: {:?}", error);
+                        }
+                        queue.wait_list.remove(&mut e.list);
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Queue {
@@ -1025,6 +1175,7 @@ impl Queue {
         number_of_submission_queue_entries: u16,
     ) -> Self {
         Self {
+            lock: IrqSaveSpinLockFlag::new(),
             submit_queue,
             completion_queue,
             id,
@@ -1033,6 +1184,7 @@ impl Queue {
             number_of_completion_queue_entries,
             number_of_submission_queue_entries,
             next_command_id: 0,
+            wait_list: PtrLinkedList::new(),
         }
     }
 }

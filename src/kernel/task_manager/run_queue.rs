@@ -189,7 +189,7 @@ impl RunQueue {
     /// This function returns mut reference of current thread.
     ///
     /// To avoid dead lock of current thread's lock, the interrupt must be disabled.
-    pub(super) fn get_running_thread(&mut self) -> &mut ThreadEntry {
+    pub fn get_running_thread(&mut self) -> &mut ThreadEntry {
         assert!(!is_interrupt_enabled());
         unsafe { &mut *self.running_thread.unwrap() }
     }
