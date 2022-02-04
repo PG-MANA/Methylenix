@@ -22,6 +22,7 @@ use crate::{alloc_non_linear_pages, alloc_pages};
 use core::arch::global_asm;
 
 const IDT_DEVICE_MIN: usize = 0x20;
+const IDT_AVAILABLE_MIN: usize = 0x30;
 const IDT_MAX: usize = 0xff;
 
 pub struct StoredIrqData {
@@ -239,6 +240,9 @@ impl InterruptManager {
                 if Self::irq_to_index(irq) != index {
                     return Err(());
                 }
+            } else if index < IDT_AVAILABLE_MIN {
+                /* To avoid conflict legacy IRQ Numbers */
+                return Err(());
             }
         }
         let _self_lock = self.lock.lock();
@@ -287,6 +291,9 @@ impl InterruptManager {
 
     fn search_available_handler_index() -> Option<usize> {
         for (index, e) in unsafe { INTERRUPT_HANDLER.iter().enumerate() } {
+            if index + IDT_DEVICE_MIN < IDT_AVAILABLE_MIN {
+                continue;
+            }
             if *e == 0 {
                 return Some(index);
             }
