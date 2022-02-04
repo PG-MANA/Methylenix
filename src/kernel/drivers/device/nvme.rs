@@ -249,7 +249,7 @@ impl PciDeviceDriver for NvmeManager {
             (queue_size.to_usize() / 2usize.pow(submission_queue_entry_size)) as u16;
         if admin_completion_queue_size > max_queue || admin_submission_queue_size > max_queue {
             pr_err!(
-                "The number of queue entries is exceeded max_queue size({}",
+                "The number of queue entries is exceeded max_queue size({})",
                 max_queue
             );
 

@@ -138,7 +138,12 @@ pub fn detect_file_system(block_device_id: usize) {
                 starting_lba,
                 ending_lba,
             );
-            analysis_partition(block_device_id, starting_lba as usize, ending_lba as usize);
+            analysis_partition(
+                block_device_id,
+                starting_lba as usize,
+                ending_lba as usize,
+                lba_sector_size,
+            );
         }
         let _ = free_pages!(partition_entries);
     }

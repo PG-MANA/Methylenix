@@ -4,7 +4,6 @@
 
 use crate::free_pages;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::Address;
 
 mod fat32;
 mod gpt;
@@ -13,7 +12,21 @@ pub fn detect_partitions(device_id: usize) {
     gpt::detect_file_system(device_id);
 }
 
-fn analysis_partition(device_id: usize, starting_lba: usize, ending_lba: usize) {
+//#[derive(Clone)]
+struct PartitionInfo {
+    device_id: usize,
+    starting_lba: usize,
+    #[allow(dead_code)]
+    ending_lba: usize,
+    lba_block_size: usize,
+}
+
+fn analysis_partition(
+    device_id: usize,
+    starting_lba: usize,
+    ending_lba: usize,
+    lba_sector_size: usize,
+) {
     let first_block = match get_kernel_manager_cluster()
         .block_device_manager
         .read_by_lba(device_id, starting_lba, 1)
@@ -24,14 +37,15 @@ fn analysis_partition(device_id: usize, starting_lba: usize, ending_lba: usize) 
             return;
         }
     };
-    let header = unsafe { &*(first_block.to_usize() as *const [u8; 3]) };
-    pr_debug!(
-        "First 3 block: {:#X}, {:#X}, {:#X}",
-        header[0],
-        header[1],
-        header[2]
+    let _ = fat32::try_detect_file_system(
+        &PartitionInfo {
+            device_id,
+            starting_lba,
+            ending_lba,
+            lba_block_size: lba_sector_size,
+        },
+        first_block,
     );
-    let _ = fat32::try_detect_file_system(device_id, first_block, starting_lba, ending_lba);
     let _ = free_pages!(first_block);
     return;
 }
