@@ -14,7 +14,7 @@ pub mod collections {
 }
 pub mod block_device;
 pub mod drivers;
-pub mod file;
+pub mod file_manager;
 pub mod graphic_manager;
 pub mod manager_cluster;
 pub mod memory_manager;

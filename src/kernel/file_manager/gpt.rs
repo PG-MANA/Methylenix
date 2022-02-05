@@ -2,9 +2,10 @@
 //! Guid Partition Table
 //!
 
+use super::FileManager;
+
 use crate::free_pages;
 use crate::kernel::collections::guid::Guid;
-use crate::kernel::file::analysis_partition;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::Address;
 
@@ -27,7 +28,7 @@ const PARTITION_GUID_UEFI: Guid = Guid::new(0xC12A7328, 0xF81F, 0x11D2, 0xBA4B, 
 const PARTITION_GUID_LINUX_DATA: Guid =
     Guid::new(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, 0x3D69D8477DE4);
 
-pub fn detect_file_system(block_device_id: usize) {
+pub fn detect_file_system(manager: &mut FileManager, block_device_id: usize) {
     /* Read the first 4KiB */
     let initial_read_size = 512 * 2;
     let first_sector_data = match get_kernel_manager_cluster().block_device_manager.read(
@@ -138,7 +139,7 @@ pub fn detect_file_system(block_device_id: usize) {
                 starting_lba,
                 ending_lba,
             );
-            analysis_partition(
+            manager.analysis_partition(
                 block_device_id,
                 starting_lba as usize,
                 ending_lba as usize,

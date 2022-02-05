@@ -18,13 +18,11 @@ use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
-
-use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::table::bgrt::BgrtManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
-use crate::kernel::file;
+use crate::kernel::file_manager::{FileSeekOrigin, PathInfo};
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
@@ -33,7 +31,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
-use crate::{io_remap, mremap};
+use crate::{free_pages, io_remap, mremap};
 
 use core::mem;
 
@@ -178,11 +176,7 @@ fn main_process() -> ! {
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
 
-    /* Initialize block device manager */
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().block_device_manager,
-        BlockDeviceManager::new(),
-    ));
+    init_block_devices_and_file_system_early();
 
     if init_pci_early() {
         if !init_acpi_later() {
@@ -196,12 +190,48 @@ fn main_process() -> ! {
         pr_err!("Cannot init PCI devices.");
     }
 
-    let number_of_block_devices = get_kernel_manager_cluster()
-        .block_device_manager
-        .get_number_of_devices();
-    if number_of_block_devices != 0 {
-        for i in 0..number_of_block_devices {
-            file::detect_partitions(i);
+    init_block_devices_and_file_system_later();
+
+    /* Test */
+    let file_manager = &get_kernel_manager_cluster().file_manager;
+    if file_manager.get_number_of_file_systems() != 0 {
+        let text_path = "/METLNOS/FILES/INFO.TXT";
+        pr_info!("Search: {}", text_path);
+        match file_manager.file_open(PathInfo::new(text_path)) {
+            Ok(mut info) => {
+                let size = file_manager
+                    .file_seek(&mut info, 0, FileSeekOrigin::SeekEnd)
+                    .unwrap_or(0);
+                pr_info!("Found: File Size: {}", size);
+                if size != 0
+                    && file_manager
+                        .file_seek(&mut info, 0, FileSeekOrigin::SeekSet)
+                        .is_ok()
+                {
+                    match file_manager.file_read(&mut info, size) {
+                        Ok(d) => {
+                            pr_info!(
+                                "FileData: {}",
+                                unsafe {
+                                    core::str::from_utf8(core::slice::from_raw_parts(
+                                        (d.0.to_usize() + d.1) as *const u8,
+                                        size,
+                                    ))
+                                }
+                                .unwrap_or("N/A")
+                            );
+                            let _ = free_pages!(d.0);
+                            file_manager.file_close(info);
+                        }
+                        Err(_) => {
+                            pr_err!("Failed to read data");
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                pr_info!("Not Found...");
+            }
         }
     }
 

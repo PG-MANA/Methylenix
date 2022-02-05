@@ -32,6 +32,8 @@ use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager, Timer};
 
+use crate::kernel::block_device::BlockDeviceManager;
+use crate::kernel::file_manager::FileManager;
 use core::mem;
 use core::sync::atomic::AtomicBool;
 
@@ -492,5 +494,33 @@ pub fn init_multiple_processors_ap() {
 
     if num_of_cpu != 1 {
         pr_info!("Found {} CPUs", num_of_cpu);
+    }
+}
+
+/// Initialize Block Device Manager and File System Manager
+///
+/// This function must be called before calling device scan functions.
+pub fn init_block_devices_and_file_system_early() {
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().block_device_manager,
+        BlockDeviceManager::new(),
+    ));
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().file_manager,
+        FileManager::new(),
+    ));
+}
+
+/// Search partitions and try to mount them
+///
+/// This function will be called after completing the device initializations.
+pub fn init_block_devices_and_file_system_later() {
+    for i in 0..get_kernel_manager_cluster()
+        .block_device_manager
+        .get_number_of_devices()
+    {
+        get_kernel_manager_cluster()
+            .file_manager
+            .detect_partitions(i);
     }
 }
