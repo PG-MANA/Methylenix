@@ -2,6 +2,7 @@
 //! File System
 //!
 
+pub mod elf;
 mod fat32;
 mod gpt;
 mod path_info;

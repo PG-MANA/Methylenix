@@ -2,6 +2,8 @@
 //! Multiboot ELF Information
 //!
 
+use crate::kernel::file_manager::elf::Elf64SectionHeader;
+
 #[repr(C, packed)]
 pub struct MultibootTagElfSections {
     s_type: u32,
@@ -11,21 +13,7 @@ pub struct MultibootTagElfSections {
     shndx: u32,
 }
 
-#[repr(C)]
-pub struct ElfSection {
-    section_name: u32,
-    section_type: u32,
-    section_flags: usize,
-    section_addr: usize,
-    section_offset: usize,
-    section_size: usize,
-    section_link: u32,
-    section_info: u32,
-    section_addralign: usize,
-    section_entry_size: usize,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ElfInfo {
     pub address: usize,
     pub size_of_entry: usize,
@@ -45,54 +33,20 @@ impl ElfInfo {
 }
 
 impl Iterator for ElfInfo {
-    type Item = &'static ElfSection;
+    type Item = &'static Elf64SectionHeader;
     fn next(&mut self) -> Option<Self::Item> {
         if self.cnt == self.num_of_entry {
             None
         } else {
-            let section =
-                unsafe { &*((self.address + self.cnt * self.size_of_entry) as *const ElfSection) };
+            let section = unsafe {
+                &*((self.address + self.cnt * self.size_of_entry) as *const Elf64SectionHeader)
+            };
             self.cnt += 1;
-            if section.section_type == 0 {
+            if section.get_section_type() == 0 {
                 self.next()
             } else {
                 Some(section)
             }
         }
-    }
-}
-
-impl Default for ElfInfo {
-    fn default() -> Self {
-        Self {
-            address: 0,
-            num_of_entry: 0,
-            size_of_entry: 0,
-            cnt: 0,
-        }
-    }
-}
-
-impl ElfSection {
-    pub fn address(&self) -> usize {
-        self.section_addr as usize
-    }
-    pub fn size(&self) -> usize {
-        self.section_size
-    }
-    pub fn align_size(&self) -> usize {
-        self.section_addralign as usize
-    }
-    pub fn flags(&self) -> usize {
-        self.section_flags
-    }
-    pub fn should_writable(&self) -> bool {
-        self.section_flags & 1 != 0
-    }
-    pub fn should_excusable(&self) -> bool {
-        self.section_flags & 4 != 0
-    }
-    pub fn should_allocate(&self) -> bool {
-        self.section_flags & 2 != 0
     }
 }

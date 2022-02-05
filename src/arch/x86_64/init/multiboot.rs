@@ -25,6 +25,7 @@ use crate::kernel::memory_manager::{
 use crate::io_remap;
 use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use crate::kernel::memory_manager::system_memory_manager::SystemMemoryManager;
+
 use core::mem;
 
 /// Init memory system based on multiboot information.
@@ -113,8 +114,8 @@ pub fn init_memory_by_multiboot_information(
 
     /* Reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
-        if section.should_allocate() && (section.address() & !PAGE_MASK) == 0 {
-            let virtual_address = VAddress::new(section.address());
+        if section.is_section_allocate() && ((section.get_address() as usize) & !PAGE_MASK) == 0 {
+            let virtual_address = VAddress::new(section.get_address() as usize);
             let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
                 kernel_area_to_physical_address(virtual_address)
             } else {
@@ -123,7 +124,7 @@ pub fn init_memory_by_multiboot_information(
             physical_memory_manager
                 .reserve_memory(
                     physical_address,
-                    MSize::new(section.size()),
+                    MSize::new(section.get_size() as usize),
                     MOrder::new(PAGE_SHIFT),
                 )
                 .expect("Failed to reserve memory");
@@ -171,17 +172,18 @@ pub fn init_memory_by_multiboot_information(
         .init_pools(&mut virtual_memory_manager);
 
     for section in multiboot_information.elf_info.clone() {
-        if !section.should_allocate() || (section.address() & !PAGE_MASK) != 0 {
+        let section_address = section.get_address() as usize;
+        if !section.is_section_allocate() || (section_address & !PAGE_MASK) != 0 {
             continue;
         }
-        let aligned_size = MSize::new((section.size() - 1) & PAGE_MASK) + PAGE_SIZE;
+        let aligned_size = MSize::new((section.get_size() as usize - 1) & PAGE_MASK) + PAGE_SIZE;
         let permission = MemoryPermissionFlags::new(
             true,
-            section.should_writable(),
-            section.should_excusable(),
+            section.is_section_writable(),
+            section.is_section_excusable(),
             false,
         );
-        let virtual_address = VAddress::new(section.address());
+        let virtual_address = VAddress::new(section_address);
         let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
             kernel_area_to_physical_address(virtual_address)
         } else {
@@ -197,13 +199,13 @@ pub fn init_memory_by_multiboot_information(
             get_physical_memory_manager(),
         ) {
             Ok(address) => {
-                if address == VAddress::new(section.address()) {
+                if address == VAddress::new(section_address) {
                     continue;
                 }
                 pr_err!(
                     "Virtual Address is different from Physical Address: V:{:#X} P:{:#X}",
                     address.to_usize(),
-                    section.address()
+                    section_address
                 );
             }
             Err(e) => {
