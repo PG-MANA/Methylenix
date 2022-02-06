@@ -25,6 +25,12 @@ const IDT_DEVICE_MIN: usize = 0x20;
 const IDT_AVAILABLE_MIN: usize = 0x30;
 const IDT_MAX: usize = 0xff;
 
+const MSR_EFER: u32 = 0xC0000080;
+const MSR_EFER_SYSCALL_ENABLE: u64 = 0x01;
+
+const MSR_STAR: u32 = 0xc0000081;
+const MSR_LSTAR: u32 = 0xc0000082;
+
 pub struct StoredIrqData {
     r_flags: u64,
 }
@@ -41,7 +47,8 @@ static mut IDT: [GateDescriptor; IDT_MAX + 1] = [GateDescriptor::invalid(); IDT_
 /// This struct may be changed in the future.
 pub struct InterruptManager {
     lock: IrqSaveSpinLockFlag,
-    main_selector: u16,
+    kernel_cs: u16,
+    user_cs: u16,
     local_apic: LocalApicManager,
     tss_manager: TssManager,
 }
@@ -74,7 +81,8 @@ impl InterruptManager {
     pub const fn new() -> InterruptManager {
         InterruptManager {
             lock: IrqSaveSpinLockFlag::new(),
-            main_selector: 0,
+            kernel_cs: 0,
+            user_cs: 0,
             local_apic: LocalApicManager::new(),
             tss_manager: TssManager::new(),
         }
@@ -98,7 +106,7 @@ impl InterruptManager {
             unsafe {
                 IDT[i] = GateDescriptor::new(
                     irq_handler_list_address + irq_handler_entry_size * (i - IDT_DEVICE_MIN),
-                    self.main_selector,
+                    self.kernel_cs,
                     IstIndex::TaskSwitch as u8,
                     0,
                 )
@@ -143,12 +151,14 @@ impl InterruptManager {
     /// This function alloc page from memory manager and
     /// fills all of IDT converted from the allocated page with a invalid handler.
     /// After that, this also init LocalApicManager.
-    pub fn init(&mut self, selector: u16) {
+    pub fn init(&mut self, kernel_code_segment: u16, user_code_segment: u16) {
         let _lock = self.lock.lock();
-        self.main_selector = selector;
+        self.kernel_cs = kernel_code_segment;
+        self.user_cs = user_code_segment;
         self.init_idt();
         self.tss_manager.load_current_tss();
         self.init_ist();
+        self.init_syscall();
         self.local_apic.init();
         unsafe { self.flush() };
         drop(_lock);
@@ -165,9 +175,11 @@ impl InterruptManager {
     /// GDT and TSS Descriptor must be valid.
     pub fn init_ap(&mut self, original: &Self) {
         let _lock = self.lock.lock();
-        self.main_selector = original.main_selector;
+        self.kernel_cs = original.kernel_cs;
+        self.user_cs = original.user_cs;
         self.tss_manager.load_current_tss();
         self.init_ist();
+        self.init_syscall();
         self.local_apic
             .init_from_other_manager(original.get_local_apic_manager());
         unsafe { self.flush() };
@@ -202,8 +214,8 @@ impl InterruptManager {
     }
 
     /// Return using selector.
-    pub fn get_main_selector(&self) -> u16 {
-        self.main_selector
+    pub fn get_kernel_code_segment(&self) -> u16 {
+        self.kernel_cs
     }
 
     /// Register interrupt handler.
@@ -361,6 +373,28 @@ impl InterruptManager {
         );
     }
 
+    /// Setup syscall
+    ///
+    /// write syscall settings into MSRs
+    pub fn init_syscall(&self) {
+        extern "C" {
+            fn syscall_handler_entry();
+        }
+        unsafe { cpu::wrmsr(MSR_EFER, cpu::rdmsr(MSR_EFER) | MSR_EFER_SYSCALL_ENABLE) };
+        unsafe {
+            cpu::wrmsr(
+                MSR_LSTAR,
+                syscall_handler_entry as *const fn() as usize as u64,
+            )
+        };
+        unsafe {
+            cpu::wrmsr(
+                MSR_STAR,
+                ((self.kernel_cs as u64) << 32) | (((self.user_cs - 16) as u64) << 48),
+            )
+        };
+    }
+
     /// Convert IRQ to Interrupt Index
     pub const fn irq_to_index(irq: u8) -> usize {
         irq as usize + 0x20
@@ -371,7 +405,7 @@ impl InterruptManager {
         /* Do nothing */
     }
 
-    /// Post script for interrupt
+    /// Main handler for interrupt
     ///
     /// This function calls `schedule` if needed.
     #[no_mangle]
@@ -387,6 +421,48 @@ impl InterruptManager {
             get_cpu_manager_cluster()
                 .run_queue
                 .schedule(Some(unsafe { &*(context_data as *const ContextData) }));
+        }
+    }
+
+    /// Main handler for syscall
+    #[no_mangle]
+    pub extern "C" fn main_syscall_handler(context_data: u64) {
+        let context_data = unsafe { &mut *(context_data as *mut ContextData) };
+        context_data.registers.gs_base = unsafe { cpu::rdmsr(0xC0000102) };
+        let user_segment_base = (unsafe { cpu::rdmsr(MSR_STAR) } >> 48) & 0xffff;
+        context_data.registers.cs = user_segment_base + 16;
+        context_data.registers.ss = user_segment_base + 8;
+
+        match context_data.registers.rax {
+            0x01 => {
+                pr_info!(
+                    "SysCall: Exit(Return Code: {:#X})",
+                    context_data.registers.rdi
+                );
+                pr_info!("This thread will be stopped.");
+                loop {
+                    unsafe { cpu::halt() };
+                }
+            }
+            0x04 => {
+                if context_data.registers.rdi == 1 {
+                    kprint!(
+                        "{}",
+                        unsafe {
+                            core::str::from_utf8(core::slice::from_raw_parts(
+                                context_data.registers.rsi as *const u8,
+                                context_data.registers.rdx as usize,
+                            ))
+                        }
+                        .unwrap_or("N/A")
+                    );
+                } else {
+                    pr_debug!("Unknown file descriptor: {}", context_data.registers.rdi);
+                }
+            }
+            s => {
+                pr_err!("SysCall: Unknown({:#X})", s);
+            }
         }
     }
 }
@@ -500,5 +576,73 @@ handler_entry:
     mov     r15, [rsp + 14 * 8] 
     add     rsp, ({0} + 1) * 8
     iretq
+",
+    const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS);
+
+global_asm!("
+syscall_handler_entry:
+    swapgs
+    sub     rsp, ({0} + 1) * 8 // +1 is for stack alignment
+    mov     [rsp +  0 * 8] ,rax
+    mov     [rsp +  1 * 8], rdx
+    mov     [rsp +  2 * 8], rcx
+    mov     [rsp +  3 * 8], rbx
+    mov     [rsp +  4 * 8], rbp
+    mov     [rsp +  5 * 8], rsi
+    mov     [rsp +  6 * 8], rdi
+    mov     [rsp +  7 * 8], r8
+    mov     [rsp +  8 * 8], r9
+    mov     [rsp +  9 * 8], r10
+    mov     [rsp + 10 * 8], r11
+    mov     [rsp + 11 * 8], r12
+    mov     [rsp + 12 * 8], r13
+    mov     [rsp + 13 * 8], r14
+    mov     [rsp + 14 * 8], r15     
+    xor     rax, rax
+    mov     ax, ds
+    mov     [rsp + 15 * 8], rax            
+    mov     ax, fs
+    mov     [rsp + 16 * 8], rax
+    rdfsbase rax
+    mov     [rsp + 17 * 8], rax
+    mov     ax, gs
+    mov     [rsp + 18 * 8], rax
+    mov     ax, es
+    mov     [rsp + 20 * 8], rax
+    mov     ax, ss
+    mov     [rsp + 21 * 8], rax
+    mov     [rsp + 23 * 8], r11                // RFLAGS
+    mov     [rsp + 25 * 8], rcx                // RIP
+    mov     rax, cr3
+    mov     [rsp + 26 * 8], rax
+    sub     rsp, 512
+    //fxsave  [rsp]
+
+    mov     rbp, rsp
+    mov     rdi, rsp
+    call    main_syscall_handler
+    mov     rsp, rbp
+
+    //fxrstor [rsp]
+    add     rsp, 512
+    // Ignore CR3, RIP, CS, RSP, DS, SS, GS, ES, FS
+    mov     rax, [rsp +  0 * 8]
+    mov     rdx, [rsp +  1 * 8]
+    mov     rcx, [rsp +  2 * 8]
+    mov     rbx, [rsp +  3 * 8]
+    mov     rbp, [rsp +  4 * 8]
+    mov     rsi, [rsp +  5 * 8]
+    mov     rdi, [rsp +  6 * 8]
+    mov     r8,  [rsp +  7 * 8]
+    mov     r9,  [rsp +  8 * 8]
+    mov     r10, [rsp +  9 * 8]
+    mov     r11, [rsp + 10 * 8]
+    mov     r12, [rsp + 11 * 8]
+    mov     r13, [rsp + 12 * 8]
+    mov     r14, [rsp + 13 * 8]
+    mov     r15, [rsp + 14 * 8] 
+    add     rsp, ({0} + 1) * 8
+    swapgs
+    sysretq
 ",
     const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS);
