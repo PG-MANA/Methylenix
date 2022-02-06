@@ -63,7 +63,7 @@ impl RunQueue {
     }
 
     pub fn start(&mut self) -> ! {
-        let irq = InterruptManager::save_and_disable_local_irq();
+        let _irq = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let thread = Self::get_highest_priority_thread(&mut self.run_list)
             .expect("There is no thread to start.");
@@ -71,12 +71,11 @@ impl RunQueue {
         thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(thread);
         drop(_lock);
-        InterruptManager::restore_local_irq(irq);
         unsafe {
             get_kernel_manager_cluster()
                 .task_manager
                 .get_context_manager()
-                .jump_to_context(thread.get_context())
+                .jump_to_context(thread.get_context(), true)
         };
         panic!("Switching to the kernel process was failed.");
     }
@@ -189,7 +188,7 @@ impl RunQueue {
     /// This function returns mut reference of current thread.
     ///
     /// To avoid dead lock of current thread's lock, the interrupt must be disabled.
-    pub(super) fn get_running_thread(&mut self) -> &mut ThreadEntry {
+    pub fn get_running_thread(&mut self) -> &mut ThreadEntry {
         assert!(!is_interrupt_enabled());
         unsafe { &mut *self.running_thread.unwrap() }
     }
@@ -438,21 +437,23 @@ impl RunQueue {
         }
         if !should_use_switch_context {
             drop(_lock);
-            InterruptManager::restore_local_irq(interrupt_flag); /* not good */
             unsafe {
                 get_kernel_manager_cluster()
                     .task_manager
                     .get_context_manager()
-                    .jump_to_context(next_thread.get_context());
+                    .jump_to_context(next_thread.get_context(), true);
             }
         } else {
             drop(_lock);
-            InterruptManager::restore_local_irq(interrupt_flag); /* not good */
             unsafe {
                 get_kernel_manager_cluster()
                     .task_manager
                     .get_context_manager()
-                    .switch_context(running_thread.get_context(), next_thread.get_context());
+                    .switch_context(
+                        running_thread.get_context(),
+                        next_thread.get_context(),
+                        true,
+                    );
             }
         }
     }

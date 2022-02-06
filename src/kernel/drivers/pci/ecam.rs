@@ -131,9 +131,10 @@ impl Ecam {
             if offset >= pci_dev.address_length {
                 return Err(());
             }
-            Ok(unsafe {
+            unsafe {
                 core::ptr::write_volatile((base_address + offset).to_usize() as *mut u32, data)
-            })
+            };
+            Ok(())
         } else {
             Err(())
         }

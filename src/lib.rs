@@ -1,6 +1,5 @@
 #![no_std]
 #![feature(alloc_error_handler)]
-#![feature(asm)]
 #![feature(asm_const)]
 #![feature(asm_sym)]
 #![feature(cfg_target_has_atomic)]
@@ -12,10 +11,8 @@
 #![feature(const_refs_to_cell)]
 #![feature(const_size_of_val)]
 #![feature(const_trait_impl)]
-#![feature(global_asm)]
-#![feature(lang_items)]
+#![feature(format_args_nl)]
 #![feature(maybe_uninit_array_assume_init)]
-#![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
@@ -24,7 +21,6 @@
 #![feature(try_blocks)]
 #![feature(type_name_of_val)]
 
-#[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
 

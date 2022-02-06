@@ -14,7 +14,7 @@ pub mod work_queue;
 use self::process_entry::ProcessEntry;
 use self::run_queue::RunQueue;
 use self::scheduling_class::{kernel::KernelSchedulingClass, SchedulingClass};
-use self::thread_entry::ThreadEntry;
+pub use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 
@@ -22,7 +22,7 @@ use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
-use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
 use crate::kernel::memory_manager::{MemoryError, MemoryManager};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
@@ -335,28 +335,20 @@ impl TaskManager {
     pub fn create_user_thread(
         &mut self,
         process: &mut ProcessEntry,
-        entry_address: fn() -> !,
-        default_stack_size: Option<MSize>,
+        entry_address: usize,
+        arguments: &[usize],
+        stack_address: VAddress,
         priority_level: u8,
     ) -> Result<&mut ThreadEntry, TaskError> {
         assert_ne!(process.get_pid(), 0);
-        /* TODO: Lazy allocation*/
-        let stack_size =
-            default_stack_size.unwrap_or(MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_USER));
-        let stack_address = get_cpu_manager_cluster()
-            .memory_allocator
-            .kmalloc(stack_size);
-        if let Err(e) = stack_address {
-            pr_err!("Failed to allocate Stack for user: {:?}", e);
-            return Err(TaskError::MemoryError(e));
-        }
-        let stack_start_address = stack_address.unwrap() + stack_size;
         let _lock = self.lock.lock();
         let result = try {
             let new_thread = self.thread_entry_pool.alloc()?;
-            let context_data = self
-                .get_context_manager()
-                .create_user_context(entry_address, stack_start_address);
+            let context_data = self.get_context_manager().create_user_context(
+                entry_address,
+                stack_address,
+                arguments,
+            );
             if let Err(e) = context_data {
                 pr_err!("Failed to create thread context: {:?}", e);
                 self.thread_entry_pool.free(new_thread);
@@ -384,12 +376,6 @@ impl TaskManager {
         drop(_lock);
         if let Err(e) = &result {
             pr_err!("Failed to create a thread for user: {:?}", e);
-            if let Err(e) = get_cpu_manager_cluster()
-                .memory_allocator
-                .kfree(stack_address.unwrap(), stack_size)
-            {
-                pr_err!("Failed to free the stack: {:?}", e);
-            }
         }
         return result;
     }

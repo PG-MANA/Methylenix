@@ -475,20 +475,12 @@ impl Step for MIndex {
 
     #[inline]
     fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        if let Some(n) = start.0.checked_add(count) {
-            Some(n.into())
-        } else {
-            None
-        }
+        start.0.checked_add(count).and_then(|n| Some(Self(n)))
     }
 
     #[inline]
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        if let Some(n) = start.0.checked_sub(count) {
-            Some(n.into())
-        } else {
-            None
-        }
+        start.0.checked_sub(count).and_then(|n| Some(Self(n)))
     }
 }
 
@@ -509,6 +501,10 @@ impl MemoryPermissionFlags {
 
     pub const fn data() -> Self {
         Self::new(true, true, false, false)
+    }
+
+    pub const fn user_data() -> Self {
+        Self::new(true, true, false, true)
     }
 
     pub fn is_readable(&self) -> bool {
@@ -539,6 +535,8 @@ impl MemoryOptionFlags {
     pub const ALLOC: Self = Self(1 << 5);
     pub const NO_WAIT: Self = Self(1 << 6);
     pub const CRITICAL: Self = Self(1 << 7);
+    pub const DEVICE_MEMORY: Self = Self(1 << 8);
+    pub const STACK: Self = Self(1 << 9);
 
     pub fn is_for_kernel(&self) -> bool {
         !self.is_for_user()
@@ -574,6 +572,14 @@ impl MemoryOptionFlags {
 
     pub fn is_critical(&self) -> bool {
         (*self & Self::CRITICAL).0 != 0
+    }
+
+    pub fn is_device_memory(&self) -> bool {
+        (*self & Self::DEVICE_MEMORY).0 != 0
+    }
+
+    pub fn is_stack(&self) -> bool {
+        (*self & Self::STACK).0 != 0
     }
 }
 

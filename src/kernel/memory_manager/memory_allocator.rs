@@ -163,7 +163,7 @@ impl MemoryAllocator {
         get_kernel_manager_cluster()
             .kernel_memory_manager
             .alloc_nonlinear_pages(
-                page_aligned_size.to_order(None).to_page_order(),
+                page_aligned_size,
                 MemoryPermissionFlags::data(),
                 Some(MemoryOptionFlags::KERNEL | MemoryOptionFlags::ALLOC),
             )

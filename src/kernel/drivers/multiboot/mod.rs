@@ -9,7 +9,7 @@ mod elf;
 mod frame_buffer;
 mod memory;
 
-pub use self::elf::{ElfInfo, ElfSection};
+pub use self::elf::ElfInfo;
 pub use self::frame_buffer::FrameBufferInfo;
 pub use self::memory::{EfiMemoryMapInfo, MemoryMapInfo};
 

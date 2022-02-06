@@ -22,17 +22,16 @@ use self::data_type::{
 };
 use self::physical_memory_manager::PhysicalMemoryManager;
 use self::system_memory_manager::get_physical_memory_manager;
-use self::virtual_memory_manager::{VirtualMemoryEntry, VirtualMemoryManager};
+use self::virtual_memory_manager::VirtualMemoryManager;
+
+use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::paging::{
-    NEED_COPY_HIGH_MEMORY_PAGE_TABLE, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE,
+    NEED_COPY_HIGH_MEMORY_PAGE_TABLE, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE,
 };
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::system_memory_manager::SystemMemoryManager;
-use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 pub struct MemoryManager {
-    lock: IrqSaveSpinLockFlag,
     virtual_memory_manager: VirtualMemoryManager,
 }
 
@@ -54,13 +53,11 @@ impl MemoryManager {
     pub fn new(virtual_memory_manager: VirtualMemoryManager) -> Self {
         Self {
             virtual_memory_manager,
-            lock: IrqSaveSpinLockFlag::new(),
         }
     }
 
     pub fn disable(&mut self) {
         assert!(!self.is_kernel_memory_manager());
-        let _lock = self.lock.lock();
         self.virtual_memory_manager.disable();
     }
 
@@ -69,13 +66,11 @@ impl MemoryManager {
     }
 
     fn clone_kernel_memory_pages(&mut self) -> Result<(), MemoryError> {
-        let kernel_memory_manager = &get_kernel_manager_cluster().kernel_memory_manager;
-        let _kernel_memory_manager_lock = kernel_memory_manager.lock.lock();
-        let result = self
-            .virtual_memory_manager
-            .clone_kernel_area(&kernel_memory_manager.virtual_memory_manager);
-        drop(_kernel_memory_manager_lock);
-        return result;
+        self.virtual_memory_manager.clone_kernel_area(
+            &get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .virtual_memory_manager,
+        )
     }
 
     pub fn clone_kernel_memory_pages_if_needed(&mut self) -> Result<(), MemoryError> {
@@ -86,10 +81,7 @@ impl MemoryManager {
         if self.is_kernel_memory_manager() {
             return Ok(());
         }
-        let _lock = self.lock.lock();
-        let result = self.clone_kernel_memory_pages();
-        drop(_lock);
-        return result;
+        self.clone_kernel_memory_pages()
     }
 
     fn _clone_kernel_memory_pages_if_needed(&mut self) -> Result<(), MemoryError> {
@@ -100,37 +92,55 @@ impl MemoryManager {
         if self.is_kernel_memory_manager() {
             return Ok(());
         }
-        assert!(self.lock.is_locked());
-        let result = self.clone_kernel_memory_pages();
-        return result;
+        self.clone_kernel_memory_pages()
+    }
+
+    fn add_physical_memory_manager_pool(
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        let address = pm_manager
+            .alloc(PAGE_SIZE, MOrder::new(0))
+            .expect("Failed to alloc memory");
+        pm_manager.add_memory_entry_pool(
+            physical_address_to_direct_map(address).to_usize(),
+            PAGE_SIZE_USIZE,
+        );
+        return Ok(());
+    }
+
+    fn allocate_physical_memory(
+        size: MSize,
+        align_order: MOrder,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<PAddress, MemoryError> {
+        match pm_manager.alloc(size, align_order) {
+            Ok(physical_address) => Ok(physical_address),
+            Err(MemoryError::EntryPoolRunOut) => {
+                if let Err(e) = Self::add_physical_memory_manager_pool(pm_manager) {
+                    pr_err!(
+                        "Failed to add memory pool to PhysicalMemoryManager: {:?}",
+                        e
+                    );
+                    Err(e)
+                } else {
+                    Self::allocate_physical_memory(size, align_order, pm_manager)
+                }
+            }
+            Err(e) => {
+                pr_err!("Failed to allocate physical memory: {:?}", e);
+                Err(e)
+            }
+        }
     }
 
     pub fn create_user_memory_manager(&self) -> Result<Self, MemoryError> {
         assert!(self.is_kernel_memory_manager());
         let mut user_virtual_memory_manager = VirtualMemoryManager::new();
 
-        let _lock = self.lock.lock();
         user_virtual_memory_manager
             .init_user(&self.virtual_memory_manager, get_physical_memory_manager())?;
-        drop(_lock);
-        return Ok(Self::new(user_virtual_memory_manager));
-    }
 
-    fn add_memory_pool_to_physical_memory_manager(
-        &mut self,
-        pm_manager: &mut PhysicalMemoryManager,
-    ) -> Result<(), MemoryError> {
-        if let Err(e) = self
-            .virtual_memory_manager
-            .add_physical_memory_manager_pool(pm_manager)
-        {
-            pr_err!(
-                "Failed to add memory pool for PhysicalMemoryManager: {:?}",
-                e
-            );
-            return Err(e);
-        }
-        return Ok(());
+        return Ok(Self::new(user_virtual_memory_manager));
     }
 
     fn _alloc_pages(
@@ -139,69 +149,28 @@ impl MemoryManager {
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
     ) -> Result<(VAddress, PAddress), MemoryError> {
-        /* ADD: lazy allocation */
         /* Return physically continuous 2 ^ order pages memory. */
         let size = order.to_offset();
-        let mut _lock = self.lock.lock();
         let pm_manager = get_physical_memory_manager();
-        let physical_address = {
-            let p: PAddress;
-            loop {
-                p = match pm_manager.alloc(size, MOrder::new(PAGE_SHIFT)) {
-                    Ok(physical_address) => physical_address,
-                    Err(MemoryError::EntryPoolRunOut) => {
-                        if let Err(e) = self
-                            .virtual_memory_manager
-                            .add_physical_memory_manager_pool(pm_manager)
-                        {
-                            pr_err!(
-                                "Failed to add memory pool to PhysicalMemoryManager: {:?}",
-                                e
-                            );
-                            drop(_lock);
-                            return Err(e);
-                        }
-                        continue;
-                    }
-                    Err(e) => {
-                        drop(_lock);
-                        pr_err!("Failed to allocate physical memory: {:?}", e);
-                        return Err(e);
-                    }
-                };
-                break;
+        let physical_address =
+            Self::allocate_physical_memory(size, MOrder::new(PAGE_SHIFT), pm_manager)?;
+
+        match self.virtual_memory_manager.alloc_and_map_virtual_address(
+            size,
+            physical_address,
+            permission,
+            option,
+            pm_manager,
+        ) {
+            Ok(address) => {
+                self._clone_kernel_memory_pages_if_needed()?;
+                Ok((address, physical_address))
             }
-            p
-        };
-
-        loop {
-            match self.virtual_memory_manager.alloc_and_map_virtual_address(
-                size,
-                physical_address,
-                permission,
-                option,
-                pm_manager,
-            ) {
-                Ok(address) => {
-                    self._clone_kernel_memory_pages_if_needed()?;
-                    return Ok((address, physical_address));
+            Err(e) => {
+                if let Err(e) = pm_manager.free(physical_address, size, false) {
+                    pr_err!("Failed to free physical memory: {:?}", e);
                 }
-                Err(MemoryError::EntryPoolRunOut) => {
-                    if option.is_no_wait() {
-                        return Err(MemoryError::EntryPoolRunOut);
-                    }
-                    drop(_lock);
-                    self.add_entry_pool()?;
-                    _lock = self.lock.lock();
-
-                    continue;
-                }
-                Err(e) => {
-                    if let Err(e) = pm_manager.free(physical_address, size, false) {
-                        pr_err!("Failed to free physical memory: {:?}", e);
-                    }
-                    return Err(e);
-                }
+                Err(e)
             }
         }
     }
@@ -212,6 +181,7 @@ impl MemoryManager {
         permission: MemoryPermissionFlags,
         option: Option<MemoryOptionFlags>,
     ) -> Result<(VAddress, PAddress), MemoryError> {
+        Self::check_option_and_permission(&permission, &option)?;
         self._alloc_pages(
             order,
             permission,
@@ -229,98 +199,68 @@ impl MemoryManager {
             .and_then(|r| Ok(r.0))
     }
 
-    /* TODO: check memory access error(sometimes occurs) */
-    /* TODO: rewrite(For entry pool allocation) */
     pub fn alloc_nonlinear_pages(
         &mut self,
-        order: MPageOrder,
+        size: MSize,
         permission: MemoryPermissionFlags,
         option: Option<MemoryOptionFlags>,
     ) -> Result<VAddress, MemoryError> {
-        let size = order.to_offset();
         if size <= PAGE_SIZE {
-            return self.alloc_pages(order, permission, option);
+            return self.alloc_pages(MPageOrder::new(0), permission, option);
         }
-        let _lock = self.lock.lock();
-
-        let entry = self.virtual_memory_manager.alloc_virtual_address(
+        let size = MSize::new((size.to_usize() - 1) & PAGE_MASK) + PAGE_SIZE;
+        let vm_entry = self.virtual_memory_manager.alloc_virtual_address(
             size,
             permission,
             option.unwrap_or(MemoryOptionFlags::KERNEL | MemoryOptionFlags::ALLOC),
         )?;
-        let vm_start_address = entry.get_vm_start_address();
-
-        let map_func = |s: &mut Self,
-                        i: MIndex,
-                        p_a: PAddress,
-                        vm_entry: &mut VirtualMemoryEntry,
-                        pm_manager: &mut PhysicalMemoryManager|
-         -> Result<(), MemoryError> {
-            if let Err(e) = s.virtual_memory_manager.map_physical_address_into_vm_entry(
-                vm_entry,
-                vm_start_address + i.to_offset(),
-                p_a,
-                PAGE_SIZE,
-            ) {
-                pr_err!(
-                    "Failed to map virtual address({}) to physical address({}): {:?}",
-                    vm_start_address + i.to_offset(),
-                    p_a,
-                    e
-                );
-                if let Err(e) = s
-                    .virtual_memory_manager
-                    ._free_address(unsafe { &mut *(vm_entry as *mut _) }, pm_manager)
-                {
-                    pr_err!("Failed to free vm_entry: {:?}", e);
-                }
-                return Err(e);
-            }
-            return Ok(());
-        };
+        let vm_start_address = vm_entry.get_vm_start_address();
+        let pm_manager = get_physical_memory_manager();
 
         for i in MIndex::new(0)..size.to_index() {
-            let pm_manager = get_physical_memory_manager();
-            match (*pm_manager).alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT)) {
-                Ok(p_a) => {
-                    map_func(self, i, p_a, entry, pm_manager)?;
-                }
-                Err(MemoryError::EntryPoolRunOut) => {
-                    self.add_memory_pool_to_physical_memory_manager(pm_manager)?;
-                    match (*pm_manager).alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT)) {
-                        Ok(p_a) => {
-                            map_func(self, i, p_a, entry, pm_manager)?;
+            match Self::allocate_physical_memory(PAGE_SIZE, MOrder::new(PAGE_SHIFT), pm_manager) {
+                Ok(physical_address) => {
+                    if let Err(e) = self
+                        .virtual_memory_manager
+                        .map_physical_address_into_vm_entry_and_page_table(
+                            vm_entry,
+                            vm_start_address + i.to_offset(),
+                            physical_address,
+                            PAGE_SIZE,
+                            pm_manager,
+                        )
+                    {
+                        pr_err!("Failed to map memory memory: {:?}", e);
+                        if let Err(e) = pm_manager.free(physical_address, PAGE_SIZE, false) {
+                            pr_err!("Failed to free physical memory: {:?}", e);
                         }
-                        Err(e) => {
-                            pr_err!("Failed to allocate physical memory: {:?}", e);
-                            return Err(MemoryError::AllocAddressFailed);
+                        if let Err(e) = self
+                            .virtual_memory_manager
+                            .free_address_with_vm_entry(vm_entry, pm_manager)
+                        {
+                            pr_err!("Failed to free memory: {:?}", e);
                         }
+                        return Err(MemoryError::AllocAddressFailed);
                     }
                 }
                 Err(e) => {
                     pr_err!("Failed to allocate physical memory: {:?}", e);
+                    if let Err(e) = self
+                        .virtual_memory_manager
+                        .free_address_with_vm_entry(vm_entry, pm_manager)
+                    {
+                        pr_err!("Failed to free memory: {:?}", e);
+                    }
                     return Err(MemoryError::AllocAddressFailed);
                 }
             }
         }
 
-        let pm_manager = get_physical_memory_manager();
-        if let Err(e) = self
-            .virtual_memory_manager
-            .update_page_table_with_vm_entry(entry, pm_manager)
-        {
-            pr_err!("Failed to update page table: {:?}", e);
-            if let Err(e) = self.virtual_memory_manager._free_address(entry, pm_manager) {
-                pr_err!("Failed to free vm_entry: {:?}", e);
-            }
-            return Err(MemoryError::PagingError);
-        }
         self._clone_kernel_memory_pages_if_needed()?;
         return Ok(vm_start_address);
     }
 
     pub fn free(&mut self, address: VAddress) -> Result<(), MemoryError> {
-        let _lock = self.lock.lock();
         let pm_manager = get_physical_memory_manager();
         let aligned_vm_address = address & PAGE_MASK;
         if let Err(e) = self
@@ -335,45 +275,42 @@ impl MemoryManager {
         /* Freeing Physical Memory will be done by Virtual Memory Manager, if it be needed. */
     }
 
-    pub fn alloc_physical_memory(&mut self, order: MPageOrder) -> Result<PAddress, MemoryError> {
-        /* initializing use only */
-        /* Returned memory area is not mapped, if you want to access, you must map. */
-        let size = order.to_offset();
-        let _lock = self.lock.lock();
-        let pm_manager = get_physical_memory_manager();
-        match pm_manager.alloc(size, MOrder::new(PAGE_SHIFT)) {
-            Ok(p_a) => {
-                drop(_lock);
-                Ok(p_a)
-            }
-            Err(MemoryError::EntryPoolRunOut) => {
-                self.add_memory_pool_to_physical_memory_manager(pm_manager)?;
-                drop(_lock);
-                self.alloc_physical_memory(order)
-            }
-            Err(e) => {
-                pr_err!("Failed to allocate PhysicalMemory: {:?}", e);
-                drop(_lock);
-                Err(MemoryError::AllocAddressFailed)
-            }
-        }
-    }
-
     pub fn free_physical_memory(
         &mut self,
         address: PAddress,
         size: MSize,
     ) -> Result<(), MemoryError> {
         /* initializing use only */
-        let _lock = self.lock.lock();
+
         if let Err(e) = get_physical_memory_manager().free(address, size, false) {
-            drop(_lock);
             pr_err!("Failed to free physical memory: {:?}", e);
             Err(e)
         } else {
-            drop(_lock);
             Ok(())
         }
+    }
+
+    pub fn share_kernel_memory_with_user(
+        &mut self,
+        user_memory_manager: &mut MemoryManager,
+        kernel_virtual_address: VAddress,
+        user_virtual_address_to_map: VAddress,
+        user_permission: MemoryPermissionFlags,
+        user_option: MemoryOptionFlags,
+    ) -> Result<(), MemoryError> {
+        if !self.is_kernel_memory_manager() || user_memory_manager.is_kernel_memory_manager() {
+            pr_err!("Invalid Operation.");
+            return Err(MemoryError::InternalError);
+        }
+        Self::check_option_and_permission(&user_permission, &Some(user_option))?;
+        self.virtual_memory_manager.share_memory_with_user(
+            &mut user_memory_manager.virtual_memory_manager,
+            kernel_virtual_address,
+            user_virtual_address_to_map,
+            user_permission,
+            user_option,
+            get_physical_memory_manager(),
+        )
     }
 
     pub fn io_remap(
@@ -384,48 +321,23 @@ impl MemoryManager {
         option: Option<MemoryOptionFlags>,
     ) -> Result<VAddress, MemoryError> {
         let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
-        let mut _lock = self.lock.lock();
 
         let pm_manager = get_physical_memory_manager();
         /* TODO: check physical_address is not allocatble */
-        let option = option.unwrap_or(MemoryOptionFlags::KERNEL) | MemoryOptionFlags::IO_MAP;
-        let virtual_address = {
-            let v: VAddress;
-            loop {
-                v = match self.virtual_memory_manager.map_address(
-                    aligned_physical_address,
-                    None,
-                    aligned_size,
-                    permission,
-                    option,
-                    pm_manager,
-                ) {
-                    Ok(v) => v,
-                    Err(MemoryError::EntryPoolRunOut) => {
-                        if option.is_no_wait() {
-                            return Err(MemoryError::EntryPoolRunOut);
-                        }
-                        if self.is_kernel_memory_manager() {
-                            drop(_lock);
-                            self.add_entry_pool()?;
-                            _lock = self.lock.lock();
-                        } else {
-                            self.add_entry_pool()?;
-                        }
-                        continue;
-                    }
-                    Err(e) => {
-                        drop(_lock);
-                        return Err(e);
-                    }
-                };
-                break;
-            }
-            v
-        };
+        let option = option.unwrap_or(MemoryOptionFlags::KERNEL)
+            | MemoryOptionFlags::IO_MAP
+            | MemoryOptionFlags::DEVICE_MEMORY;
+        let virtual_address = self.virtual_memory_manager.map_address(
+            aligned_physical_address,
+            None,
+            aligned_size,
+            permission,
+            option,
+            pm_manager,
+        )?;
 
         self._clone_kernel_memory_pages_if_needed()?;
-        drop(_lock);
+
         Ok(virtual_address + (physical_address - aligned_physical_address))
     }
 
@@ -438,51 +350,39 @@ impl MemoryManager {
         let (aligned_virtual_address, aligned_new_size) =
             Self::page_align(old_virtual_address, new_size);
 
-        let mut _lock = self.lock.lock();
         let pm_manager = get_physical_memory_manager();
 
         //pm_manager.reserve_memory(aligned_physical_address, size, false);
         /* physical_address must be reserved. */
 
-        let new_virtual_address = {
-            let v: VAddress;
-            loop {
-                v = match self.virtual_memory_manager.resize_memory_mapping(
-                    aligned_virtual_address,
-                    aligned_new_size,
-                    pm_manager,
-                ) {
-                    Ok(v) => v,
-                    Err(MemoryError::EntryPoolRunOut) => {
-                        drop(_lock);
-                        self.add_entry_pool()?;
-                        _lock = self.lock.lock();
-                        continue;
-                    }
-                    Err(e) => {
-                        drop(_lock);
-                        return Err(e);
-                    }
-                };
-                break;
-            }
-            v
-        };
+        let new_virtual_address = self.virtual_memory_manager.resize_memory_mapping(
+            aligned_virtual_address,
+            aligned_new_size,
+            pm_manager,
+        )?;
 
         self._clone_kernel_memory_pages_if_needed()?;
-        drop(_lock);
+
         Ok(new_virtual_address + (old_virtual_address - aligned_virtual_address))
     }
 
-    fn add_entry_pool(&mut self) -> Result<(), MemoryError> {
-        SystemMemoryManager::pool_alloc_worker(
-            SystemMemoryManager::ALLOC_VM_ENTRY_FLAG | SystemMemoryManager::ALLOC_VM_PAGE_FLAG,
-        );
+    #[inline]
+    fn check_option_and_permission(
+        p: &MemoryPermissionFlags,
+        o: &Option<MemoryOptionFlags>,
+    ) -> Result<(), MemoryError> {
+        if o.as_ref()
+            .and_then(|o| Some(o.is_for_user() && !p.is_user_accessible()))
+            .unwrap_or(false)
+        {
+            pr_err!("User Memory must be accessible from user.");
+            return Err(MemoryError::InternalError);
+        }
+
         return Ok(());
     }
 
     pub fn set_paging_table(&mut self) {
-        let _lock = self.lock.lock();
         self.virtual_memory_manager.flush_paging();
     }
 
@@ -509,6 +409,15 @@ impl MemoryManager {
                         & PAGE_MASK,
                 ) + PAGE_SIZE,
             )
+        }
+    }
+
+    #[inline]
+    pub const fn size_align(size: MSize) -> MSize {
+        if size.is_zero() {
+            size
+        } else {
+            MSize::new((size.to_usize() - 1) & PAGE_MASK) + PAGE_SIZE
         }
     }
 }
@@ -538,28 +447,91 @@ macro_rules! mremap {
 
 #[macro_export]
 macro_rules! alloc_pages {
-    ($len:expr, $permission:expr) => {
+    ($order:expr, $permission:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_pages($len, $permission, None)
+            .alloc_pages($order, $permission, None)
     };
-    ($len:expr, $permission:expr, $option:expr) => {
+    ($order:expr, $permission:expr, $option:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_pages($len, $permission, Some($option))
+            .alloc_pages($order, $permission, Some($option))
+    };
+}
+
+#[macro_export]
+macro_rules! alloc_pages_with_physical_address {
+    ($order:expr, $permission:expr) => {
+        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .alloc_pages_with_physical_address($order, $permission, None)
+    };
+    ($order:expr, $permission:expr, $option:expr) => {
+        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .alloc_pages_with_physical_address($order, $permission, Some($option))
     };
 }
 
 #[macro_export]
 macro_rules! alloc_non_linear_pages {
-    ($len:expr, $permission:expr) => {
+    ($order:expr, $permission:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_nonlinear_pages($len, $permission, None)
+            .alloc_nonlinear_pages($order, $permission, None)
     };
-    ($len:expr, $permission:expr, $option:expr) => {
+    ($order:expr, $permission:expr, $option:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_nonlinear_pages($len, $permission, Some($option))
+            .alloc_nonlinear_pages($order, $permission, Some($option))
+    };
+}
+
+#[macro_export]
+macro_rules! free_pages {
+    ($address:expr) => {
+        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .free($address)
+    };
+}
+
+#[macro_export]
+macro_rules! kmalloc {
+    ($size:expr) => {
+        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+            .memory_allocator
+            .kmalloc($size)
+    };
+
+    ($t:ty, $initial_value:expr) => {
+        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+            .memory_allocator
+            .kmalloc(crate::kernel::memory_manager::data_type::MSize::new(
+                core::mem::size_of::<$t>(),
+            ))
+            .and_then(|addr| {
+                let o = unsafe { &mut *(addr.to_usize() as *mut $t) };
+                core::mem::forget(core::mem::replace(o, $initial_value));
+                Ok(o)
+            })
+    };
+}
+
+#[macro_export]
+macro_rules! kfree {
+    ($address:expr, $size:expr) => {
+        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+            .memory_allocator
+            .kfree($address, $size)
+    };
+
+    ($data:expr) => {
+        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+            .memory_allocator
+            .kfree(
+                crate::kernel::memory_manager::data_type::VAddress::new($data as *const _ as usize),
+                crate::kernel::memory_manager::data_type::MSize::new(core::mem::size_of_val($data)),
+            )
     };
 }

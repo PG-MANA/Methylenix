@@ -13,7 +13,7 @@ use self::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MPageOrder, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::MemoryError;
 
 /// This manager contains system/user stack/code segment pointer.
@@ -31,7 +31,7 @@ impl ContextManager {
     pub const DEFAULT_STACK_SIZE_OF_SYSTEM: usize = 0x200000;
     pub const IDLE_THREAD_STACK_SIZE: MSize = PAGE_SIZE;
     pub const DEFAULT_STACK_SIZE_OF_USER: usize = 0x8000;
-    pub const DEFAULT_INTERRUPT_STACK_ORDER: MPageOrder = MPageOrder::new(0);
+    pub const DEFAULT_INTERRUPT_STACK_SIZE: MSize = MSize::new(0x2000);
     pub const STACK_ALIGN_ORDER: usize = 6; /*size = 2^6 = 64*/
 
     /// Create Context Manager with invalid data.
@@ -123,15 +123,17 @@ impl ContextManager {
     /// `entry_address` must not return.
     pub fn create_user_context(
         &self,
-        entry_address: fn() -> !,
+        entry_address: usize,
         stack_address: VAddress,
+        arguments: &[usize],
         //pg_manager: &PageManager,
     ) -> Result<ContextData, MemoryError> {
-        Ok(ContextData::create_context_data_for_system(
-            entry_address as *const fn() as usize,
+        Ok(ContextData::create_context_data_for_user(
+            entry_address,
             stack_address.to_usize() - 8, /* For SystemV ABI Stack Alignment */
             self.user_cs as u64,
             self.user_ss as u64,
+            arguments,
             //pg_manager.get_page_table_address().to_usize(),
         ))
     }
@@ -142,8 +144,15 @@ impl ContextManager {
     /// This is used when OS starts task management system.
     ///
     /// **ContextData must be aligned by 64bit**.
-    pub unsafe fn jump_to_context(&self, context: &mut ContextData) {
+    pub unsafe fn jump_to_context(
+        &self,
+        context: &mut ContextData,
+        allow_interrupt_after_jump: bool,
+    ) {
         assert_eq!(core::mem::align_of_val(context), 64);
+        if allow_interrupt_after_jump {
+            context.registers.rflags |= 0x0200;
+        }
         cpu::run_task(context as *mut _);
     }
 
@@ -155,9 +164,13 @@ impl ContextManager {
         &self,
         old_context: &mut ContextData,
         next_context: &mut ContextData,
+        allow_interrupt_after_switch: bool,
     ) {
         assert_eq!(core::mem::align_of_val(old_context), 64);
         assert_eq!(core::mem::align_of_val(next_context), 64);
+        if allow_interrupt_after_switch {
+            next_context.registers.rflags |= 0x0200;
+        }
         cpu::task_switch(next_context as *mut _, old_context as *mut _);
     }
 }

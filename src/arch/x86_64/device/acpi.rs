@@ -5,7 +5,6 @@
 use crate::arch::target_arch::device::cpu::{
     in_byte, in_dword, in_word, out_byte, out_dword, out_word,
 };
-use crate::arch::target_arch::interrupt::{InterruptManager, IstIndex};
 
 use crate::kernel::drivers::acpi::aml::{AmlError, AmlVariable, ConstData};
 use crate::kernel::drivers::acpi::AcpiManager;
@@ -14,37 +13,21 @@ use crate::kernel::sync::spin_lock::Mutex;
 
 use alloc::sync::Arc;
 
-static mut INTERRUPT_VECTOR: u8 = 0;
-
 pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
     let irq = acpi_manager.get_fadt_manager().get_sci_int();
-    let index = InterruptManager::irq_to_index(irq as u8);
-    make_device_interrupt_handler!(handler, acpi_event_handler);
-    if get_cpu_manager_cluster()
+    get_cpu_manager_cluster()
         .interrupt_manager
-        .set_device_interrupt_function(
-            handler,
-            Some(irq as u8),
-            IstIndex::NormalInterrupt,
-            index,
-            0,
-            true,
-        )
-    {
-        unsafe { INTERRUPT_VECTOR = index as u8 };
-        true
-    } else {
-        false
-    }
+        .set_device_interrupt_function(acpi_event_handler, Some(irq as u8), None, 0, true)
+        .is_ok()
 }
 
-extern "C" fn acpi_event_handler() {
+fn acpi_event_handler(index: usize) {
     get_kernel_manager_cluster()
         .acpi_event_manager
         .sci_handler();
     get_cpu_manager_cluster()
         .interrupt_manager
-        .send_eoi_level_trigger(unsafe { INTERRUPT_VECTOR });
+        .send_eoi_level_trigger(index as u8);
 }
 
 #[inline]

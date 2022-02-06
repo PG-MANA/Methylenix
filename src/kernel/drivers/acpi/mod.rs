@@ -328,7 +328,7 @@ impl AcpiManager {
             .get_pm_timer()
         {
             for i in (1..=3).rev() {
-                println!("System will shutdown after {}s...", i);
+                kprintln!("System will shutdown after {}s...", i);
                 for _ in 0..1000 {
                     timer.busy_wait_ms(1);
                 }

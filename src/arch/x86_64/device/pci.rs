@@ -2,6 +2,8 @@
 //! PCI arch-depend
 //!
 
+pub mod msi;
+pub mod nvme;
 pub mod sm_bus;
 
 use crate::arch::target_arch::device::cpu;

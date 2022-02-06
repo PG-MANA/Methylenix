@@ -9,6 +9,7 @@ pub mod boot;
 pub mod context;
 pub mod device;
 mod init;
+mod loader;
 pub mod paging;
 
 use self::device::cpu;
@@ -18,7 +19,6 @@ use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
 use self::interrupt::{idt::GateDescriptor, InterruptManager};
-
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::table::bgrt::BgrtManager;
 use crate::kernel::drivers::acpi::AcpiManager;
@@ -46,10 +46,10 @@ pub struct ArchDependedKernelManagerCluster {
 
 #[no_mangle]
 pub extern "C" fn multiboot_main(
-    mbi_address: usize,       /* MultiBoot Information */
-    kernel_code_segment: u16, /* Current segment is 8 */
-    user_code_segment: u16,
-    user_data_segment: u16,
+    mbi_address: usize, /* MultiBoot Information */
+    kernel_cs: u16,
+    user_cs: u16,
+    user_ss: u16,
 ) -> ! {
     /* Enable fxsave and fxrstor and fs/gs_base */
     unsafe {
@@ -112,7 +112,7 @@ pub extern "C" fn multiboot_main(
     init_graphic(&multiboot_information);
 
     /* Init interrupt */
-    init_interrupt(kernel_code_segment);
+    init_interrupt(kernel_cs, user_cs);
 
     /* Setup Serial Port */
     get_kernel_manager_cluster().serial_port_manager.init();
@@ -135,13 +135,7 @@ pub extern "C" fn multiboot_main(
     init_global_timer();
 
     /* Init the task management system */
-    init_task(
-        kernel_code_segment,
-        user_code_segment,
-        user_data_segment,
-        main_process,
-        idle,
-    );
+    init_task(kernel_cs, user_cs, user_ss, main_process, idle);
 
     /* Setup work queue system */
     init_work_queue();
@@ -176,6 +170,8 @@ fn main_process() -> ! {
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
 
+    init_block_devices_and_file_system_early();
+
     if init_pci_early() {
         if !init_acpi_later() {
             pr_err!("Cannot init ACPI devices.");
@@ -187,14 +183,19 @@ fn main_process() -> ! {
     if !init_pci_later() {
         pr_err!("Cannot init PCI devices.");
     }
+
+    init_block_devices_and_file_system_later();
+
+    /* Test */
+    let _ = loader::load_and_execute("/OS/FILES/APP", &["Arg1", "Arg2", "Arg3"]);
+
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
-        let c = tty.getc(true);
-        if c.is_some() {
-            print!("{}", c.unwrap() as char);
-        }
-        if tty.flush().is_err() {
-            pr_err!("Cannot flush text.");
+        if let Some(c) = tty.getc(true) {
+            kprint!("{}", c as char);
+            if tty.flush().is_err() {
+                pr_err!("Cannot flush text.");
+            }
         }
     }
 }

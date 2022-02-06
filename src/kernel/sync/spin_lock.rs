@@ -5,6 +5,7 @@
 use crate::arch::target_arch::interrupt::{InterruptManager, StoredIrqData};
 
 use core::cell::UnsafeCell;
+use core::mem::MaybeUninit;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -30,6 +31,11 @@ pub struct IrqSaveSpinLockFlag {
 pub struct IrqSaveSpinLockFlagHolder {
     flag: *const AtomicBool,
     irq: StoredIrqData,
+}
+
+pub struct ClassicIrqSaveSpinLockFlag {
+    flag: AtomicBool,
+    irq: UnsafeCell<MaybeUninit<StoredIrqData>>,
 }
 
 pub struct MutexGuard<'a, T: ?Sized + 'a> {
@@ -166,6 +172,67 @@ impl Drop for IrqSaveSpinLockFlagHolder {
             (&*self.flag).store(false, Ordering::Release);
             InterruptManager::restore_local_irq_by_reference(&self.irq);
         }
+    }
+}
+
+impl ClassicIrqSaveSpinLockFlag {
+    pub const fn new() -> Self {
+        Self {
+            flag: AtomicBool::new(false),
+            irq: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    pub fn try_lock(&self) -> Result<(), ()> {
+        let irq = InterruptManager::save_and_disable_local_irq();
+        if self
+            .flag
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            unsafe { self.irq.get().write(MaybeUninit::new(irq)) };
+            Ok(())
+        } else {
+            InterruptManager::restore_local_irq(irq);
+            Err(())
+        }
+    }
+
+    pub fn try_lock_weak(&self) -> Result<(), ()> {
+        let irq = InterruptManager::save_and_disable_local_irq();
+        if self
+            .flag
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            unsafe { self.irq.get().write(MaybeUninit::new(irq)) };
+            Ok(())
+        } else {
+            InterruptManager::restore_local_irq(irq);
+            Err(())
+        }
+    }
+
+    pub fn lock(&self) {
+        loop {
+            if self.try_lock_weak().is_ok() {
+                return;
+            }
+            while self.flag.load(Ordering::Relaxed) {
+                core::hint::spin_loop();
+            }
+        }
+    }
+
+    pub fn unlock(&self) {
+        assert!(self.is_locked());
+        let irq = unsafe { self.irq.get().read().assume_init_read() };
+        self.flag.store(false, Ordering::Release);
+        InterruptManager::restore_local_irq(irq);
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
     }
 }
 

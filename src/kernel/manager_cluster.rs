@@ -8,22 +8,23 @@ use crate::arch::target_arch::device::serial_port::SerialPortManager;
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::{ArchDependedCpuManagerCluster, ArchDependedKernelManagerCluster};
 
+use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::efi::EfiManager;
 use crate::kernel::drivers::pci::PciManager;
+use crate::kernel::file_manager::FileManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use crate::kernel::memory_manager::{system_memory_manager::SystemMemoryManager, MemoryManager};
+use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::work_queue::WorkQueue;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager};
 use crate::kernel::tty::TtyManager;
-
-use crate::kernel::sync::spin_lock::Mutex;
 
 use core::mem::MaybeUninit;
 
@@ -38,7 +39,8 @@ pub struct KernelManagerCluster {
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
     pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
-    //input_manager:
+    pub block_device_manager: BlockDeviceManager,
+    pub file_manager: FileManager,
     pub acpi_manager: Mutex<AcpiManager>,
     pub acpi_event_manager: AcpiEventManager,
     pub acpi_device_manager: AcpiDeviceManager,

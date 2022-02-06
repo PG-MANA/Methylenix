@@ -13,14 +13,16 @@ use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pci::ArchDependPciManager;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
-use crate::arch::target_arch::interrupt::{InterruptManager, InterruptionIndex, IstIndex};
+use crate::arch::target_arch::interrupt::{InterruptIndex, InterruptManager};
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
+use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::table::{madt::MadtManager, mcfg::McfgManager};
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::pci::PciManager;
+use crate::kernel::file_manager::FileManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
@@ -28,8 +30,7 @@ use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
 };
 use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::task_manager::run_queue::RunQueue;
-use crate::kernel::task_manager::TaskManager;
+use crate::kernel::task_manager::{run_queue::RunQueue, TaskManager};
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager, Timer};
 
 use core::mem;
@@ -104,13 +105,13 @@ pub fn init_work_queue() {
 /// Init InterruptManager
 ///
 /// This function disables 8259 PIC and init InterruptManager
-pub fn init_interrupt(kernel_selector: u16) {
+pub fn init_interrupt(kernel_code_segment: u16, user_code_segment: u16) {
     pic::disable_8259_pic();
 
     get_cpu_manager_cluster().interrupt_manager = InterruptManager::new();
     get_cpu_manager_cluster()
         .interrupt_manager
-        .init(kernel_selector);
+        .init(kernel_code_segment, user_code_segment);
     let mut io_apic_manager = IoApicManager::new();
     io_apic_manager.init();
     mem::forget(mem::replace(
@@ -261,7 +262,7 @@ pub fn init_local_timer() {
     let local_timer_manager = &mut get_cpu_manager_cluster().local_timer_manager;
     local_apic_timer.init();
     if local_apic_timer.enable_deadline_mode(
-        InterruptionIndex::LocalApicTimer as u16,
+        InterruptIndex::LocalApicTimer as u16,
         get_cpu_manager_cluster()
             .interrupt_manager
             .get_local_apic_manager(),
@@ -274,7 +275,7 @@ pub fn init_local_timer() {
     {
         pr_info!("Using ACPI PM Timer to calculate frequency of Local APIC Timer.");
         local_apic_timer.set_up_interrupt(
-            InterruptionIndex::LocalApicTimer as u16,
+            InterruptIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
                 .get_local_apic_manager(),
@@ -286,7 +287,7 @@ pub fn init_local_timer() {
         let mut pit = PitManager::new();
         pit.init();
         local_apic_timer.set_up_interrupt(
-            InterruptionIndex::LocalApicTimer as u16,
+            InterruptIndex::LocalApicTimer as u16,
             get_cpu_manager_cluster()
                 .interrupt_manager
                 .get_local_apic_manager(),
@@ -296,22 +297,16 @@ pub fn init_local_timer() {
         local_timer_manager.set_source_timer(local_apic_timer); /* Temporary, set local APIC Timer */
     }
 
-    /* setup IDT */
-    make_context_switch_interrupt_handler!(
-        local_apic_timer_handler,
-        LocalApicTimer::local_apic_timer_handler
-    );
-
     get_cpu_manager_cluster()
         .interrupt_manager
         .set_device_interrupt_function(
-            local_apic_timer_handler,
+            LocalApicTimer::local_apic_timer_handler,
             None,
-            IstIndex::TaskSwitch,
-            InterruptionIndex::LocalApicTimer as u16,
+            Some(InterruptIndex::LocalApicTimer as _),
             0,
             false,
-        );
+        )
+        .expect("Failed to setup the interrupt for Local APIC Timer");
 
     /* Setup TimerManager */
 }
@@ -388,7 +383,6 @@ pub fn init_multiple_processors_ap() {
         .get_local_apic_manager()
         .get_apic_id();
     cpu_manager.cpu_id = bsp_apic_id as usize;
-    cpu_manager.interrupt_manager.init_ipi();
 
     /* Extern Assembly Symbols */
     extern "C" {
@@ -499,5 +493,33 @@ pub fn init_multiple_processors_ap() {
 
     if num_of_cpu != 1 {
         pr_info!("Found {} CPUs", num_of_cpu);
+    }
+}
+
+/// Initialize Block Device Manager and File System Manager
+///
+/// This function must be called before calling device scan functions.
+pub fn init_block_devices_and_file_system_early() {
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().block_device_manager,
+        BlockDeviceManager::new(),
+    ));
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().file_manager,
+        FileManager::new(),
+    ));
+}
+
+/// Search partitions and try to mount them
+///
+/// This function will be called after completing the device initializations.
+pub fn init_block_devices_and_file_system_later() {
+    for i in 0..get_kernel_manager_cluster()
+        .block_device_manager
+        .get_number_of_devices()
+    {
+        get_kernel_manager_cluster()
+            .file_manager
+            .detect_partitions(i);
     }
 }
