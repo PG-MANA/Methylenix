@@ -144,8 +144,15 @@ impl ContextManager {
     /// This is used when OS starts task management system.
     ///
     /// **ContextData must be aligned by 64bit**.
-    pub unsafe fn jump_to_context(&self, context: &mut ContextData) {
+    pub unsafe fn jump_to_context(
+        &self,
+        context: &mut ContextData,
+        allow_interrupt_after_jump: bool,
+    ) {
         assert_eq!(core::mem::align_of_val(context), 64);
+        if allow_interrupt_after_jump {
+            context.registers.rflags |= 0x0200;
+        }
         cpu::run_task(context as *mut _);
     }
 
@@ -157,9 +164,13 @@ impl ContextManager {
         &self,
         old_context: &mut ContextData,
         next_context: &mut ContextData,
+        allow_interrupt_after_switch: bool,
     ) {
         assert_eq!(core::mem::align_of_val(old_context), 64);
         assert_eq!(core::mem::align_of_val(next_context), 64);
+        if allow_interrupt_after_switch {
+            next_context.registers.rflags |= 0x0200;
+        }
         cpu::task_switch(next_context as *mut _, old_context as *mut _);
     }
 }
