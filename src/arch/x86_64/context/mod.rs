@@ -123,15 +123,17 @@ impl ContextManager {
     /// `entry_address` must not return.
     pub fn create_user_context(
         &self,
-        entry_address: fn() -> !,
+        entry_address: usize,
         stack_address: VAddress,
+        arguments: &[usize],
         //pg_manager: &PageManager,
     ) -> Result<ContextData, MemoryError> {
-        Ok(ContextData::create_context_data_for_system(
-            entry_address as *const fn() as usize,
+        Ok(ContextData::create_context_data_for_user(
+            entry_address,
             stack_address.to_usize() - 8, /* For SystemV ABI Stack Alignment */
-            self.user_cs as u64,
-            self.user_ss as u64,
+            self.user_cs as u64 | 3,
+            self.user_ss as u64 | 3,
+            arguments,
             //pg_manager.get_page_table_address().to_usize(),
         ))
     }
