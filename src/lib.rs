@@ -25,7 +25,7 @@
 extern crate alloc;
 
 pub const OS_NAME: &str = "Methylenix";
-pub const OS_VERSION: &str = "0.0.1";
+pub const OS_VERSION: &str = "0.1.0";
 
 /* Arch independent modules */
 #[macro_use]
