@@ -1129,6 +1129,8 @@ impl VirtualMemoryManager {
             (MAP_START_ADDRESS, MAP_END_ADDRESS)
         } else if option.is_alloc_area() {
             (MALLOC_START_ADDRESS, MALLOC_END_ADDRESS)
+        } else if option.is_for_user() && option.is_stack() {
+            (USER_STACK_START_ADDRESS, USER_STACK_END_ADDRESS)
         } else {
             unimplemented!()
         };
