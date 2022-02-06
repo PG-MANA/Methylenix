@@ -153,6 +153,7 @@ impl TtyManager {
         let _ = self._flush();
         let old = self.text_color;
         self.text_color = (foreground_color, background_color);
+        drop(_lock);
         return Some(old);
     }
 }

@@ -45,10 +45,10 @@ pub struct ArchDependedKernelManagerCluster {
 
 #[no_mangle]
 pub extern "C" fn multiboot_main(
-    mbi_address: usize,       /* MultiBoot Information */
-    kernel_code_segment: u16, /* Current segment is 8 */
-    user_code_segment: u16,
-    user_data_segment: u16,
+    mbi_address: usize, /* MultiBoot Information */
+    kernel_cs: u16,
+    user_cs: u16,
+    user_ss: u16,
 ) -> ! {
     /* Enable fxsave and fxrstor and fs/gs_base */
     unsafe {
@@ -111,7 +111,7 @@ pub extern "C" fn multiboot_main(
     init_graphic(&multiboot_information);
 
     /* Init interrupt */
-    init_interrupt(kernel_code_segment);
+    init_interrupt(kernel_cs, user_cs);
 
     /* Setup Serial Port */
     get_kernel_manager_cluster().serial_port_manager.init();
@@ -134,13 +134,7 @@ pub extern "C" fn multiboot_main(
     init_global_timer();
 
     /* Init the task management system */
-    init_task(
-        kernel_code_segment,
-        user_code_segment,
-        user_data_segment,
-        main_process,
-        idle,
-    );
+    init_task(kernel_cs, user_cs, user_ss, main_process, idle);
 
     /* Setup work queue system */
     init_work_queue();

@@ -106,13 +106,13 @@ pub fn init_work_queue() {
 /// Init InterruptManager
 ///
 /// This function disables 8259 PIC and init InterruptManager
-pub fn init_interrupt(kernel_selector: u16) {
+pub fn init_interrupt(kernel_code_segment: u16, user_code_segment: u16) {
     pic::disable_8259_pic();
 
     get_cpu_manager_cluster().interrupt_manager = InterruptManager::new();
     get_cpu_manager_cluster()
         .interrupt_manager
-        .init(kernel_selector);
+        .init(kernel_code_segment, user_code_segment);
     let mut io_apic_manager = IoApicManager::new();
     io_apic_manager.init();
     mem::forget(mem::replace(
