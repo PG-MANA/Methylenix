@@ -12,7 +12,7 @@ mod virtual_memory_object;
 mod virtual_memory_page;
 
 pub(super) use self::virtual_memory_entry::VirtualMemoryEntry;
-/*use self::virtual_memory_object::VirtualMemoryObject;*/
+pub(super) use self::virtual_memory_object::VirtualMemoryObject;
 pub(super) use self::virtual_memory_page::VirtualMemoryPage;
 
 use super::data_type::{

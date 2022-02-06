@@ -193,6 +193,10 @@ impl Elf64ProgramHeader {
         self.p_filesz
     }
 
+    pub const fn get_align(&self) -> u64 {
+        self.p_align
+    }
+
     pub const fn is_segment_readable(&self) -> bool {
         (self.p_flags & ELF_PROGRAM_HEADER_FLAGS_READABLE) != 0
     }
