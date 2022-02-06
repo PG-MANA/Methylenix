@@ -503,6 +503,10 @@ impl MemoryPermissionFlags {
         Self::new(true, true, false, false)
     }
 
+    pub const fn user_data() -> Self {
+        Self::new(true, true, false, true)
+    }
+
     pub fn is_readable(&self) -> bool {
         self.0 & (1 << 0) != 0
     }
@@ -532,6 +536,7 @@ impl MemoryOptionFlags {
     pub const NO_WAIT: Self = Self(1 << 6);
     pub const CRITICAL: Self = Self(1 << 7);
     pub const DEVICE_MEMORY: Self = Self(1 << 8);
+    pub const STACK: Self = Self(1 << 9);
 
     pub fn is_for_kernel(&self) -> bool {
         !self.is_for_user()
@@ -571,6 +576,10 @@ impl MemoryOptionFlags {
 
     pub fn is_device_memory(&self) -> bool {
         (*self & Self::DEVICE_MEMORY).0 != 0
+    }
+
+    pub fn is_stack(&self) -> bool {
+        (*self & Self::STACK).0 != 0
     }
 }
 
