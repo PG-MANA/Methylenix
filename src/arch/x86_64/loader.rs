@@ -255,23 +255,7 @@ pub fn load_and_execute(file_name: &str, arguments: &[&str]) -> Result<(), ()> {
     ap += core::mem::size_of::<u64>();
 
     /* Write arguments */
-    /* Write file_name */
-    {
-        let len = file_name.as_bytes().len();
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                file_name.as_bytes().as_ptr(),
-                (stack_top_address - argv_env_pointer - len - 1) as *mut u8,
-                len,
-            );
-            *((stack_top_address - argv_env_pointer - 1) as *mut u8) = 0;
-        }
-        argv_env_pointer += len + 1;
-
-        unsafe { *(ap as *mut u64) = (stack_top_address_user - argv_env_pointer) as u64 };
-        ap += core::mem::size_of::<u64>();
-    }
-    for e in arguments {
+    for e in [file_name].iter().chain(arguments.iter()) {
         let len = e.as_bytes().len();
         unsafe {
             core::ptr::copy_nonoverlapping(
