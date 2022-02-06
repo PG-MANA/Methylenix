@@ -19,11 +19,13 @@ use super::data_type::{
     Address, MIndex, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
 use super::physical_memory_manager::PhysicalMemoryManager;
+use super::system_memory_manager::SystemMemoryManager;
 use super::MemoryError;
 
 use crate::arch::target_arch::context::memory_layout::{
     DIRECT_MAP_BASE_ADDRESS, DIRECT_MAP_MAX_SIZE, DIRECT_MAP_START_ADDRESS, MALLOC_END_ADDRESS,
-    MALLOC_START_ADDRESS, MAP_END_ADDRESS, MAP_START_ADDRESS,
+    MALLOC_START_ADDRESS, MAP_END_ADDRESS, MAP_START_ADDRESS, USER_STACK_END_ADDRESS,
+    USER_STACK_START_ADDRESS,
 };
 use crate::arch::target_arch::paging::{
     PageManager, MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE,
@@ -308,31 +310,45 @@ impl VirtualMemoryManager {
             vm_entry.get_vm_end_address(),
         )
         .to_index(); /* OK? */
+        let vm_start_address = vm_entry.get_vm_start_address();
+        let permission_flags = vm_entry.get_permission_flags();
+
+        let (target_object, is_shared_object) =
+            if let Some(s) = vm_entry.get_object().get_shared_object() {
+                (s, true)
+            } else {
+                (vm_entry.get_object_mut(), false)
+            };
+        let _lock = target_object.lock.lock();
+
         for i in first_p_index..=last_p_index {
-            if let Some(p) = vm_entry.get_object_mut().get_vm_page_mut(i) {
-                p.activate();
+            if let Some(p) = target_object.get_vm_page_mut(i) {
+                if !is_shared_object {
+                    p.activate();
+                }
                 if let Err(e) = self.map_address_into_page_table(
                     p.get_physical_address(),
-                    vm_entry.get_vm_start_address() + i.to_offset(), /* OK? */
-                    vm_entry.get_permission_flags(),
+                    vm_start_address + i.to_offset(), /* OK? */
+                    permission_flags,
                     pm_manager,
                 ) {
                     pr_err!(
-                        "Failed to update paging, address: {}, index: {}: {:?}",
-                        vm_entry.get_vm_start_address() + i.to_offset(),
+                        "Failed to update paging(Address: {}, Index: {}): {:?}",
+                        vm_start_address + i.to_offset(),
                         i,
                         e
                     );
                     for unassociate_i in first_p_index..i {
-                        let address = vm_entry.get_vm_start_address() + unassociate_i.to_offset(); /* OK? */
+                        let address = vm_start_address + unassociate_i.to_offset(); /* OK? */
                         if let Err(u_e) = self.unassociate_address(address, pm_manager) {
                             pr_err!("Failed to rollback paging(VirtualAddress: {}).", address);
                             return Err(u_e);
                         }
-                        vm_entry
-                            .get_object_mut()
-                            .get_vm_page_mut(unassociate_i)
-                            .and_then(|p| Some(p.inactivate()));
+                        if !is_shared_object {
+                            target_object
+                                .get_vm_page_mut(unassociate_i)
+                                .and_then(|p| Some(p.inactivate()));
+                        }
                     }
                     return Err(e);
                 }
@@ -539,6 +555,7 @@ impl VirtualMemoryManager {
         .to_index();
 
         if vm_entry.get_memory_option_flags().is_io_map() {
+            assert!(!vm_entry.get_object().is_shadow_entry());
             if let Err(e) = self.unassociate_address_with_size(
                 vm_entry.get_vm_start_address(),
                 vm_entry.get_size(),
@@ -569,35 +586,68 @@ impl VirtualMemoryManager {
                 }
             }
         } else {
-            for i in first_p_index..=last_p_index {
-                if let Some(p) = vm_entry.get_object_mut().remove_vm_page(i) {
-                    if let Err(e) = self.unassociate_address(
-                        vm_entry.get_vm_start_address() + i.to_offset(),
-                        pm_manager,
-                    ) {
-                        pr_err!(
-                            "Failed to unmap address({}): {:?}",
-                            vm_entry.get_vm_start_address() + i.to_offset(),
-                            e
-                        );
-                        return Err(MemoryError::PagingError);
-                    }
-                    if !vm_entry
-                        .get_memory_option_flags()
-                        .should_not_free_phy_address()
-                    {
-                        if let Err(e) = pm_manager.free(p.get_physical_address(), PAGE_SIZE, false)
-                        {
-                            pr_err!("Failed to free physical memory: {:?}", e);
+            let mut processed = false;
+            if let Some(shared_object) = vm_entry.get_object().get_shared_object() {
+                let _lock = shared_object.lock.lock();
+                if shared_object.get_reference_count() > 1 {
+                    for i in first_p_index..=last_p_index {
+                        if shared_object.get_vm_page(i).is_some() {
+                            if let Err(e) = self.unassociate_address(
+                                vm_entry.get_vm_start_address() + i.to_offset(),
+                                pm_manager,
+                            ) {
+                                pr_err!(
+                                    "Failed to unmap address({}): {:?}",
+                                    vm_entry.get_vm_start_address() + i.to_offset(),
+                                    e
+                                );
+                                return Err(MemoryError::PagingError);
+                            }
                         }
                     }
+                    processed = true;
+                } else {
+                    vm_entry.get_object_mut().unset_shared_object(shared_object);
+                    drop(_lock);
+                    core::mem::swap(shared_object, vm_entry.get_object_mut());
+                    /* delete shared object(Invalid) */
+                    shared_object.set_disabled();
                     get_kernel_manager_cluster()
                         .system_memory_manager
-                        .free_vm_page(p, p.get_physical_address());
+                        .free_vm_object(shared_object);
+                }
+            }
+            if !processed {
+                for i in first_p_index..=last_p_index {
+                    if let Some(p) = vm_entry.get_object_mut().remove_vm_page(i) {
+                        if let Err(e) = self.unassociate_address(
+                            vm_entry.get_vm_start_address() + i.to_offset(),
+                            pm_manager,
+                        ) {
+                            pr_err!(
+                                "Failed to unmap address({}): {:?}",
+                                vm_entry.get_vm_start_address() + i.to_offset(),
+                                e
+                            );
+                            return Err(MemoryError::PagingError);
+                        }
+                        if !vm_entry
+                            .get_memory_option_flags()
+                            .should_not_free_phy_address()
+                        {
+                            if let Err(e) =
+                                pm_manager.free(p.get_physical_address(), PAGE_SIZE, false)
+                            {
+                                pr_err!("Failed to free physical memory: {:?}", e);
+                            }
+                        }
+                        get_kernel_manager_cluster()
+                            .system_memory_manager
+                            .free_vm_page(p, p.get_physical_address());
+                    }
                 }
             }
         }
-
         self.vm_entry.remove(&mut vm_entry.list);
         self.adjust_vm_entries();
         vm_entry.set_disabled();
@@ -616,7 +666,6 @@ impl VirtualMemoryManager {
     ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
         assert!(self.lock.is_locked());
         let vm_entry;
-        use super::system_memory_manager::SystemMemoryManager;
         loop {
             vm_entry = match get_kernel_manager_cluster()
                 .system_memory_manager
@@ -697,7 +746,6 @@ impl VirtualMemoryManager {
             let p_index = (current_virtual_address - vm_entry.get_vm_start_address()).to_index()
                 + vm_entry.get_memory_offset().to_index();
             let vm_page;
-            use super::system_memory_manager::SystemMemoryManager;
             loop {
                 vm_page = match get_kernel_manager_cluster()
                     .system_memory_manager
@@ -736,6 +784,123 @@ impl VirtualMemoryManager {
             vm_page.activate();
             vm_entry.get_object_mut().add_vm_page(p_index, vm_page);
         }
+        return Ok(());
+    }
+
+    pub(super) fn share_memory_with_user(
+        &mut self,
+        user_vm_manager: &mut Self,
+        kernel_virtual_address: VAddress,
+        user_virtual_address: VAddress,
+        user_permission: MemoryPermissionFlags,
+        user_option: MemoryOptionFlags,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        Self::check_align(None, Some(kernel_virtual_address), None)?;
+        Self::check_align(None, Some(user_virtual_address), None)?;
+
+        loop {
+            user_vm_manager.lock.lock();
+            if self.lock.try_lock().is_ok() {
+                break;
+            }
+            user_vm_manager.lock.unlock();
+        }
+        let vm_entry = self.find_entry_mut(kernel_virtual_address);
+        if vm_entry.is_none() {
+            pr_err!("{} is not found.", kernel_virtual_address);
+            self.lock.unlock();
+            user_vm_manager.lock.unlock();
+            return Err(MemoryError::InvalidAddress);
+        }
+        let kernel_vm_entry = vm_entry.unwrap();
+        /* Assume user_virtual_address is usable. */
+        let user_vm_map_entry = VirtualMemoryEntry::new(
+            user_virtual_address,
+            kernel_vm_entry
+                .get_size()
+                .to_end_address(user_virtual_address),
+            user_permission,
+            user_option,
+        );
+
+        let original_vm_object = kernel_vm_entry.get_object_mut();
+        if original_vm_object.is_shadow_entry() {
+            pr_err!("Nested shared memory is not supported.");
+            self.lock.unlock();
+            user_vm_manager.lock.unlock();
+            return Err(MemoryError::InternalError);
+        }
+
+        /* Allocate vm_object to share */
+        let vm_object;
+        loop {
+            vm_object = match get_kernel_manager_cluster()
+                .system_memory_manager
+                .alloc_vm_object(self.is_kernel_virtual_memory_manager(), user_option)
+            {
+                Ok(e) => Ok(e),
+                Err(MemoryError::EntryPoolRunOut) => {
+                    self.lock.unlock();
+                    SystemMemoryManager::pool_alloc_worker(
+                        SystemMemoryManager::ALLOC_VM_ENTRY_FLAG,
+                    );
+                    self.lock.lock();
+                    continue;
+                }
+
+                Err(e) => Err(e),
+            };
+            break;
+        }
+        if let Err(e) = vm_object {
+            self.lock.unlock();
+            user_vm_manager.lock.unlock();
+            return Err(e);
+        }
+        let shared_vm_object = vm_object.unwrap();
+        let user_vm_map_entry =
+            user_vm_manager.insert_vm_map_entry_into_list(user_vm_map_entry, user_option);
+        if let Err(e) = user_vm_map_entry {
+            get_kernel_manager_cluster()
+                .system_memory_manager
+                .free_vm_object(shared_vm_object);
+            self.lock.unlock();
+            user_vm_manager.lock.unlock();
+            return Err(e);
+        }
+        let user_vm_map_entry = user_vm_map_entry.unwrap();
+
+        core::mem::forget(core::mem::replace(
+            shared_vm_object,
+            VirtualMemoryObject::new(),
+        ));
+        core::mem::swap(shared_vm_object, original_vm_object);
+
+        original_vm_object.set_shared_object(shared_vm_object);
+        user_vm_map_entry
+            .get_object_mut()
+            .set_shared_object(shared_vm_object);
+
+        self.lock.unlock();
+        if let Err(e) =
+            user_vm_manager._update_page_table_with_vm_entry(user_vm_map_entry, pm_manager, None)
+        {
+            let _shared_object_lock = shared_vm_object.lock.lock();
+            user_vm_map_entry
+                .get_object_mut()
+                .unset_shared_object(shared_vm_object);
+            user_vm_manager.vm_entry.remove(&mut user_vm_map_entry.list);
+            user_vm_manager.adjust_vm_entries();
+            user_vm_map_entry.set_disabled();
+            get_kernel_manager_cluster()
+                .system_memory_manager
+                .free_vm_entry(user_vm_map_entry);
+            drop(_shared_object_lock);
+            user_vm_manager.lock.unlock();
+            return Err(e);
+        }
+        user_vm_manager.lock.unlock();
         return Ok(());
     }
 
@@ -1046,13 +1211,14 @@ impl VirtualMemoryManager {
                 continue;
             }
             kprintln!(
-                "Virtual Address:{:>#16X}, Size:{:>#16X}, W:{:>5}, U:{:>5}, E:{:>5}",
+                "Virtual Address:{:>#16X}, Size:{:>#16X}, W:{:>5}, U:{:>5}, E:{:>5}, Shared:{:>5}",
                 entry.get_vm_start_address().to_usize(),
                 MSize::from_address(entry.get_vm_start_address(), entry.get_vm_end_address())
                     .to_usize(),
                 entry.get_permission_flags().is_writable(),
                 entry.get_permission_flags().is_user_accessible(),
-                entry.get_permission_flags().is_executable()
+                entry.get_permission_flags().is_executable(),
+                entry.get_object().is_shadow_entry()
             );
             let first_p_index = entry.get_memory_offset().to_index();
             let last_p_index = MIndex::from_offset(
@@ -1064,8 +1230,24 @@ impl VirtualMemoryManager {
             let mut last_is_not_found = false;
             let mut last_address = PAddress::new(0);
 
+            let object = if let Some(s) = entry.get_object().get_shared_object() {
+                &*s
+            } else {
+                entry.get_object()
+            };
+            let _lock = if let Ok(l) = object.lock.try_lock() {
+                l
+            } else {
+                pr_warn!("Failed to lock object");
+                let next = unsafe { entry.list.get_next(offset) };
+                if next.is_none() {
+                    break;
+                }
+                entry = next.unwrap();
+                continue;
+            };
             for i in first_p_index..last_p_index {
-                if let Some(p) = entry.get_object().get_vm_page(i) {
+                if let Some(p) = object.get_vm_page(i) {
                     if last_is_not_found {
                         kprintln!("...\n - {} Not Found", i.to_usize() - 1);
                         last_is_not_found = false;

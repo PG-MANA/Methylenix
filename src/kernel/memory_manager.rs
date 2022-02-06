@@ -181,6 +181,7 @@ impl MemoryManager {
         permission: MemoryPermissionFlags,
         option: Option<MemoryOptionFlags>,
     ) -> Result<(VAddress, PAddress), MemoryError> {
+        Self::check_option_and_permission(&permission, &option)?;
         self._alloc_pages(
             order,
             permission,
@@ -289,6 +290,29 @@ impl MemoryManager {
         }
     }
 
+    pub fn share_kernel_memory_with_user(
+        &mut self,
+        user_memory_manager: &mut MemoryManager,
+        kernel_virtual_address: VAddress,
+        user_virtual_address_to_map: VAddress,
+        user_permission: MemoryPermissionFlags,
+        user_option: MemoryOptionFlags,
+    ) -> Result<(), MemoryError> {
+        if !self.is_kernel_memory_manager() || user_memory_manager.is_kernel_memory_manager() {
+            pr_err!("Invalid Operation.");
+            return Err(MemoryError::InternalError);
+        }
+        Self::check_option_and_permission(&user_permission, &Some(user_option))?;
+        self.virtual_memory_manager.share_memory_with_user(
+            &mut user_memory_manager.virtual_memory_manager,
+            kernel_virtual_address,
+            user_virtual_address_to_map,
+            user_permission,
+            user_option,
+            get_physical_memory_manager(),
+        )
+    }
+
     pub fn io_remap(
         &mut self,
         physical_address: PAddress,
@@ -340,6 +364,22 @@ impl MemoryManager {
         self._clone_kernel_memory_pages_if_needed()?;
 
         Ok(new_virtual_address + (old_virtual_address - aligned_virtual_address))
+    }
+
+    #[inline]
+    fn check_option_and_permission(
+        p: &MemoryPermissionFlags,
+        o: &Option<MemoryOptionFlags>,
+    ) -> Result<(), MemoryError> {
+        if o.as_ref()
+            .and_then(|o| Some(o.is_for_user() && !p.is_user_accessible()))
+            .unwrap_or(false)
+        {
+            pr_err!("User Memory must be accessible from user.");
+            return Err(MemoryError::InternalError);
+        }
+
+        return Ok(());
     }
 
     pub fn set_paging_table(&mut self) {
