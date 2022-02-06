@@ -37,8 +37,8 @@ init_long_mode:
 
   pop   %rdi                                /* Pass boot information */
   mov   $main_code_segment_descriptor, %rsi
-  mov   $user_code_segment_descriptor, %rdx
-  mov   $user_data_segment_descriptor, %rcx
+  mov   $user_code_segment_descriptor | 3, %rdx
+  mov   $user_data_segment_descriptor | 3, %rcx
   pop   %rax                                /* Boot type (Multiboot:1, Directboot: 2)*/
   movabs    $(os_stack + OS_STACK_SIZE), %rsp   /* Reset Stack */
   cmp   $BOOT_FROM_MULTIBOOT_MARK, %rax

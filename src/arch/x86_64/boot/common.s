@@ -52,11 +52,14 @@ gdt:
 .equ  main_code_segment_descriptor, . - gdt
     .quad    (1 << 41) | (1 << 43) | (1 << 44) | (1 << 47) | (1 << 53)
 
-.equ user_code_segment_descriptor, . - gdt
-    .quad    (1 << 41) | (1 << 43) | (1 << 44) | (3 << 45) | (1 << 47) | (1 << 53)
+.equ main_data_segment_descriptor, . - gdt
+    .quad    (1 << 41) | (1 << 44) | (1 << 47) | (1 << 53)
 
 .equ user_data_segment_descriptor, . - gdt
-    .quad    (1 << 41) | (1 << 44) | (3 << 45) | (1 << 47)| (1 << 53)
+    .quad    (1 << 41) | (1 << 44) | (3 << 45) | (1 << 47) | (1 << 53)
+
+.equ user_code_segment_descriptor, . - gdt
+    .quad    (1 << 41) | (1 << 43) | (1 << 44) | (3 << 45) | (1 << 47) | (1 << 53)
 
 tss_descriptor_address:
 .equ  tss_descriptor, tss_descriptor_address - gdt
