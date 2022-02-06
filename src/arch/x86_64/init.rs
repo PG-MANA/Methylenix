@@ -16,14 +16,13 @@ use crate::arch::target_arch::device::{cpu, pic};
 use crate::arch::target_arch::interrupt::{InterruptIndex, InterruptManager};
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
-use crate::free_pages;
 use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::table::{madt::MadtManager, mcfg::McfgManager};
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::pci::PciManager;
-use crate::kernel::file_manager::{elf::ELF_MACHINE_AMD64, FileManager};
+use crate::kernel::file_manager::FileManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
@@ -523,66 +522,4 @@ pub fn init_block_devices_and_file_system_later() {
             .file_manager
             .detect_partitions(i);
     }
-}
-
-pub fn load_and_execute_binary(file_name: &str) {
-    use crate::kernel::file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
-    use crate::kernel::file_manager::PathInfo;
-
-    pr_debug!("Search {}", file_name);
-    let file_manager = &get_kernel_manager_cluster().file_manager;
-    let result = file_manager.file_open(PathInfo::new(file_name));
-    if let Err(e) = result {
-        pr_err!("{} is not found: {:?}", file_name, e);
-        return;
-    }
-    let mut file_info = result.unwrap();
-    let (first_1024_bytes, p) = match file_manager.file_read(&mut file_info, 1024) {
-        Ok(v) => v,
-        Err(e) => {
-            pr_err!("Failed to read data: {:?}", e);
-            return;
-        }
-    };
-
-    let header = Elf64Header::from_address((first_1024_bytes.to_usize() + p) as *const u8);
-    if let Err(e) = header {
-        pr_err!("File is not valid ELF file: {:?}", e);
-        let _ = free_pages!(first_1024_bytes);
-        return;
-    }
-    let header = header.unwrap();
-    if !header.is_executable_file() {
-        pr_err!("The ELF file is not executable");
-        let _ = free_pages!(first_1024_bytes);
-        return;
-    } else if header.get_machine_type() != ELF_MACHINE_AMD64 || !header.is_lsb() {
-        pr_err!("The ELF file is not for x86_64");
-        let _ = free_pages!(first_1024_bytes);
-        return;
-    }
-
-    if header.get_program_header_offset() + header.get_program_header_array_size() > 1024 {
-        unimplemented!()
-    }
-
-    for program_header in header.get_program_header_iter(
-        first_1024_bytes.to_usize() + p + header.get_program_header_offset() as usize,
-    ) {
-        if program_header.get_segment_type() == ELF_PROGRAM_HEADER_SEGMENT_LOAD {
-            pr_debug!(
-            "PA: {:#X}, VA: {:#X}, MemSize: {:#X}, FSize: {:#X}, FOffset: {:#X}, R:{}, W: {}, E:{}",
-            program_header.get_physical_address(),
-            program_header.get_virtual_address(),
-            program_header.get_memory_size(),
-            program_header.get_file_size(),
-            program_header.get_file_offset(),
-            program_header.is_segment_readable(),
-            program_header.is_segment_writable(),
-            program_header.is_segment_executable()
-        );
-        }
-    }
-    let _ = free_pages!(first_1024_bytes);
-    let _ = file_manager.file_close(file_info);
 }

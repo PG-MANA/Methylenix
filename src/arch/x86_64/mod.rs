@@ -186,7 +186,6 @@ fn main_process() -> ! {
     init_block_devices_and_file_system_later();
 
     /* Test */
-    load_and_execute_binary("/METLNOS/FILES/APP");
 
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {

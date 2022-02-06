@@ -62,7 +62,8 @@ trait PartitionManager {
         file_info: &Box<dyn Any>,
         offset: usize,
         length: usize,
-    ) -> Result<(VAddress, usize /* memory offset */), ()>;
+        buffer: VAddress,
+    ) -> Result<(), ()>;
 }
 
 impl FileManager {
@@ -138,10 +139,12 @@ impl FileManager {
     pub fn file_read(
         &self,
         file_info: &mut FileInfo,
+        buffer: VAddress,
         length: usize,
-    ) -> Result<(VAddress, usize), ()> {
+    ) -> Result<(), ()> {
         let p = &self.partition_list[file_info.index];
-        let result = p.1.read_file(&p.0, &file_info.d, file_info.offset, length);
+        let result =
+            p.1.read_file(&p.0, &file_info.d, file_info.offset, length, buffer);
         if result.is_ok() {
             file_info.offset += length;
         }

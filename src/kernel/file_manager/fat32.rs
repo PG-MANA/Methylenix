@@ -2,15 +2,14 @@
 //! FAT32
 //!
 
-use super::{PartitionInfo, PartitionManager};
+use super::{PartitionInfo, PartitionManager, PathInfo};
+
+use crate::free_pages;
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
+
 use alloc::boxed::Box;
 use core::any::Any;
-
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, VAddress};
-use crate::{alloc_non_linear_pages, free_pages};
-
-use crate::kernel::file_manager::PathInfo;
 use core::mem::MaybeUninit;
 
 const FAT32_SIGNATURE: [u8; 8] = [b'F', b'A', b'T', b'3', b'2', b' ', b' ', b' '];
@@ -68,6 +67,13 @@ pub(super) fn try_detect_file_system(
         u32::from_le(unsafe { *((first_4k_data.to_usize() + FAT_SIZE_OFFSET) as *const u32) });
     let root_cluster =
         u32::from_le(unsafe { *((first_4k_data.to_usize() + ROOT_CLUSTER_OFFSET) as *const u32) });
+
+    pr_debug!(
+        "LBA Block Size: {:#X}, FAT Size: {:#X}, SectorsPerCluster: {:#X}",
+        partition_info.lba_block_size,
+        fat_size,
+        sectors_per_cluster
+    );
 
     let fat_data = match get_kernel_manager_cluster()
         .block_device_manager
@@ -143,7 +149,8 @@ impl PartitionManager for Fat32Info {
         file_info: &Box<dyn Any>,
         offset: usize,
         mut length: usize,
-    ) -> Result<(VAddress, usize), ()> {
+        buffer: VAddress,
+    ) -> Result<(), ()> {
         let entry_info = file_info.downcast_ref::<Fat32EntryInfo>().unwrap();
         if (entry_info.attribute
             & (FAT32_ATTRIBUTE_DIRECTORY
@@ -169,16 +176,6 @@ impl PartitionManager for Fat32Info {
         //let num_of_clusters = ((length + memory_offset) / bytes_per_cluster).max(1);
 
         /* TODO: avoid memory copy */
-        let buffer = match alloc_non_linear_pages!(
-            MSize::new(length).to_order(None).to_page_order(),
-            MemoryPermissionFlags::data()
-        ) {
-            Ok(a) => a,
-            Err(e) => {
-                pr_err!("Failed to alloc buffer: {:?}", e);
-                return Err(());
-            }
-        };
 
         macro_rules! next_cluster {
             ($c:expr) => {
@@ -186,7 +183,6 @@ impl PartitionManager for Fat32Info {
                     Some(n) => n,
                     None => {
                         pr_err!("Failed to get next cluster");
-                        let _ = free_pages!(buffer);
                         return Err(());
                     }
                 }
@@ -224,7 +220,7 @@ impl PartitionManager for Fat32Info {
             }
             reading_cluster = next_cluster!(reading_cluster);
         }
-        return Ok((buffer, 0));
+        return Ok(());
     }
 }
 
