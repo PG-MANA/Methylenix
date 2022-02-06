@@ -119,13 +119,12 @@ impl InterruptManager {
     ///
     /// This function allocates stack and set rsp into TSS.
     fn init_ist(&mut self) {
-        let stack_order = ContextManager::DEFAULT_INTERRUPT_STACK_ORDER;
-        let stack = alloc_non_linear_pages!(stack_order, MemoryPermissionFlags::data())
+        let stack_size = ContextManager::DEFAULT_INTERRUPT_STACK_SIZE;
+        let stack = alloc_non_linear_pages!(stack_size, MemoryPermissionFlags::data())
             .expect("Cannot allocate stack for interrupts.");
-        assert!(self.tss_manager.set_ist(
-            IstIndex::TaskSwitch as u8,
-            (stack + stack_order.to_offset()).to_usize()
-        ));
+        assert!(self
+            .tss_manager
+            .set_ist(IstIndex::TaskSwitch as u8, (stack + stack_size).to_usize()));
     }
 
     /// Setup RSP(for privilege level 0~2)

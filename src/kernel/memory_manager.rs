@@ -200,15 +200,14 @@ impl MemoryManager {
 
     pub fn alloc_nonlinear_pages(
         &mut self,
-        order: MPageOrder,
+        size: MSize,
         permission: MemoryPermissionFlags,
         option: Option<MemoryOptionFlags>,
     ) -> Result<VAddress, MemoryError> {
-        let size = order.to_offset();
         if size <= PAGE_SIZE {
-            return self.alloc_pages(order, permission, option);
+            return self.alloc_pages(MPageOrder::new(0), permission, option);
         }
-
+        let size = MSize::new((size.to_usize() - 1) & PAGE_MASK) + PAGE_SIZE;
         let vm_entry = self.virtual_memory_manager.alloc_virtual_address(
             size,
             permission,
