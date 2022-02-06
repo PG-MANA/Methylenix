@@ -281,11 +281,13 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 je      2f
                 mov     gs, ax
 2:
+                mov     rax, cs
+                cmp     [rdi + 512 + 8 * 24], rax // Compare current CS and next CS
+                je      3f
                 mov     rax, [rdi + 512 + 8 * 19]
-                mov     rcx, 0xC0000102 /* write swap_gs_base */
-                mov     rdx, rax
-                shr     rdx, 32
-                wrmsr
+                swapgs
+                wrgsbase    rax
+3:
                 mov     rax, [rdi + 512 + 8 * 20]
                 mov     es, ax
 
@@ -309,11 +311,6 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 push    [rdi + 512 + 8 * 24] // CS
                 push    [rdi + 512 + 8 * 25] // RIP
 
-                mov     rax, cs
-                cmp     [rdi + 512 + 8 * 24], rax // Compare current CS and next CS
-                je      3f
-                swapgs
-3:
                 mov     rax, [rdi + 512 + 8 * 26]
                 //mov     cr3, rax
                 mov     rax, [rdi + 512]
