@@ -411,6 +411,15 @@ impl MemoryManager {
             )
         }
     }
+
+    #[inline]
+    pub const fn size_align(size: MSize) -> MSize {
+        if size.is_zero() {
+            size
+        } else {
+            MSize::new((size.to_usize() - 1) & PAGE_MASK) + PAGE_SIZE
+        }
+    }
 }
 
 #[macro_export]

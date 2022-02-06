@@ -100,8 +100,8 @@ impl Elf64SectionHeader {
 }
 
 impl Elf64Header {
-    pub fn from_address(address: *const u8) -> Result<&'static Self, ()> {
-        let s = unsafe { &*(address as *const Self) };
+    pub unsafe fn from_address(address: *const u8) -> Result<&'static Self, ()> {
+        let s = &*(address as *const Self);
         if s.e_ident[0..4] != ELF_MAGIC
             || s.e_ident[4] != ELF_CLASS
             || s.e_ident[6] != ELF_HEADER_VERSION

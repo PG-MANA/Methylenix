@@ -9,6 +9,7 @@ pub mod boot;
 pub mod context;
 pub mod device;
 mod init;
+mod loader;
 pub mod paging;
 
 use self::device::cpu;
@@ -186,6 +187,7 @@ fn main_process() -> ! {
     init_block_devices_and_file_system_later();
 
     /* Test */
+    let _ = loader::load_and_execute("/OS/FILES/APP", &["Arg1", "Arg2", "Arg3"]);
 
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {
