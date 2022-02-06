@@ -508,3 +508,21 @@ macro_rules! kmalloc {
             })
     };
 }
+
+#[macro_export]
+macro_rules! kfree {
+    ($address:expr, $size:expr) => {
+        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+            .memory_allocator
+            .kfree($address, $size)
+    };
+
+    ($data:expr) => {
+        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+            .memory_allocator
+            .kfree(
+                crate::kernel::memory_manager::data_type::VAddress::new($data as *const _ as usize),
+                crate::kernel::memory_manager::data_type::MSize::new(core::mem::size_of_val($data)),
+            )
+    };
+}
