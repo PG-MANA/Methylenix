@@ -24,8 +24,8 @@ Methylenixという名前はメチレン基(Methylene)より採っています�
 * ACPI AMLの部分的な解析とシャットダウン
 * フォント解析による簡易GUI
 * NVM Expressからのデータ読み出し
-* GPT及びFAT32ディレクトリとファイル取得
-* アプリケーション実行
+* GPT及びFAT32からのディレクトリとファイル取得
+* 簡易アプリケーション実行
 
 ## 方針
 * GUIについては基本対応しない(デバイスの認識などはしておく、デバッグテキストを表示する程度)
@@ -56,11 +56,9 @@ limitations under the License.
 必要なソフトウェア
 
 * make
-* ld
 * grub2-mkrescue
 * rustc(nightly)
 * cargo
-* cargo-xbuild
 
 ### ビルド
 
