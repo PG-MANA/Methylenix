@@ -27,13 +27,12 @@ RM = rm -rf
 GRUBMKRES = grub-mkrescue
 GRUB2MKRES = grub2-mkrescue #Temporary
 #LD = ld -n --gc-sections -Map $(MAKE_TMPDIR)$(NAME).map -nostartfiles -nodefaultlibs -nostdlib -T $(MAKE_CONGIGDIR)linkerscript.ld
-LD = ld.lld --no-nmagic --gc-sections --Map=$(MAKE_TMPDIR)$(NAME).map  -nostdlib --script=$(MAKE_CONGIGDIR)linkerscript.ld
+#LD = ld.lld --no-nmagic --gc-sections --Map=$(MAKE_TMPDIR)$(NAME).map  -nostdlib --script=$(MAKE_CONGIGDIR)linkerscript.ld
 CARGO = cargo
 
 ##ビルドファイル
 KERNELFILES = kernel.elf
-RUST_OBJ = target/$(RUST_TARGET)/release/lib$(NAME).a
-BOOT_SYS_LIST = $(RUST_OBJ)
+RUST_BIN = target/$(RUST_TARGET)/release/$(NAME)
 
 #初期設定
 export TARGET_ARCH
@@ -68,13 +67,9 @@ kernel:
 
 
 # ファイル生成規則
-kernel.elf : $(BOOT_SYS_LIST)
-	$(LD) -o $(MAKE_BINDIR)kernel.elf $(BOOT_SYS_LIST)
-	-$(OBJCOPY) --only-keep-debug $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel.elf.debug
-	$(CP) $(MAKE_BINDIR)kernel.elf $(MAKE_BINDIR)kernel_original.elf
-	-$(STRIP) $(MAKE_BINDIR)kernel.elf
+kernel.elf : .FORCE
+	$(CARGO) build --release --target $(RUST_TARGET_JSON)
+	$(CP) $(RUST_BIN) $(MAKE_BINDIR)kernel.elf
 
-$(RUST_OBJ) :  .FORCE
-	$(CARGO) xbuild --release --target $(RUST_TARGET_JSON)
 
 .FORCE:

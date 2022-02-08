@@ -11,7 +11,5 @@ edition = "2021"
 [profile.release]
 #lto = true
 #opt-level = 1
-debug=true
-
-[lib]
-crate-type = ["staticlib"]
+debug = true
+strip = "symbols"
