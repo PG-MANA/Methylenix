@@ -54,6 +54,12 @@ SECTIONS {
     *(.eh_frame .eh_frame.*)
   }
 
+    . = ALIGN(__ALIGN_SIZE);
+    .eh_frame_hdr : AT(ADDR(.eh_frame_hdr) - KERNEL_MAP_START_ADDRESS) {
+      *(.eh_frame_hdr .eh_frame_hdr.*)
+    }
+
+
   /DISCARD/ : {
     *(.comment .comment.*)
   }
