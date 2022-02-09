@@ -112,12 +112,7 @@ pub fn load_and_execute(file_name: &str, arguments: &[&str]) -> Result<(), ()> {
                 program_header.is_segment_executable()
             );
 
-            let mut alignment = program_header.get_align();
-            if alignment == 1 {
-                alignment = 0;
-            }
-            let alignment = alignment;
-
+            let alignment = program_header.get_align().max(1);
             let align_offset =
                 MSize::new((program_header.get_virtual_address() & (alignment - 1)) as usize);
             if alignment != 0
