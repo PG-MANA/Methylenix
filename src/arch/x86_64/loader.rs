@@ -115,7 +115,7 @@ pub fn load_and_execute(file_name: &str, arguments: &[&str]) -> Result<(), ()> {
             let alignment = program_header.get_align().max(1);
             let align_offset =
                 MSize::new((program_header.get_virtual_address() & (alignment - 1)) as usize);
-            if alignment != 0
+            if alignment != 1
                 && (align_offset.to_usize()
                     != (program_header.get_file_offset() & (alignment - 1)) as usize
                     || !alignment.is_power_of_two())
