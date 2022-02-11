@@ -165,6 +165,7 @@ impl VirtualMemoryManager {
             DIRECT_MAP_START_ADDRESS,
             DIRECT_MAP_MAX_SIZE.min(aligned_map_size),
             MemoryPermissionFlags::data(),
+            MemoryOptionFlags::KERNEL,
             pm_manager,
         )
         .expect("Failed to map physical memory");
@@ -273,6 +274,7 @@ impl VirtualMemoryManager {
             physical_address,
             virtual_address,
             vm_entry.get_permission_flags(),
+            vm_entry.get_memory_option_flags(),
             pm_manager,
         );
         if let Err(e) = result {
@@ -312,6 +314,7 @@ impl VirtualMemoryManager {
         .to_index(); /* OK? */
         let vm_start_address = vm_entry.get_vm_start_address();
         let permission_flags = vm_entry.get_permission_flags();
+        let option_flags = vm_entry.get_memory_option_flags();
 
         let (target_object, is_shared_object) =
             if let Some(s) = vm_entry.get_object().get_shared_object() {
@@ -330,6 +333,7 @@ impl VirtualMemoryManager {
                     p.get_physical_address(),
                     vm_start_address + i.to_offset(), /* OK? */
                     permission_flags,
+                    option_flags,
                     pm_manager,
                 ) {
                     pr_err!(
@@ -443,6 +447,7 @@ impl VirtualMemoryManager {
                 vm_start_address,
                 size,
                 permission,
+                option,
                 pm_manager,
             ) {
                 pr_err!("Failed to map address(VirtualAddress: {}, PhysicalAddress: {}) with block_size: {:?}", vm_start_address, physical_address, e);
@@ -471,6 +476,7 @@ impl VirtualMemoryManager {
                     physical_address + i.to_offset(),
                     vm_start_address + i.to_offset(),
                     permission,
+                    option,
                     pm_manager,
                 ) {
                     pr_err!(
@@ -909,12 +915,19 @@ impl VirtualMemoryManager {
         physical_address: PAddress,
         virtual_address: VAddress,
         permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
         return self
             .page_manager
-            .associate_address(pm_manager, physical_address, virtual_address, permission)
+            .associate_address(
+                pm_manager,
+                physical_address,
+                virtual_address,
+                permission,
+                option,
+            )
             .or(Err(MemoryError::PagingError));
     }
 
@@ -924,6 +937,7 @@ impl VirtualMemoryManager {
         virtual_address: VAddress,
         size: MSize,
         permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
@@ -935,6 +949,7 @@ impl VirtualMemoryManager {
                 virtual_address,
                 size,
                 permission,
+                option,
             )
             .or(Err(MemoryError::PagingError));
     }

@@ -29,7 +29,7 @@ use crate::arch::target_arch::device::cpu;
 
 //use crate::kernel::kernel_memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::data_type::{
-    Address, MOrder, MSize, MemoryPermissionFlags, PAddress, VAddress,
+    Address, MOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 
@@ -404,6 +404,7 @@ impl PageManager {
         physical_address: PAddress,
         virtual_address: VAddress,
         permission: MemoryPermissionFlags,
+        _: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if ((physical_address.to_usize() & !PAGE_MASK) != 0)
             || ((virtual_address.to_usize() & !PAGE_MASK) != 0)
@@ -446,6 +447,7 @@ impl PageManager {
         virtual_address: VAddress,
         size: MSize,
         permission: MemoryPermissionFlags,
+        _: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if ((physical_address.to_usize() & !PAGE_MASK) != 0)
             || ((virtual_address.to_usize() & !PAGE_MASK) != 0)
