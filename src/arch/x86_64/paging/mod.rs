@@ -447,7 +447,7 @@ impl PageManager {
         virtual_address: VAddress,
         size: MSize,
         permission: MemoryPermissionFlags,
-        _: MemoryOptionFlags,
+        option: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if ((physical_address.to_usize() & !PAGE_MASK) != 0)
             || ((virtual_address.to_usize() & !PAGE_MASK) != 0)
@@ -462,6 +462,7 @@ impl PageManager {
                 physical_address,
                 virtual_address,
                 permission,
+                option,
             );
         }
 
@@ -533,6 +534,7 @@ impl PageManager {
                 processing_physical_address,
                 processing_virtual_address,
                 permission,
+                option,
             )?;
             processed_size += PAGE_SIZE;
         }
@@ -548,6 +550,7 @@ impl PageManager {
         pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
         permission: MemoryPermissionFlags,
+        _: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if (virtual_address.to_usize() & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);

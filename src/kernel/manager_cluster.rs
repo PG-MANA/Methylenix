@@ -13,7 +13,6 @@ use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNo
 use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
-use crate::kernel::drivers::efi::EfiManager;
 use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::file_manager::FileManager;
 use crate::kernel::graphic_manager::GraphicManager;
@@ -35,7 +34,6 @@ pub struct KernelManagerCluster {
     pub graphic_manager: GraphicManager,
     pub kernel_memory_manager: MemoryManager,
     pub system_memory_manager: SystemMemoryManager,
-    pub efi_manager: Mutex<EfiManager>,
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
     pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/

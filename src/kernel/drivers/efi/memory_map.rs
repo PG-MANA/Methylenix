@@ -23,6 +23,15 @@ pub enum EfiMemoryType {
     EfiMaxMemoryType,
 }
 
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[repr(C)]
+pub enum EfiAllocateType {
+    AllocateAnyPages,
+    AllocateMaxAddress,
+    AllocateAddress,
+    MaxAllocateType,
+}
+
 impl core::fmt::Display for EfiMemoryType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         f.write_fmt(format_args!("{:?}", self))
