@@ -69,7 +69,7 @@ impl GraphicManager {
         }
     }
 
-    pub fn init(&mut self, frame_buffer_info: &FrameBufferInfo) {
+    pub fn init_by_multiboot_information(&mut self, frame_buffer_info: &FrameBufferInfo) {
         let _lock = self.lock.lock();
         if !self
             .graphic

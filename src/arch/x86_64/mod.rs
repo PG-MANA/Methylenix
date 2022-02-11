@@ -82,7 +82,7 @@ pub extern "C" fn multiboot_main(
     ));
     get_kernel_manager_cluster()
         .graphic_manager
-        .init(&multiboot_information.framebuffer_info);
+        .init_by_multiboot_information(&multiboot_information.framebuffer_info);
     get_kernel_manager_cluster().graphic_manager.clear_screen();
     mem::forget(mem::replace(
         &mut get_kernel_manager_cluster().kernel_tty_manager,
