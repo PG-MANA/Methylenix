@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(abi_efiapi)]
 #![feature(alloc_error_handler)]
 #![feature(asm_const)]
 #![feature(asm_sym)]

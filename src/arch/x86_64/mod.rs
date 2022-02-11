@@ -92,7 +92,7 @@ pub extern "C" fn multiboot_main(
         .kernel_tty_manager
         .open(&get_kernel_manager_cluster().graphic_manager);
 
-    kprintln!("{}", crate::OS_NAME);
+    kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
     pr_info!(
         "Booted from {}, cmd line: {}",
         multiboot_information.boot_loader_name,
@@ -167,8 +167,6 @@ fn main_process() -> ! {
 
     /* Draw boot logo */
     draw_boot_logo();
-
-    kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
 
     init_block_devices_and_file_system_early();
 
