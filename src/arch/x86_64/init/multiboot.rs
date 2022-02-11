@@ -10,7 +10,7 @@ use crate::arch::target_arch::context::memory_layout::{
 };
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
-use crate::kernel::drivers::efi::boot_service::memory_map::EfiMemoryType;
+use crate::kernel::drivers::efi::memory_map::EfiMemoryType;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::graphic_manager::font::FontType;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
