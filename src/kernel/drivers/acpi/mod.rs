@@ -58,9 +58,10 @@ use self::table::fadt::FadtManager;
 use self::table::ssdt::SsdtManager;
 use self::table::xsdt::XsdtManager;
 
-use crate::arch::target_arch::device::cpu::{
-    disable_interrupt, enable_interrupt, in_byte, in_word, out_byte, out_word,
+use crate::arch::target_arch::device::acpi::{
+    read_io_byte, read_io_word, write_io_byte, write_io_word,
 };
+use crate::arch::target_arch::device::cpu::{disable_interrupt, enable_interrupt};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::PAddress;
@@ -208,12 +209,12 @@ impl AcpiManager {
             /* HW reduced ACPI */
             return true;
         }
-        unsafe { out_byte(smi_cmd as _, enable as _) };
-        while (unsafe { in_byte(pm1_a_port as _) & 1 }) == 0 {
+        unsafe { write_io_byte(smi_cmd as _, enable as _) };
+        while (unsafe { read_io_byte(pm1_a_port as _) & 1 }) == 0 {
             core::hint::spin_loop();
         }
         if pm1_b_port != 0 {
-            while (unsafe { in_byte(pm1_b_port as _) & 1 }) == 0 {
+            while (unsafe { read_io_byte(pm1_b_port as _) & 1 }) == 0 {
                 core::hint::spin_loop();
             }
         }
@@ -266,20 +267,20 @@ impl AcpiManager {
         }
         unsafe {
             if let Some(s_r) = sleep_register {
-                let mut status = in_byte(s_r as _);
+                let mut status = read_io_byte(s_r as _);
                 status &= !(0b111 << 2);
                 status |= (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8;
-                out_byte(s_r as _, status);
+                write_io_byte(s_r as _, status);
             } else {
-                let mut status = in_word(pm1_a as _);
+                let mut status = read_io_word(pm1_a as _);
                 status &= !(0b111 << 10);
                 status |= (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16;
-                out_word(pm1_a as _, status);
+                write_io_word(pm1_a as _, status);
                 if pm1_b != 0 {
-                    let mut status = in_word(pm1_b as _);
+                    let mut status = read_io_word(pm1_b as _);
                     status &= !(0b111 << 10);
                     status |= (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16;
-                    out_word(pm1_b as _, status);
+                    write_io_word(pm1_b as _, status);
                 }
             }
         }
@@ -654,16 +655,17 @@ impl AcpiManager {
     }
 }
 
-pub struct GeneralAddress {
+pub struct GenericAddress {
     pub address: u64,
-    pub address_type: u8,
+    pub space_id: u8,
 }
 
-impl GeneralAddress {
+impl GenericAddress {
+    pub const ADDRESS_SPACE_ID_SYSTEM_MEMORY: u8 = 0x00;
     fn invalid() -> Self {
         Self {
             address: 0,
-            address_type: 0x0B,
+            space_id: 0x0B,
         }
     }
 
@@ -673,7 +675,7 @@ impl GeneralAddress {
             return Self::invalid();
         }
         Self {
-            address_type,
+            space_id: address_type,
             address: u64::from_le_bytes((a[4..12]).try_into().unwrap()),
         }
     }

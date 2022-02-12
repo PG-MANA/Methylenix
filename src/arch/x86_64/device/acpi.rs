@@ -40,6 +40,16 @@ pub fn write_io_byte(port: usize, data: u8) {
     unsafe { out_byte(port as u16, data) }
 }
 
+#[inline]
+pub fn read_io_word(port: usize) -> u16 {
+    unsafe { in_word(port as u16) }
+}
+
+#[inline]
+pub fn write_io_word(port: usize, data: u16) {
+    unsafe { out_word(port as u16, data) }
+}
+
 pub fn read_io(
     port: usize,
     bit_index: usize,
