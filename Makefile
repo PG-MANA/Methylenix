@@ -3,10 +3,8 @@
 NAME = methylenix
 
 ##ターゲット
-TARGET_ARCH = $(2)
-ifeq ($(strip $(TARGET_ARCH)),)
-    TARGET_ARCH = x86_64
-endif
+TARGET_ARCH ?= x86_64
+
 RUST_TARGET = $(TARGET_ARCH)-unknown-none
 RUST_TARGET_JSON = config/$(TARGET_ARCH)/$(RUST_TARGET).json
 
@@ -42,7 +40,9 @@ export MAKE_OBJDIR
 
 #各コマンド
 ##デフォルト動作
-default:
+.DEFAULT: all
+
+all:
 	$(MAKE) kernel
 
 ##初期化動作
