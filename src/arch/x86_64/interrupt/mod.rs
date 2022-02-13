@@ -287,7 +287,7 @@ impl InterruptManager {
         let type_attr: u8 = 0xe | (privilege_level & 0x3) << 5 | 1 << 7;
         unsafe { IDT[index].set_type_attributes(type_attr) };
         if let Some(irq) = irq {
-            let irq_index = irq & !0b111;
+            let irq_index = irq >> 3;
             let irq_offset = irq & 0b111;
             unsafe {
                 IRQ_IS_LEVEL_TRIGGER[irq_index as usize] =
@@ -434,14 +434,14 @@ impl InterruptManager {
 
         if address != 0 {
             if unsafe { (core::mem::transmute::<usize, fn(usize) -> bool>(address))(index) } {
-                if Some(irq) = Self::index_to_irq(index) {
-                    let irq_index = irq & !0b111;
+                if let Some(irq) = Self::index_to_irq(index) {
+                    let irq_index = irq >> 3;
                     let irq_offset = irq & 0b111;
                     if unsafe { IRQ_IS_LEVEL_TRIGGER[irq_index as usize] & (1 << irq_offset) } != 0
                     {
                         get_cpu_manager_cluster()
                             .interrupt_manager
-                            .send_eoi_level_trigger(irq as u8);
+                            .send_eoi_level_trigger(index as u8);
                     }
                 }
                 get_cpu_manager_cluster().interrupt_manager.send_eoi();

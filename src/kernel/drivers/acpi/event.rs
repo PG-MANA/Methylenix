@@ -9,7 +9,7 @@ use self::gpe::GpeManager;
 use super::aml::notify::NotifyList;
 use super::table::fadt::FadtManager;
 
-use crate::arch::target_arch::device::cpu::{in_word, out_word};
+use crate::arch::target_arch::device::acpi::{read_io_word, write_io_word};
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
@@ -122,45 +122,41 @@ impl AcpiEventManager {
     }
 
     fn read_pm1_a_status(&self) -> u16 {
-        unsafe { in_word(self.pm1a_event_block as _) }
+        read_io_word(self.pm1a_event_block as _)
     }
 
     fn read_pm1_b_status(&self) -> u16 {
-        unsafe { in_word(self.pm1b_event_block as _) }
+        read_io_word(self.pm1b_event_block as _)
     }
 
     fn read_pm1_a_enable(&self) -> u16 {
-        unsafe { in_word((self.pm1a_event_block + (self.pm1_event_block_len / 2) as usize) as _) }
+        read_io_word((self.pm1a_event_block + (self.pm1_event_block_len / 2) as usize) as _)
     }
 
     fn read_pm1_b_enable(&self) -> u16 {
-        unsafe { in_word((self.pm1b_event_block + (self.pm1_event_block_len / 2) as usize) as _) }
+        read_io_word((self.pm1b_event_block + (self.pm1_event_block_len / 2) as usize) as _)
     }
 
     fn write_pm1_a_status(&self, d: u16) {
-        unsafe { out_word(self.pm1a_event_block as _, d) }
+        write_io_word(self.pm1a_event_block as _, d)
     }
 
     fn write_pm1_b_status(&self, d: u16) {
-        unsafe { out_word(self.pm1b_event_block as _, d) }
+        write_io_word(self.pm1b_event_block as _, d)
     }
 
     fn write_pm1_a_enable(&self, d: u16) {
-        unsafe {
-            out_word(
-                (self.pm1a_event_block + (self.pm1_event_block_len / 2) as usize) as _,
-                d,
-            )
-        }
+        write_io_word(
+            (self.pm1a_event_block + (self.pm1_event_block_len / 2) as usize) as _,
+            d,
+        )
     }
 
     fn write_pm1_b_enable(&self, d: u16) {
-        unsafe {
-            out_word(
-                (self.pm1b_event_block + (self.pm1_event_block_len / 2) as usize) as _,
-                d,
-            )
-        }
+        write_io_word(
+            (self.pm1b_event_block + (self.pm1_event_block_len / 2) as usize) as _,
+            d,
+        )
     }
 
     pub fn enable_fixed_event(&mut self, event: AcpiFixedEvent) -> bool {

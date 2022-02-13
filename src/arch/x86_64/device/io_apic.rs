@@ -87,12 +87,12 @@ impl IoApicManager {
         );
     }
 
-    pub fn send_eoi(&self, irq: u8) {
+    pub fn send_eoi(&self, index: u8) {
         use core::ptr::write_volatile;
         unsafe {
             write_volatile(
                 (self.base_address.to_usize() + 0x40) as *mut u32,
-                irq as u32,
+                index as u32,
             );
         }
     }
