@@ -1,0 +1,15 @@
+[package]
+name = "methylenix_loader"
+version = "0.1.0"
+authors = ["PG_MANA <pg_mana@taprix.org>"]
+description = "The boot loader for Methylenix"
+keywords = ["bootloader", "boot-loader", "seccamp", "security-camp"]
+categories = ["boot-loader", "bootloader"]
+license = "Apache-2.0"
+edition = "2021"
+
+[profile.release]
+#lto = true
+#opt-level = 1
+debug=true
+

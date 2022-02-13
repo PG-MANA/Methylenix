@@ -32,6 +32,7 @@ impl MemoryPermissionFlags {
         )
     }
 
+    #[allow(dead_code)]
     pub const fn rodata() -> Self {
         Self::new(true, false, false, false)
     }
@@ -40,10 +41,12 @@ impl MemoryPermissionFlags {
         Self::new(true, true, false, false)
     }
 
+    #[allow(dead_code)]
     pub const fn user_data() -> Self {
         Self::new(true, true, false, true)
     }
 
+    #[allow(dead_code)]
     pub fn is_readable(&self) -> bool {
         self.0 & (1 << 0) != 0
     }
@@ -56,6 +59,7 @@ impl MemoryPermissionFlags {
         self.0 & (1 << 2) != 0
     }
 
+    #[allow(dead_code)]
     pub fn is_user_accessible(&self) -> bool {
         self.0 & (1 << 3) != 0
     }
@@ -220,10 +224,10 @@ fn _associate_direct_map_address(
                 return Err(());
             }
             table[index] = *physical_address as u64 | attr;
-            *physical_address += (1 << shift_level);
-            *virtual_address += (1 << shift_level);
+            *physical_address += 1 << shift_level;
+            *virtual_address += 1 << shift_level;
             index += 1;
-            *size -= (1 << shift_level);
+            *size -= 1 << shift_level;
         }
         return Ok(());
     }
