@@ -123,7 +123,7 @@ impl SerialPortManager {
     ///
     /// First, this will get data from serial port controller, and push it into FIFO.
     /// Currently, this wakes the main process up.
-    fn int_handler24_main(_: usize) {
+    fn int_handler24_main(_: usize) -> bool {
         let work = WorkList::new(
             Self::worker,
             get_kernel_manager_cluster().serial_port_manager.read() as usize,
@@ -131,7 +131,7 @@ impl SerialPortManager {
         if let Err(_) = get_cpu_manager_cluster().work_queue.add_work(work) {
             pr_err!("Failed to add work for key event");
         }
-        get_cpu_manager_cluster().interrupt_manager.send_eoi();
+        return true;
     }
 
     fn worker(data: usize) {

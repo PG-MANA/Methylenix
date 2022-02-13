@@ -32,7 +32,7 @@ pub fn setup_interrupt(pci_dev: &PciDevice, nvme_manager: &mut NvmeManager) -> R
 
 static mut NVME_LIST: LinkedList<(usize, *mut NvmeManager)> = LinkedList::new();
 
-fn nvme_handler(index: usize) {
+fn nvme_handler(index: usize) -> bool {
     if let Some(nvme) = unsafe {
         NVME_LIST
             .iter()
@@ -40,11 +40,9 @@ fn nvme_handler(index: usize) {
             .and_then(|x| Some(x.1.clone()))
     } {
         unsafe { &mut *(nvme) }.interrupt_handler();
+        true
     } else {
         pr_err!("Unknown NVMe Device");
+        false
     }
-
-    get_cpu_manager_cluster()
-        .interrupt_manager
-        .send_eoi_level_trigger(index as _);
 }

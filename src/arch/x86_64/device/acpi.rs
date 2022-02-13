@@ -21,13 +21,11 @@ pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
         .is_ok()
 }
 
-fn acpi_event_handler(index: usize) {
+fn acpi_event_handler(_: usize) -> bool {
     get_kernel_manager_cluster()
         .acpi_event_manager
         .sci_handler();
-    get_cpu_manager_cluster()
-        .interrupt_manager
-        .send_eoi_level_trigger(index as u8);
+    return true;
 }
 
 #[inline]

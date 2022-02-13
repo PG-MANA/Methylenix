@@ -21,8 +21,10 @@ use crate::{alloc_non_linear_pages, alloc_pages};
 
 use core::arch::global_asm;
 
+/// IRQ Start from this value
 const IDT_DEVICE_MIN: usize = 0x20;
-const IDT_AVAILABLE_MIN: usize = 0x30;
+const NUM_OF_IRQ: usize = 0x10;
+const IDT_AVAILABLE_MIN: usize = IDT_DEVICE_MIN + NUM_OF_IRQ;
 const IDT_MAX: usize = 0xff;
 
 const MSR_EFER: u32 = 0xC0000080;
@@ -37,6 +39,8 @@ pub struct StoredIrqData {
 
 static mut INTERRUPT_HANDLER: [usize; IDT_MAX - IDT_DEVICE_MIN + 1] =
     [0usize; IDT_MAX - IDT_DEVICE_MIN + 1];
+static mut IRQ_IS_LEVEL_TRIGGER: [u8; NUM_OF_IRQ / u8::BITS as usize] =
+    [0; NUM_OF_IRQ / u8::BITS as usize];
 
 static mut IDT_LOCK: IrqSaveSpinLockFlag = IrqSaveSpinLockFlag::new();
 static mut IDT: [GateDescriptor; IDT_MAX + 1] = [GateDescriptor::invalid(); IDT_MAX + 1];
@@ -235,7 +239,7 @@ impl InterruptManager {
     ///  [`set_redirect`]: ../device/io_apic/struct.IoApicManager.html#method.set_redirect
     pub fn set_device_interrupt_function(
         &mut self,
-        function: fn(usize),
+        function: fn(usize) -> bool,
         irq: Option<u8>,
         index: Option<usize>,
         privilege_level: u8,
@@ -282,9 +286,16 @@ impl InterruptManager {
         unsafe { INTERRUPT_HANDLER[handler_index] = function as *const fn(usize) as usize };
         let type_attr: u8 = 0xe | (privilege_level & 0x3) << 5 | 1 << 7;
         unsafe { IDT[index].set_type_attributes(type_attr) };
-        drop(_lock);
-        drop(_self_lock);
         if let Some(irq) = irq {
+            let irq_index = irq & !0b111;
+            let irq_offset = irq & 0b111;
+            unsafe {
+                IRQ_IS_LEVEL_TRIGGER[irq_index as usize] =
+                    (IRQ_IS_LEVEL_TRIGGER[irq_index as usize] & !(1 << irq_offset))
+                        | ((is_level_trigger as u8) << irq_offset)
+            };
+            drop(_lock);
+            drop(_self_lock);
             get_kernel_manager_cluster()
                 .arch_depend_data
                 .io_apic_manager
@@ -296,6 +307,9 @@ impl InterruptManager {
                     index as u8,
                     is_level_trigger,
                 );
+        } else {
+            drop(_lock);
+            drop(_self_lock);
         }
         return Ok(index);
     }
@@ -343,14 +357,12 @@ impl InterruptManager {
 
     /// Send end of interrupt to Local APIC and also send to I/O APIC.
     pub fn send_eoi_level_trigger(&self, vector: u8) {
-        self.local_apic.send_eoi();
-        if let Ok(io) = get_kernel_manager_cluster()
+        get_kernel_manager_cluster()
             .arch_depend_data
             .io_apic_manager
-            .try_lock()
-        {
-            io.send_eoi(vector)
-        }
+            .lock()
+            .unwrap()
+            .send_eoi(vector);
     }
 
     /// Return the reference of LocalApicManager.
@@ -396,12 +408,21 @@ impl InterruptManager {
 
     /// Convert IRQ to Interrupt Index
     pub const fn irq_to_index(irq: u8) -> usize {
-        irq as usize + 0x20
+        irq as usize + IDT_DEVICE_MIN
     }
 
-    fn reschedule_ipi_handler(_: usize) {
-        get_cpu_manager_cluster().interrupt_manager.send_eoi();
+    /// Convert Interrupt Index to IRQ if index is between IDT_DEVICE_MIN and IDT_AVAILABLE_MIN
+    pub const fn index_to_irq(index: usize) -> Option<u8> {
+        if index >= IDT_DEVICE_MIN && index < IDT_AVAILABLE_MIN {
+            Some((index - IDT_DEVICE_MIN) as u8)
+        } else {
+            None
+        }
+    }
+
+    fn reschedule_ipi_handler(_: usize) -> bool {
         /* Do nothing */
+        return true;
     }
 
     /// Main handler for interrupt
@@ -412,7 +433,21 @@ impl InterruptManager {
         let address = unsafe { INTERRUPT_HANDLER[index - IDT_DEVICE_MIN] };
 
         if address != 0 {
-            unsafe { (core::mem::transmute::<usize, fn(usize)>(address))(index) };
+            if unsafe { (core::mem::transmute::<usize, fn(usize) -> bool>(address))(index) } {
+                if Some(irq) = Self::index_to_irq(index) {
+                    let irq_index = irq & !0b111;
+                    let irq_offset = irq & 0b111;
+                    if unsafe { IRQ_IS_LEVEL_TRIGGER[irq_index as usize] & (1 << irq_offset) } != 0
+                    {
+                        get_cpu_manager_cluster()
+                            .interrupt_manager
+                            .send_eoi_level_trigger(irq as u8);
+                    }
+                }
+                get_cpu_manager_cluster().interrupt_manager.send_eoi();
+            } else {
+                pr_err!("Failed to process interrupt.");
+            }
         } else {
             pr_err!("Invalid Interrupt: {:#X}", index);
         }
