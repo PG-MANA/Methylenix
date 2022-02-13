@@ -35,6 +35,17 @@ pub struct LocalApicIdIter {
     length: MSize,
 }
 
+pub struct GenericInterruptDistributorInfo {
+    pub base_address: usize,
+    pub version: u8,
+}
+
+pub struct GenericInterruptControllerCpuInfo {
+    #[allow(dead_code)]
+    pub acpi_processor_uid: u32,
+    pub gicr_base_address: u64,
+}
+
 impl AcpiTable for MadtManager {
     const SIGNATURE: [u8; 4] = *b"APIC";
 
@@ -45,7 +56,7 @@ impl AcpiTable for MadtManager {
     }
 
     fn init(&mut self, vm_address: VAddress) -> Result<(), ()> {
-        /* madt_vm_address must be accessible */
+        /* vm_address must be accessible */
         let madt = unsafe { &*(vm_address.to_usize() as *const MADT) };
         if madt.revision > 4 {
             pr_err!("Not supported MADT version: {}", madt.revision);
@@ -72,6 +83,62 @@ impl MadtManager {
             pointer: MSize::new(0),
             length: MSize::new(length),
         }
+    }
+
+    pub fn find_generic_interrupt_controller_cpu_interface(
+        &self,
+        target_mpidr: u64,
+    ) -> Option<GenericInterruptControllerCpuInfo> {
+        if self.base_address.is_zero() {
+            return None;
+        }
+        let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
+        let length = madt.length as usize - core::mem::size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+        let mut pointer = 0usize;
+        while pointer < length {
+            let record_base = base_address.to_usize() + pointer;
+            let record_type = unsafe { *(record_base as *const u8) };
+            let record_length = unsafe { *((record_base + 1) as *const u8) };
+
+            if record_type == 0x0B {
+                if (unsafe { *((record_base + 68) as *const u64) } == target_mpidr)
+                    && (unsafe { *((record_base + 12) as *const u8) } & 1) != 0
+                {
+                    return Some(GenericInterruptControllerCpuInfo {
+                        acpi_processor_uid: unsafe { *((record_base + 8) as *const u32) },
+                        gicr_base_address: unsafe { *((record_base + 60) as *const u64) },
+                    });
+                }
+            }
+            pointer += record_length as usize;
+        }
+        return None;
+    }
+
+    ///
+    pub fn find_generic_interrupt_distributor(&self) -> Option<GenericInterruptDistributorInfo> {
+        if self.base_address.is_zero() {
+            return None;
+        }
+        let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
+        let length = madt.length as usize - core::mem::size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+        let mut pointer = 0usize;
+        while pointer < length {
+            let record_base = base_address.to_usize() + pointer;
+            let record_type = unsafe { *(record_base as *const u8) };
+            let record_length = unsafe { *((record_base + 1) as *const u8) };
+
+            if record_type == 0x0C {
+                return Some(GenericInterruptDistributorInfo {
+                    base_address: unsafe { *((record_base + 8) as *const u64) as usize },
+                    version: unsafe { *((record_base + 20) as *const u8) },
+                });
+            }
+            pointer += record_length as usize;
+        }
+        return None;
     }
 
     /// Release memory map and drop my self

@@ -4,7 +4,7 @@
 //! ACPI Power Management Timer(ACPI PM Timer) is the timer equipped in ACPI.
 //! Its frequency is 3.579545 MHz.
 
-use crate::arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::acpi::read_io_dword;
 
 use crate::kernel::timer_manager::Timer;
 
@@ -25,7 +25,7 @@ impl AcpiPmTimer {
 
 impl Timer for AcpiPmTimer {
     fn get_count(&self) -> usize {
-        let mut result = unsafe { cpu::in_dword(self.port as _) };
+        let mut result = read_io_dword(self.port as _);
         if self.is_32_bit_counter == false {
             result &= 0xffffff;
         }

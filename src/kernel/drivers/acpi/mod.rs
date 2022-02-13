@@ -42,8 +42,10 @@ pub mod table {
     pub mod bgrt;
     pub mod dsdt;
     pub mod fadt;
+    pub mod gtdt;
     pub mod madt;
     pub mod mcfg;
+    pub mod spcr;
     pub mod ssdt;
     pub mod xsdt;
 }
@@ -209,12 +211,12 @@ impl AcpiManager {
             /* HW reduced ACPI */
             return true;
         }
-        unsafe { write_io_byte(smi_cmd as _, enable as _) };
-        while (unsafe { read_io_byte(pm1_a_port as _) & 1 }) == 0 {
+        write_io_byte(smi_cmd as _, enable as _);
+        while (read_io_byte(pm1_a_port as _) & 1) == 0 {
             core::hint::spin_loop();
         }
         if pm1_b_port != 0 {
-            while (unsafe { read_io_byte(pm1_b_port as _) & 1 }) == 0 {
+            while (read_io_byte(pm1_b_port as _) & 1) == 0 {
                 core::hint::spin_loop();
             }
         }
@@ -265,23 +267,21 @@ impl AcpiManager {
         {
             pr_err!("Failed to evaluate _PTS");
         }
-        unsafe {
-            if let Some(s_r) = sleep_register {
-                let mut status = read_io_byte(s_r as _);
-                status &= !(0b111 << 2);
-                status |= (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8;
-                write_io_byte(s_r as _, status);
-            } else {
-                let mut status = read_io_word(pm1_a as _);
+        if let Some(s_r) = sleep_register {
+            let mut status = read_io_byte(s_r as _);
+            status &= !(0b111 << 2);
+            status |= (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8;
+            write_io_byte(s_r as _, status);
+        } else {
+            let mut status = read_io_word(pm1_a as _);
+            status &= !(0b111 << 10);
+            status |= (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16;
+            write_io_word(pm1_a as _, status);
+            if pm1_b != 0 {
+                let mut status = read_io_word(pm1_b as _);
                 status &= !(0b111 << 10);
-                status |= (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16;
-                write_io_word(pm1_a as _, status);
-                if pm1_b != 0 {
-                    let mut status = read_io_word(pm1_b as _);
-                    status &= !(0b111 << 10);
-                    status |= (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16;
-                    write_io_word(pm1_b as _, status);
-                }
+                status |= (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16;
+                write_io_word(pm1_b as _, status);
             }
         }
         return true;
@@ -629,10 +629,9 @@ impl AcpiManager {
             .ec
             .is_some()
         {
-            if let Ok(Some(mut new_interpreter)) =
+            if let Ok(Some(mut interpreter)) =
                 interpreter.move_into_device(&EmbeddedController::HID)
             {
-                drop(interpreter);
                 let to_ascii = |x: u8| -> u8 {
                     if x >= 0xa {
                         x - 0xa + b'A'
@@ -645,9 +644,9 @@ impl AcpiManager {
                     &[[b'_', b'Q', to_ascii(query >> 4), to_ascii(query & 0xf)]],
                     false,
                 )
-                .get_full_name_path(new_interpreter.get_current_scope(), false);
+                .get_full_name_path(interpreter.get_current_scope(), false);
                 pr_debug!("Evaluate: {}", query_method_name);
-                if let Err(_) = new_interpreter.evaluate_method(&query_method_name, &[]) {
+                if let Err(_) = interpreter.evaluate_method(&query_method_name, &[]) {
                     pr_err!("Failed to evaluate: {}", query_method_name);
                 }
             }

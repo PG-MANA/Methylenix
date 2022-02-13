@@ -14,6 +14,7 @@ use self::text_buffer_driver::TextBufferDriver;
 
 use crate::arch::target_arch::device::text::TextDriver;
 
+use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, VAddress};
@@ -67,6 +68,16 @@ impl GraphicManager {
                 .unwrap()
                 .set_frame_buffer_memory_permission()
         }
+    }
+
+    pub fn init_by_efi_information(
+        &mut self,
+        _base_address: usize,
+        _memory_size: usize,
+        _pixel_info: &EfiGraphicsOutputModeInformation,
+    ) {
+        let _lock = self.lock.lock();
+        /*TODO*/
     }
 
     pub fn init_by_multiboot_information(&mut self, frame_buffer_info: &FrameBufferInfo) {

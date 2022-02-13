@@ -22,6 +22,7 @@ pub const EFI_PAGE_SIZE: usize = 0x1000;
 
 pub type EfiHandle = usize;
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct EfiTableHeader {
     signature: u64,
@@ -83,6 +84,7 @@ pub struct EfiBootServices {
     create_event_ex: usize,
 }
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct EfiSystemTable {
     efi_table_header: EfiTableHeader,
@@ -99,6 +101,19 @@ pub struct EfiSystemTable {
     num_table_entries: usize,
     configuration_table: usize,
 }
+
+#[repr(C)]
+pub struct EfiConfigurationTable {
+    pub vendor_guid: Guid,
+    pub vendor_table: usize,
+}
+
+pub const EFI_ACPI_2_0_TABLE_GUID: Guid = Guid {
+    d1: 0x8868e871,
+    d2: 0xe4f1,
+    d3: 0x11d3,
+    d4: [0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81],
+};
 
 impl EfiSystemTable {
     const EFI_SYSTEM_TABLE_SIGNATURE: u64 = 0x5453595320494249;
@@ -127,5 +142,12 @@ impl EfiSystemTable {
 
     pub const fn get_number_of_configuration_tables(&self) -> usize {
         self.num_table_entries
+    }
+
+    pub unsafe fn get_configuration_table_slice(&self) -> &[EfiConfigurationTable] {
+        core::slice::from_raw_parts(
+            self.get_configuration_table() as *const EfiConfigurationTable,
+            self.get_number_of_configuration_tables(),
+        )
     }
 }
