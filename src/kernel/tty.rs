@@ -99,7 +99,8 @@ impl TtyManager {
         let _lock = self.output_lock.lock();
 
         if self.output_driver.is_none() {
-            return Err(fmt::Error {});
+            return Ok(());
+            //return Err(fmt::Error {});
         }
 
         for c in s.bytes().into_iter() {
@@ -122,6 +123,9 @@ impl TtyManager {
     }
 
     fn _flush(&mut self) -> fmt::Result {
+        if self.output_driver.is_none() {
+            return Ok(());
+        }
         /* output_driver must be some and locked */
         let mut buffer: [u8; Self::DEFAULT_OUTPUT_BUFFER_SIZE] =
             [unsafe { MaybeUninit::uninit().assume_init() }; Self::DEFAULT_OUTPUT_BUFFER_SIZE];
