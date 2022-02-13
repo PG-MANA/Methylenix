@@ -70,7 +70,7 @@ pub struct PageManager {
 /// Paging Error enum
 ///
 /// This enum is used to pass error from PageManager.
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Copy, Debug)]
 pub enum PagingError {
     MemoryCacheRanOut,
     MemoryCacheOverflowed,

@@ -78,7 +78,7 @@ impl VirtualMemoryManager {
             self.lock.unlock();
             kernel_virtual_memory_manager.lock.unlock();
             pr_err!("Failed to copy kernel area: {:?}", e);
-            return Err(MemoryError::PagingError);
+            return Err(MemoryError::PagingError(e));
         }
         self.lock.unlock();
         kernel_virtual_memory_manager.lock.unlock();
@@ -113,7 +113,7 @@ impl VirtualMemoryManager {
         {
             self.lock.unlock();
             pr_err!("Failed to init PageManager for user: {:?}", e);
-            return Err(MemoryError::PagingError);
+            return Err(MemoryError::PagingError(e));
         }
         self.lock.unlock();
         return Ok(());
@@ -464,7 +464,7 @@ impl VirtualMemoryManager {
                 get_kernel_manager_cluster()
                     .system_memory_manager
                     .free_vm_entry(vm_entry);
-                return Err(MemoryError::PagingError);
+                return Err(e);
             }
             /* TODO: check the page_table is used currently. */
             for i in MIndex::new(0)..size.to_index() {
@@ -501,7 +501,7 @@ impl VirtualMemoryManager {
                     get_kernel_manager_cluster()
                         .system_memory_manager
                         .free_vm_entry(vm_entry);
-                    return Err(MemoryError::PagingError);
+                    return Err(e);
                 }
                 /* TODO: check the page_table is used currently. */
                 self.update_paging(vm_start_address + i.to_offset());
@@ -573,7 +573,7 @@ impl VirtualMemoryManager {
                     vm_entry.get_vm_end_address(),
                     e
                 );
-                return Err(MemoryError::PagingError);
+                return Err(e);
             }
             if !vm_entry
                 .get_memory_option_flags()
@@ -607,7 +607,7 @@ impl VirtualMemoryManager {
                                     vm_entry.get_vm_start_address() + i.to_offset(),
                                     e
                                 );
-                                return Err(MemoryError::PagingError);
+                                return Err(e);
                             }
                         }
                     }
@@ -635,7 +635,7 @@ impl VirtualMemoryManager {
                                 vm_entry.get_vm_start_address() + i.to_offset(),
                                 e
                             );
-                            return Err(MemoryError::PagingError);
+                            return Err(e);
                         }
                         if !vm_entry
                             .get_memory_option_flags()
@@ -919,16 +919,13 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        return self
-            .page_manager
-            .associate_address(
-                pm_manager,
-                physical_address,
-                virtual_address,
-                permission,
-                option,
-            )
-            .or(Err(MemoryError::PagingError));
+        Ok(self.page_manager.associate_address(
+            pm_manager,
+            physical_address,
+            virtual_address,
+            permission,
+            option,
+        )?)
     }
 
     fn map_address_into_page_table_with_size(
@@ -941,17 +938,14 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        return self
-            .page_manager
-            .associate_area(
-                pm_manager,
-                physical_address,
-                virtual_address,
-                size,
-                permission,
-                option,
-            )
-            .or(Err(MemoryError::PagingError));
+        Ok(self.page_manager.associate_area(
+            pm_manager,
+            physical_address,
+            virtual_address,
+            size,
+            permission,
+            option,
+        )?)
     }
 
     fn unassociate_address(
@@ -960,16 +954,9 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        match self
+        Ok(self
             .page_manager
-            .unassociate_address(virtual_address, pm_manager, false)
-        {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                pr_err!("Cannot unassociate memory Err:{:?}", e);
-                Err(MemoryError::PagingError)
-            }
-        }
+            .unassociate_address(virtual_address, pm_manager, false)?)
     }
 
     fn unassociate_address_with_size(
@@ -979,18 +966,12 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        match self.page_manager.unassociate_address_width_size(
+        Ok(self.page_manager.unassociate_address_width_size(
             virtual_address,
             size,
             pm_manager,
             true,
-        ) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                pr_err!("Failed to unmap memory Err:{:?}", e);
-                Err(MemoryError::PagingError)
-            }
-        }
+        )?)
     }
 
     fn try_expand_vm_entry(
