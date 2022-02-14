@@ -2,13 +2,15 @@
 //! Serial Port Devices
 //!
 
+mod devices;
+
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
 use crate::io_remap;
 use crate::kernel::drivers::acpi::table::spcr::SpcrManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
-    Address, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
 };
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
@@ -32,6 +34,17 @@ fn dummy_wait_buffer(_: usize) -> bool {
 
     true
 }
+
+struct SerialPortDeviceEntry {
+    interface_type: u8,
+    compatible: &'static str,
+    putc_func: fn(base_address: usize, char: u8),
+    #[allow(dead_code)]
+    getc_func: fn(base_address: usize) -> Option<u8>,
+    wait_buffer: fn(base_address: usize) -> bool,
+}
+
+const SERIAL_PORT_DEVICES: [SerialPortDeviceEntry; 2] = [devices::PL011, devices::MESON_GX_UART];
 
 pub struct SerialPortManager {
     lock: SpinLockFlag,
@@ -70,8 +83,8 @@ impl SerialPortManager {
             return false;
         }
         let base_address = base_address.unwrap();
-        match spcr_manager.get_interface_type() {
-            SpcrManager::INTERFACE_TYPE_ARM_PL011 => {
+        for e in &SERIAL_PORT_DEVICES {
+            if spcr_manager.get_interface_type() == e.interface_type {
                 match io_remap!(
                     PAddress::new(base_address),
                     PAGE_SIZE,
@@ -80,9 +93,9 @@ impl SerialPortManager {
                 ) {
                     Ok(virtual_address) => {
                         self.base_address = virtual_address.to_usize();
-                        self.putc_func = pl011_putc;
-                        self.wait_buffer = pl011_wait;
-                        /*self.getc = ? */
+                        self.putc_func = e.putc_func;
+                        self.wait_buffer = e.wait_buffer;
+                        self.getc_func = e.getc_func;
                         return true;
                     }
                     Err(e) => {
@@ -91,12 +104,49 @@ impl SerialPortManager {
                     }
                 }
             }
-            SpcrManager::INTERFACE_TYPE_ARM_SBSA_GENERIC => { /*TODO...*/ }
-            _ => {
-                return false;
+        }
+        return false;
+    }
+
+    pub fn init_with_dtb(&mut self) -> bool {
+        let _lock = self.lock.lock();
+        let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
+
+        for node_name in [b"uart".as_slice(), b"serial".as_slice()].iter() {
+            let mut previous = None;
+            while let Some(info) = dtb_manager.search_node(node_name, previous.as_ref()) {
+                for e in &SERIAL_PORT_DEVICES {
+                    if dtb_manager.is_device_compatible(&info, e.compatible.as_bytes())
+                        && dtb_manager.is_node_operational(&info)
+                    {
+                        if let Some((address, size)) = dtb_manager.read_reg_property(&info, 0) {
+                            match io_remap!(
+                                PAddress::new(address),
+                                MSize::new(size),
+                                MemoryPermissionFlags::data(),
+                                MemoryOptionFlags::DEVICE_MEMORY
+                            ) {
+                                Ok(virtual_address) => {
+                                    self.base_address = virtual_address.to_usize();
+                                    self.putc_func = e.putc_func;
+                                    self.wait_buffer = e.wait_buffer;
+                                    self.getc_func = e.getc_func;
+                                    return true;
+                                }
+                                Err(e) => {
+                                    pr_err!("Failed to map the Serial Port area: {:?}", e);
+                                    return false;
+                                }
+                            }
+                        } else {
+                            pr_err!("No address available");
+                        }
+                    }
+                }
+                previous = Some(info);
             }
         }
-        return true;
+        return false;
     }
 
     pub fn send_str(&mut self, s: &str) {
@@ -106,7 +156,7 @@ impl SerialPortManager {
                 return;
             }
             if *e == b'\n' {
-                (self.putc_func)(self.base_address, *e);
+                (self.putc_func)(self.base_address, b'\r');
                 if !(self.wait_buffer)(self.base_address) {
                     return;
                 }
@@ -114,22 +164,4 @@ impl SerialPortManager {
             (self.putc_func)(self.base_address, *e);
         }
     }
-}
-
-fn pl011_putc(base_address: usize, c: u8) {
-    unsafe { core::ptr::write_volatile(base_address as *mut u8, c) };
-}
-
-fn pl011_wait(base_address: usize) -> bool {
-    let mut time_out = 0xffffffusize;
-    while time_out > 0 {
-        if (unsafe { core::ptr::read_volatile((base_address + 0x018) as *const u16) } & (1 << 5))
-            == 0
-        {
-            return true;
-        }
-        time_out -= 1;
-        core::hint::spin_loop();
-    }
-    return false;
 }

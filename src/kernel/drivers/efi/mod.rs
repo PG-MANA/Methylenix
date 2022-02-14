@@ -115,6 +115,13 @@ pub const EFI_ACPI_2_0_TABLE_GUID: Guid = Guid {
     d4: [0xbc, 0x22, 0x00, 0x80, 0xc7, 0x3c, 0x88, 0x81],
 };
 
+pub const EFI_DTB_TABLE_GUID: Guid = Guid {
+    d1: 0xb1b621d5,
+    d2: 0xf19c,
+    d3: 0x41a5,
+    d4: [0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0],
+};
+
 impl EfiSystemTable {
     const EFI_SYSTEM_TABLE_SIGNATURE: u64 = 0x5453595320494249;
     pub fn verify(&self) -> bool {

@@ -16,6 +16,7 @@ const SYSTEM_COUNTER_MEMORY_SIZE: MSize = MSize::new(0x1000);
 
 pub struct GenericTimer {
     is_non_secure_timer: bool,
+    frequency: u32,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -89,13 +90,19 @@ impl GenericTimer {
     pub fn new(is_non_secure_timer: bool) -> Self {
         Self {
             is_non_secure_timer,
+            frequency: 0,
         }
     }
 
     /// Setup interrupt
     ///
     /// This function does not enable interrupt, only setup to be ready.
-    pub fn init_interrupt(&self, interrupt_id: u32, is_level_trigger: bool) {
+    pub fn init_interrupt(
+        &mut self,
+        interrupt_id: u32,
+        is_level_trigger: bool,
+        frequency: Option<u32>,
+    ) {
         pr_debug!("Interrupt ID: {interrupt_id}");
         get_cpu_manager_cluster()
             .interrupt_manager
@@ -111,6 +118,7 @@ impl GenericTimer {
                 is_level_trigger,
             )
             .expect("Failed to setup interrupt");
+        self.frequency = frequency.unwrap_or(0);
     }
 
     pub fn start_interrupt(&self) {

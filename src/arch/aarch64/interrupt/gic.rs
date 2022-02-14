@@ -6,6 +6,7 @@ use crate::arch::target_arch::device::cpu;
 
 use crate::kernel::drivers::acpi::table::madt::MadtManager;
 use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::dtb::{DtbManager, DtbNodeInfo};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
@@ -22,6 +23,7 @@ pub enum GicV3Group {
 
 enum GicInformationSoruce {
     Madt(MadtManager),
+    Dtb(DtbNodeInfo),
 }
 
 pub struct GicManager {
@@ -39,6 +41,11 @@ impl GicManager {
     const GCID_CTLR_DS: u32 = 1 << 6;
     const GCID_CTLR_ENABLE_GRP1: u32 = 1;
 
+    /* Device Tree Definitions */
+    pub const DTB_GIC_SPI: u32 = 0x00;
+    pub const DTB_GIC_PPI: u32 = 0x01;
+    pub const DTB_GIC_SPI_INTERRUPT_ID_OFFSET: u32 = 32;
+
     pub fn new_with_acpi(acpi_manager: &AcpiManager) -> Option<Self> {
         if let Some(madt_manager) = acpi_manager
             .get_table_manager()
@@ -49,9 +56,28 @@ impl GicManager {
                 interrupt_distributor_base_address: VAddress::new(0),
             })
         } else {
-            pr_err!("GIC information is not found.");
+            pr_err!("GICv3 or later information is not found.");
             None
         }
+    }
+
+    pub fn new_with_dtb(dtb_manager: &DtbManager) -> Option<Self> {
+        let mut previous = None;
+        while let Some(node_info) =
+            dtb_manager.search_node(b"interrupt-controller", previous.as_ref())
+        {
+            if dtb_manager.is_device_compatible(&node_info, b"arm,gic-v3")
+                && dtb_manager.is_node_operational(&node_info)
+            {
+                return Some(Self {
+                    info_source: GicInformationSoruce::Dtb(node_info),
+                    interrupt_distributor_base_address: VAddress::new(0),
+                });
+            }
+            previous = Some(node_info);
+        }
+        pr_err!("GICv3 information is not found.");
+        None
     }
 
     pub fn init_generic_interrupt_distributor(&mut self) -> bool {
@@ -80,6 +106,7 @@ impl GicManager {
                     }
                 };
             }
+            GicInformationSoruce::Dtb(_dtb) => unimplemented!(),
         }
 
         self.interrupt_distributor_base_address = base_address;
@@ -105,6 +132,7 @@ impl GicManager {
                     return None;
                 }
             }
+            GicInformationSoruce::Dtb(_dtb) => unimplemented!(),
         };
         let base_address = match io_remap!(
             PAddress::new(redistributor_address as usize),

@@ -24,6 +24,7 @@ use self::init::*;
 use self::interrupt::gic::{GicManager, GicRedistributorManager};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
+use crate::kernel::drivers::dtb::DtbManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
@@ -32,6 +33,7 @@ use crate::kernel::tty::TtyManager;
 use core::mem;
 
 pub struct ArchDependedKernelManagerCluster {
+    dtb_manager: DtbManager,
     system_counter: SystemCounter,
     gic_manager: GicManager,
 }
@@ -75,14 +77,15 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
 
     let boot_information = init_memory_by_boot_information(boot_information);
 
-    /* Initialize ACPI */
+    /* Initialize ACPI and DTB */
     let acpi_available = init_acpi_early_by_boot_information(&boot_information);
-    if !acpi_available {
-        panic!("Failed to initialize ACPI");
+    let dtb_available = init_dtb(&boot_information);
+    if !acpi_available && !dtb_available {
+        panic!("Neither ACPI nor DTB is available");
     }
 
     /* Detect serial port*/
-    init_serial_port(acpi_available);
+    init_serial_port(acpi_available, dtb_available);
 
     /* Initialize Graphic */
     if let Some(graphic_info) = &boot_information.graphic_info {
@@ -99,13 +102,17 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
         .open(&get_kernel_manager_cluster().graphic_manager);
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
-    pr_info!("Booted from AArch64 BootLoader");
+    pr_info!(
+        "Booted from AArch64 BootLoader: ACPI: {} DTB: {}",
+        acpi_available,
+        dtb_available
+    );
 
     /* Init interrupt */
-    init_interrupt(acpi_available);
+    init_interrupt(acpi_available, dtb_available);
 
     /* Init Timers */
-    init_local_timer_and_system_counter(acpi_available);
+    init_local_timer_and_system_counter(acpi_available, dtb_available);
     init_global_timer();
 
     /* Init the task management system */

@@ -15,8 +15,9 @@ use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::table::gtdt::GtdtManager;
 use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
 use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::dtb::DtbManager;
 use crate::kernel::drivers::efi::memory_map::{EfiMemoryDescriptor, EfiMemoryType};
-use crate::kernel::drivers::efi::{EFI_ACPI_2_0_TABLE_GUID, EFI_PAGE_SIZE};
+use crate::kernel::drivers::efi::{EFI_ACPI_2_0_TABLE_GUID, EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE};
 use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
 use crate::kernel::file_manager::FileManager;
@@ -216,7 +217,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
 }
 
 /// Init InterruptManager
-pub fn init_interrupt(acpi_available: bool) {
+pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
     mem::forget(mem::replace(
         &mut get_cpu_manager_cluster().interrupt_manager,
         InterruptManager::new(),
@@ -247,6 +248,29 @@ pub fn init_interrupt(acpi_available: bool) {
         }
     }
 
+    if dtb_available {
+        if let Some(mut gic_manager) =
+            GicManager::new_with_dtb(&get_kernel_manager_cluster().arch_depend_data.dtb_manager)
+        {
+            if !gic_manager.init_generic_interrupt_distributor() {
+                panic!("Failed to init GIC");
+            }
+            let cpu_redistributor = gic_manager
+                .init_redistributor()
+                .expect("Failed to init GIC Redistributor");
+            mem::forget(mem::replace(
+                &mut get_cpu_manager_cluster()
+                    .arch_depend_data
+                    .gic_redistributor_manager,
+                cpu_redistributor,
+            ));
+            mem::forget(mem::replace(
+                &mut get_kernel_manager_cluster().arch_depend_data.gic_manager,
+                gic_manager,
+            ));
+            return;
+        }
+    }
     panic!("GIC is not available");
 }
 
@@ -260,11 +284,19 @@ pub fn init_work_queue() {
 /// Init SerialPort
 ///
 ///
-pub fn init_serial_port(acpi_available: bool) -> bool {
+pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
     if acpi_available {
         if get_kernel_manager_cluster()
             .serial_port_manager
             .init_with_acpi()
+        {
+            return true;
+        }
+    }
+    if dtb_available {
+        if get_kernel_manager_cluster()
+            .serial_port_manager
+            .init_with_dtb()
         {
             return true;
         }
@@ -323,6 +355,43 @@ pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -
         return false;
     }
     set_manger(acpi_manager, device_manager);
+    return true;
+}
+
+/// Init Device Tree Blob Manager
+pub fn init_dtb(boot_information: &BootInformation) -> bool {
+    let mut dtb_manager = DtbManager::new();
+    let mut dtb_address: Option<usize> = None;
+    for e in unsafe {
+        boot_information
+            .efi_system_table
+            .get_configuration_table_slice()
+    } {
+        if e.vendor_guid == EFI_DTB_TABLE_GUID {
+            dtb_address = Some(e.vendor_table);
+            break;
+        }
+    }
+    if dtb_address.is_none() {
+        mem::forget(mem::replace(
+            &mut get_kernel_manager_cluster().arch_depend_data.dtb_manager,
+            dtb_manager,
+        ));
+        return false;
+    }
+
+    if !dtb_manager.init(PAddress::new(dtb_address.unwrap())) {
+        pr_warn!("Failed to initialize DTB.");
+        mem::forget(mem::replace(
+            &mut get_kernel_manager_cluster().arch_depend_data.dtb_manager,
+            dtb_manager,
+        ));
+        return false;
+    }
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().arch_depend_data.dtb_manager,
+        dtb_manager,
+    ));
     return true;
 }
 
@@ -407,7 +476,7 @@ pub fn init_pci_later() -> bool {
     return true;
 }
 
-pub fn init_local_timer_and_system_counter(acpi_available: bool) {
+pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: bool) {
     mem::forget(mem::replace(
         &mut get_cpu_manager_cluster().local_timer_manager,
         LocalTimerManager::new(),
@@ -424,6 +493,7 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool) {
     let generic_timer = &mut get_cpu_manager_cluster().arch_depend_data.generic_timer;
     let system_counter = &mut get_kernel_manager_cluster().arch_depend_data.system_counter;
     let local_timer_manager = &mut get_cpu_manager_cluster().local_timer_manager;
+    let mut initialized = false;
     if acpi_available {
         if let Some(gtdt) = get_kernel_manager_cluster()
             .acpi_manager
@@ -440,13 +510,64 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool) {
             generic_timer.init_interrupt(
                 gtdt.get_non_secure_el1_gsiv(),
                 (gtdt.get_non_secure_el1_flags() & 1) == 0,
+                None,
             );
             gtdt.delete_map();
-        } else {
-            panic!("GTDT is not found");
+            initialized = true;
+        }
+    }
+    if !initialized && dtb_available {
+        let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
+        let mut previous_timer = None;
+        while let Some(info) = dtb_manager.search_node(b"timer", previous_timer.as_ref()) {
+            if dtb_manager.is_device_compatible(&info, b"arm,armv8-timer")
+                && dtb_manager.is_node_operational(&info)
+            {
+                /* Found Usable timer */
+                if let Some(interrupts) =
+                    dtb_manager.get_property(&info, &DtbManager::PROP_INTERRUPTS)
+                {
+                    let clock_frequency = dtb_manager.get_property(&info, b"clock-frequency");
+                    let interrupts = dtb_manager.read_property_as_u32_array(&interrupts);
+                    if interrupts.len() >= 3 * 2 {
+                        pr_debug!(
+                            "Generic Timer: {}",
+                            if interrupts[3] == GicManager::DTB_GIC_PPI {
+                                "PPI"
+                            } else if interrupts[3] == GicManager::DTB_GIC_SPI {
+                                "SPI"
+                            } else {
+                                "Unknown"
+                            }
+                        );
+                        let interrupt_id = if interrupts[3] == GicManager::DTB_GIC_SPI {
+                            interrupts[4] + GicManager::DTB_GIC_SPI_INTERRUPT_ID_OFFSET
+                        } else {
+                            interrupts[4]
+                        };
+
+                        generic_timer.init_interrupt(
+                            interrupt_id,
+                            (interrupts[5] & 0b1111) == 4,
+                            clock_frequency.and_then(|i| dtb_manager.read_property_as_u32(&i)),
+                        );
+                        initialized = true;
+                        break;
+                    } else {
+                        pr_err!(
+                            "Interrupts cells are too small(Length: {:#X})",
+                            interrupts.len()
+                        );
+                    }
+                }
+            }
+            previous_timer = Some(info);
         }
     }
 
+    if !initialized {
+        panic!("Failed to initialize Generic Timer");
+    }
     local_timer_manager.set_source_timer(generic_timer);
 }
 

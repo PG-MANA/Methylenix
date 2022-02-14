@@ -29,7 +29,6 @@ pub unsafe extern "C" fn _boot_main() {
     asm!("
         adr x8, {}
         add x8, x8, {}
-        sub x8, x8, 8
         mov sp, x8
         b   boot_main
     ",
