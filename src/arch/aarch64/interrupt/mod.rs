@@ -210,11 +210,19 @@ synchronous_current_el_stack_pointer_0:
 
 .balign 0x080
 irq_current_el_stack_pointer_0:
-    b   irq_current_el_stack_pointer_0
+    sub     sp,  sp, {c}
+    stp     x0,  x1, [sp, #(16 * 0)]
+    stp     x2,  x3, [sp, #(16 * 1)]
+    mov     x1, {irq_mark}
+    b       interrupt_entry
 
 .balign 0x080
 fiq_current_el_stack_pointer_0:
-    b   fiq_current_el_stack_pointer_0
+    sub     sp,  sp, {c}
+    stp     x0,  x1, [sp, #(16 * 0)]
+    stp     x2,  x3, [sp, #(16 * 1)]
+    mov     x1, {fiq_mark}
+    b       interrupt_entry
 
 .balign 0x080
 s_error_current_el_stack_pointer_0:

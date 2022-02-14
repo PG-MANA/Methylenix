@@ -62,10 +62,10 @@ impl SystemCounter {
         };
         self.base_address_type = SystemCounterBaseAddressType::CntCtlBase;
         self.current_frequency_model = 0;
-        unsafe { *((base_address.to_usize() + Self::CNTCR) as *mut u64) = Self::CNTCR_EN };
+        unsafe { *((self.base_address.to_usize() + Self::CNTCR) as *mut u64) = Self::CNTCR_EN };
 
         self.current_frequency = unsafe {
-            *((base_address.to_usize()
+            *((self.base_address.to_usize()
                 + Self::CNTFID0
                 + (self.current_frequency_model as usize) * core::mem::size_of::<u32>())
                 as *const u32)
@@ -103,7 +103,7 @@ impl GenericTimer {
         is_level_trigger: bool,
         frequency: Option<u32>,
     ) {
-        pr_debug!("Interrupt ID: {interrupt_id}");
+        pr_debug!("Generic Timer Interrupt ID: {interrupt_id}");
         get_cpu_manager_cluster()
             .interrupt_manager
             .set_device_interrupt_function(

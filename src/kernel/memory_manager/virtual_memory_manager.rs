@@ -177,8 +177,12 @@ impl VirtualMemoryManager {
         self.lock.unlock();
     }
 
-    pub fn update_paging(&mut self /*Not necessary*/, address: VAddress) {
+    fn _update_paging(&self /*Not necessary*/, address: VAddress) {
         PageManager::update_page_cache(address);
+    }
+
+    pub fn update_paging(&self /*Not necessary*/, address: VAddress) {
+        self._update_paging(address);
     }
 
     /// Allocate the virtual address and map the given physical address
@@ -919,13 +923,15 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        Ok(self.page_manager.associate_address(
+        self.page_manager.associate_address(
             pm_manager,
             physical_address,
             virtual_address,
             permission,
             option,
-        )?)
+        )?;
+        self._update_paging(virtual_address);
+        return Ok(());
     }
 
     fn map_address_into_page_table_with_size(
@@ -938,14 +944,18 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        Ok(self.page_manager.associate_area(
+        self.page_manager.associate_area(
             pm_manager,
             physical_address,
             virtual_address,
             size,
             permission,
             option,
-        )?)
+        )?;
+        for i in MIndex::new(0)..size.to_index() {
+            self._update_paging(virtual_address + i.to_offset());
+        }
+        return Ok(());
     }
 
     fn unassociate_address(
@@ -954,9 +964,10 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        Ok(self
-            .page_manager
-            .unassociate_address(virtual_address, pm_manager, false)?)
+        self.page_manager
+            .unassociate_address(virtual_address, pm_manager, false)?;
+        self._update_paging(virtual_address);
+        return Ok(());
     }
 
     fn unassociate_address_with_size(
@@ -966,12 +977,16 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        Ok(self.page_manager.unassociate_address_width_size(
+        self.page_manager.unassociate_address_width_size(
             virtual_address,
             size,
             pm_manager,
             true,
-        )?)
+        )?;
+        for i in MIndex::new(0)..size.to_index() {
+            self._update_paging(virtual_address + i.to_offset());
+        }
+        return Ok(());
     }
 
     fn try_expand_vm_entry(

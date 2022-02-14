@@ -157,7 +157,15 @@ pub unsafe fn set_mair(mair: u64) {
 
 #[inline(always)]
 pub unsafe fn tlbi_va(target: u64) {
-    asm!("tlbi vaae1,{:x}", in(reg) target);
+    asm!("
+            dsb ishst
+            tlbi vaae1,{:x}
+            dc cvau, {:x}
+            dsb ish
+            ",
+            in(reg) (target >> 12),
+            in(reg) target
+    );
 }
 
 #[inline(always)]
@@ -259,6 +267,7 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
         "
             ldp  x1, x2, [x0, #(8 * 34)]
             msr  elr_el1, x1
+            msr  spsr_el1, x2
             and  x2, x2, {m}
             cmp  x2, {el0}
             b.ne 1f

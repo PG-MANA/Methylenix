@@ -14,7 +14,7 @@ use crate::{free_pages, io_remap};
 
 const GIC_V3_DISTRIBUTOR_MEMORY_MAP_SIZE: MSize = MSize::new(0x10000);
 
-const GIC_V3_REDISTRIBUTOR_MEMORY_MAP_SIZE: MSize = MSize::new(0x10000);
+const GIC_V3_REDISTRIBUTOR_MEMORY_MAP_SIZE: MSize = MSize::new(0x20000);
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum GicV3Group {

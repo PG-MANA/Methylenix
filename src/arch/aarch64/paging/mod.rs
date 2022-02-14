@@ -670,8 +670,9 @@ impl PageManager {
     /// Delete the paging cache of the target address and update it.
     ///
     /// This function operates invpg.
-    pub fn update_page_cache(virtual_address: VAddress) {
-        unsafe { cpu::tlbi_va((virtual_address & PAGE_MASK) as u64) }
+    pub fn update_page_cache(_virtual_address: VAddress) {
+        /* TODO: inspect why hangs up when exec tlbi on QEMU */
+        //unsafe { cpu::tlbi_va((virtual_address & PAGE_MASK) as u64) }
     }
 
     fn _dump_table(

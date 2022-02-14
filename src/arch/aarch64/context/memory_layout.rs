@@ -37,6 +37,11 @@ pub fn direct_map_to_physical_address(direct_map_virtual_address: VAddress) -> P
     )
 }
 
+pub fn is_direct_mapped(physical_address: PAddress) -> bool {
+    (physical_address - DIRECT_MAP_BASE_ADDRESS)
+        <= (DIRECT_MAP_END_ADDRESS - DIRECT_MAP_START_ADDRESS)
+}
+
 pub fn physical_address_to_direct_map(physical_address: PAddress) -> VAddress {
     assert!(
         (physical_address - DIRECT_MAP_BASE_ADDRESS)

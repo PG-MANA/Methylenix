@@ -63,6 +63,14 @@ pub const fn direct_map_to_physical_address(direct_map_virtual_address: VAddress
     PAddress::new((direct_map_virtual_address - DIRECT_MAP_START_ADDRESS).to_usize())
 }
 
+pub fn is_direct_mapped(physical_address: PAddress) -> bool {
+    (physical_address - DIRECT_MAP_BASE_ADDRESS)
+        <= (DIRECT_MAP_END_ADDRESS - DIRECT_MAP_START_ADDRESS)
+}
+
 pub const fn physical_address_to_direct_map(physical_address: PAddress) -> VAddress {
-    VAddress::new(physical_address.to_usize() + DIRECT_MAP_START_ADDRESS.to_usize())
+    VAddress::new(
+        physical_address.to_usize() - DIRECT_MAP_BASE_ADDRESS.to_usize()
+            + DIRECT_MAP_START_ADDRESS.to_usize(),
+    )
 }
