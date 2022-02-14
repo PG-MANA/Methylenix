@@ -110,6 +110,7 @@ impl GicManager {
         }
 
         self.interrupt_distributor_base_address = base_address;
+        self.write_register(Self::GICD_CTLR, 0);
         self.wait_rwp();
         self.write_register(Self::GICD_CTLR, Self::GCID_CTLR_ENABLE_GRP1);
         return true;

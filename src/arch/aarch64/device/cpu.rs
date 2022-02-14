@@ -106,7 +106,7 @@ pub unsafe fn idle() {
 pub fn is_interrupt_enabled() -> bool {
     let daif: u64;
     unsafe { asm!("mrs {:x}, DAIF", out(reg) daif) };
-    (daif & (DAIF_FIQ | DAIF_IRQ)) != 0
+    (daif & (DAIF_FIQ | DAIF_IRQ)) == 0
 }
 
 #[inline(always)]

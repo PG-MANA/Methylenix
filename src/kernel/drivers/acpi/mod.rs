@@ -367,9 +367,6 @@ impl AcpiManager {
             }
         } else {
             pr_info!("PowerButton is the control method power button.");
-            if !acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton) {
-                return false;
-            }
         }
         if let Some(interpreter) = &self.aml_interpreter {
             match interpreter.move_into_device(b"PNP0C0C") {

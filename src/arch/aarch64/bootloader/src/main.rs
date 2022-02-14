@@ -473,6 +473,8 @@ extern "C" fn down_to_el1() {
     unsafe {
         asm!(
             "
+            mov x0, (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 1) | (1 << 0) 
+            msr cnthctl_el2, x0
             mov x0, sp
             msr sp_el1, x0
             adr x0, {}

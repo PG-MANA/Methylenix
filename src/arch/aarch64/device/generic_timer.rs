@@ -70,11 +70,16 @@ impl SystemCounter {
                 + (self.current_frequency_model as usize) * core::mem::size_of::<u32>())
                 as *const u32)
         };
+        if self.current_frequency == u32::MAX {
+            self.current_frequency = 0;
+        }
         Ok(())
     }
 
     pub fn get_current_frequency(&self) -> usize {
-        if self.base_address_type == SystemCounterBaseAddressType::Invalid {
+        if self.base_address_type == SystemCounterBaseAddressType::Invalid
+            || self.current_frequency == 0
+        {
             unsafe { cpu::get_cntfrq() as usize }
         } else {
             self.current_frequency as usize
@@ -133,7 +138,7 @@ impl GenericTimer {
     pub fn reload_timeout_value(&self) {
         let reset_value =
             (GlobalTimerManager::TIMER_INTERVAL_MS * self.get_frequency_hz() as u64) / 1000;
-        assert!(reset_value <= u32::MAX as u64);
+        assert!(reset_value <= i32::MAX as u64);
         if self.is_non_secure_timer {
             unsafe { cpu::set_cntp_tval(reset_value) };
         }
@@ -162,10 +167,14 @@ impl Timer for GenericTimer {
     }
 
     fn get_frequency_hz(&self) -> usize {
-        get_kernel_manager_cluster()
-            .arch_depend_data
-            .system_counter
-            .get_current_frequency()
+        if self.frequency != 0 {
+            self.frequency as usize
+        } else {
+            get_kernel_manager_cluster()
+                .arch_depend_data
+                .system_counter
+                .get_current_frequency()
+        }
     }
 
     fn is_count_up_timer(&self) -> bool {
