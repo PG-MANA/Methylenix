@@ -49,6 +49,9 @@ all: bootloader kernel
 init:
 	-$(MKDIR) $(MAKE_BINDIR)
 	-$(MKDIR) $(MAKE_TMPDIR)
+ifeq ($(strip $(TARGET_ARCH)), aarch64)
+	-$(MKDIR) $(MAKE_EFIDIR)
+endif
 
 clean:
 	$(RM) $(MAKE_TMPDIR)
@@ -66,12 +69,10 @@ iso: kernel
 kernel: init $(KERNELFILES)
 ifeq ($(strip $(TARGET_ARCH)), aarch64)
 	$(CP) $(MAKE_BINDIR)kernel.elf $(MAKE_EFIDIR)kernel.elf
-	$(MAKE_SUB) $(BOOTLOADER)
 endif
 
 bootloader: init
 ifeq ($(strip $(TARGET_ARCH)), aarch64)
-	-$(MKDIR) $(MAKE_EFIDIR)
 	$(MAKE_SUB) $(BOOTLOADER)
 endif
 
