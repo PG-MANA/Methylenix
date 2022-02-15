@@ -195,6 +195,11 @@ pub unsafe fn get_icc_iar1() -> u64 {
 }
 
 #[inline(always)]
+pub unsafe fn set_icc_ctlr_el1(icc_ctlr: u64) {
+    asm!("msr icc_iar1_el1, {:x}", in(reg) icc_ctlr);
+}
+
+#[inline(always)]
 pub unsafe fn set_icc_sre(icc_sre: u64) {
     asm!("msr icc_sre_el1, {:x}", in(reg) icc_sre);
 }
@@ -205,6 +210,11 @@ pub unsafe fn set_icc_igrpen1(icc_igrpen1: u64) {
 }
 
 #[inline(always)]
+pub unsafe fn set_icc_igrpen0(icc_igrpen0: u64) {
+    asm!("msr icc_igrpen0_el1, {:x}", in(reg) icc_igrpen0);
+}
+
+#[inline(always)]
 pub unsafe fn set_icc_eoir1(icc_eoir1: u64) {
     asm!("msr icc_eoir1_el1, {:x}", in(reg) icc_eoir1);
 }
@@ -212,6 +222,16 @@ pub unsafe fn set_icc_eoir1(icc_eoir1: u64) {
 #[inline(always)]
 pub unsafe fn set_icc_pmr(icc_pmr: u64) {
     asm!("msr icc_pmr_el1, {:x}", in(reg) icc_pmr);
+}
+
+#[inline(always)]
+pub unsafe fn set_icc_bpr1(icc_bpr: u64) {
+    asm!("msr icc_bpr1_el1, {:x}", in(reg) icc_bpr);
+}
+
+#[inline(always)]
+pub unsafe fn set_icc_bpr0(icc_bpr: u64) {
+    asm!("msr icc_bpr0_el1, {:x}", in(reg) icc_bpr);
 }
 
 #[inline(always)]
@@ -258,6 +278,11 @@ pub unsafe fn get_mpidr() -> u64 {
 
 pub const fn mpidr_to_affinity(mpidr: u64) -> u64 {
     mpidr & !((1 << 31) | (1 << 30))
+}
+
+pub const fn mpidr_to_packed_affinity(mpidr: u64) -> u32 {
+    let a = mpidr_to_affinity(mpidr);
+    ((a & ((1 << 24) - 1)) | ((a & (0xff << 32)) >> (32 - 24))) as u32
 }
 
 #[naked]

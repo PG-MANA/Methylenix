@@ -46,6 +46,11 @@ pub struct GenericInterruptControllerCpuInfo {
     pub gicr_base_address: u64,
 }
 
+pub struct GenericInterruptRedistributorInfo {
+    pub discovery_range_base_address: u64,
+    pub discovery_range_length: u32,
+}
+
 impl AcpiTable for MadtManager {
     const SIGNATURE: [u8; 4] = *b"APIC";
 
@@ -134,6 +139,32 @@ impl MadtManager {
                 return Some(GenericInterruptDistributorInfo {
                     base_address: unsafe { *((record_base + 8) as *const u64) as usize },
                     version: unsafe { *((record_base + 20) as *const u8) },
+                });
+            }
+            pointer += record_length as usize;
+        }
+        return None;
+    }
+
+    pub fn find_generic_interrupt_redistributor_struct(
+        &self,
+    ) -> Option<GenericInterruptRedistributorInfo> {
+        if self.base_address.is_zero() {
+            return None;
+        }
+        let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
+        let length = madt.length as usize - core::mem::size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+        let mut pointer = 0usize;
+        while pointer < length {
+            let record_base = base_address.to_usize() + pointer;
+            let record_type = unsafe { *(record_base as *const u8) };
+            let record_length = unsafe { *((record_base + 1) as *const u8) };
+
+            if record_type == 0x0E {
+                return Some(GenericInterruptRedistributorInfo {
+                    discovery_range_base_address: unsafe { *((record_base + 4) as *const u64) },
+                    discovery_range_length: unsafe { *((record_base + 12) as *const u32) },
                 });
             }
             pointer += record_length as usize;

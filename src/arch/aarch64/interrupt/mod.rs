@@ -6,16 +6,17 @@ pub mod gic;
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
+use crate::arch::target_arch::interrupt::gic::GicV3Group;
 
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
-use crate::arch::target_arch::interrupt::gic::GicV3Group;
-use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use core::arch::global_asm;
 
 static mut INTERRUPT_HANDLER: [usize; u8::MAX as _] = [0usize; u8::MAX as _];
 static mut INTERRUPT_HANDLER_LOCK: IrqSaveSpinLockFlag = IrqSaveSpinLockFlag::new();
 
+#[allow(dead_code)]
 const INTERRUPT_FROM_IRQ: u64 = cpu::SPSR_I;
 const INTERRUPT_FROM_FIQ: u64 = cpu::SPSR_F;
 
@@ -91,11 +92,15 @@ impl InterruptManager {
             }
             redistributor.set_priority(interrupt_id, priority_level);
             redistributor.set_group(interrupt_id, group);
+            redistributor.set_ppi_trigger_mode(interrupt_id, is_level_trigger); /* TODO: check is SGI/PPI */
             redistributor.set_enable(interrupt_id, true);
-            /* TODO: check is SGI/PPI */
-            redistributor.set_ppi_trigger_mode(interrupt_id, is_level_trigger);
         } else if interrupt_id < 1020 {
             /* Setup SPI */
+            let gic_distributor = &get_kernel_manager_cluster().arch_depend_data.gic_manager;
+            gic_distributor.set_priority(interrupt_id, priority_level);
+            gic_distributor.set_group(interrupt_id, group);
+            /* gic_distributor.set_target(interrupt_id, 0x01); */
+            gic_distributor.set_enable(interrupt_id, true);
             unimplemented!()
         } else {
             unimplemented!()
@@ -154,15 +159,10 @@ impl InterruptManager {
     #[no_mangle]
     extern "C" fn irq_fiq_handler(context_data: *mut ContextData, from_mark: u64) {
         match from_mark {
-            INTERRUPT_FROM_IRQ => {
-                pr_debug!("IRQ");
-            }
             INTERRUPT_FROM_FIQ => {
                 pr_debug!("FIQ");
             }
-            _ => {
-                unreachable!();
-            }
+            _ => { /* Do nothing */ }
         }
 
         let redistributor = &get_cpu_manager_cluster()
