@@ -6,7 +6,7 @@ pub mod gic;
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::interrupt::gic::GicV3Group;
+use crate::arch::target_arch::interrupt::gic::{GicManager, GicV3Group};
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
@@ -177,6 +177,9 @@ impl InterruptManager {
             return;
         }
         let (index, group) = redistributor.get_acknowledge();
+        if index == GicManager::INTERRUPT_ID_INVALID {
+            return;
+        }
         let _lock = unsafe { INTERRUPT_HANDLER_LOCK.lock() };
         let address = unsafe { INTERRUPT_HANDLER[index as usize] };
         drop(_lock);

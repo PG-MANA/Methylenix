@@ -138,6 +138,13 @@ fn main_process() -> ! {
         .generic_timer
         .start_interrupt();
 
+    if !get_kernel_manager_cluster()
+        .serial_port_manager
+        .setup_interrupt()
+    {
+        pr_err!("Failed to setup interrupt of SerialPort");
+    }
+
     pr_info!("All init are done!");
 
     init_block_devices_and_file_system_early();

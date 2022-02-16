@@ -50,10 +50,11 @@ impl GicManager {
     const GICD_ISENABLER: usize = 0x0100;
     const GICD_ICENABLER: usize = 0x0180;
     const GICD_IPRIORITYR: usize = 0x0400;
-    const GICD_ITARGETSR: usize = 0x0800;
     const GICD_ICFGR: usize = 0x0C00;
     const GICD_IGRPMODR: usize = 0x0D00;
     const GICD_IROUTER: usize = 0x6100;
+
+    pub const INTERRUPT_ID_INVALID: u32 = 1023;
 
     /* Device Tree Definitions */
     pub const DTB_GIC_SPI: u32 = 0x00;
@@ -242,17 +243,6 @@ impl GicManager {
             (self.read_register(Self::GICD_IPRIORITYR + register_index)
                 & !(0xFF << register_offset))
                 | ((priority as u32) << register_offset),
-        );
-    }
-
-    pub fn set_target(&self, index: u32, target: u8) {
-        let register_index = ((index >> 2) as usize) * core::mem::size_of::<u32>();
-        let register_offset = (index & 0b11) << 3;
-        self.write_register(
-            Self::GICD_ITARGETSR + register_index,
-            (self.read_register(Self::GICD_ITARGETSR + register_index)
-                & !(0xFF << register_offset))
-                | ((target as u32) << register_offset),
         );
     }
 

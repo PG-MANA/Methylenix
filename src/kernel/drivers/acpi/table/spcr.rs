@@ -88,4 +88,8 @@ impl SpcrManager {
     pub fn get_interface_type(&self) -> u8 {
         unsafe { &*(self.base_address.to_usize() as *const SPCR) }.interface_type
     }
+
+    pub fn get_interrupt_id(&self) -> u32 {
+        unsafe { &*(self.base_address.to_usize() as *const SPCR) }.global_system_interrupt
+    }
 }
