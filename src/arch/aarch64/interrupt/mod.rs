@@ -65,6 +65,10 @@ impl InterruptManager {
         group: Option<GicV3Group>,
         is_level_trigger: bool,
     ) -> Result<usize, ()> {
+        if interrupt_id as usize >= unsafe { INTERRUPT_HANDLER.len() } {
+            pr_err!("Invalid interrupt id: {:#X}", interrupt_id);
+            return Err(());
+        }
         let _self_lock = self.lock.lock();
         let _lock = unsafe { INTERRUPT_HANDLER_LOCK.lock() };
         let group = group.unwrap_or(GicV3Group::NonSecureEl1);
@@ -99,9 +103,9 @@ impl InterruptManager {
             let gic_distributor = &get_kernel_manager_cluster().arch_depend_data.gic_manager;
             gic_distributor.set_priority(interrupt_id, priority_level);
             gic_distributor.set_group(interrupt_id, group);
-            /* gic_distributor.set_target(interrupt_id, 0x01); */
+            gic_distributor.set_routing(interrupt_id, false, unsafe { cpu::get_mpidr() });
+            gic_distributor.set_trigger_mode(interrupt_id, is_level_trigger);
             gic_distributor.set_enable(interrupt_id, true);
-            unimplemented!()
         } else {
             unimplemented!()
         }

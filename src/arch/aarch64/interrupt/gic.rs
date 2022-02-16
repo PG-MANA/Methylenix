@@ -45,12 +45,15 @@ impl GicManager {
     //const GCID_CTLR_DS: u32 = 1 << 6;
     const GICD_CTLR_ARE: u32 = 1 << 5;
     const GCID_CTLR_ENABLE_GRP1NS: u32 = 1 << 1;
-    const GCID_CTLR_ENABLE_GRP0: u32 = 1 << 1;
+    const GCID_CTLR_ENABLE_GRP0: u32 = 1;
     const GICD_IGROUPR: usize = 0x0080;
-    const GICD_ISENABLER: usize = 0x1000;
-    const GICD_ICENABLER: usize = 0x1080;
+    const GICD_ISENABLER: usize = 0x0100;
+    const GICD_ICENABLER: usize = 0x0180;
     const GICD_IPRIORITYR: usize = 0x0400;
     const GICD_ITARGETSR: usize = 0x0800;
+    const GICD_ICFGR: usize = 0x0C00;
+    const GICD_IGRPMODR: usize = 0x0D00;
+    const GICD_IROUTER: usize = 0x6100;
 
     /* Device Tree Definitions */
     pub const DTB_GIC_SPI: u32 = 0x00;
@@ -254,7 +257,7 @@ impl GicManager {
     }
 
     pub fn set_group(&self, index: u32, group: GicV3Group) {
-        let register_index = (index / u32::BITS) as usize;
+        let register_index = ((index / u32::BITS) as usize) * core::mem::size_of::<u32>();
         let register_offset = index & (u32::BITS - 1);
         let data = match group {
             GicV3Group::NonSecureEl1 => 1,
@@ -264,10 +267,18 @@ impl GicManager {
             (self.read_register(Self::GICD_IGROUPR + register_index) & !(1 << register_offset))
                 | (data << register_offset),
         );
+        let data = match group {
+            GicV3Group::NonSecureEl1 => 0,
+        };
+        self.write_register(
+            Self::GICD_IGRPMODR + register_index,
+            (self.read_register(Self::GICD_IGRPMODR + register_index) & !(1 << register_offset))
+                | (data << register_offset),
+        );
     }
 
     pub fn set_enable(&self, index: u32, enable: bool) {
-        let register_index = (index / u32::BITS) as usize;
+        let register_index = ((index / u32::BITS) as usize) * core::mem::size_of::<u32>();
         let register_offset = index & (u32::BITS - 1);
         let register = if enable {
             Self::GICD_ISENABLER
@@ -278,6 +289,33 @@ impl GicManager {
             register + register_index,
             self.read_register(register + register_index) | (1 << register_offset),
         );
+    }
+
+    pub fn set_trigger_mode(&self, index: u32, is_level_trigger: bool) {
+        let register_index = ((index / (u32::BITS / 2)) as usize) * core::mem::size_of::<u32>();
+        let register_offset = index & (u32::BITS / 2 - 1);
+
+        self.write_register(
+            Self::GICD_ICFGR + register_index,
+            (self.read_register(Self::GICD_ICFGR + register_index) & !(0x03 << register_offset))
+                | ((((!is_level_trigger) as u32) << 1) << register_offset),
+        );
+    }
+
+    pub fn set_routing(&self, interrupt_id: u32, is_routing_mode: bool, mpidr: u64) {
+        if is_routing_mode {
+            unimplemented!()
+        } else {
+            unsafe {
+                core::ptr::write_volatile(
+                    (self.interrupt_distributor_base_address.to_usize()
+                        + Self::GICD_IROUTER
+                        + (interrupt_id as usize) * core::mem::size_of::<u64>())
+                        as *mut u64,
+                    cpu::mpidr_to_affinity(mpidr),
+                )
+            }
+        }
     }
 
     fn wait_rwp(&self) {
@@ -443,10 +481,13 @@ impl GicRedistributorManager {
             pr_err!("Invalid index: {:#X}", index);
             return;
         }
+        let register_index = ((index / (u32::BITS / 2)) as usize) * core::mem::size_of::<u32>();
+        let register_offset = index & (u32::BITS / 2 - 1);
+
         self.write_register(
-            Self::GICR_ICFGR1,
-            (self.read_register(Self::GICR_ICFGR1) & !(0x01 << index))
-                | (((!is_level_trigger) as u32) << index),
+            Self::GICR_ICFGR1 + register_index,
+            (self.read_register(Self::GICR_ICFGR1 + register_index) & !(0x03 << register_offset))
+                | (((((!is_level_trigger) as u32) << 1) as u32) << register_offset),
         );
     }
 

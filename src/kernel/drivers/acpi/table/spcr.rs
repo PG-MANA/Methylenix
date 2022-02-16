@@ -23,6 +23,7 @@ struct SPCR {
     reserved: [u8; 3],
     base_address: [u8; 12],
     interrupt_type: u8,
+    irq: u8,
     global_system_interrupt: u32,
     baud_rate: u8,
     parity: u8,

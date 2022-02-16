@@ -346,7 +346,7 @@ pub unsafe extern "C" fn task_switch(
             mov  x2, sp
             stp  x2, x3, [x1, #(8 * 32)]
             adr  x4, 1f
-            ldr  x4, [x0, #(8 * 34)]
+            str  x4, [x1, #(8 * 34)]
             //stp  x0,  x1, [x1, #(16 * 0)]
             //stp  x2,  x3, [x1, #(16 * 1)]
             //stp  x4,  x5, [x1, #(16 * 2)]
