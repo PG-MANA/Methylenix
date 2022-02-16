@@ -74,15 +74,22 @@ impl InterruptManager {
         let group = group.unwrap_or(GicV3Group::NonSecureEl1);
         let handler_address = unsafe { INTERRUPT_HANDLER[interrupt_id as usize] };
         if handler_address != 0 {
-            drop(_lock);
-            drop(_self_lock);
             if handler_address == function as *const fn(usize) as usize {
-                return Ok(interrupt_id as usize);
+                if interrupt_id > 31 {
+                    return Ok(interrupt_id as usize);
+                }
+            } else {
+                drop(_lock);
+                drop(_self_lock);
+                pr_err!("Index is in use.");
+                return Err(());
             }
-            pr_err!("Index is in use.");
-            return Err(());
+        } else {
+            unsafe {
+                INTERRUPT_HANDLER[interrupt_id as usize] = function as *const fn(usize) as usize
+            };
         }
-        unsafe { INTERRUPT_HANDLER[interrupt_id as usize] = function as *const fn(usize) as usize };
+
         if interrupt_id < 31 {
             /* Setup SGI/PPI */
             let redistributor = &mut get_cpu_manager_cluster()
@@ -96,7 +103,7 @@ impl InterruptManager {
             }
             redistributor.set_priority(interrupt_id, priority_level);
             redistributor.set_group(interrupt_id, group);
-            redistributor.set_ppi_trigger_mode(interrupt_id, is_level_trigger); /* TODO: check is SGI/PPI */
+            redistributor.set_trigger_mode(interrupt_id, is_level_trigger);
             redistributor.set_enable(interrupt_id, true);
         } else if interrupt_id < 1020 {
             /* Setup SPI */

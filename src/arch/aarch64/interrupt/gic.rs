@@ -359,7 +359,6 @@ impl GicRedistributorManager {
     const GICR_ISENABLER0: usize = 0x10000 + 0x0100;
     const GICR_ICENABLER0: usize = 0x10000 + 0x0180;
     const GICR_ICFGR0: usize = 0x10000 + 0x0C00;
-    const GICR_ICFGR1: usize = 0x10000 + 0x0C04;
 
     fn new(base_address: VAddress) -> Self {
         Self { base_address }
@@ -466,7 +465,7 @@ impl GicRedistributorManager {
         );
     }
 
-    pub fn set_ppi_trigger_mode(&self, index: u32, is_level_trigger: bool) {
+    pub fn set_trigger_mode(&self, index: u32, is_level_trigger: bool) {
         if index > 31 {
             pr_err!("Invalid index: {:#X}", index);
             return;
@@ -475,8 +474,8 @@ impl GicRedistributorManager {
         let register_offset = index & (u32::BITS / 2 - 1);
 
         self.write_register(
-            Self::GICR_ICFGR1 + register_index,
-            (self.read_register(Self::GICR_ICFGR1 + register_index) & !(0x03 << register_offset))
+            Self::GICR_ICFGR0 + register_index,
+            (self.read_register(Self::GICR_ICFGR0 + register_index) & !(0x03 << register_offset))
                 | (((((!is_level_trigger) as u32) << 1) as u32) << register_offset),
         );
     }
