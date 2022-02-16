@@ -8,12 +8,11 @@ use crate::arch::target_arch::paging::PAGE_SIZE;
 
 use crate::io_remap;
 use crate::kernel::drivers::acpi::table::spcr::SpcrManager;
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
 };
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-use crate::kernel::task_manager::work_queue::WorkList;
 
 /// Dummy putc Function
 fn dummy_putc(_: usize, c: u8) {
@@ -173,22 +172,12 @@ impl SerialPortManager {
     fn interrupt_handler(_: usize) -> bool {
         let serial_manager = &get_kernel_manager_cluster().serial_port_manager;
         if let Some(c) = (serial_manager.getc_func)(serial_manager.base_address) {
-            let work = WorkList::new(Self::worker, c as usize);
-            if let Err(_) = get_cpu_manager_cluster().work_queue.add_work(work) {
-                pr_err!("Failed to add work for key event");
-            }
+            get_kernel_manager_cluster()
+                .kernel_tty_manager
+                .input_from_interrupt_handler(c);
             return true;
         }
         return false;
-    }
-
-    fn worker(data: usize) {
-        if let Err(e) = get_kernel_manager_cluster()
-            .kernel_tty_manager
-            .input(data as u8)
-        {
-            pr_err!("Cannot input data to tty. Error: {:?}", e);
-        }
     }
 
     pub fn send_str(&mut self, s: &str) {
