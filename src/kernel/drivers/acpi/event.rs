@@ -9,7 +9,7 @@ use self::gpe::GpeManager;
 use super::aml::notify::NotifyList;
 use super::table::fadt::FadtManager;
 
-use crate::arch::target_arch::device::cpu::{in_word, out_word};
+use crate::arch::target_arch::device::acpi::{read_io_word, write_io_word};
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
@@ -79,9 +79,13 @@ impl AcpiEventManager {
 
     pub fn init_event_registers(&mut self) {
         self.pm1a_enabled_event = 0;
-        self.write_pm1_a_enable(0);
+        if self.pm1a_event_block != 0 {
+            self.write_pm1_a_enable(0);
+        }
         self.pm1b_enabled_event = 0;
-        self.write_pm1_b_enable(0);
+        if self.pm1b_event_block != 0 {
+            self.write_pm1_b_enable(0);
+        }
         self.gpe0_manager.init();
         if let Some(gpe1) = &self.gpe1_manager {
             gpe1.init();
@@ -122,48 +126,47 @@ impl AcpiEventManager {
     }
 
     fn read_pm1_a_status(&self) -> u16 {
-        unsafe { in_word(self.pm1a_event_block as _) }
+        read_io_word(self.pm1a_event_block as _)
     }
 
     fn read_pm1_b_status(&self) -> u16 {
-        unsafe { in_word(self.pm1b_event_block as _) }
+        read_io_word(self.pm1b_event_block as _)
     }
 
     fn read_pm1_a_enable(&self) -> u16 {
-        unsafe { in_word((self.pm1a_event_block + (self.pm1_event_block_len / 2) as usize) as _) }
+        read_io_word((self.pm1a_event_block + (self.pm1_event_block_len / 2) as usize) as _)
     }
 
     fn read_pm1_b_enable(&self) -> u16 {
-        unsafe { in_word((self.pm1b_event_block + (self.pm1_event_block_len / 2) as usize) as _) }
+        read_io_word((self.pm1b_event_block + (self.pm1_event_block_len / 2) as usize) as _)
     }
 
     fn write_pm1_a_status(&self, d: u16) {
-        unsafe { out_word(self.pm1a_event_block as _, d) }
+        write_io_word(self.pm1a_event_block as _, d)
     }
 
     fn write_pm1_b_status(&self, d: u16) {
-        unsafe { out_word(self.pm1b_event_block as _, d) }
+        write_io_word(self.pm1b_event_block as _, d)
     }
 
     fn write_pm1_a_enable(&self, d: u16) {
-        unsafe {
-            out_word(
-                (self.pm1a_event_block + (self.pm1_event_block_len / 2) as usize) as _,
-                d,
-            )
-        }
+        write_io_word(
+            (self.pm1a_event_block + (self.pm1_event_block_len / 2) as usize) as _,
+            d,
+        )
     }
 
     fn write_pm1_b_enable(&self, d: u16) {
-        unsafe {
-            out_word(
-                (self.pm1b_event_block + (self.pm1_event_block_len / 2) as usize) as _,
-                d,
-            )
-        }
+        write_io_word(
+            (self.pm1b_event_block + (self.pm1_event_block_len / 2) as usize) as _,
+            d,
+        )
     }
 
     pub fn enable_fixed_event(&mut self, event: AcpiFixedEvent) -> bool {
+        if self.pm1a_event_block == 0 && self.pm1b_event_block == 0 {
+            return true;
+        }
         if (self.read_pm1_a_enable() & event as u16) != 0
             && (self.read_pm1_b_enable() & event as u16) != 0
         {
@@ -184,8 +187,11 @@ impl AcpiEventManager {
     }
 
     pub fn find_occurred_fixed_event(&self) -> Option<AcpiFixedEvent> {
-        let pm1a_status = self.read_pm1_a_status() & self.pm1a_enabled_event;
-        let result = AcpiFixedEvent::from_u16(pm1a_status);
+        let mut result = None;
+        if self.pm1a_event_block != 0 {
+            let pm1a_status = self.read_pm1_a_status() & self.pm1a_enabled_event;
+            result = AcpiFixedEvent::from_u16(pm1a_status);
+        }
         if result.is_none() && self.pm1b_event_block != 0 {
             AcpiFixedEvent::from_u16(self.read_pm1_b_status() & self.pm1b_enabled_event)
         } else {

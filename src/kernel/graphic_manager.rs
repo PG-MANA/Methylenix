@@ -12,8 +12,9 @@ use self::font::FontType;
 use self::frame_buffer_manager::FrameBufferManager;
 use self::text_buffer_driver::TextBufferDriver;
 
-use crate::arch::target_arch::device::vga_text::VgaTextDriver;
+use crate::arch::target_arch::device::text::TextDriver;
 
+use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, VAddress};
@@ -24,7 +25,7 @@ use core::fmt;
 
 pub struct GraphicManager {
     lock: SpinLockFlag,
-    text: Mutex<VgaTextDriver>,
+    text: Mutex<TextDriver>,
     graphic: Mutex<FrameBufferManager>,
     is_text_mode: bool,
     font: Mutex<FontManager>,
@@ -42,7 +43,7 @@ impl GraphicManager {
         Self {
             lock: SpinLockFlag::new(),
             is_text_mode: false,
-            text: Mutex::new(VgaTextDriver::new()),
+            text: Mutex::new(TextDriver::new()),
             graphic: Mutex::new(FrameBufferManager::new()),
             font: Mutex::new(FontManager::new()),
             cursor: Mutex::new(Cursor { x: 0, y: 0 }),
@@ -69,7 +70,17 @@ impl GraphicManager {
         }
     }
 
-    pub fn init(&mut self, frame_buffer_info: &FrameBufferInfo) {
+    pub fn init_by_efi_information(
+        &mut self,
+        _base_address: usize,
+        _memory_size: usize,
+        _pixel_info: &EfiGraphicsOutputModeInformation,
+    ) {
+        let _lock = self.lock.lock();
+        /*TODO*/
+    }
+
+    pub fn init_by_multiboot_information(&mut self, frame_buffer_info: &FrameBufferInfo) {
         let _lock = self.lock.lock();
         if !self
             .graphic

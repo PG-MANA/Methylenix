@@ -18,17 +18,14 @@ use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
-use self::interrupt::{idt::GateDescriptor, InterruptManager};
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
-use crate::kernel::drivers::acpi::table::bgrt::BgrtManager;
-use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
+use crate::kernel::drivers::{acpi::table::bgrt::BgrtManager, acpi::AcpiManager};
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
 };
-use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
 use crate::{io_remap, mremap};
@@ -82,7 +79,7 @@ pub extern "C" fn multiboot_main(
     ));
     get_kernel_manager_cluster()
         .graphic_manager
-        .init(&multiboot_information.framebuffer_info);
+        .init_by_multiboot_information(&multiboot_information.framebuffer_info);
     get_kernel_manager_cluster().graphic_manager.clear_screen();
     mem::forget(mem::replace(
         &mut get_kernel_manager_cluster().kernel_tty_manager,
@@ -92,7 +89,7 @@ pub extern "C" fn multiboot_main(
         .kernel_tty_manager
         .open(&get_kernel_manager_cluster().graphic_manager);
 
-    kprintln!("{}", crate::OS_NAME);
+    kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
     pr_info!(
         "Booted from {}, cmd line: {}",
         multiboot_information.boot_loader_name,
@@ -163,12 +160,10 @@ fn main_process() -> ! {
                 .interrupt_manager
                 .get_local_apic_manager(),
         );
-    pr_info!("All init are done!");
+    pr_info!("All initializations are done!");
 
     /* Draw boot logo */
     draw_boot_logo();
-
-    kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
 
     init_block_devices_and_file_system_early();
 
@@ -351,80 +346,5 @@ pub extern "C" fn unknown_boot_main() -> ! {
     SerialPortManager::new(0x3F8).send_str("Unknown Boot System!");
     loop {
         unsafe { cpu::halt() };
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn ap_boot_main() -> ! {
-    /* Extern Assembly Symbols */
-    extern "C" {
-        pub static gdt: u64; /* boot/common.s */
-        pub static tss_descriptor_address: u64; /* boot/common.s */
-    }
-    unsafe {
-        cpu::enable_sse();
-        cpu::enable_fs_gs_base();
-    }
-
-    /* Apply kernel paging table */
-    get_kernel_manager_cluster()
-        .kernel_memory_manager
-        .set_paging_table();
-
-    /* Setup CPU Manager, it contains individual data of CPU */
-    let cpu_manager = setup_cpu_manager_cluster(None);
-
-    /* Setup memory management system */
-    let mut memory_allocator = MemoryAllocator::new();
-    memory_allocator
-        .init()
-        .expect("Failed to init MemoryAllocator");
-    mem::forget(mem::replace(
-        &mut cpu_manager.memory_allocator,
-        memory_allocator,
-    ));
-
-    /* Copy GDT from BSP and create own TSS */
-    let gdt_address = unsafe { &gdt as *const _ as usize };
-    GateDescriptor::fork_gdt_from_other_and_create_tss_and_set(gdt_address, unsafe {
-        &tss_descriptor_address as *const _ as usize - gdt_address
-    } as u16);
-
-    /* Setup InterruptManager(including LocalApicManager) */
-    let mut interrupt_manager = InterruptManager::new();
-    interrupt_manager.init_ap(
-        &mut get_kernel_manager_cluster()
-            .boot_strap_cpu_manager
-            .interrupt_manager,
-    );
-    interrupt_manager.init_ipi();
-    cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
-    mem::forget(mem::replace(
-        &mut cpu_manager.interrupt_manager,
-        interrupt_manager,
-    ));
-
-    init_local_timer();
-    init_task_ap(ap_idle);
-    init_work_queue();
-    /* Switch to ap_idle task with own stack */
-    cpu_manager.run_queue.start()
-}
-
-fn ap_idle() -> ! {
-    /* Tell BSP completing of init */
-    init::AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
-    get_cpu_manager_cluster()
-        .arch_depend_data
-        .local_apic_timer
-        .start_interrupt(
-            get_cpu_manager_cluster()
-                .interrupt_manager
-                .get_local_apic_manager(),
-        );
-    loop {
-        unsafe {
-            cpu::idle();
-        }
     }
 }

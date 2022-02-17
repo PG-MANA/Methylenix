@@ -2,12 +2,13 @@
 //! NVMe Driver
 //!
 
-use crate::arch::target_arch::device::pci::nvme::setup_interrupt;
 use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::block_device::{BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceInfo};
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::drivers::pci::{ClassCode, PciDevice, PciDeviceDriver, PciManager};
+use crate::kernel::drivers::pci::{
+    msi::setup_msi, ClassCode, PciDevice, PciDeviceDriver, PciManager,
+};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
@@ -17,6 +18,7 @@ use crate::kernel::task_manager::{TaskStatus, ThreadEntry};
 
 use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
 
+use alloc::collections::LinkedList;
 use alloc::vec::Vec;
 
 pub struct NvmeManager {
@@ -297,7 +299,7 @@ impl PciDeviceDriver for NvmeManager {
             }
         };
 
-        if let Err(e) = setup_interrupt(pci_dev, nvme_manager) {
+        if let Err(e) = nvme_manager.setup_interrupt(pci_dev) {
             pr_debug!("Failed to setup interrupt: {:?}", e);
             let _ = free_pages!(admin_completion_queue_virtual_address);
             let _ = free_pages!(admin_submission_queue_virtual_address);
@@ -631,6 +633,12 @@ impl NvmeManager {
                 < name_space.name_space_id
         );
         self.namespace_list.push(name_space);
+    }
+
+    pub fn setup_interrupt(&mut self, pci_dev: &PciDevice) -> Result<(), ()> {
+        let interrupt_id = setup_msi(pci_dev, nvme_handler, None, true)?;
+        unsafe { NVME_LIST.push_back((interrupt_id, self as *mut _)) };
+        return Ok(());
     }
 
     fn _read_completion_queue_head_doorbell(
@@ -1195,4 +1203,21 @@ fn read_mmio<T: Sized>(base: VAddress, offset: usize) -> T {
 
 fn write_mmio<T: Sized>(base: VAddress, offset: usize, data: T) {
     unsafe { core::ptr::write_volatile((base.to_usize() + offset) as *mut T, data) }
+}
+
+static mut NVME_LIST: LinkedList<(usize, *mut NvmeManager)> = LinkedList::new();
+
+fn nvme_handler(index: usize) -> bool {
+    if let Some(nvme) = unsafe {
+        NVME_LIST
+            .iter()
+            .find(|x| (**x).0 == index)
+            .and_then(|x| Some(x.1.clone()))
+    } {
+        unsafe { &mut *(nvme) }.interrupt_handler();
+        true
+    } else {
+        pr_err!("Unknown NVMe Device");
+        false
+    }
 }

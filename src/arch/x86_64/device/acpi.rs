@@ -21,13 +21,11 @@ pub fn setup_interrupt(acpi_manager: &AcpiManager) -> bool {
         .is_ok()
 }
 
-fn acpi_event_handler(index: usize) {
+fn acpi_event_handler(_: usize) -> bool {
     get_kernel_manager_cluster()
         .acpi_event_manager
         .sci_handler();
-    get_cpu_manager_cluster()
-        .interrupt_manager
-        .send_eoi_level_trigger(index as u8);
+    return true;
 }
 
 #[inline]
@@ -38,6 +36,21 @@ pub fn read_io_byte(port: usize) -> u8 {
 #[inline]
 pub fn write_io_byte(port: usize, data: u8) {
     unsafe { out_byte(port as u16, data) }
+}
+
+#[inline]
+pub fn read_io_word(port: usize) -> u16 {
+    unsafe { in_word(port as u16) }
+}
+
+#[inline]
+pub fn write_io_word(port: usize, data: u16) {
+    unsafe { out_word(port as u16, data) }
+}
+
+#[inline]
+pub fn read_io_dword(port: usize) -> u32 {
+    unsafe { in_dword(port as u16) }
 }
 
 pub fn read_io(

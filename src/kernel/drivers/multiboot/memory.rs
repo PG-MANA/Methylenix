@@ -2,7 +2,7 @@
 //! Multiboot Memory Map Information
 //!
 
-use crate::kernel::drivers::efi::boot_service::memory_map::EfiMemoryDescriptor;
+use crate::kernel::drivers::efi::memory_map::EfiMemoryDescriptor;
 
 use core::mem;
 

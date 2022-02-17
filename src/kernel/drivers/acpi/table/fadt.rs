@@ -5,7 +5,7 @@
 //! FADT has the information about ACPI PowerManagement Timer.
 
 use super::super::device::pm_timer::AcpiPmTimer;
-use super::super::GeneralAddress;
+use super::super::GenericAddress;
 use super::AcpiTable;
 
 use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};
@@ -96,7 +96,7 @@ impl AcpiTable for FadtManager {
 impl FadtManager {
     pub fn get_acpi_pm_timer(&self) -> Option<AcpiPmTimer> {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_pm_tmr_block).address;
+        let address = GenericAddress::new(&fadt.x_pm_tmr_block).address;
         let pm_block = if address != 0 {
             address as usize
         } else if fadt.pm_tmr_block != 0 {
@@ -113,7 +113,7 @@ impl FadtManager {
 
     pub fn get_pm1a_event_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_pm1a_event_block).address;
+        let address = GenericAddress::new(&fadt.x_pm1a_event_block).address;
         if address != 0 {
             address as usize
         } else {
@@ -123,7 +123,7 @@ impl FadtManager {
 
     pub fn get_pm1a_control_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_pm1a_control_block).address;
+        let address = GenericAddress::new(&fadt.x_pm1a_control_block).address;
         if address != 0 {
             address as usize
         } else {
@@ -133,7 +133,7 @@ impl FadtManager {
 
     pub fn get_pm1b_event_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_pm1b_event_block).address;
+        let address = GenericAddress::new(&fadt.x_pm1b_event_block).address;
         if address != 0 {
             address as usize
         } else {
@@ -143,7 +143,7 @@ impl FadtManager {
 
     pub fn get_pm1b_control_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_pm1b_control_block).address;
+        let address = GenericAddress::new(&fadt.x_pm1b_control_block).address;
         if address != 0 {
             address as usize
         } else {
@@ -157,7 +157,7 @@ impl FadtManager {
 
     pub fn get_gp_event0_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_gpe0_block).address;
+        let address = GenericAddress::new(&fadt.x_gpe0_block).address;
         if address != 0 {
             address as usize
         } else {
@@ -171,7 +171,7 @@ impl FadtManager {
 
     pub fn get_gp_event1_block(&self) -> usize {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.x_gpe1_block).address;
+        let address = GenericAddress::new(&fadt.x_gpe1_block).address;
         if address != 0 {
             address as usize
         } else {
@@ -185,7 +185,7 @@ impl FadtManager {
 
     pub fn get_sleep_control_register(&self) -> Option<usize> {
         let fadt = unsafe { &*(self.base_address.to_usize() as *const FADT) };
-        let address = GeneralAddress::new(&fadt.sleep_control_register).address;
+        let address = GenericAddress::new(&fadt.sleep_control_register).address;
         if address != 0 {
             Some(address as usize)
         } else {

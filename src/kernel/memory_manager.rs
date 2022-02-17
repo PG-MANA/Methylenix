@@ -26,7 +26,8 @@ use self::virtual_memory_manager::VirtualMemoryManager;
 
 use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::paging::{
-    NEED_COPY_HIGH_MEMORY_PAGE_TABLE, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE,
+    PagingError, NEED_COPY_HIGH_MEMORY_PAGE_TABLE, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE,
+    PAGE_SIZE_USIZE,
 };
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -46,7 +47,13 @@ pub enum MemoryError {
     MapAddressFailed,
     InternalError,
     EntryPoolRunOut,
-    PagingError,
+    PagingError(PagingError),
+}
+
+impl From<PagingError> for MemoryError {
+    fn from(e: PagingError) -> Self {
+        Self::PagingError(e)
+    }
 }
 
 impl MemoryManager {

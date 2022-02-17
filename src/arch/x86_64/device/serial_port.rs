@@ -5,9 +5,8 @@
 
 use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-use crate::kernel::task_manager::work_queue::WorkList;
 
 /// SerialPortManager
 ///
@@ -123,24 +122,11 @@ impl SerialPortManager {
     ///
     /// First, this will get data from serial port controller, and push it into FIFO.
     /// Currently, this wakes the main process up.
-    fn int_handler24_main(_: usize) {
-        let work = WorkList::new(
-            Self::worker,
-            get_kernel_manager_cluster().serial_port_manager.read() as usize,
-        );
-        if let Err(_) = get_cpu_manager_cluster().work_queue.add_work(work) {
-            pr_err!("Failed to add work for key event");
-        }
-        get_cpu_manager_cluster().interrupt_manager.send_eoi();
-    }
-
-    fn worker(data: usize) {
-        if let Err(e) = get_kernel_manager_cluster()
+    fn int_handler24_main(_: usize) -> bool {
+        get_kernel_manager_cluster()
             .kernel_tty_manager
-            .input(data as u8)
-        {
-            pr_err!("Cannot input data to tty. Error: {:?}", e);
-        }
+            .input_from_interrupt_handler(get_kernel_manager_cluster().serial_port_manager.read());
+        return true;
     }
 
     /// Check if the transmission was completed.

@@ -3,6 +3,7 @@
 //!
 
 pub mod ecam;
+pub mod msi;
 
 use self::ecam::Ecam;
 

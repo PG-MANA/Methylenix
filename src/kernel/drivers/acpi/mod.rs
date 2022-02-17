@@ -42,8 +42,10 @@ pub mod table {
     pub mod bgrt;
     pub mod dsdt;
     pub mod fadt;
+    pub mod gtdt;
     pub mod madt;
     pub mod mcfg;
+    pub mod spcr;
     pub mod ssdt;
     pub mod xsdt;
 }
@@ -58,9 +60,10 @@ use self::table::fadt::FadtManager;
 use self::table::ssdt::SsdtManager;
 use self::table::xsdt::XsdtManager;
 
-use crate::arch::target_arch::device::cpu::{
-    disable_interrupt, enable_interrupt, in_byte, in_word, out_byte, out_word,
+use crate::arch::target_arch::device::acpi::{
+    read_io_byte, read_io_word, write_io_byte, write_io_word,
 };
+use crate::arch::target_arch::device::cpu::{disable_interrupt, enable_interrupt};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::PAddress;
@@ -208,12 +211,12 @@ impl AcpiManager {
             /* HW reduced ACPI */
             return true;
         }
-        unsafe { out_byte(smi_cmd as _, enable as _) };
-        while (unsafe { in_byte(pm1_a_port as _) & 1 }) == 0 {
+        write_io_byte(smi_cmd as _, enable as _);
+        while (read_io_byte(pm1_a_port as _) & 1) == 0 {
             core::hint::spin_loop();
         }
         if pm1_b_port != 0 {
-            while (unsafe { in_byte(pm1_b_port as _) & 1 }) == 0 {
+            while (read_io_byte(pm1_b_port as _) & 1) == 0 {
                 core::hint::spin_loop();
             }
         }
@@ -264,23 +267,21 @@ impl AcpiManager {
         {
             pr_err!("Failed to evaluate _PTS");
         }
-        unsafe {
-            if let Some(s_r) = sleep_register {
-                let mut status = in_byte(s_r as _);
-                status &= !(0b111 << 2);
-                status |= (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8;
-                out_byte(s_r as _, status);
-            } else {
-                let mut status = in_word(pm1_a as _);
+        if let Some(s_r) = sleep_register {
+            let mut status = read_io_byte(s_r as _);
+            status &= !(0b111 << 2);
+            status |= (((s_value.0 & 0b111) << 2) | (1 << 5)) as u8;
+            write_io_byte(s_r as _, status);
+        } else {
+            let mut status = read_io_word(pm1_a as _);
+            status &= !(0b111 << 10);
+            status |= (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16;
+            write_io_word(pm1_a as _, status);
+            if pm1_b != 0 {
+                let mut status = read_io_word(pm1_b as _);
                 status &= !(0b111 << 10);
-                status |= (((s_value.0 & 0b111) << 10) | (1 << 13)) as u16;
-                out_word(pm1_a as _, status);
-                if pm1_b != 0 {
-                    let mut status = in_word(pm1_b as _);
-                    status &= !(0b111 << 10);
-                    status |= (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16;
-                    out_word(pm1_b as _, status);
-                }
+                status |= (((s_value.1 & 0b111) << 10) | (1 << 13)) as u16;
+                write_io_word(pm1_b as _, status);
             }
         }
         return true;
@@ -366,9 +367,6 @@ impl AcpiManager {
             }
         } else {
             pr_info!("PowerButton is the control method power button.");
-            if !acpi_event_manager.enable_fixed_event(AcpiFixedEvent::PowerButton) {
-                return false;
-            }
         }
         if let Some(interpreter) = &self.aml_interpreter {
             match interpreter.move_into_device(b"PNP0C0C") {
@@ -628,10 +626,9 @@ impl AcpiManager {
             .ec
             .is_some()
         {
-            if let Ok(Some(mut new_interpreter)) =
+            if let Ok(Some(mut interpreter)) =
                 interpreter.move_into_device(&EmbeddedController::HID)
             {
-                drop(interpreter);
                 let to_ascii = |x: u8| -> u8 {
                     if x >= 0xa {
                         x - 0xa + b'A'
@@ -644,9 +641,9 @@ impl AcpiManager {
                     &[[b'_', b'Q', to_ascii(query >> 4), to_ascii(query & 0xf)]],
                     false,
                 )
-                .get_full_name_path(new_interpreter.get_current_scope(), false);
+                .get_full_name_path(interpreter.get_current_scope(), false);
                 pr_debug!("Evaluate: {}", query_method_name);
-                if let Err(_) = new_interpreter.evaluate_method(&query_method_name, &[]) {
+                if let Err(_) = interpreter.evaluate_method(&query_method_name, &[]) {
                     pr_err!("Failed to evaluate: {}", query_method_name);
                 }
             }
@@ -654,16 +651,17 @@ impl AcpiManager {
     }
 }
 
-pub struct GeneralAddress {
+pub struct GenericAddress {
     pub address: u64,
-    pub address_type: u8,
+    pub space_id: u8,
 }
 
-impl GeneralAddress {
+impl GenericAddress {
+    pub const ADDRESS_SPACE_ID_SYSTEM_MEMORY: u8 = 0x00;
     fn invalid() -> Self {
         Self {
             address: 0,
-            address_type: 0x0B,
+            space_id: 0x0B,
         }
     }
 
@@ -673,7 +671,7 @@ impl GeneralAddress {
             return Self::invalid();
         }
         Self {
-            address_type,
+            space_id: address_type,
             address: u64::from_le_bytes((a[4..12]).try_into().unwrap()),
         }
     }
