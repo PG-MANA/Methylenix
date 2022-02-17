@@ -1,42 +1,49 @@
+//!
+//! Initialization Functions
+//!
+
 use crate::arch::target_arch::boot_info::BootInformation;
-use crate::arch::target_arch::context::memory_layout::{
-    physical_address_to_direct_map, DIRECT_MAP_BASE_ADDRESS, DIRECT_MAP_MAX_SIZE,
+use crate::arch::target_arch::context::{
+    memory_layout::{physical_address_to_direct_map, DIRECT_MAP_BASE_ADDRESS, DIRECT_MAP_MAX_SIZE},
+    ContextManager,
 };
-use crate::arch::target_arch::context::ContextManager;
-use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::device::generic_timer::{GenericTimer, SystemCounter};
-use crate::arch::target_arch::interrupt::gic::GicManager;
-use crate::arch::target_arch::interrupt::InterruptManager;
+use crate::arch::target_arch::device::{
+    cpu,
+    generic_timer::{GenericTimer, SystemCounter},
+};
+use crate::arch::target_arch::interrupt::{gic::GicManager, InterruptManager};
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
-use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
-use crate::kernel::drivers::acpi::table::gtdt::GtdtManager;
-use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
-use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::acpi::{
+    device::AcpiDeviceManager,
+    table::{gtdt::GtdtManager, mcfg::McfgManager},
+    AcpiManager,
+};
 use crate::kernel::drivers::dtb::DtbManager;
-use crate::kernel::drivers::efi::memory_map::{EfiMemoryDescriptor, EfiMemoryType};
-use crate::kernel::drivers::efi::{EFI_ACPI_2_0_TABLE_GUID, EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE};
+use crate::kernel::drivers::efi::{
+    memory_map::{EfiMemoryDescriptor, EfiMemoryType},
+    EFI_ACPI_2_0_TABLE_GUID, EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE,
+};
 use crate::kernel::drivers::pci::PciManager;
-use crate::kernel::file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
-use crate::kernel::file_manager::FileManager;
+use crate::kernel::file_manager::{
+    elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD},
+    FileManager,
+};
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
-use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+use crate::kernel::memory_manager::{
+    data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
+    memory_allocator::MemoryAllocator,
+    physical_memory_manager::PhysicalMemoryManager,
+    system_memory_manager::{get_physical_memory_manager, SystemMemoryManager},
+    virtual_memory_manager::VirtualMemoryManager,
+    MemoryManager,
 };
-use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
-use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use crate::kernel::memory_manager::system_memory_manager::{
-    get_physical_memory_manager, SystemMemoryManager,
-};
-use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
-use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::task_manager::run_queue::RunQueue;
-use crate::kernel::task_manager::TaskManager;
+use crate::kernel::task_manager::{run_queue::RunQueue, TaskManager};
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager};
 use crate::{alloc_pages, alloc_pages_with_physical_address, free_pages};
 

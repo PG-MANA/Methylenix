@@ -145,7 +145,7 @@ fn main_process() -> ! {
         pr_err!("Failed to setup interrupt of SerialPort");
     }
 
-    pr_info!("All init are done!");
+    pr_info!("All initializations are done!");
 
     init_block_devices_and_file_system_early();
 
