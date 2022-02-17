@@ -29,6 +29,7 @@ enum GicInformationSoruce {
 
 pub struct GicManager {
     info_source: GicInformationSoruce,
+    interrupt_distributor_physical_address: PAddress, /* For MSI */
     interrupt_distributor_base_address: VAddress,
     interrupt_redistributor_discovery_base_address: Option<VAddress>,
     interrupt_redistributor_discovery_length: u32,
@@ -49,6 +50,7 @@ impl GicManager {
     const GICD_IGROUPR: usize = 0x0080;
     const GICD_ISENABLER: usize = 0x0100;
     const GICD_ICENABLER: usize = 0x0180;
+    const GICD_ISPENDR: usize = 0x0200;
     const GICD_IPRIORITYR: usize = 0x0400;
     const GICD_ICFGR: usize = 0x0C00;
     const GICD_IGRPMODR: usize = 0x0D00;
@@ -68,6 +70,7 @@ impl GicManager {
         {
             Some(Self {
                 info_source: GicInformationSoruce::Madt(madt_manager),
+                interrupt_distributor_physical_address: PAddress::new(0),
                 interrupt_distributor_base_address: VAddress::new(0),
                 interrupt_redistributor_discovery_base_address: None,
                 interrupt_redistributor_discovery_length: 0,
@@ -89,6 +92,7 @@ impl GicManager {
             {
                 return Some(Self {
                     info_source: GicInformationSoruce::Dtb(node_info),
+                    interrupt_distributor_physical_address: PAddress::new(0),
                     interrupt_distributor_base_address: VAddress::new(0),
                     interrupt_redistributor_discovery_base_address: None,
                     interrupt_redistributor_discovery_length: 0,
@@ -113,9 +117,11 @@ impl GicManager {
                     pr_err!("Unsupported GIC version: {}", gic_distributor_info.version);
                     return false;
                 }
+                self.interrupt_distributor_physical_address =
+                    PAddress::new(gic_distributor_info.base_address);
                 self.version = gic_distributor_info.version;
                 let base_address = match io_remap!(
-                    PAddress::new(gic_distributor_info.base_address),
+                    self.interrupt_distributor_physical_address,
                     GIC_V3_DISTRIBUTOR_MEMORY_MAP_SIZE,
                     MemoryPermissionFlags::data(),
                     MemoryOptionFlags::DEVICE_MEMORY
@@ -306,6 +312,17 @@ impl GicManager {
                 )
             }
         }
+    }
+
+    /// For MSI
+    pub fn get_pending_register_address_and_data(&self, interrupt_id: u32) -> (PAddress, u8) {
+        let register_index = (interrupt_id / u8::BITS) as usize;
+        let register_offset = interrupt_id & (u8::BITS - 1);
+        (
+            self.interrupt_distributor_physical_address
+                + MSize::new(Self::GICD_ISPENDR + register_index),
+            1u8 << register_offset,
+        )
     }
 
     fn wait_rwp(&self) {

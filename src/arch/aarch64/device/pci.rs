@@ -2,8 +2,6 @@
 //! PCI arch-depend
 //!
 
-pub mod nvme;
-
 use crate::kernel::drivers::pci::{ClassCode, PciDevice};
 
 pub struct ArchDependPciManager {}

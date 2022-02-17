@@ -8,7 +8,9 @@ use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::interrupt::gic::{GicManager, GicV3Group};
 
+use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::memory_manager::data_type::Address;
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use core::arch::global_asm;
@@ -19,6 +21,8 @@ static mut INTERRUPT_HANDLER_LOCK: IrqSaveSpinLockFlag = IrqSaveSpinLockFlag::ne
 #[allow(dead_code)]
 const INTERRUPT_FROM_IRQ: u64 = cpu::SPSR_I;
 const INTERRUPT_FROM_FIQ: u64 = cpu::SPSR_F;
+
+const MSI_DEFAULT_PRIORITY: u8 = 0x30;
 
 /// InterruptManager has no SpinLockFlag, When you use this, be careful of Mutex.
 ///
@@ -58,7 +62,7 @@ impl InterruptManager {
     /// setup GIC redistributor.
     ///
     pub fn set_device_interrupt_function(
-        &mut self,
+        &self,
         function: fn(usize) -> bool,
         interrupt_id: u32,
         priority_level: u8,
@@ -90,7 +94,7 @@ impl InterruptManager {
             };
         }
 
-        if interrupt_id < 31 {
+        if interrupt_id < 32 {
             /* Setup SGI/PPI */
             let redistributor = &mut get_cpu_manager_cluster()
                 .arch_depend_data
@@ -119,6 +123,41 @@ impl InterruptManager {
         drop(_lock);
         drop(_self_lock);
         return Ok(interrupt_id as usize);
+    }
+
+    pub fn setup_msi_interrupt(
+        &self,
+        function: fn(usize) -> bool,
+        priority_level: Option<u8>,
+        is_level_trigger: bool,
+    ) -> Result<MsiInfo, ()> {
+        /* TODO: support ITS */
+        let _self_lock = self.lock.lock();
+        let _lock = unsafe { INTERRUPT_HANDLER_LOCK.lock() };
+        let mut interrupt_id = 0u32;
+        for i in 32..unsafe { INTERRUPT_HANDLER.len() } {
+            if unsafe { INTERRUPT_HANDLER[i] } == 0 {
+                unsafe { INTERRUPT_HANDLER[i] = function as *const fn() as usize };
+                interrupt_id = i as u32;
+                break;
+            }
+        }
+        drop(_lock);
+        /* Setup SPI */
+        let gic_distributor = &get_kernel_manager_cluster().arch_depend_data.gic_manager;
+        gic_distributor.set_priority(interrupt_id, priority_level.unwrap_or(MSI_DEFAULT_PRIORITY));
+        gic_distributor.set_group(interrupt_id, GicV3Group::NonSecureEl1);
+        gic_distributor.set_routing(interrupt_id, false, unsafe { cpu::get_mpidr() });
+        gic_distributor.set_trigger_mode(interrupt_id, is_level_trigger);
+        gic_distributor.set_enable(interrupt_id, true);
+        let (address, data) = gic_distributor.get_pending_register_address_and_data(interrupt_id);
+
+        drop(_self_lock);
+        return Ok(MsiInfo {
+            message_address: address.to_usize() as u64,
+            message_data: data as u64,
+            interrupt_id: interrupt_id as usize,
+        });
     }
 
     /// Save current the interrupt status and disable interrupt

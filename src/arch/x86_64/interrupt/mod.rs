@@ -13,10 +13,10 @@ use crate::arch::target_arch::context::{context_data::ContextData, ContextManage
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
+use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
-
 use crate::{alloc_non_linear_pages, alloc_pages};
 
 use core::arch::global_asm;
@@ -238,7 +238,7 @@ impl InterruptManager {
     ///
     ///  [`set_redirect`]: ../device/io_apic/struct.IoApicManager.html#method.set_redirect
     pub fn set_device_interrupt_function(
-        &mut self,
+        &self,
         function: fn(usize) -> bool,
         irq: Option<u8>,
         index: Option<usize>,
@@ -312,6 +312,27 @@ impl InterruptManager {
             drop(_self_lock);
         }
         return Ok(index);
+    }
+
+    pub fn setup_msi_interrupt(
+        &self,
+        function: fn(usize) -> bool,
+        _priority_level: Option<u8>,
+        is_level_trigger: bool,
+    ) -> Result<MsiInfo, ()> {
+        let interrupt_id =
+            self.set_device_interrupt_function(function, None, None, 0, is_level_trigger)?;
+        let destination_id = self.local_apic.get_apic_id();
+        let message_address = 0xfee00000u64 | ((destination_id as u64) << 12);
+        let message_data = ((is_level_trigger as u64) << 15)
+            | (1u64 << 14)
+            | (0b000u64/* Fixed */  << 8)
+            | (interrupt_id as u64);
+        return Ok(MsiInfo {
+            message_address,
+            message_data,
+            interrupt_id,
+        });
     }
 
     fn search_available_handler_index() -> Option<usize> {
