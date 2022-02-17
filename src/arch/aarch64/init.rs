@@ -7,7 +7,7 @@ use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::device::generic_timer::{GenericTimer, SystemCounter};
 use crate::arch::target_arch::interrupt::gic::GicManager;
 use crate::arch::target_arch::interrupt::InterruptManager;
-use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE};
 
 use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
@@ -38,11 +38,15 @@ use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::run_queue::RunQueue;
 use crate::kernel::task_manager::TaskManager;
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager};
+use crate::{alloc_pages, alloc_pages_with_physical_address, free_pages};
 
 use core::mem;
+use core::sync::atomic::AtomicBool;
 
 /// Memory Areas for PhysicalMemoryManager
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; PAGE_SIZE_USIZE * 2];
+
+pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// Setup Per CPU struct
 ///
@@ -244,6 +248,7 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
                 &mut get_kernel_manager_cluster().arch_depend_data.gic_manager,
                 gic_manager,
             ));
+            get_cpu_manager_cluster().interrupt_manager.init_ipi();
             return;
         }
     }
@@ -268,6 +273,7 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
                 &mut get_kernel_manager_cluster().arch_depend_data.gic_manager,
                 gic_manager,
             ));
+            get_cpu_manager_cluster().interrupt_manager.init_ipi();
             return;
         }
     }
@@ -483,7 +489,7 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
     ));
     mem::forget(mem::replace(
         &mut get_cpu_manager_cluster().arch_depend_data.generic_timer,
-        GenericTimer::new(true),
+        GenericTimer::new(),
     ));
     mem::forget(mem::replace(
         &mut get_kernel_manager_cluster().arch_depend_data.system_counter,
@@ -507,9 +513,10 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
                     panic!("Failed to init System Counter: {:?}", e);
                 }
             }
-            generic_timer.init_interrupt(
-                gtdt.get_non_secure_el1_gsiv(),
+            generic_timer.init(
+                true,
                 (gtdt.get_non_secure_el1_flags() & 1) == 0,
+                gtdt.get_non_secure_el1_gsiv(),
                 None,
             );
             gtdt.delete_map();
@@ -546,9 +553,10 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
                             interrupts[4]
                         };
 
-                        generic_timer.init_interrupt(
-                            interrupt_id,
+                        generic_timer.init(
+                            true,
                             (interrupts[5] & 0b1111) == 4,
+                            interrupt_id,
                             clock_frequency.and_then(|i| dtb_manager.read_property_as_u32(&i)),
                         );
                         initialized = true;
@@ -569,6 +577,26 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
         panic!("Failed to initialize Generic Timer");
     }
     local_timer_manager.set_source_timer(generic_timer);
+}
+
+fn init_local_timer_ap() {
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster().local_timer_manager,
+        LocalTimerManager::new(),
+    ));
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster().arch_depend_data.generic_timer,
+        GenericTimer::new(),
+    ));
+    get_cpu_manager_cluster()
+        .arch_depend_data
+        .generic_timer
+        .init_ap(
+            &get_kernel_manager_cluster()
+                .boot_strap_cpu_manager
+                .arch_depend_data
+                .generic_timer,
+        );
 }
 
 pub fn init_global_timer() {
@@ -649,4 +677,186 @@ pub fn init_block_devices_and_file_system_later() {
             .file_manager
             .detect_partitions(i);
     }
+}
+
+/// Init APs
+///
+/// This function will setup multiple processors by using ACPI
+/// This is in the development
+pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
+    if !acpi_available {
+        unimplemented!()
+    }
+    /* Get available Local APIC IDs from ACPI */
+    let madt_manager = get_kernel_manager_cluster()
+        .arch_depend_data
+        .gic_manager
+        .get_madt_manager();
+    if madt_manager.is_none() {
+        pr_info!("ACPI does not have MADT.");
+        return;
+    }
+    let mpidr_list_iter = madt_manager
+        .unwrap()
+        .get_generic_interrupt_controller_cpu_info_iter();
+
+    /* Set BSP Local APIC ID into cpu_manager */
+
+    /* Extern Assembly Symbols */
+    extern "C" {
+        /* device/cpu.rs */
+        fn ap_entry();
+        fn ap_entry_end();
+    }
+    let ap_entry_address = ap_entry as *const fn() as usize;
+    let ap_entry_end_address = ap_entry_end as *const fn() as usize;
+    let (virtual_address, physical_address) = alloc_pages_with_physical_address!(
+        PAGE_SIZE.to_order(None).to_page_order(),
+        MemoryPermissionFlags::data(),
+        MemoryOptionFlags::KERNEL
+    )
+    .expect("Failed to allocate memory for AP");
+    /* Copy boot code for application processors */
+    assert!(
+        (ap_entry_end_address - ap_entry_address) <= PAGE_SIZE_USIZE,
+        "The size of ap_entry:{:#X}",
+        (ap_entry_end_address - ap_entry_address)
+    );
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            ap_entry as *const u8,
+            virtual_address.to_usize() as *mut u8,
+            ap_entry_end_address - ap_entry_address,
+        )
+    };
+
+    /* Allocate and set temporary stack */
+    let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
+    let stack = alloc_pages!(
+        stack_size.to_order(None).to_page_order(),
+        MemoryPermissionFlags::data()
+    )
+    .expect("Failed to alloc stack for AP");
+    let boot_data = unsafe {
+        [
+            cpu::get_tcr(),
+            cpu::get_ttbr1(),
+            cpu::get_sctlr(),
+            cpu::get_mair(),
+            (stack + stack_size).to_usize() as u64,
+            ap_boot_main as *const fn() as usize as u64,
+        ]
+    };
+
+    unsafe {
+        *((virtual_address.to_usize() + (ap_entry_end_address - ap_entry_address)) as *mut _) =
+            boot_data
+    };
+
+    let bsp_mpidr = unsafe { cpu::mpidr_to_affinity(cpu::get_mpidr()) };
+
+    let mut num_of_cpu = 1usize;
+
+    'ap_init_loop: for mpidr in mpidr_list_iter {
+        if mpidr == bsp_mpidr {
+            continue;
+        }
+        pr_debug!("MPIDR: {:#X}", mpidr);
+        AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
+        let mut x0 = cpu::SMC_PSCI_CPU_ON;
+        unsafe {
+            cpu::smc_0(
+                &mut x0,
+                &mut mpidr.clone(),
+                &mut (physical_address.to_usize() as u64).clone(),
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+                &mut 0,
+            )
+        }
+        if x0 != 0 {
+            pr_err!("Failed to startup CPU(Result of PSCI: {:#X})", x0);
+            continue;
+        }
+        loop {
+            if AP_BOOT_COMPLETE_FLAG.load(core::sync::atomic::Ordering::Relaxed) {
+                num_of_cpu += 1;
+                continue 'ap_init_loop;
+            }
+            core::hint::spin_loop();
+        }
+        //panic!("Fialed to setup CPU(MPIDR: {:#X})", mpidr);
+    }
+
+    let _ = free_pages!(virtual_address);
+    let _ = free_pages!(stack);
+
+    //madt_manager.release_memory_map();
+
+    if num_of_cpu != 1 {
+        pr_info!("Found {} CPUs", num_of_cpu);
+    }
+}
+
+pub extern "C" fn ap_boot_main() -> ! {
+    /* Setup CPU Manager, it contains individual data of CPU */
+    let cpu_manager = setup_cpu_manager_cluster(None);
+
+    /* Setup memory management system */
+    let mut memory_allocator = MemoryAllocator::new();
+    memory_allocator
+        .init()
+        .expect("Failed to init MemoryAllocator");
+    mem::forget(mem::replace(
+        &mut cpu_manager.memory_allocator,
+        memory_allocator,
+    ));
+
+    /* Setup InterruptManager(including LocalApicManager) */
+    let mut interrupt_manager = InterruptManager::new();
+    interrupt_manager.init_ap();
+    let cpu_redistributor = get_kernel_manager_cluster()
+        .arch_depend_data
+        .gic_manager
+        .init_redistributor()
+        .expect("Failed to init GIC Redistributor");
+    mem::forget(mem::replace(
+        &mut get_cpu_manager_cluster()
+            .arch_depend_data
+            .gic_redistributor_manager,
+        cpu_redistributor,
+    ));
+    interrupt_manager.init_ipi();
+    mem::forget(mem::replace(
+        &mut cpu_manager.interrupt_manager,
+        interrupt_manager,
+    ));
+
+    init_local_timer_ap();
+    init_task_ap(ap_idle);
+    init_work_queue();
+    /* Switch to ap_idle task with own stack */
+    cpu_manager.run_queue.start()
+}
+
+fn ap_idle() -> ! {
+    AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
+    get_cpu_manager_cluster()
+        .arch_depend_data
+        .generic_timer
+        .start_interrupt();
+    super::idle()
 }

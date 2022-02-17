@@ -164,7 +164,7 @@ impl VirtualMemoryManager {
             DIRECT_MAP_BASE_ADDRESS,
             DIRECT_MAP_START_ADDRESS,
             DIRECT_MAP_MAX_SIZE.min(aligned_map_size),
-            MemoryPermissionFlags::data(),
+            MemoryPermissionFlags::new(true, true, true, false),
             MemoryOptionFlags::KERNEL,
             pm_manager,
         )

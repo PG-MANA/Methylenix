@@ -99,6 +99,11 @@ impl PageManager {
         let mair = (MAIR_DEVICE_MEMORY_ATTRIBUTE << (MAIR_DEVICE_MEMORY_INDEX << 3))
             | (MAIR_NORMAL_MEMORY_ATTRIBUTE << (MAIR_NORMAL_MEMORY_INDEX << 3));
         unsafe { cpu::set_mair(mair) };
+        let mut tcr_el1 = unsafe { cpu::get_tcr() };
+        tcr_el1 = tcr_el1 & !(cpu::TCR_EL1_T0SZ)
+            | (((tcr_el1 & cpu::TCR_EL1_T1SZ) >> cpu::TCR_EL1_T1SZ_OFFSET)
+                << cpu::TCR_EL1_T0SZ_OFFSET);
+        unsafe { cpu::set_tcr(tcr_el1) };
         return Ok(());
     }
 

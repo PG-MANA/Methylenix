@@ -37,6 +37,8 @@ pub struct StoredIrqData {
 }
 
 impl InterruptManager {
+    const RESCHEDULE_SGI: u32 = 15;
+
     /// Create InterruptManager with invalid data.
     ///
     /// Before use, **you must call [`init`]**.
@@ -54,6 +56,25 @@ impl InterruptManager {
         }
         let _lock = self.lock.lock();
         unsafe { cpu::set_vbar(interrupt_vector as *const fn() as usize as u64) };
+    }
+
+    pub fn init_ap(&mut self) {
+        extern "C" {
+            fn interrupt_vector();
+        }
+        let _lock = self.lock.lock();
+        unsafe { cpu::set_vbar(interrupt_vector as *const fn() as usize as u64) };
+    }
+
+    pub fn init_ipi(&self) {
+        self.set_device_interrupt_function(
+            Self::reschedule_ipi_handler,
+            Self::RESCHEDULE_SGI,
+            0x10,
+            None,
+            false,
+        )
+        .expect("Failed to setup IPI");
     }
 
     /// Register interrupt handler.
@@ -184,8 +205,19 @@ impl InterruptManager {
         cpu::restore_irq_fiq(original.daif)
     }
 
-    pub fn send_reschedule_ipi(&self, _: usize) {
-        unimplemented!()
+    pub fn send_reschedule_ipi(&self, cpu_id: usize) {
+        /* cpu_id is mpidr */
+        let affinity_0 = (cpu_id & 0xff) as u64;
+        let affinity_1 = ((cpu_id >> 8) & 0xff) as u64;
+        let affinity_2 = ((cpu_id >> 16) & 0xff) as u64;
+        let affinity_3 = ((cpu_id >> 32) & 0xff) as u64;
+
+        let icc_sgi1r = (affinity_3 << 48)
+            | (affinity_2 << 32)
+            | ((Self::RESCHEDULE_SGI as u64) << 24)
+            | (affinity_1 << 16)
+            | affinity_0;
+        unsafe { cpu::set_icc_sgi1r_el1(icc_sgi1r) };
     }
 
     #[allow(dead_code)]

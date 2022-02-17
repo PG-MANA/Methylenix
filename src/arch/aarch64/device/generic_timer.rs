@@ -16,6 +16,8 @@ const SYSTEM_COUNTER_MEMORY_SIZE: MSize = MSize::new(0x1000);
 
 pub struct GenericTimer {
     is_non_secure_timer: bool,
+    is_level_trigger: bool,
+    interrupt_id: u32,
     frequency: u32,
 }
 
@@ -92,22 +94,29 @@ impl GenericTimer {
 
     const TIMER_PRIORITY: u8 = 0x00;
 
-    pub fn new(is_non_secure_timer: bool) -> Self {
+    pub const fn new() -> Self {
         Self {
-            is_non_secure_timer,
+            is_non_secure_timer: false,
+            is_level_trigger: false,
+            interrupt_id: 0,
             frequency: 0,
         }
     }
 
-    /// Setup interrupt
+    /// Init manager and setup interrupt
     ///
     /// This function does not enable interrupt, only setup to be ready.
-    pub fn init_interrupt(
+    pub fn init(
         &mut self,
-        interrupt_id: u32,
+        is_non_secure_timer: bool,
         is_level_trigger: bool,
+        interrupt_id: u32,
         frequency: Option<u32>,
     ) {
+        self.is_non_secure_timer = is_non_secure_timer;
+        self.is_level_trigger = is_level_trigger;
+        self.interrupt_id = interrupt_id;
+        self.frequency = frequency.unwrap_or(0);
         pr_debug!("Generic Timer Interrupt ID: {interrupt_id}");
         get_cpu_manager_cluster()
             .interrupt_manager
@@ -123,7 +132,15 @@ impl GenericTimer {
                 is_level_trigger,
             )
             .expect("Failed to setup interrupt");
-        self.frequency = frequency.unwrap_or(0);
+    }
+
+    pub fn init_ap(&mut self, original: &Self) {
+        self.init(
+            original.is_non_secure_timer,
+            original.is_level_trigger,
+            original.interrupt_id,
+            Some(original.frequency),
+        );
     }
 
     pub fn start_interrupt(&self) {

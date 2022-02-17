@@ -122,7 +122,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     init_work_queue();
 
     /* Setup APs if the processor is multicore-processor */
-    //init_multiple_processors_ap();
+    init_multiple_processors_ap(acpi_available, dtb_available);
 
     /* Switch to main process */
     get_cpu_manager_cluster().run_queue.start()

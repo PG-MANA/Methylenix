@@ -35,6 +35,12 @@ pub struct LocalApicIdIter {
     length: MSize,
 }
 
+pub struct GicCpuIter {
+    base_address: VAddress,
+    pointer: MSize,
+    length: MSize,
+}
+
 pub struct GenericInterruptDistributorInfo {
     pub base_address: usize,
     pub version: u8,
@@ -84,6 +90,18 @@ impl MadtManager {
         let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
 
         LocalApicIdIter {
+            base_address,
+            pointer: MSize::new(0),
+            length: MSize::new(length),
+        }
+    }
+
+    pub fn get_generic_interrupt_controller_cpu_info_iter(&self) -> GicCpuIter {
+        let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
+        let length = madt.length as usize - core::mem::size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+
+        GicCpuIter {
             base_address,
             pointer: MSize::new(0),
             length: MSize::new(length),
@@ -217,6 +235,30 @@ impl Iterator for LocalApicIdIter {
                 }
             }
 
+            _ => self.next(),
+        }
+    }
+}
+
+impl Iterator for GicCpuIter {
+    type Item = u64;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pointer >= self.length {
+            return None;
+        }
+        let record_base = (self.base_address + self.pointer).to_usize();
+        let record_type = unsafe { *(record_base as *const u8) };
+        let record_length = unsafe { *((record_base + 1) as *const u8) };
+        self.pointer += MSize::new(record_length as usize);
+        match record_type {
+            0x0B => {
+                if (unsafe { *((record_base + 12) as *const u8) } & 1) != 0 {
+                    /* Enabled */
+                    Some(unsafe { *((record_base + 68) as *const u64) })
+                } else {
+                    self.next()
+                }
+            }
             _ => self.next(),
         }
     }

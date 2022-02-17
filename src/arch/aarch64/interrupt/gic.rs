@@ -105,6 +105,14 @@ impl GicManager {
         None
     }
 
+    pub fn get_madt_manager(&self) -> Option<&MadtManager> {
+        if let GicInformationSoruce::Madt(madt_manager) = &self.info_source {
+            Some(madt_manager)
+        } else {
+            None
+        }
+    }
+
     pub fn init_generic_interrupt_distributor(&mut self) -> bool {
         match &self.info_source {
             GicInformationSoruce::Madt(madt_manager) => {

@@ -7,7 +7,7 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
-use core::arch::asm;
+use core::arch::{asm, global_asm};
 
 const DAIF_IRQ: u64 = 1 << 7;
 const DAIF_FIQ: u64 = 1 << 6;
@@ -18,10 +18,12 @@ pub const SPSR_M: u64 = 0b1111;
 pub const SPSR_I: u64 = 1 << 7;
 pub const SPSR_F: u64 = 1 << 6;
 
-const TCR_EL1_T0SZ_OFFSET: u64 = 0;
-const TCR_EL1_T0SZ: u64 = 0b111111 << TCR_EL1_T0SZ_OFFSET;
-const TCR_EL1_T1SZ_OFFSET: u64 = 16;
-const TCR_EL1_T1SZ: u64 = 0b111111 << TCR_EL1_T1SZ_OFFSET;
+pub const TCR_EL1_T0SZ_OFFSET: u64 = 0;
+pub const TCR_EL1_T0SZ: u64 = 0b111111 << TCR_EL1_T0SZ_OFFSET;
+pub const TCR_EL1_T1SZ_OFFSET: u64 = 16;
+pub const TCR_EL1_T1SZ: u64 = 0b111111 << TCR_EL1_T1SZ_OFFSET;
+
+pub const SMC_PSCI_CPU_ON: u64 = 0xC4000003;
 
 #[no_mangle]
 #[naked]
@@ -141,6 +143,11 @@ pub unsafe fn get_tcr() -> u64 {
 }
 
 #[inline(always)]
+pub unsafe fn set_tcr(tcr: u64) {
+    asm!("msr tcr_el1, {:x}", in(reg) tcr);
+}
+
+#[inline(always)]
 pub unsafe fn get_t0sz() -> u64 {
     (get_tcr() & TCR_EL1_T0SZ) >> TCR_EL1_T0SZ_OFFSET
 }
@@ -148,6 +155,13 @@ pub unsafe fn get_t0sz() -> u64 {
 #[inline(always)]
 pub unsafe fn get_t1sz() -> u64 {
     (get_tcr() & TCR_EL1_T1SZ) >> TCR_EL1_T1SZ_OFFSET
+}
+
+#[inline(always)]
+pub unsafe fn get_mair() -> u64 {
+    let r: u64;
+    asm!("mrs {:x}, mair_el1", out(reg) r);
+    r
 }
 
 #[inline(always)]
@@ -171,6 +185,13 @@ pub unsafe fn tlbi_va(target: u64) {
 #[inline(always)]
 pub unsafe fn set_vbar(address: u64) {
     asm!("msr vbar_el1, {:x}", in(reg) address);
+}
+
+#[inline(always)]
+pub unsafe fn get_sctlr() -> u64 {
+    let r: u64;
+    asm!("mrs {:x}, sctlr_el1", out(reg) r);
+    r
 }
 
 #[inline(always)]
@@ -235,6 +256,11 @@ pub unsafe fn set_icc_bpr0(icc_bpr: u64) {
 }
 
 #[inline(always)]
+pub unsafe fn set_icc_sgi1r_el1(icc_sgi1r: u64) {
+    asm!("msr icc_sgi1r_el1, {:x}", in(reg) icc_sgi1r);
+}
+
+#[inline(always)]
 pub unsafe fn get_cntcr() -> u64 {
     let r: u64;
     asm!("
@@ -283,6 +309,51 @@ pub const fn mpidr_to_affinity(mpidr: u64) -> u64 {
 pub const fn mpidr_to_packed_affinity(mpidr: u64) -> u32 {
     let a = mpidr_to_affinity(mpidr);
     ((a & ((1 << 24) - 1)) | ((a & (0xff << 32)) >> (32 - 24))) as u32
+}
+
+/// Execute SMC #0 with Secure Monitor Call Conversation
+pub unsafe fn smc_0(
+    x0: &mut u64,
+    x1: &mut u64,
+    x2: &mut u64,
+    x3: &mut u64,
+    x4: &mut u64,
+    x5: &mut u64,
+    x6: &mut u64,
+    x7: &mut u64,
+    x8: &mut u64,
+    x9: &mut u64,
+    x10: &mut u64,
+    x11: &mut u64,
+    x12: &mut u64,
+    x13: &mut u64,
+    x14: &mut u64,
+    x15: &mut u64,
+    x16: &mut u64,
+    x17: &mut u64,
+) {
+    asm!(
+        "smc #0",
+        inout("x0") * x0,
+        inout("x1") * x1,
+        inout("x2") * x2,
+        inout("x3") * x3,
+        inout("x4") * x4,
+        inout("x5") * x5,
+        inout("x6") * x6,
+        inout("x7") * x7,
+        inout("x8") * x8,
+        inout("x9") * x9,
+        inout("x10") * x10,
+        inout("x11") * x11,
+        inout("x12") * x12,
+        inout("x13") * x13,
+        inout("x14") * x14,
+        inout("x15") * x15,
+        inout("x16") * x16,
+        inout("x17") * x17,
+        clobber_abi("C")
+    )
 }
 
 #[naked]
@@ -371,3 +442,46 @@ pub unsafe extern "C" fn task_switch(
     in("x1") now_context_data_address
     );
 }
+
+global_asm!(
+    "
+.global ap_entry, ap_entry_end
+.section .text
+
+ap_entry:
+    mrs x2, CurrentEL
+    lsr x2, x2, 2
+    cmp x2, 2
+    b.ne 1f
+    /* EL2 */
+    mov x3, (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 1) | (1 << 0)
+    msr cnthctl_el2, x3
+    adr x2, 1f
+    msr elr_el2, x2
+    mov x3, 0xC5
+    msr spsr_el2, x3
+    mov x2, (1 << 47) | (1 << 41) | (1 << 40)
+    orr x2, x2, (1 << 31)
+    orr x2, x2, (1 << 19)
+    msr hcr_el2, x2
+    eret
+
+1:
+    /* EL1 */
+    mrs x6, DAIF
+    orr x6, x6, (1 << 6) | (1 << 7)
+    msr DAIF, x6
+    adr x2, ap_entry_end
+    ldp x3, x4, [x2, #(16 * 0)] /* x3: TCR_EL1, x4: TTBR1_EL1 */
+    ldp x5, x6, [x2, #(16 * 1)] /* x5: SCTLR_EL1, x6: MAIR_EL1 */
+    ldp x7, x8, [x2, #(16 * 2)] /* x7: Stack, x8: Jump Point */
+    msr tcr_el1, x3
+    msr ttbr1_el1, x4
+    msr ttbr0_el1, x4
+    msr mair_el1, x6
+    msr sctlr_el1, x5
+    mov sp, x7
+    br  x8
+ap_entry_end:
+"
+);
