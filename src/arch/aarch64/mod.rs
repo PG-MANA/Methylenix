@@ -23,8 +23,10 @@ use self::device::serial_port::SerialPortManager;
 use self::init::*;
 use self::interrupt::gic::{GicManager, GicRedistributorManager};
 
+use crate::kernel::application_loader;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::dtb::DtbManager;
+use crate::kernel::file_manager::elf::ELF_MACHINE_AA64;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
@@ -162,6 +164,19 @@ fn main_process() -> ! {
     }
 
     init_block_devices_and_file_system_later();
+
+    /* Test */
+    const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
+        ("OSTYPE", crate::OS_NAME),
+        ("OSVERSION", crate::OS_VERSION),
+        ("TARGET", "AArch64"),
+    ];
+    let _ = application_loader::load_and_execute(
+        "/EFI/BOOT/APP",
+        &["Arg1", "Arg2", "Arg3"],
+        &ENVIRONMENT_VARIABLES,
+        ELF_MACHINE_AA64,
+    );
 
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {

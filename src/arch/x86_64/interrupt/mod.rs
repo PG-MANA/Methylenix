@@ -487,38 +487,7 @@ impl InterruptManager {
         let user_segment_base = (unsafe { cpu::rdmsr(MSR_STAR) } >> 48) & 0xffff;
         context_data.registers.cs = user_segment_base + 16;
         context_data.registers.ss = user_segment_base + 8;
-
-        match context_data.registers.rax {
-            0x01 => {
-                pr_info!(
-                    "SysCall: Exit(Return Code: {:#X})",
-                    context_data.registers.rdi
-                );
-                pr_info!("This thread will be stopped.");
-                loop {
-                    unsafe { cpu::halt() };
-                }
-            }
-            0x04 => {
-                if context_data.registers.rdi == 1 {
-                    kprint!(
-                        "{}",
-                        unsafe {
-                            core::str::from_utf8(core::slice::from_raw_parts(
-                                context_data.registers.rsi as *const u8,
-                                context_data.registers.rdx as usize,
-                            ))
-                        }
-                        .unwrap_or("N/A")
-                    );
-                } else {
-                    pr_debug!("Unknown file descriptor: {}", context_data.registers.rdi);
-                }
-            }
-            s => {
-                pr_err!("SysCall: Unknown({:#X})", s);
-            }
-        }
+        crate::kernel::system_call::system_call_handler(context_data);
     }
 }
 

@@ -9,7 +9,6 @@ pub mod boot;
 pub mod context;
 pub mod device;
 mod init;
-mod loader;
 pub mod paging;
 
 use self::device::cpu;
@@ -18,9 +17,11 @@ use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
+use crate::kernel::application_loader;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::drivers::{acpi::table::bgrt::BgrtManager, acpi::AcpiManager};
+use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
@@ -182,7 +183,17 @@ fn main_process() -> ! {
     init_block_devices_and_file_system_later();
 
     /* Test */
-    let _ = loader::load_and_execute("/OS/FILES/APP", &["Arg1", "Arg2", "Arg3"]);
+    const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
+        ("OSTYPE", crate::OS_NAME),
+        ("OSVERSION", crate::OS_VERSION),
+        ("TARGET", "x86_64"),
+    ];
+    let _ = application_loader::load_and_execute(
+        "/OS/FILES/APP",
+        &["Arg1", "Arg2", "Arg3"],
+        &ENVIRONMENT_VARIABLES,
+        ELF_MACHINE_AMD64,
+    );
 
     let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
     loop {

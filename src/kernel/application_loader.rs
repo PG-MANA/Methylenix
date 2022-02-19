@@ -6,7 +6,6 @@ use crate::arch::target_arch::context::memory_layout::USER_STACK_END_ADDRESS;
 use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
 
-use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64;
 use crate::kernel::file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
 use crate::kernel::file_manager::{FileSeekOrigin, PathInfo};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -19,14 +18,12 @@ use crate::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
 const DEFAULT_PRIVILEGE_LEVEL: u8 = 3;
 const DEFAULT_PRIORITY_LEVEL: u8 = 2;
 
-// TEST
-const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
-    ("OSTYPE", crate::OS_NAME),
-    ("OSVERSION", crate::OS_VERSION),
-    ("TARGET", "x86_64"),
-];
-
-pub fn load_and_execute(file_name: &str, arguments: &[&str]) -> Result<(), ()> {
+pub fn load_and_execute(
+    file_name: &str,
+    arguments: &[&str],
+    environments: &[(&str, &str)],
+    elf_machine_type: u16,
+) -> Result<(), ()> {
     pr_debug!("Search {}", file_name);
     let file_manager = &get_kernel_manager_cluster().file_manager;
     let result = file_manager.file_open(PathInfo::new(file_name));
@@ -62,7 +59,7 @@ pub fn load_and_execute(file_name: &str, arguments: &[&str]) -> Result<(), ()> {
         }
     };
     if !header.is_executable_file()
-        || header.get_machine_type() != ELF_MACHINE_AMD64
+        || header.get_machine_type() != elf_machine_type
         || !header.is_lsb()
     {
         pr_err!("The file is not executable.");
@@ -233,13 +230,13 @@ pub fn load_and_execute(file_name: &str, arguments: &[&str]) -> Result<(), ()> {
     for e in arguments {
         ap_offset_from_stack_top += e.as_bytes().len() + 1;
     }
-    for e in ENVIRONMENT_VARIABLES {
+    for e in environments {
         ap_offset_from_stack_top += e.0.as_bytes().len() + 1 + e.1.as_bytes().len() + 1;
     }
     if (ap_offset_from_stack_top & 0b111) != 0 {
         ap_offset_from_stack_top = (ap_offset_from_stack_top & !0b111) + 8;
     }
-    ap_offset_from_stack_top += (1 /* argc */+ 1 /* file_name */ + arguments.len() + 1 + ENVIRONMENT_VARIABLES.len() + 1)
+    ap_offset_from_stack_top += (1 /* argc */+ 1 /* file_name */ + arguments.len() + 1 + environments.len() + 1)
         * core::mem::size_of::<u64>();
 
     let ap_offset_from_stack_top = ap_offset_from_stack_top;
@@ -273,7 +270,7 @@ pub fn load_and_execute(file_name: &str, arguments: &[&str]) -> Result<(), ()> {
     ap += core::mem::size_of::<u64>();
 
     /* Write environment variables */
-    for e in ENVIRONMENT_VARIABLES {
+    for e in environments {
         let mut len = e.0.as_bytes().len() + 1 + e.1.as_bytes().len();
         unsafe {
             core::ptr::copy_nonoverlapping(

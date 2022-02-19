@@ -126,7 +126,7 @@ impl ContextData {
         if arguments.len() > 5 {
             data.registers.r9 = arguments[5] as u64;
         }
-        if arguments.len() > 6 {
+        if arguments.len() >= 6 {
             pr_err!("Too many arguments.");
         }
         //data.registers.cr3 = cr3 as u64;
@@ -144,5 +144,28 @@ impl ContextData {
         forked_data.registers.rflags = 0x202;
         forked_data.registers.rsp = stack as u64;
         return forked_data;
+    }
+
+    pub fn get_system_call_arguments(&self, index: usize) -> Option<u64> {
+        if index > 6 {
+            None
+        } else {
+            Some(if index == 0 {
+                self.registers.rax
+            } else if index == 1 {
+                self.registers.rdi
+            } else if index == 2 {
+                self.registers.rsi
+            } else if index == 3 {
+                self.registers.rdx
+            } else if index == 4 {
+                self.registers.rcx
+            } else if index == 5 {
+                self.registers.r8
+            } else {
+                /* index == 6*/
+                self.registers.r9
+            })
+        }
     }
 }
