@@ -18,9 +18,9 @@ use core::arch::global_asm;
 static mut INTERRUPT_HANDLER: [usize; u8::MAX as _] = [0usize; u8::MAX as _];
 static mut INTERRUPT_HANDLER_LOCK: IrqSaveSpinLockFlag = IrqSaveSpinLockFlag::new();
 
-#[allow(dead_code)]
 const INTERRUPT_FROM_IRQ: u64 = cpu::SPSR_I;
 const INTERRUPT_FROM_FIQ: u64 = cpu::SPSR_F;
+const INTERRUPT_FROM_SYNCHRONOUS_LOWER: u64 = 0x01;
 
 const MSI_DEFAULT_PRIORITY: u8 = 0x30;
 
@@ -239,14 +239,24 @@ impl InterruptManager {
 
     /// IRQ/FIQ Handler
     #[no_mangle]
-    extern "C" fn irq_fiq_handler(context_data: *mut ContextData, from_mark: u64) {
+    extern "C" fn interrupt_handler(context_data: *mut ContextData, from_mark: u64) {
         match from_mark {
-            INTERRUPT_FROM_FIQ => {
-                pr_debug!("FIQ");
+            INTERRUPT_FROM_FIQ | INTERRUPT_FROM_IRQ => {
+                Self::irq_fiq_handler(context_data, from_mark);
+            }
+            INTERRUPT_FROM_SYNCHRONOUS_LOWER => {
+                crate::kernel::system_call::system_call_handler(unsafe { &mut *context_data });
             }
             _ => { /* Do nothing */ }
         }
+        if get_cpu_manager_cluster().run_queue.should_call_schedule() {
+            get_cpu_manager_cluster()
+                .run_queue
+                .schedule(Some(unsafe { &*(context_data as *const ContextData) }));
+        }
+    }
 
+    fn irq_fiq_handler(_context_data: *mut ContextData, _from_mark: u64) {
         let redistributor = &get_cpu_manager_cluster()
             .arch_depend_data
             .gic_redistributor_manager;
@@ -274,11 +284,6 @@ impl InterruptManager {
             }
         } else {
             pr_err!("Invalid Interrupt: {:#X}", index);
-        }
-        if get_cpu_manager_cluster().run_queue.should_call_schedule() {
-            get_cpu_manager_cluster()
-                .run_queue
-                .schedule(Some(unsafe { &*(context_data as *const ContextData) }));
         }
     }
 }
@@ -339,7 +344,11 @@ s_error_current_el_stack_pointer_x:
 
 .balign 0x080
 synchronous_lower_el_aarch64:
-    b   synchronous_lower_el_aarch64
+    sub     sp,  sp, {c}
+    stp     x0,  x1, [sp, #(16 * 0)]
+    stp     x2,  x3, [sp, #(16 * 1)]
+    mov     x1, {synchronous_lower}
+    b       interrupt_entry
 
 .balign 0x080
 irq_lower_el_aarch64:
@@ -413,7 +422,7 @@ interrupt_entry:
     str    x30,      [sp, #(16 * 15)]
     mov    x29,  sp
     mov     x0, x29
-    bl      irq_fiq_handler
+    bl      interrupt_handler
     mov     sp, x29
     ldp     x2, x3,  [sp, #(16 * 1)]
     ldp     x4,  x5, [sp, #(16 * 2)]
@@ -454,4 +463,5 @@ interrupt_entry:
     el0 = const cpu::SPSR_M_EL0T,
     irq_mark = const INTERRUPT_FROM_IRQ,
     fiq_mark = const INTERRUPT_FROM_FIQ,
+    synchronous_lower = const INTERRUPT_FROM_SYNCHRONOUS_LOWER,
 );

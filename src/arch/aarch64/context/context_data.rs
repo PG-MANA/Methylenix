@@ -141,4 +141,12 @@ impl ContextData {
         forked_data.registers.spsr = original_context.registers.spsr;
         return forked_data;
     }
+
+    pub fn get_system_call_arguments(&self, index: usize) -> Option<u64> {
+        if index > 8 {
+            None
+        } else {
+            Some(unsafe { (*(self.registers.x0 as *const u64 as *const [u64; 8]))[index] })
+        }
+    }
 }

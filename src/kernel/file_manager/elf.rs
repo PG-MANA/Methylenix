@@ -21,6 +21,7 @@ const ELF_SECTION_HEADER_FLAGS_EXECUTABLE: u64 = 0x04;
 const ELF_TYPE_EXECUTABLE: u16 = 2;
 
 pub const ELF_MACHINE_AMD64: u16 = 62;
+pub const ELF_MACHINE_AA64: u16 = 183;
 
 pub const ELF64_HEADER_SIZE: usize = core::mem::size_of::<Elf64Header>();
 
