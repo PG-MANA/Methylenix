@@ -29,6 +29,16 @@ impl fmt::Write for Print {
                 }
                 pointer = 0;
             }
+            if x == b'\n' as u16 {
+                buf[pointer] = b'\r' as u16;
+                buf[pointer + 1] = x;
+                let status = (output_service.output_string)(output_service, buf.as_ptr());
+                if status != EFI_SUCCESS {
+                    return Err(fmt::Error {});
+                }
+                pointer = 0;
+                continue;
+            }
             buf[pointer] = x;
             pointer += 1;
         }

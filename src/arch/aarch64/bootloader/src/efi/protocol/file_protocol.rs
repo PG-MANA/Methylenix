@@ -27,7 +27,7 @@ pub struct EfiFileProtocol {
     delete: usize,
     pub read: extern "efiapi" fn(&Self, buffer_size: *mut usize, buffer: *mut u8) -> EfiStatus,
     write: usize,
-    get_position: usize,
+    pub get_position: extern "efiapi" fn(&Self, *mut u64) -> EfiStatus,
     pub set_position: extern "efiapi" fn(&Self, u64) -> EfiStatus,
     get_info: usize,
     set_info: usize,

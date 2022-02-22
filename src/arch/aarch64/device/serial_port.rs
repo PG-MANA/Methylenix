@@ -15,10 +15,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 /// Dummy putc Function
-fn dummy_putc(_: usize, c: u8) {
-    /* Temporary QEMU */
-    unsafe { core::ptr::write_volatile(0x9000000 as *mut u8, c) };
-}
+fn dummy_putc(_: usize, _: u8) {}
 
 /// Dummy putc Function
 fn dummy_getc(_: usize) -> Option<u8> {
@@ -27,11 +24,6 @@ fn dummy_getc(_: usize) -> Option<u8> {
 
 /// Dummy wait for buffer function
 fn dummy_wait_buffer(_: usize) -> bool {
-    /* Temporary QEMU */
-    while (unsafe { core::ptr::read_volatile((0x9000000 + 0x018) as *const u16) } & (1 << 5)) != 0 {
-        core::hint::spin_loop()
-    }
-
     true
 }
 

@@ -14,7 +14,7 @@ pub struct EfiPixelBitmask {
 }
 
 #[derive(Clone)]
-#[repr(C)]
+#[repr(u32)]
 pub enum EfiGraphicsPixelFormat {
     PixelRedGreenBlueReserved8BitPerColor,
     PixelBlueGreenRedReserved8BitPerColor,
