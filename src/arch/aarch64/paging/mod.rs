@@ -644,6 +644,21 @@ impl PageManager {
         }
     }
 
+    pub fn destroy_page_table(
+        &mut self,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), PagingError> {
+        if let Some(t) = self.page_table {
+            pm_manager
+                .free(direct_map_to_physical_address(t), PAGE_SIZE, false)
+                .or(Err(PagingError::MemoryCacheOverflowed))?;
+            self.page_table = None;
+            Ok(())
+        } else {
+            Err(PagingError::InvalidPageTable)
+        }
+    }
+
     /// Allocate the page table.
     fn alloc_page_table(pm_manager: &mut PhysicalMemoryManager) -> Result<VAddress, PagingError> {
         match pm_manager.alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT)) {

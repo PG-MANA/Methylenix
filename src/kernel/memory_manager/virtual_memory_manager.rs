@@ -52,11 +52,6 @@ impl VirtualMemoryManager {
         }
     }
 
-    pub fn disable(&mut self) {
-
-        /* TODO: */
-    }
-
     pub fn is_kernel_virtual_memory_manager(&self) -> bool {
         self as *const _
             == &get_kernel_manager_cluster()
@@ -1100,6 +1095,26 @@ impl VirtualMemoryManager {
             self.lock.unlock();
             Err(MemoryError::InvalidAddress)
         }
+    }
+
+    pub fn free_all_mapping(
+        &mut self,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        self.lock.lock();
+        for e in unsafe { self.vm_entry.iter_mut(offset_of!(VirtualMemoryEntry, list)) } {
+            if let Err(e) = self._free_address(e, pm_manager) {
+                self.lock.unlock();
+                return Err(e);
+            }
+        }
+        if let Err(e) = self.page_manager.destroy_page_table(pm_manager) {
+            self.lock.unlock();
+            pr_err!("Failed to free page table: {:?}", e);
+            return Err(MemoryError::PagingError(e));
+        }
+        self.lock.unlock();
+        return Ok(());
     }
 
     fn _find_entry(&self, vm_address: VAddress) -> Option<&'static VirtualMemoryEntry> {

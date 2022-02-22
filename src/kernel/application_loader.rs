@@ -91,12 +91,13 @@ pub fn load_and_execute(
     };
     let process_memory_manager = unsafe { &mut *process.get_memory_manager() };
 
-    for program_header in header
-        .get_program_header_iter(head_data.to_usize() + header.get_program_header_offset() as usize)
-    {
-        /* TODO: delete the process when failed. */
-        if program_header.get_segment_type() == ELF_PROGRAM_HEADER_SEGMENT_LOAD {
-            pr_debug!(
+    let result: Result<(), ()> = try {
+        for program_header in header.get_program_header_iter(
+            head_data.to_usize() + header.get_program_header_offset() as usize,
+        ) {
+            /* TODO: delete the process when failed. */
+            if program_header.get_segment_type() == ELF_PROGRAM_HEADER_SEGMENT_LOAD {
+                pr_debug!(
                 "PA: {:#X}, VA: {:#X}, MS: {:#X}, FS: {:#X}, FO: {:#X}, AL: {}, R:{}, W: {}, E:{}",
                 program_header.get_physical_address(),
                 program_header.get_virtual_address(),
@@ -109,102 +110,103 @@ pub fn load_and_execute(
                 program_header.is_segment_executable()
             );
 
-            let alignment = program_header.get_align().max(1);
-            let align_offset =
-                MSize::new((program_header.get_virtual_address() & (alignment - 1)) as usize);
-            if alignment != 1
-                && (align_offset.to_usize()
-                    != (program_header.get_file_offset() & (alignment - 1)) as usize
-                    || !alignment.is_power_of_two())
-            {
-                pr_err!("Invalid Alignment: {:#X}", alignment);
-                let _ = file_manager.file_close(file_info);
-                let _ = kfree!(head_data, head_read_size);
-                return Err(());
-            } else if alignment as usize > PAGE_SIZE_USIZE {
-                pr_err!("Unsupported Align: {:#X}", alignment);
-                let _ = file_manager.file_close(file_info);
-                let _ = kfree!(head_data, head_read_size);
-                return Err(());
-            } else if program_header.get_memory_size() == 0 {
-                continue;
-            }
+                let alignment = program_header.get_align().max(1);
+                let align_offset =
+                    MSize::new((program_header.get_virtual_address() & (alignment - 1)) as usize);
+                if alignment != 1
+                    && (align_offset.to_usize()
+                        != (program_header.get_file_offset() & (alignment - 1)) as usize
+                        || !alignment.is_power_of_two())
+                {
+                    pr_err!("Invalid Alignment: {:#X}", alignment);
+                    Err(())?
+                } else if alignment as usize > PAGE_SIZE_USIZE {
+                    pr_err!("Unsupported Align: {:#X}", alignment);
+                    Err(())?
+                } else if program_header.get_memory_size() == 0 {
+                    continue;
+                }
 
-            let aligned_memory_size = MemoryManager::size_align(
-                MSize::new(program_header.get_memory_size() as usize) + align_offset,
-            );
-            let allocated_memory =
-                match alloc_non_linear_pages!(aligned_memory_size, MemoryPermissionFlags::data()) {
+                let aligned_memory_size = MemoryManager::size_align(
+                    MSize::new(program_header.get_memory_size() as usize) + align_offset,
+                );
+                let allocated_memory = match alloc_non_linear_pages!(
+                    aligned_memory_size,
+                    MemoryPermissionFlags::data()
+                ) {
                     Ok(v) => v,
                     Err(e) => {
                         pr_err!("Failed to allocate memory: {:?}", e);
-                        let _ = file_manager.file_close(file_info);
-                        let _ = kfree!(head_data, head_read_size);
-                        return Err(());
+                        Err(())?
                     }
                 };
-            if program_header.get_file_size() > 0 {
-                if let Err(e) = file_manager.file_seek(
-                    &mut file_info,
-                    program_header.get_file_offset() as usize,
-                    FileSeekOrigin::SeekSet,
-                ) {
-                    pr_err!("Failed to seek: {:?}", e);
-                    let _ = free_pages!(allocated_memory);
-                    let _ = file_manager.file_close(file_info);
-                    let _ = kfree!(head_data, head_read_size);
-                    return Err(());
+                if program_header.get_file_size() > 0 {
+                    if let Err(e) = file_manager.file_seek(
+                        &mut file_info,
+                        program_header.get_file_offset() as usize,
+                        FileSeekOrigin::SeekSet,
+                    ) {
+                        pr_err!("Failed to seek: {:?}", e);
+                        let _ = free_pages!(allocated_memory);
+                        Err(())?
+                    }
+                    if let Err(e) = file_manager.file_read(
+                        &mut file_info,
+                        allocated_memory + align_offset,
+                        program_header.get_file_size() as usize,
+                    ) {
+                        pr_err!("Failed to read data: {:?}", e);
+                        let _ = free_pages!(allocated_memory);
+                        Err(())?
+                    }
                 }
-                if let Err(e) = file_manager.file_read(
-                    &mut file_info,
-                    allocated_memory + align_offset,
-                    program_header.get_file_size() as usize,
-                ) {
-                    pr_err!("Failed to read data: {:?}", e);
-                    let _ = free_pages!(allocated_memory);
-                    let _ = file_manager.file_close(file_info);
-                    let _ = kfree!(head_data, head_read_size);
-                    return Err(());
+                if program_header.get_memory_size() > program_header.get_file_size() {
+                    unsafe {
+                        core::ptr::write_bytes(
+                            ((allocated_memory + align_offset).to_usize()
+                                + program_header.get_file_size() as usize)
+                                as *mut u8,
+                            0,
+                            (program_header.get_memory_size() - program_header.get_file_size())
+                                as usize,
+                        )
+                    }
                 }
-            }
-            if program_header.get_memory_size() > program_header.get_file_size() {
-                unsafe {
-                    core::ptr::write_bytes(
-                        ((allocated_memory + align_offset).to_usize()
-                            + program_header.get_file_size() as usize)
-                            as *mut u8,
-                        0,
-                        (program_header.get_memory_size() - program_header.get_file_size())
-                            as usize,
+                if let Err(e) = get_kernel_manager_cluster()
+                    .kernel_memory_manager
+                    .share_kernel_memory_with_user(
+                        process_memory_manager,
+                        allocated_memory,
+                        VAddress::new(program_header.get_virtual_address() as usize) - align_offset,
+                        MemoryPermissionFlags::new(
+                            program_header.is_segment_readable(),
+                            program_header.is_segment_writable(),
+                            program_header.is_segment_executable(),
+                            true,
+                        ),
+                        MemoryOptionFlags::USER,
                     )
+                {
+                    pr_err!("Failed to map memory into user process: {:?}", e);
+                    let _ = free_pages!(allocated_memory);
+                    Err(())?
                 }
-            }
-            if let Err(e) = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .share_kernel_memory_with_user(
-                    process_memory_manager,
-                    allocated_memory,
-                    VAddress::new(program_header.get_virtual_address() as usize) - align_offset,
-                    MemoryPermissionFlags::new(
-                        program_header.is_segment_readable(),
-                        program_header.is_segment_writable(),
-                        program_header.is_segment_executable(),
-                        true,
-                    ),
-                    MemoryOptionFlags::USER,
-                )
-            {
-                pr_err!("Failed to map memory into user process: {:?}", e);
+
                 let _ = free_pages!(allocated_memory);
-                let _ = file_manager.file_close(file_info);
-                let _ = kfree!(head_data, head_read_size);
-                return Err(());
             }
-
-            let _ = free_pages!(allocated_memory);
         }
+    };
+    if result.is_err() {
+        let _ = file_manager.file_close(file_info);
+        let _ = kfree!(head_data, head_read_size);
+        if let Err(e) = get_kernel_manager_cluster()
+            .task_manager
+            .delete_user_process(process)
+        {
+            pr_err!("Failed to delete user process: {:?}", e);
+        }
+        return Err(());
     }
-
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_USER);
     let stack_address = match alloc_non_linear_pages!(stack_size, MemoryPermissionFlags::data()) {
         Ok(v) => v,
@@ -212,6 +214,12 @@ pub fn load_and_execute(
             pr_err!("Failed to alloc stack: {:?}", e);
             let _ = file_manager.file_close(file_info);
             let _ = kfree!(head_data, head_read_size);
+            if let Err(e) = get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+            {
+                pr_err!("Failed to delete user process: {:?}", e);
+            }
             return Err(());
         }
     };
@@ -305,6 +313,12 @@ pub fn load_and_execute(
         let _ = free_pages!(stack_address);
         let _ = file_manager.file_close(file_info);
         let _ = kfree!(head_data, head_read_size);
+        if let Err(e) = get_kernel_manager_cluster()
+            .task_manager
+            .delete_user_process(process)
+        {
+            pr_err!("Failed to delete user process: {:?}", e);
+        }
         return Err(());
     }
     let _ = free_pages!(stack_address);
@@ -322,6 +336,12 @@ pub fn load_and_execute(
         pr_err!("Failed to add thread: {:?}", e);
         let _ = file_manager.file_close(file_info);
         let _ = kfree!(head_data, head_read_size);
+        if let Err(e) = get_kernel_manager_cluster()
+            .task_manager
+            .delete_user_process(process)
+        {
+            pr_err!("Failed to delete user process: {:?}", e);
+        }
         return Err(());
     }
     let _ = file_manager.file_close(file_info);

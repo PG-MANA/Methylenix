@@ -63,11 +63,6 @@ impl MemoryManager {
         }
     }
 
-    pub fn disable(&mut self) {
-        assert!(!self.is_kernel_memory_manager());
-        self.virtual_memory_manager.disable();
-    }
-
     pub fn is_kernel_memory_manager(&self) -> bool {
         &get_kernel_manager_cluster().kernel_memory_manager as *const _ == self as *const _
     }
@@ -272,7 +267,7 @@ impl MemoryManager {
         let aligned_vm_address = address & PAGE_MASK;
         if let Err(e) = self
             .virtual_memory_manager
-            .free_address(aligned_vm_address.into(), pm_manager)
+            .free_address(VAddress::new(aligned_vm_address), pm_manager)
         {
             pr_err!("Failed to free memory: {:?}", e); /* The error of 'free_address' tends to be ignored. */
             return Err(e);
@@ -391,6 +386,12 @@ impl MemoryManager {
 
     pub fn set_paging_table(&mut self) {
         self.virtual_memory_manager.flush_paging();
+    }
+
+    pub fn free_all_allocated_memory(&mut self) -> Result<(), MemoryError> {
+        assert!(!self.is_kernel_memory_manager());
+        self.virtual_memory_manager
+            .free_all_mapping(get_physical_memory_manager())
     }
 
     pub fn dump_memory_manager(&self) {

@@ -27,6 +27,7 @@ use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
 use crate::kernel::memory_manager::{MemoryError, MemoryManager};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::scheduling_class::user::UserSchedulingClass;
+use crate::{kfree, kmalloc};
 
 pub struct TaskManager {
     lock: IrqSaveSpinLockFlag,
@@ -280,25 +281,18 @@ impl TaskManager {
         privilege_level: u8,
     ) -> Result<&'static mut ProcessEntry, TaskError> {
         /* Create Memory Manager */
-        let mut user_memory_manger = get_kernel_manager_cluster()
-            .kernel_memory_manager
-            .create_user_memory_manager()?;
-        const MEMORY_MANAGER_SIZE: MSize = MSize::new(core::mem::size_of::<MemoryManager>());
-        let allocated_user_memory_manager_address = get_cpu_manager_cluster()
-            .memory_allocator
-            .kmalloc(MEMORY_MANAGER_SIZE);
-        if let Err(e) = allocated_user_memory_manager_address {
-            pr_err!("Failed to allocate MemoryManager: {:?}", e);
-            user_memory_manger.disable();
-            return Err(TaskError::MemoryError(e));
-        }
-        let allocated_user_memory_manager = unsafe {
-            &mut *(allocated_user_memory_manager_address.unwrap().to_usize() as *mut MemoryManager)
+        let user_memory_manager = match kmalloc!(
+            MemoryManager,
+            get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .create_user_memory_manager()?
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                pr_err!("Failed to allocate MemoryManager: {:?}", e);
+                return Err(TaskError::MemoryError(e));
+            }
         };
-        core::mem::forget(core::mem::replace(
-            allocated_user_memory_manager,
-            user_memory_manger,
-        ));
 
         let _lock = self.lock.lock();
         let result = try {
@@ -310,7 +304,7 @@ impl TaskManager {
                 self.next_process_id,
                 parent_process,
                 &mut [],
-                allocated_user_memory_manager as *mut _,
+                user_memory_manager as *mut _,
                 privilege_level,
             );
             self.p_list.insert_tail(&mut new_process.p_list);
@@ -321,11 +315,8 @@ impl TaskManager {
         drop(_lock);
         if let Err(e) = &result {
             pr_err!("Failed to create a process for user: {:?}", e);
-            allocated_user_memory_manager.disable();
-            if let Err(e) = get_cpu_manager_cluster().memory_allocator.kfree(
-                allocated_user_memory_manager_address.unwrap(),
-                MEMORY_MANAGER_SIZE,
-            ) {
+            let _ = user_memory_manager.free_all_allocated_memory();
+            if let Err(e) = kfree!(user_memory_manager) {
                 pr_err!("Failed to free the MemoryManager: {:?}", e);
             }
         }
@@ -378,6 +369,70 @@ impl TaskManager {
             pr_err!("Failed to create a thread for user: {:?}", e);
         }
         return result;
+    }
+
+    pub fn delete_user_process(
+        &mut self,
+        target_process: &mut ProcessEntry,
+    ) -> Result<(), TaskError> {
+        let mut _lock = Some(target_process.lock.lock());
+
+        /* Delete all children */
+        for e in unsafe {
+            target_process
+                .children
+                .iter_mut(offset_of!(ProcessEntry, siblings))
+        } {
+            _lock = None;
+            self.delete_user_process(e)?;
+            _lock = Some(target_process.lock.lock());
+        }
+
+        /* Delete all thread */
+        while let Some(thread) = target_process.take_thread()? {
+            let mut _lock = thread.lock.lock();
+            if thread.get_task_status() != TaskStatus::Stopped {
+                pr_err!("Thread is not stopped.");
+                return Err(TaskError::InvalidProcessEntry);
+            }
+            self.thread_entry_pool
+                .free(unsafe { &mut *(thread as *mut _) });
+        }
+
+        /* Delete from parent */
+        let parent = target_process.get_parent_process();
+        if !parent.is_null() {
+            let parent = unsafe { &mut *parent };
+            let mut _parent_lock;
+            loop {
+                if let Ok(e) = parent.lock.try_lock() {
+                    if _lock.is_none() {
+                        if let Ok(l) = target_process.lock.try_lock() {
+                            _lock = Some(l);
+                        } else {
+                            drop(e);
+                            continue;
+                        }
+                    }
+                    _parent_lock = e;
+                    break;
+                }
+                _lock = None;
+            }
+            parent.children.remove(&mut target_process.siblings);
+        }
+
+        /* Delete Memory Manager */
+        let memory_manager = unsafe { &mut *target_process.get_memory_manager() };
+        memory_manager.free_all_allocated_memory()?;
+        let _ = kfree!(memory_manager);
+        let _self_lock = self.lock.lock();
+        self.p_list.remove(&mut target_process.p_list);
+        drop(_lock);
+        self.process_entry_pool
+            .free(unsafe { &mut *(target_process as *mut _) });
+        drop(_self_lock);
+        return Ok(());
     }
 
     pub fn get_context_manager(&self) -> &ContextManager {
