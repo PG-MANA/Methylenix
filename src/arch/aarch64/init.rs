@@ -211,6 +211,12 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
         ))
         .to_usize(),
     );
+    boot_information.font_address = boot_information.font_address.and_then(|a| {
+        Some((
+            (physical_address_to_direct_map(PAddress::new(a.0)).to_usize()),
+            a.1,
+        ))
+    });
 
     /* Apply paging */
     get_kernel_manager_cluster()

@@ -27,7 +27,7 @@ use crate::kernel::application_loader;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::dtb::DtbManager;
 use crate::kernel::file_manager::elf::ELF_MACHINE_AA64;
-use crate::kernel::graphic_manager::GraphicManager;
+use crate::kernel::graphic_manager::{font::FontType, GraphicManager};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
 use crate::kernel::tty::TtyManager;
@@ -98,6 +98,16 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
                 graphic_info.frame_buffer_size,
                 &graphic_info.info,
             );
+        get_kernel_manager_cluster()
+            .graphic_manager
+            .set_frame_buffer_memory_permission();
+        if let Some((address, size)) = boot_information.font_address {
+            get_kernel_manager_cluster().graphic_manager.load_font(
+                VAddress::new(address),
+                size,
+                FontType::Pff2,
+            );
+        }
     }
     get_kernel_manager_cluster()
         .kernel_tty_manager

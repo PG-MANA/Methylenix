@@ -12,6 +12,7 @@ pub struct BootInformation {
     pub elf_program_header_address: usize,
     pub efi_system_table: EfiSystemTable,
     pub graphic_info: Option<GraphicInfo>,
+    pub font_address: Option<(usize, usize)>,
     pub memory_info: MemoryInfo,
 }
 

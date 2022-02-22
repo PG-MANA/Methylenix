@@ -72,12 +72,15 @@ impl GraphicManager {
 
     pub fn init_by_efi_information(
         &mut self,
-        _base_address: usize,
-        _memory_size: usize,
-        _pixel_info: &EfiGraphicsOutputModeInformation,
+        base_address: usize,
+        memory_size: usize,
+        pixel_info: &EfiGraphicsOutputModeInformation,
     ) {
         let _lock = self.lock.lock();
-        /*TODO*/
+        self.graphic
+            .lock()
+            .unwrap()
+            .init_by_efi_information(base_address, memory_size, pixel_info);
     }
 
     pub fn init_by_multiboot_information(&mut self, frame_buffer_info: &FrameBufferInfo) {

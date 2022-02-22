@@ -23,8 +23,7 @@ use self::efi::protocol::file_protocol::{
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
 };
 use self::efi::protocol::graphics_output_protocol::{
-    EfiGraphicsOutputModeInformation, EfiGraphicsOutputProtocol, EfiGraphicsOutputProtocolMode,
-    EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
+    EfiGraphicsOutputModeInformation, EfiGraphicsOutputProtocol, EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
 };
 use self::efi::protocol::loaded_image_protocol::{
     EfiLoadedImageProtocol, EFI_LOADED_IMAGE_PROTOCOL_GUID, EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
@@ -48,6 +47,7 @@ static mut NUM_OF_PAGE_TABLES: usize = 0;
 static mut BOOT_INFO: MaybeUninit<BootInformation> = MaybeUninit::uninit();
 
 const KERNEL_PATH: &str = "\\EFI\\BOOT\\kernel.elf";
+const FONT_PATH: &str = "\\EFI\\BOOT\\font";
 
 const DIRECT_MAP_START_ADDRESS: usize = 0xffff_0000_0000_0000;
 const DIRECT_MAP_END_ADDRESS: usize = 0xffff_7fff_ffff_ffff;
@@ -60,6 +60,7 @@ struct BootInformation {
     elf_program_header_address: usize,
     efi_system_table: EfiSystemTable,
     graphic_info: Option<GraphicInfo>,
+    font_address: Option<(usize, usize)>,
     memory_info: MemoryInfo,
 }
 
@@ -113,6 +114,13 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
         &mut num_of_needed_page_tables,
     );
     boot_info.graphic_info = detect_graphics(unsafe { &*system_table.get_boot_services() });
+    if boot_info.graphic_info.is_some() {
+        load_font_file(
+            main_handle,
+            unsafe { &*system_table.get_boot_services() },
+            &mut boot_info,
+        );
+    }
 
     println!(
         "Number of estimated pages for the page tables: {:#X}",
@@ -439,6 +447,122 @@ fn load_elf_binary(
         }
     }
     let _ = (file_protocol.close)(file_protocol);
+    let _ = (root_directory.close)(root_directory);
+}
+
+fn load_font_file(
+    main_handle: EfiHandle,
+    boot_service: &EfiBootServices,
+    boot_info: &mut BootInformation,
+) {
+    /* Open root directory */
+    let mut root_directory: *const EfiFileProtocol = core::ptr::null();
+    let mut loaded_image_protocol: *const EfiLoadedImageProtocol = core::ptr::null();
+    let mut simple_file_protocol: *const EfiSimpleFileProtocol = core::ptr::null();
+
+    let r = (boot_service.open_protocol)(
+        main_handle,
+        &EFI_LOADED_IMAGE_PROTOCOL_GUID,
+        &mut loaded_image_protocol as *mut _ as usize,
+        main_handle,
+        0,
+        EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
+    );
+    if r != EFI_SUCCESS {
+        panic!("Failed to open LOADED_IMAGE_PROTOCOL: {:#X}", r);
+    }
+
+    let r = (boot_service.open_protocol)(
+        unsafe { (*loaded_image_protocol).device_handle },
+        &EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
+        &mut simple_file_protocol as *mut _ as usize,
+        main_handle,
+        0,
+        EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
+    );
+    if r != EFI_SUCCESS {
+        panic!(
+            "Failed to open EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID: {:#X}",
+            r
+        );
+    }
+
+    let simple_file_protocol = unsafe { &*simple_file_protocol };
+    let r = (simple_file_protocol.open_volume)(simple_file_protocol, &mut root_directory);
+    if r != EFI_SUCCESS {
+        panic!("Failed to open the volume: {:#X}", r);
+    };
+    let root_directory = unsafe { &*root_directory };
+    let mut file_protocol: *const EfiFileProtocol = core::ptr::null();
+    let mut font_path: [MaybeUninit<u16>; FONT_PATH.len() + 1] = MaybeUninit::uninit_array();
+
+    for (i, e) in FONT_PATH.encode_utf16().enumerate() {
+        font_path[i].write(e);
+    }
+
+    font_path[FONT_PATH.len()].write(0);
+
+    let r = (root_directory.open)(
+        root_directory,
+        &mut file_protocol,
+        unsafe { MaybeUninit::array_assume_init(font_path) }.as_ptr(),
+        EFI_FILE_MODE_READ,
+        0,
+    );
+    if r != EFI_SUCCESS {
+        panic!("Failed to open \"{}\": {:#X}", FONT_PATH, r);
+    };
+
+    let file_protocol = unsafe { &*file_protocol };
+    let r = (file_protocol.set_position)(file_protocol, u64::MAX);
+    if r != EFI_SUCCESS {
+        panic!("Failed to seek \"{}\": {:#X}", FONT_PATH, r);
+    };
+    let mut file_size: u64 = 0;
+    let r = (file_protocol.get_position)(file_protocol, &mut file_size);
+    if r != EFI_SUCCESS {
+        panic!("Failed to seek \"{}\": {:#X}", FONT_PATH, r);
+    };
+    if file_size == 0 {
+        println!("Invalid file size");
+        (file_protocol.close)(file_protocol);
+        (root_directory.close)(root_directory);
+        return;
+    }
+    let num_of_pages = (((file_size as usize - 1) & EFI_PAGE_MASK) / EFI_PAGE_SIZE) + 1;
+    let mut allocated_memory = 0;
+    let r = (boot_service.allocate_pages)(
+        EfiAllocateType::AllocateAnyPages,
+        EfiMemoryType::EfiLoaderData,
+        num_of_pages,
+        &mut allocated_memory,
+    );
+    if r != EFI_SUCCESS {
+        println!("Failed to allocate memory for Font");
+        (file_protocol.close)(file_protocol);
+        (root_directory.close)(root_directory);
+        return;
+    }
+
+    let mut read_size = file_size as usize;
+    let _ = (file_protocol.set_position)(file_protocol, 0);
+    let r = (file_protocol.read)(file_protocol, &mut read_size, allocated_memory as *mut u8);
+    if r != EFI_SUCCESS || read_size != file_size as usize {
+        println!(
+            "Failed to read Font size(Read Size: {:#X}, expected: {:#X}, EfiStatus: {:#X})",
+            read_size, file_size, r
+        );
+        (file_protocol.close)(file_protocol);
+        (root_directory.close)(root_directory);
+        return;
+    }
+    boot_info.font_address = Some((allocated_memory, file_size as usize));
+    let _ = (file_protocol.close)(file_protocol);
+    let _ = (root_directory.close)(root_directory);
+    println!(
+        "Loaded Font File(File Size: {:#X}, Location: {:#X})",
+        file_size, allocated_memory
+    );
 }
 
 fn detect_graphics(boot_service: &EfiBootServices) -> Option<GraphicInfo> {
@@ -456,11 +580,7 @@ fn detect_graphics(boot_service: &EfiBootServices) -> Option<GraphicInfo> {
 
     let graphics_output_protocol = unsafe { &*graphics_output_protocol };
     let mode = unsafe { &*graphics_output_protocol.mode };
-    let supported_size = core::mem::size_of::<EfiGraphicsOutputProtocolMode>();
-    if (mode.size_of_info as usize) != supported_size {
-        println!("Unsupported EfiGraphicsOutputModeInformation(Expected {:#X} bytes, but found {:#X} bytes",supported_size,mode.size_of_info );
-        return None;
-    }
+
     Some(GraphicInfo {
         frame_buffer_base: mode.frame_buffer_base,
         frame_buffer_size: mode.frame_buffer_size,
