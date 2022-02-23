@@ -3,8 +3,8 @@
 //!
 
 use crate::cpu::{
-    get_sctlr_el1, get_tcr_el1, get_ttbr1_el1, set_mair_el1, set_sctlr_el1, set_tcr_el1,
-    set_ttbr1_el1,
+    get_id_aa64mmfr0_el1, get_sctlr_el1, get_tcr_el1, get_ttbr1_el1, set_mair_el1, set_sctlr_el1,
+    set_tcr_el1, set_ttbr1_el1,
 };
 use crate::EFI_PAGE_SIZE;
 
@@ -14,7 +14,8 @@ pub const PAGE_SIZE: usize = 0x1000;
 pub const PAGE_SHIFT: usize = 12;
 pub const PAGE_MASK: usize = !0xFFF;
 
-static mut MAIR_INDEX: u64 = 0;
+static mut MAIR_INDEX: u8 = 0;
+static mut MINIMUM_T0SZ: u8 = 0;
 static mut TTBR1_INITIAL_SHIFT: u8 = 0;
 
 /* From kernel/memory_manager/data_type.rs */
@@ -65,6 +66,17 @@ impl MemoryPermissionFlags {
     }
 }
 
+pub fn set_paging_settings() {
+    unsafe {
+        MINIMUM_T0SZ = 32 - ((get_id_aa64mmfr0_el1() & 0b1111) as u8 - 32);
+        TTBR1_INITIAL_SHIFT = PAGE_SHIFT as u8
+            + 9 * (3
+                - (4 - (1
+                    + ((64 - MINIMUM_T0SZ - (PAGE_SHIFT as u8) - 1) / ((PAGE_SHIFT as u8) - 3)))
+                    as i8) as u8);
+    }
+}
+
 pub fn init_ttbr1(top_level_page: usize) {
     let mut tcr_el1 = 0u64;
     let original_tcr_el1 = unsafe { get_tcr_el1() };
@@ -87,16 +99,7 @@ pub fn init_ttbr1(top_level_page: usize) {
     /* IRGN1 */
     tcr_el1 |= 0b01 << 24;
     /* T1SZ */
-    const T1SZ: u64 = 16;
-    tcr_el1 |= T1SZ << 16;
-
-    unsafe {
-        TTBR1_INITIAL_SHIFT = PAGE_SHIFT as u8
-            + 9 * (3
-                - (4 - (1
-                    + ((64 - (T1SZ as u8) - (PAGE_SHIFT as u8) - 1) / ((PAGE_SHIFT as u8) - 3)))
-                    as i8) as u8)
-    };
+    tcr_el1 |= unsafe { MINIMUM_T0SZ as u64 } << 16;
 
     unsafe { core::ptr::write_bytes(top_level_page as *mut u8, 0, EFI_PAGE_SIZE) };
 
@@ -131,7 +134,7 @@ fn _associate_address(
             | (1 << 10/* AF */)
             | (0b11 << 8/* Inner Shareable */)
             | (((!permission.is_writable() as u64) << 1) << 6)
-            | unsafe { MAIR_INDEX } << 2
+            | unsafe { MAIR_INDEX as u64 } << 2
             | 0b11;
 
         while *pages > 0 && index < NUM_OF_ENTRIES_IN_PAGE_TABLE {
@@ -216,7 +219,7 @@ fn _associate_direct_map_address(
             | (1 << 10/* AF */)
             | (0b11 << 8/* Inner Shareable */)
             | (((!permission.is_writable() as u64) << 1) << 6)
-            | unsafe { MAIR_INDEX } << 2
+            | unsafe { MAIR_INDEX as u64 } << 2
             | 0b01;
 
         while *size > 0 && index < NUM_OF_ENTRIES_IN_PAGE_TABLE {
@@ -285,7 +288,13 @@ pub fn associate_direct_map_address(
 
 pub fn estimate_num_of_pages_to_direct_map(size: usize) -> usize {
     /* Using Level1 Block Entry */
-    let shift = (PAGE_SHIFT as u8) + (3 - 1) * 9;
-    let entries = size / (1 << shift);
-    ((entries - 1) / NUM_OF_ENTRIES_IN_PAGE_TABLE) + 1
+    let level_1_shift = (PAGE_SHIFT as u8) + (3 - 1) * 9;
+    let initial_shift = unsafe { TTBR1_INITIAL_SHIFT };
+    let entries = size / (1 << level_1_shift.min(initial_shift));
+    ((entries - 1) / NUM_OF_ENTRIES_IN_PAGE_TABLE)
+        + if initial_shift > level_1_shift {
+            (initial_shift - level_1_shift) as usize / 9
+        } else {
+            0
+        }
 }

@@ -10,6 +10,12 @@ pub unsafe fn get_current_el() -> u64 {
     c
 }
 
+pub unsafe fn get_id_aa64mmfr0_el1() -> u64 {
+    let id: u64;
+    asm!("mrs {:x}, id_aa64mmfr0_el1", out(reg) id);
+    id
+}
+
 pub unsafe fn get_ttbr1_el1() -> u64 {
     let ttbr: u64;
     asm!("mrs {:x}, ttbr1_el1", out(reg) ttbr);
@@ -23,6 +29,12 @@ pub unsafe fn set_ttbr1_el1(address: u64) {
 pub unsafe fn get_tcr_el1() -> u64 {
     let tcr: u64;
     asm!("mrs {:x}, tcr_el1", out(reg) tcr);
+    tcr
+}
+
+pub unsafe fn get_tcr_el2() -> u64 {
+    let tcr: u64;
+    asm!("mrs {:x}, tcr_el2", out(reg) tcr);
     tcr
 }
 

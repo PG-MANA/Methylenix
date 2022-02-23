@@ -16,25 +16,28 @@ mod elf;
 mod guid;
 mod paging;
 
-use self::cpu::get_current_el;
-use self::efi::memory_map::{EfiAllocateType, EfiMemoryType};
-use self::efi::protocol::file_protocol::{
-    EfiFileProtocol, EfiSimpleFileProtocol, EFI_FILE_MODE_READ,
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
+use self::efi::protocol::{
+    file_protocol::{
+        EfiFileProtocol, EfiSimpleFileProtocol, EFI_FILE_MODE_READ,
+        EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
+    },
+    graphics_output_protocol::{
+        EfiGraphicsOutputModeInformation, EfiGraphicsOutputProtocol,
+        EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
+    },
+    loaded_image_protocol::{
+        EfiLoadedImageProtocol, EFI_LOADED_IMAGE_PROTOCOL_GUID,
+        EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
+    },
 };
-use self::efi::protocol::graphics_output_protocol::{
-    EfiGraphicsOutputModeInformation, EfiGraphicsOutputProtocol, EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
+use self::efi::{
+    EfiBootServices, EfiHandle, EfiSystemTable, EFI_PAGE_MASK, EFI_PAGE_SIZE, EFI_SUCCESS,
 };
-use self::efi::protocol::loaded_image_protocol::{
-    EfiLoadedImageProtocol, EFI_LOADED_IMAGE_PROTOCOL_GUID, EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
-};
-use self::efi::{EfiBootServices, EfiHandle, EfiSystemTable, EFI_SUCCESS};
-use self::efi::{EFI_PAGE_MASK, EFI_PAGE_SIZE};
 use self::elf::{Elf64Header, ELF_MACHINE_AA64, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
 use self::paging::{
     associate_address, associate_direct_map_address, estimate_num_of_pages_to_direct_map,
-    init_ttbr1, MemoryPermissionFlags, NUM_OF_ENTRIES_IN_PAGE_TABLE, PAGE_MASK, PAGE_SIZE,
-    TTBR1_EL1_START_ADDRESS,
+    init_ttbr1, set_paging_settings, MemoryPermissionFlags, NUM_OF_ENTRIES_IN_PAGE_TABLE,
+    PAGE_MASK, PAGE_SIZE, TTBR1_EL1_START_ADDRESS,
 };
 
 use core::arch::asm;
@@ -102,6 +105,8 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
             core::mem::transmute_copy(system_table),
         ))
     };
+    dump_system();
+    set_paging_settings();
     let mut num_of_needed_page_tables = 1
         + 3
         + estimate_num_of_pages_to_direct_map(
@@ -129,8 +134,8 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
 
     let mut page_table_address = 0;
     let r = (unsafe { &*system_table.get_boot_services() }.allocate_pages)(
-        EfiAllocateType::AllocateAnyPages,
-        EfiMemoryType::EfiLoaderData,
+        efi::memory_map::EfiAllocateType::AllocateAnyPages,
+        efi::memory_map::EfiMemoryType::EfiLoaderData,
         num_of_needed_page_tables,
         &mut page_table_address,
     );
@@ -145,8 +150,8 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
 
     let mut memory_map_address = 0;
     let r = (unsafe { &*system_table.get_boot_services() }.allocate_pages)(
-        EfiAllocateType::AllocateAnyPages,
-        EfiMemoryType::EfiLoaderData,
+        efi::memory_map::EfiAllocateType::AllocateAnyPages,
+        efi::memory_map::EfiMemoryType::EfiLoaderData,
         1,
         &mut memory_map_address,
     );
@@ -189,7 +194,7 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
     unsafe { cpu::cli() };
 
     /* Down to EL1 if currentEL is EL2 */
-    if unsafe { get_current_el() >> 2 } == 2 {
+    if unsafe { cpu::get_current_el() >> 2 } == 2 {
         down_to_el1();
         /* Never comes here */
     }
@@ -245,6 +250,20 @@ fn boot_latter_half() -> ! {
     };
 
     unreachable!()
+}
+
+fn dump_system() {
+    let el = unsafe { cpu::get_current_el() >> 2 };
+    println!("CurrentEL: {el}");
+    println!("SCTLR_EL1: {:#X}", unsafe { cpu::get_sctlr_el1() });
+    println!("ID_AA64MMFR0_EL1: {:#X}", unsafe {
+        cpu::get_id_aa64mmfr0_el1()
+    });
+    if el == 2 {
+        println!("TCR_EL2: {:#X}", unsafe { cpu::get_tcr_el2() });
+    } else {
+        println!("TCR_EL1: {:#X}", unsafe { cpu::get_tcr_el1() });
+    }
 }
 
 fn alloc_table() -> Option<usize> {
@@ -347,8 +366,8 @@ fn load_elf_binary(
     }
     println!("Entry Point: {:#X}", elf_header.get_entry_point());
     let r = (boot_service.allocate_pages)(
-        EfiAllocateType::AllocateAnyPages,
-        EfiMemoryType::EfiLoaderData,
+        efi::memory_map::EfiAllocateType::AllocateAnyPages,
+        efi::memory_map::EfiMemoryType::EfiLoaderData,
         ((elf_program_headers_size - 1) & EFI_PAGE_MASK) / EFI_PAGE_SIZE + 1,
         &mut boot_info.elf_program_header_address,
     );
@@ -410,8 +429,8 @@ fn load_elf_binary(
             let num_of_pages = aligned_memory_size / EFI_PAGE_SIZE;
             let mut allocated_memory = 0;
             let r = (boot_service.allocate_pages)(
-                EfiAllocateType::AllocateAnyPages,
-                EfiMemoryType::EfiLoaderData,
+                efi::memory_map::EfiAllocateType::AllocateAnyPages,
+                efi::memory_map::EfiMemoryType::EfiLoaderData,
                 num_of_pages,
                 &mut allocated_memory,
             );
@@ -532,8 +551,8 @@ fn load_font_file(
     let num_of_pages = (((file_size as usize - 1) & EFI_PAGE_MASK) / EFI_PAGE_SIZE) + 1;
     let mut allocated_memory = 0;
     let r = (boot_service.allocate_pages)(
-        EfiAllocateType::AllocateAnyPages,
-        EfiMemoryType::EfiLoaderData,
+        efi::memory_map::EfiAllocateType::AllocateAnyPages,
+        efi::memory_map::EfiMemoryType::EfiLoaderData,
         num_of_pages,
         &mut allocated_memory,
     );
