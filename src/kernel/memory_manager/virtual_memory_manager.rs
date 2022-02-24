@@ -23,9 +23,9 @@ use super::system_memory_manager::SystemMemoryManager;
 use super::MemoryError;
 
 use crate::arch::target_arch::context::memory_layout::{
-    DIRECT_MAP_BASE_ADDRESS, DIRECT_MAP_MAX_SIZE, DIRECT_MAP_START_ADDRESS, MALLOC_END_ADDRESS,
-    MALLOC_START_ADDRESS, MAP_END_ADDRESS, MAP_START_ADDRESS, USER_STACK_END_ADDRESS,
-    USER_STACK_START_ADDRESS,
+    get_direct_map_start_address, get_direct_map_max_size, DIRECT_MAP_BASE_ADDRESS,
+    MALLOC_END_ADDRESS, MALLOC_START_ADDRESS, MAP_END_ADDRESS, MAP_START_ADDRESS,
+    USER_STACK_END_ADDRESS, USER_STACK_START_ADDRESS,
 };
 use crate::arch::target_arch::paging::{
     PageManager, MAX_VIRTUAL_ADDRESS, PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE,
@@ -152,13 +152,13 @@ impl VirtualMemoryManager {
         ) + PAGE_SIZE;
         pr_debug!(
             "Map {} ~ {}",
-            DIRECT_MAP_START_ADDRESS,
-            aligned_map_size.to_end_address(DIRECT_MAP_START_ADDRESS)
+            get_direct_map_start_address(),
+            aligned_map_size.to_end_address(get_direct_map_start_address())
         );
         self.map_address_into_page_table_with_size(
             DIRECT_MAP_BASE_ADDRESS,
-            DIRECT_MAP_START_ADDRESS,
-            DIRECT_MAP_MAX_SIZE.min(aligned_map_size),
+            get_direct_map_start_address(),
+            get_direct_map_max_size().min(aligned_map_size),
             MemoryPermissionFlags::new(true, true, true, false),
             MemoryOptionFlags::KERNEL,
             pm_manager,

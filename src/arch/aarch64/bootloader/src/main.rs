@@ -52,8 +52,8 @@ static mut BOOT_INFO: MaybeUninit<BootInformation> = MaybeUninit::uninit();
 const KERNEL_PATH: &str = "\\EFI\\BOOT\\kernel.elf";
 const FONT_PATH: &str = "\\EFI\\BOOT\\font";
 
-const DIRECT_MAP_START_ADDRESS: usize = 0xffff_0000_0000_0000;
-const DIRECT_MAP_END_ADDRESS: usize = 0xffff_7fff_ffff_ffff;
+static mut DIRECT_MAP_START_ADDRESS: usize = 0xffff_0000_0000_0000;
+const DIRECT_MAP_END_ADDRESS: usize = 0xffff_ff1f_ffff_ffff;
 const DIRECT_MAP_BASE_ADDRESS: usize = 0;
 
 const ELF_64_HEADER_SIZE: usize = core::mem::size_of::<Elf64Header>();
@@ -105,12 +105,13 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
             core::mem::transmute_copy(system_table),
         ))
     };
-    dump_system();
     set_paging_settings();
+    dump_system();
+
     let mut num_of_needed_page_tables = 1
         + 3
         + estimate_num_of_pages_to_direct_map(
-            DIRECT_MAP_END_ADDRESS - DIRECT_MAP_START_ADDRESS + 1,
+            DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS } + 1,
         );
     load_elf_binary(
         main_handle,
@@ -236,9 +237,9 @@ fn boot_latter_half() -> ! {
 
     associate_direct_map_address(
         DIRECT_MAP_BASE_ADDRESS,
-        DIRECT_MAP_START_ADDRESS,
+        unsafe { DIRECT_MAP_START_ADDRESS },
         MemoryPermissionFlags::data(),
-        DIRECT_MAP_END_ADDRESS - DIRECT_MAP_START_ADDRESS + 1,
+        DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS } + 1,
         alloc_table,
     )
     .expect("Failed to setup direct map");
@@ -259,6 +260,13 @@ fn dump_system() {
     println!("ID_AA64MMFR0_EL1: {:#X}", unsafe {
         cpu::get_id_aa64mmfr0_el1()
     });
+    println!(
+        "DIRECT_MAP_START_ADDRESS: {:#X} ~ {:#X}(Physical Address: {:#X} ~ {:#X})",
+        unsafe { DIRECT_MAP_START_ADDRESS },
+        DIRECT_MAP_END_ADDRESS,
+        DIRECT_MAP_BASE_ADDRESS,
+        DIRECT_MAP_BASE_ADDRESS + (DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS })
+    );
     if el == 2 {
         println!("TCR_EL2: {:#X}", unsafe { cpu::get_tcr_el2() });
     } else {

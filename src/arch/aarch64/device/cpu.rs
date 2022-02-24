@@ -25,6 +25,9 @@ pub const TCR_EL1_T1SZ: u64 = 0b111111 << TCR_EL1_T1SZ_OFFSET;
 
 pub const SMC_PSCI_CPU_ON: u64 = 0xC4000003;
 
+//pub const ID_AA64MMFR0_EL1_PA_RANGE_OFFSET: u64 = 0;
+//pub const ID_AA64MMFR0_EL1_PA_RANGE: u64 = 0b1111 << ID_AA64MMFR0_EL1_PA_RANGE_OFFSET;
+
 #[no_mangle]
 #[naked]
 pub unsafe extern "C" fn _boot_main() {
@@ -134,6 +137,15 @@ pub unsafe fn get_ttbr1() -> u64 {
 pub unsafe fn set_ttbr0(ttbr1: u64) {
     asm!("msr ttbr0_el1, {:x}", in(reg) ttbr1);
 }
+
+/*
+#[inline(always)]
+pub unsafe fn get_id_aa64mmfr0() -> u64 {
+    let result: u64;
+    asm!("mrs {:x}, id_aa64mmfr0_el1", out(reg) result);
+    result
+}
+*/
 
 #[inline(always)]
 pub unsafe fn get_tcr() -> u64 {

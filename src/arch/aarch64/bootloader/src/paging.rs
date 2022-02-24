@@ -6,7 +6,7 @@ use crate::cpu::{
     get_id_aa64mmfr0_el1, get_sctlr_el1, get_tcr_el1, get_ttbr1_el1, set_mair_el1, set_sctlr_el1,
     set_tcr_el1, set_ttbr1_el1,
 };
-use crate::EFI_PAGE_SIZE;
+use crate::{DIRECT_MAP_START_ADDRESS, EFI_PAGE_SIZE};
 
 pub const NUM_OF_ENTRIES_IN_PAGE_TABLE: usize = 512;
 pub const TTBR1_EL1_START_ADDRESS: usize = 0xFFFF_0000_0000_0000;
@@ -15,7 +15,7 @@ pub const PAGE_SHIFT: usize = 12;
 pub const PAGE_MASK: usize = !0xFFF;
 
 static mut MAIR_INDEX: u8 = 0;
-static mut MINIMUM_T0SZ: u8 = 0;
+static mut MINIMUM_TXSZ: u8 = 16;
 static mut TTBR1_INITIAL_SHIFT: u8 = 0;
 
 /* From kernel/memory_manager/data_type.rs */
@@ -67,13 +67,20 @@ impl MemoryPermissionFlags {
 }
 
 pub fn set_paging_settings() {
+    let pa_range = unsafe { get_id_aa64mmfr0_el1() & 0b1111 };
+    let pa_range = if pa_range > 4 {
+        44 + 4 * (pa_range as u8 - 4)
+    } else {
+        (32 + 4 * pa_range as u8).min(42)
+    };
     unsafe {
-        MINIMUM_T0SZ = 32 - ((get_id_aa64mmfr0_el1() & 0b1111) as u8 - 32);
+        MINIMUM_TXSZ = (32 - (pa_range - 32)).max(MINIMUM_TXSZ);
         TTBR1_INITIAL_SHIFT = PAGE_SHIFT as u8
             + 9 * (3
                 - (4 - (1
-                    + ((64 - MINIMUM_T0SZ - (PAGE_SHIFT as u8) - 1) / ((PAGE_SHIFT as u8) - 3)))
+                    + ((64 - MINIMUM_TXSZ - (PAGE_SHIFT as u8) - 1) / ((PAGE_SHIFT as u8) - 3)))
                     as i8) as u8);
+        DIRECT_MAP_START_ADDRESS = u64::MAX as usize - ((1 << (64 - MINIMUM_TXSZ)) - 1);
     }
 }
 
@@ -99,7 +106,7 @@ pub fn init_ttbr1(top_level_page: usize) {
     /* IRGN1 */
     tcr_el1 |= 0b01 << 24;
     /* T1SZ */
-    tcr_el1 |= unsafe { MINIMUM_T0SZ as u64 } << 16;
+    tcr_el1 |= unsafe { MINIMUM_TXSZ as u64 } << 16;
 
     unsafe { core::ptr::write_bytes(top_level_page as *mut u8, 0, EFI_PAGE_SIZE) };
 
@@ -186,7 +193,7 @@ pub fn associate_address(
         unimplemented!();
     }
     let ttbr1_el1 = unsafe { get_ttbr1_el1() } & (((1 << 48) - 1) ^ 1);
-
+    virtual_address -= u64::MAX as usize - ((1 << (64 - unsafe { MINIMUM_TXSZ })) - 1);
     _associate_address(
         ttbr1_el1 as usize,
         unsafe { TTBR1_INITIAL_SHIFT },
@@ -209,7 +216,7 @@ fn _associate_direct_map_address(
 ) -> Result<(), ()> {
     let table = unsafe { &mut *(table_address as *mut [u64; NUM_OF_ENTRIES_IN_PAGE_TABLE]) };
     let mut index = (*virtual_address >> shift_level) & (NUM_OF_ENTRIES_IN_PAGE_TABLE - 1);
-    if shift_level == (PAGE_SHIFT as u8) + (3 - 1) * 9 {
+    if shift_level <= (PAGE_SHIFT as u8) + (3 - 1) * 9 {
         /* Create Block */
         if (table[index] & 0b11) != 0b00 {
             return Err(());
@@ -260,7 +267,7 @@ fn _associate_direct_map_address(
 
         index += 1;
     }
-    return Ok(());
+    Ok(())
 }
 
 pub fn associate_direct_map_address(
@@ -274,7 +281,7 @@ pub fn associate_direct_map_address(
         unimplemented!();
     }
     let ttbr1_el1 = unsafe { get_ttbr1_el1() } & (((1 << 48) - 1) ^ 1);
-
+    virtual_address -= u64::MAX as usize - ((1 << (64 - unsafe { MINIMUM_TXSZ })) - 1);
     _associate_direct_map_address(
         ttbr1_el1 as usize,
         unsafe { TTBR1_INITIAL_SHIFT },

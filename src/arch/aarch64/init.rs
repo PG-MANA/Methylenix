@@ -4,7 +4,9 @@
 
 use crate::arch::target_arch::boot_info::BootInformation;
 use crate::arch::target_arch::context::{
-    memory_layout::{physical_address_to_direct_map, DIRECT_MAP_BASE_ADDRESS, DIRECT_MAP_MAX_SIZE},
+    memory_layout::{
+        get_direct_map_max_size, physical_address_to_direct_map, DIRECT_MAP_BASE_ADDRESS,
+    },
     ContextManager,
 };
 use crate::arch::target_arch::device::{
@@ -138,7 +140,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     /* Set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
     virtual_memory_manager.init_system(
-        DIRECT_MAP_BASE_ADDRESS + DIRECT_MAP_MAX_SIZE,
+        DIRECT_MAP_BASE_ADDRESS + get_direct_map_max_size(),
         &mut physical_memory_manager,
     );
     mem::forget(mem::replace(

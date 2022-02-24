@@ -11,7 +11,8 @@ mod table_entry;
 use self::table_entry::{TableEntry, NUM_OF_TABLE_ENTRIES, NUM_OF_TOP_LEVEL_TABLE_ENTRIES};
 
 use crate::arch::target_arch::context::memory_layout::{
-    direct_map_to_physical_address, physical_address_to_direct_map,
+    direct_map_to_physical_address, physical_address_to_direct_map, DIRECT_MAP_START_ADDRESS,
+    HIGH_MEMORY_START_ADDRESS,
 };
 use crate::arch::target_arch::device::cpu;
 
@@ -94,16 +95,19 @@ impl PageManager {
 
     /// Init PageManager
     ///
-    /// Currently, this function does nothing.
+    /// This function must be called only once on boot time.
     pub fn init(&mut self, _: &mut PhysicalMemoryManager) -> Result<(), PagingError> {
         let mair = (MAIR_DEVICE_MEMORY_ATTRIBUTE << (MAIR_DEVICE_MEMORY_INDEX << 3))
             | (MAIR_NORMAL_MEMORY_ATTRIBUTE << (MAIR_NORMAL_MEMORY_INDEX << 3));
         unsafe { cpu::set_mair(mair) };
         let mut tcr_el1 = unsafe { cpu::get_tcr() };
-        tcr_el1 = tcr_el1 & !(cpu::TCR_EL1_T0SZ)
-            | (((tcr_el1 & cpu::TCR_EL1_T1SZ) >> cpu::TCR_EL1_T1SZ_OFFSET)
-                << cpu::TCR_EL1_T0SZ_OFFSET);
-        unsafe { cpu::set_tcr(tcr_el1) };
+        let t1sz = (tcr_el1 & cpu::TCR_EL1_T1SZ) >> cpu::TCR_EL1_T1SZ_OFFSET;
+        tcr_el1 = tcr_el1 & !(cpu::TCR_EL1_T0SZ) | (t1sz << cpu::TCR_EL1_T0SZ_OFFSET);
+        unsafe {
+            HIGH_MEMORY_START_ADDRESS = VAddress::new(((1 << t1sz) - 1) << (64 - t1sz));
+            DIRECT_MAP_START_ADDRESS = HIGH_MEMORY_START_ADDRESS;
+            cpu::set_tcr(tcr_el1);
+        }
         return Ok(());
     }
 
@@ -137,7 +141,7 @@ impl PageManager {
         &self,
         virtual_address: VAddress,
     ) -> Result<(VAddress, u8), PagingError> {
-        if (virtual_address.to_usize() >> (u64::BITS - 16)) == 0xffff {
+        if (virtual_address.to_usize() & (1 << (u64::BITS - 1))) != 1 {
             unsafe {
                 Ok((
                     physical_address_to_direct_map(PAddress::new(
@@ -152,6 +156,20 @@ impl PageManager {
             }))
         } else {
             Err(PagingError::EntryIsNotFound)
+        }
+    }
+
+    fn get_canonical_address(address: VAddress) -> Result<VAddress, PagingError> {
+        if address.to_usize() & (1 << (u64::BITS - 1)) != 1 {
+            if address >= unsafe { HIGH_MEMORY_START_ADDRESS } {
+                Ok(unsafe {
+                    VAddress::new(address.to_usize() - HIGH_MEMORY_START_ADDRESS.to_usize())
+                })
+            } else {
+                Err(PagingError::AddressIsNotCanonical)
+            }
+        } else {
+            Ok(address)
         }
     }
 
@@ -211,7 +229,7 @@ impl PageManager {
             self.get_table_and_initial_shit_level(virtual_address)?;
         self._get_target_level3_descriptor(
             pm_manager,
-            virtual_address,
+            Self::get_canonical_address(virtual_address)?,
             table_address,
             initial_shift,
             should_create_entry,
@@ -256,7 +274,12 @@ impl PageManager {
     ) -> Result<&'static mut TableEntry, PagingError> {
         let (table_address, initial_shift) =
             self.get_table_and_initial_shit_level(virtual_address)?;
-        self._get_target_descriptor(pm_manager, virtual_address, table_address, initial_shift)
+        self._get_target_descriptor(
+            pm_manager,
+            Self::get_canonical_address(virtual_address)?,
+            table_address,
+            initial_shift,
+        )
     }
 
     fn set_permission_and_options(
@@ -446,7 +469,7 @@ impl PageManager {
         &self,
         pm_manager: &mut PhysicalMemoryManager,
         mut physical_address: PAddress,
-        mut virtual_address: VAddress,
+        virtual_address: VAddress,
         mut size: MSize,
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
@@ -475,7 +498,7 @@ impl PageManager {
             table_address,
             pm_manager,
             &mut physical_address,
-            &mut virtual_address,
+            &mut Self::get_canonical_address(virtual_address)?,
             &mut size,
             permission,
             option,
@@ -560,7 +583,7 @@ impl PageManager {
         }
         let (table_address, initial_shift) =
             self.get_table_and_initial_shit_level(virtual_address)?;
-
+        let virtual_address = Self::get_canonical_address(virtual_address)?;
         let mut v = virtual_address;
         self._associate_area(
             initial_shift,
@@ -637,7 +660,12 @@ impl PageManager {
     ) -> Result<(), PagingError> {
         let (table_address, initial_shift) =
             self.get_table_and_initial_shit_level(virtual_address)?;
-        if self._cleanup_page_tables(initial_shift, table_address, pm_manager, virtual_address)? {
+        if self._cleanup_page_tables(
+            initial_shift,
+            table_address,
+            pm_manager,
+            Self::get_canonical_address(virtual_address)?,
+        )? {
             Err(PagingError::InvalidPageTable)
         } else {
             Ok(())
@@ -808,7 +836,7 @@ impl PageManager {
 
         let ((table_address, initial_shift), base) = if self.page_table.is_some() {
             if let Some(s) = start {
-                if s >= VAddress::new(0xffff_0000_0000_0000) {
+                if s >= unsafe { HIGH_MEMORY_START_ADDRESS } {
                     kprintln!("Invalid start_address: {}", s);
                     return;
                 }
@@ -820,15 +848,15 @@ impl PageManager {
             )
         } else {
             if let Some(e) = end {
-                if e < VAddress::new(0xffff_0000_0000_0000) {
+                if e < unsafe { HIGH_MEMORY_START_ADDRESS } {
                     kprintln!("Invalid end_address: {}", e);
                     return;
                 }
             }
             (
-                self.get_table_and_initial_shit_level(VAddress::new(0xffff_0000_0000_0000))
+                self.get_table_and_initial_shit_level(unsafe { HIGH_MEMORY_START_ADDRESS })
                     .unwrap(),
-                0xffff_0000_0000_0000usize,
+                unsafe { HIGH_MEMORY_START_ADDRESS }.to_usize(),
             )
         };
         let mut omitted = false;

@@ -55,6 +55,14 @@ pub fn is_address_canonical(start_address: VAddress, end_address: VAddress) -> b
     }
 }
 
+pub fn get_direct_map_start_address() -> VAddress {
+    DIRECT_MAP_START_ADDRESS
+}
+
+pub fn get_direct_map_max_size() -> MSize {
+    DIRECT_MAP_MAX_SIZE
+}
+
 pub const fn kernel_area_to_physical_address(kernel_virtual_address: VAddress) -> PAddress {
     PAddress::new((kernel_virtual_address - KERNEL_MAP_START_ADDRESS).to_usize())
 }
