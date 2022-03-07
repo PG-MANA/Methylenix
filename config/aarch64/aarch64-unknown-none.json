@@ -10,7 +10,7 @@
   "os": "none",
   "max-atomic-width": 128,
   "disable-redzone": true,
-  "features": "+strict-align,-neon,-fp-armv8",
+  "features": "+v8.1a,+strict-align,-neon,-fp-armv8",
   "panic-strategy": "abort",
   "split-debuginfo": "packed",
   "vendor": "unknown",
