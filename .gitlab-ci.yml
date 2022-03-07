@@ -2,10 +2,10 @@ image:    "opensuse/tumbleweed:latest"
 stages:
   - build
 
-build:
-  stage:  build x86_64
+build_x86_64:
+  stage:  build
   script:
-    - zypper in -y curl grub2 grub2-x86_64-efi mtools make gcc lld xorriso
+    - zypper in -y curl grub2 grub2-x86_64-efi mtools make gcc xorriso
     - curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly
     - source ~/.cargo/env
     - rustc --version
@@ -16,9 +16,10 @@ build:
     paths:
       - bin/
 
-  stage:  build AArch64
+build_aarch64:
+  stage:  build
   script:
-    - zypper in -y curl make gcc lld
+    - zypper in -y curl make gcc
     - curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly
     - source ~/.cargo/env
     - rustc --version
