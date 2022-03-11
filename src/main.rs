@@ -4,8 +4,6 @@
 #![feature(alloc_error_handler)]
 #![feature(asm_const)]
 #![feature(asm_sym)]
-#![feature(const_fn_fn_ptr_basics)]
-#![feature(const_fn_trait_bound)]
 #![feature(const_for)]
 #![feature(const_mut_refs)]
 #![feature(const_ptr_offset_from)]
