@@ -50,9 +50,9 @@ const TTBR0_TABLE_ADDRESS_MASK: u64 = ((1 << 48) - 1) ^ 1;
 
 const BLOCK_ENTRY_ENABLED_SHIFT_LEVEL: u8 = (PAGE_SHIFT as u8) + 9 * (3 - 1/* Level 1*/);
 
-const MAIR_NORMAL_MEMORY_INDEX: u64 = 0;
+static mut MAIR_NORMAL_MEMORY_INDEX: u64 = 0;
 const MAIR_NORMAL_MEMORY_ATTRIBUTE: u64 = 0xff;
-const MAIR_DEVICE_MEMORY_INDEX: u64 = 1;
+static mut MAIR_DEVICE_MEMORY_INDEX: u64 = 1;
 const MAIR_DEVICE_MEMORY_ATTRIBUTE: u64 = 0;
 
 const SHAREABILITY_NON_SHAREABLE: u64 = 0;
@@ -97,8 +97,25 @@ impl PageManager {
     ///
     /// This function must be called only once on boot time.
     pub fn init(&mut self, _: &mut PhysicalMemoryManager) -> Result<(), PagingError> {
-        let mair = (MAIR_DEVICE_MEMORY_ATTRIBUTE << (MAIR_DEVICE_MEMORY_INDEX << 3))
-            | (MAIR_NORMAL_MEMORY_ATTRIBUTE << (MAIR_NORMAL_MEMORY_INDEX << 3));
+        let mut mair = unsafe { cpu::get_mair() };
+        for i in 0..=8 {
+            if i == 8 {
+                /* Not Found */
+                unsafe { MAIR_NORMAL_MEMORY_INDEX = 0 };
+                mair = MAIR_NORMAL_MEMORY_ATTRIBUTE << (unsafe { MAIR_NORMAL_MEMORY_INDEX } << 3);
+                break;
+            }
+            if ((mair >> (i << 3)) & 0xff) == MAIR_NORMAL_MEMORY_ATTRIBUTE {
+                unsafe { MAIR_NORMAL_MEMORY_INDEX = i };
+                break;
+            }
+        }
+        /* Set new attributes */
+        unsafe { MAIR_DEVICE_MEMORY_INDEX = if MAIR_NORMAL_MEMORY_INDEX == 0 { 1 } else { 0 } };
+        mair = unsafe {
+            (mair & !(0xff << (MAIR_DEVICE_MEMORY_INDEX << 3)))
+                | (MAIR_DEVICE_MEMORY_ATTRIBUTE << (MAIR_DEVICE_MEMORY_INDEX << 3))
+        };
         unsafe { cpu::set_mair(mair) };
         let mut tcr_el1 = unsafe { cpu::get_tcr() };
         let t1sz = (tcr_el1 & cpu::TCR_EL1_T1SZ) >> cpu::TCR_EL1_T1SZ_OFFSET;
@@ -289,10 +306,10 @@ impl PageManager {
     ) {
         e.set_permission(p);
         if o.is_device_memory() || o.is_io_map() {
-            e.set_memory_attribute_index(MAIR_DEVICE_MEMORY_INDEX);
+            e.set_memory_attribute_index(unsafe { MAIR_DEVICE_MEMORY_INDEX });
             e.set_shareability(SHAREABILITY_NON_SHAREABLE); /* OK..? */
         } else {
-            e.set_memory_attribute_index(MAIR_NORMAL_MEMORY_INDEX);
+            e.set_memory_attribute_index(unsafe { MAIR_NORMAL_MEMORY_INDEX });
             e.set_shareability(SHAREABILITY_INNER_SHAREABLE);
         }
     }

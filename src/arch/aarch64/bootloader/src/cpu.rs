@@ -52,8 +52,10 @@ pub unsafe fn set_sctlr_el1(sctlr_el1: u64) {
     asm!("msr sctlr_el1, {:x}", in(reg) sctlr_el1);
 }
 
-pub unsafe fn set_mair_el1(mair_el1: u64) {
-    asm!("msr mair_el1, {:x}", in(reg) mair_el1);
+pub unsafe fn get_mair_el1() -> u64 {
+    let mair: u64;
+    asm!("mrs {:x}, mair_el1", out(reg) mair);
+    mair
 }
 
 pub unsafe fn cli() {

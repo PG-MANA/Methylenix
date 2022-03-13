@@ -3,7 +3,7 @@
 //!
 
 use crate::cpu::{
-    get_id_aa64mmfr0_el1, get_sctlr_el1, get_tcr_el1, get_ttbr1_el1, set_mair_el1, set_sctlr_el1,
+    get_id_aa64mmfr0_el1, get_mair_el1, get_sctlr_el1, get_tcr_el1, get_ttbr1_el1, set_sctlr_el1,
     set_tcr_el1, set_ttbr1_el1,
 };
 use crate::{DIRECT_MAP_START_ADDRESS, EFI_PAGE_SIZE};
@@ -119,9 +119,13 @@ pub fn init_ttbr1(top_level_page: usize) {
     sctlr_el1 |= (1 << 12) | (1 << 3) | (1 << 2) | 1;
     unsafe { set_sctlr_el1(sctlr_el1) };
 
-    unsafe {
-        set_mair_el1(0xff);
-        MAIR_INDEX = 0;
+    let mut mair_el1 = unsafe { get_mair_el1() };
+    for i in 0..8 {
+        if (mair_el1 & 0xff) == 0xff {
+            unsafe { MAIR_INDEX == i };
+            break;
+        }
+        mair_el1 >>= 8;
     }
 }
 
