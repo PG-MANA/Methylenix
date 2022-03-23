@@ -15,7 +15,7 @@ use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
 use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags};
+use crate::kernel::memory_manager::data_type::{Address, MSize};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::{alloc_non_linear_pages, alloc_pages};
 
@@ -124,8 +124,8 @@ impl InterruptManager {
     /// This function allocates stack and set rsp into TSS.
     fn init_ist(&mut self) {
         let stack_size = ContextManager::DEFAULT_INTERRUPT_STACK_SIZE;
-        let stack = alloc_non_linear_pages!(stack_size, MemoryPermissionFlags::data())
-            .expect("Cannot allocate stack for interrupts.");
+        let stack =
+            alloc_non_linear_pages!(stack_size).expect("Cannot allocate stack for interrupts.");
         assert!(self
             .tss_manager
             .set_ist(IstIndex::TaskSwitch as u8, (stack + stack_size).to_usize()));
@@ -138,11 +138,8 @@ impl InterruptManager {
     /// rsp must be in the range 0 ~ 2.
     #[allow(dead_code)]
     fn set_rsp(&mut self, rsp: u8, stack_size: MSize) -> bool {
-        let stack = alloc_pages!(
-            stack_size.to_order(None).to_page_order(),
-            MemoryPermissionFlags::data()
-        )
-        .expect("Cannot allocate pages for rsp.");
+        let stack = alloc_pages!(stack_size.to_order(None).to_page_order())
+            .expect("Cannot allocate pages for rsp.");
 
         let _lock = self.lock.lock();
         self.tss_manager

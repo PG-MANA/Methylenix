@@ -748,11 +748,8 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
 
     /* Allocate and set temporary stack */
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
-    let stack = alloc_pages!(
-        stack_size.to_order(None).to_page_order(),
-        MemoryPermissionFlags::data()
-    )
-    .expect("Failed to alloc stack for AP");
+    let stack = alloc_pages!(stack_size.to_order(None).to_page_order())
+        .expect("Failed to alloc stack for AP");
     let boot_data = unsafe {
         [
             cpu::get_tcr(),

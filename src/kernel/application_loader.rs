@@ -208,7 +208,7 @@ pub fn load_and_execute(
         return Err(());
     }
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_USER);
-    let stack_address = match alloc_non_linear_pages!(stack_size, MemoryPermissionFlags::data()) {
+    let stack_address = match alloc_non_linear_pages!(stack_size) {
         Ok(v) => v,
         Err(e) => {
             pr_err!("Failed to alloc stack: {:?}", e);
