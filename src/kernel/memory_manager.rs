@@ -448,12 +448,12 @@ impl MemoryManager {
 #[macro_export]
 macro_rules! io_remap {
     ($address:expr, $len:expr, $permission:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
             .io_remap($address, $len, $permission, None)
     };
     ($address:expr, $len:expr, $permission:expr,$option:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
             .io_remap($address, $len, $permission, Some($option))
     };
@@ -462,7 +462,7 @@ macro_rules! io_remap {
 #[macro_export]
 macro_rules! mremap {
     ($old_address:expr, $old_size:expr, $new_size:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
             .mremap($old_address, $old_size, $new_size)
     };
@@ -470,13 +470,22 @@ macro_rules! mremap {
 
 #[macro_export]
 macro_rules! alloc_pages {
+    ($order:expr) => {
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .alloc_pages(
+                $order,
+                $crate::kernel::memory_manager::data_type::MemoryPermissionFlags::data(),
+                None,
+            )
+    };
     ($order:expr, $permission:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
             .alloc_pages($order, $permission, None)
     };
     ($order:expr, $permission:expr, $option:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
             .alloc_pages($order, $permission, Some($option))
     };
@@ -484,13 +493,22 @@ macro_rules! alloc_pages {
 
 #[macro_export]
 macro_rules! alloc_pages_with_physical_address {
+    ($order:expr) => {
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .alloc_pages_with_physical_address(
+                $order,
+                $crate::kernel::memory_manager::data_type::MemoryPermissionFlags::data(),
+                None,
+            )
+    };
     ($order:expr, $permission:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
             .alloc_pages_with_physical_address($order, $permission, None)
     };
     ($order:expr, $permission:expr, $option:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
             .alloc_pages_with_physical_address($order, $permission, Some($option))
     };
@@ -498,22 +516,31 @@ macro_rules! alloc_pages_with_physical_address {
 
 #[macro_export]
 macro_rules! alloc_non_linear_pages {
-    ($order:expr, $permission:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+    ($size:expr) => {
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_nonlinear_pages($order, $permission, None)
+            .alloc_nonlinear_pages(
+                $size,
+                $crate::kernel::memory_manager::data_type::MemoryPermissionFlags::data(),
+                None,
+            )
     };
-    ($order:expr, $permission:expr, $option:expr) => {
+    ($size:expr, $permission:expr) => {
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .alloc_nonlinear_pages($size, $permission, None)
+    };
+    ($size:expr, $permission:expr, $option:expr) => {
         crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
-            .alloc_nonlinear_pages($order, $permission, Some($option))
+            .alloc_nonlinear_pages($size, $permission, Some($option))
     };
 }
 
 #[macro_export]
 macro_rules! free_pages {
     ($address:expr) => {
-        crate::kernel::manager_cluster::get_kernel_manager_cluster()
+        $crate::kernel::manager_cluster::get_kernel_manager_cluster()
             .kernel_memory_manager
             .free($address)
     };
@@ -522,15 +549,15 @@ macro_rules! free_pages {
 #[macro_export]
 macro_rules! kmalloc {
     ($size:expr) => {
-        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+        $crate::kernel::manager_cluster::get_cpu_manager_cluster()
             .memory_allocator
             .kmalloc($size)
     };
 
     ($t:ty, $initial_value:expr) => {
-        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+        $crate::kernel::manager_cluster::get_cpu_manager_cluster()
             .memory_allocator
-            .kmalloc(crate::kernel::memory_manager::data_type::MSize::new(
+            .kmalloc($crate::kernel::memory_manager::data_type::MSize::new(
                 core::mem::size_of::<$t>(),
             ))
             .and_then(|addr| {
@@ -544,17 +571,21 @@ macro_rules! kmalloc {
 #[macro_export]
 macro_rules! kfree {
     ($address:expr, $size:expr) => {
-        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+        $crate::kernel::manager_cluster::get_cpu_manager_cluster()
             .memory_allocator
             .kfree($address, $size)
     };
 
     ($data:expr) => {
-        crate::kernel::manager_cluster::get_cpu_manager_cluster()
+        $crate::kernel::manager_cluster::get_cpu_manager_cluster()
             .memory_allocator
             .kfree(
-                crate::kernel::memory_manager::data_type::VAddress::new($data as *const _ as usize),
-                crate::kernel::memory_manager::data_type::MSize::new(core::mem::size_of_val($data)),
+                $crate::kernel::memory_manager::data_type::VAddress::new(
+                    $data as *const _ as usize,
+                ),
+                $crate::kernel::memory_manager::data_type::MSize::new(core::mem::size_of_val(
+                    $data,
+                )),
             )
     };
 }
