@@ -23,7 +23,7 @@ use super::system_memory_manager::SystemMemoryManager;
 use super::MemoryError;
 
 use crate::arch::target_arch::context::memory_layout::{
-    get_direct_map_start_address, get_direct_map_max_size, DIRECT_MAP_BASE_ADDRESS,
+    get_direct_map_max_size, get_direct_map_start_address, DIRECT_MAP_BASE_ADDRESS,
     MALLOC_END_ADDRESS, MALLOC_START_ADDRESS, MAP_END_ADDRESS, MAP_START_ADDRESS,
     USER_STACK_END_ADDRESS, USER_STACK_START_ADDRESS,
 };
@@ -1115,6 +1115,37 @@ impl VirtualMemoryManager {
         }
         self.lock.unlock();
         return Ok(());
+    }
+
+    pub fn get_physical_address_list(
+        &self,
+        virtual_address: VAddress,
+        offset: MIndex,
+        mut number_of_pages: MIndex,
+        list_buffer: &mut [PAddress],
+    ) -> Result<usize, MemoryError> {
+        Self::check_align(None, Some(virtual_address), None)?;
+        if number_of_pages.to_usize() > list_buffer.len() {
+            number_of_pages = MIndex::new(list_buffer.len());
+        }
+        self.lock.lock();
+        if let Some(vm_entry) = self._find_entry(virtual_address) {
+            let mut n = 0;
+            for index in offset..(offset + number_of_pages) {
+                if let Some(p) = vm_entry.get_object().get_vm_page(index) {
+                    list_buffer[n] = p.get_physical_address();
+                    n += 1;
+                } else {
+                    break;
+                }
+            }
+            self.lock.unlock();
+            Ok(n)
+        } else {
+            self.lock.unlock();
+            pr_err!("Entry is not found.");
+            Err(MemoryError::InvalidAddress)
+        }
     }
 
     fn _find_entry(&self, vm_address: VAddress) -> Option<&'static VirtualMemoryEntry> {

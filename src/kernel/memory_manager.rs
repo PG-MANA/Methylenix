@@ -315,6 +315,21 @@ impl MemoryManager {
         )
     }
 
+    pub fn get_physical_address_list(
+        &self,
+        virtual_address: VAddress,
+        offset: MIndex,
+        number_of_pages: MIndex,
+        list_buffer: &mut [PAddress],
+    ) -> Result<usize, MemoryError> {
+        self.virtual_memory_manager.get_physical_address_list(
+            virtual_address,
+            offset,
+            number_of_pages,
+            list_buffer,
+        )
+    }
+
     pub fn io_remap(
         &mut self,
         physical_address: PAddress,
