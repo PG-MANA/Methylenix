@@ -2,12 +2,11 @@
 //! TTY Manager
 //!
 
-use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
-
 use crate::kernel::collections::fifo::Fifo;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
 use crate::kernel::task_manager::wait_queue::WaitQueue;
+use crate::kernel::task_manager::work_queue::WorkList;
 
 use core::fmt;
 use core::mem::MaybeUninit;
@@ -48,23 +47,15 @@ impl TtyManager {
         }
     }
 
-    pub fn input(&mut self, data: u8) -> fmt::Result {
-        let _lock = if let Ok(l) = self.input_lock.try_lock() {
-            l
-        } else if is_interrupt_enabled() {
-            self.input_lock.lock()
-        } else {
-            return Err(fmt::Error {});
-        };
-        if self.input_queue.enqueue(data) {
+    fn input_into_fifo(data: usize) {
+        let s = &mut get_kernel_manager_cluster().kernel_tty_manager;
+        let _lock = s.input_lock.lock();
+        if s.input_queue.enqueue(data as u8) {
             #[allow(unused_must_use)]
-            if let Err(e) = self.input_wait_queue.wakeup_all() {
+            if let Err(e) = s.input_wait_queue.wakeup_all() {
                 use core::fmt::Write;
-                writeln!(self, "Cannot wakeup sleeping threads. Error: {:?}", e);
+                writeln!(s, "Failed to wakeup sleeping threads: {:?}", e);
             }
-            Ok(())
-        } else {
-            Err(fmt::Error {})
         }
     }
 
@@ -95,11 +86,21 @@ impl TtyManager {
         }
     }
 
+    pub fn input_from_interrupt_handler(&mut self, c: u8) {
+        let work = WorkList::new(Self::input_into_fifo, c as usize);
+        #[allow(unused_must_use)]
+        if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(work) {
+            use core::fmt::Write;
+            writeln!(self, "Failed to add work for key event: {:?}", e);
+        }
+    }
+
     pub fn puts(&mut self, s: &str) -> fmt::Result {
         let _lock = self.output_lock.lock();
 
         if self.output_driver.is_none() {
-            return Err(fmt::Error {});
+            return Ok(());
+            //return Err(fmt::Error {});
         }
 
         for c in s.bytes().into_iter() {
@@ -122,6 +123,9 @@ impl TtyManager {
     }
 
     fn _flush(&mut self) -> fmt::Result {
+        if self.output_driver.is_none() {
+            return Ok(());
+        }
         /* output_driver must be some and locked */
         let mut buffer: [u8; Self::DEFAULT_OUTPUT_BUFFER_SIZE] =
             [unsafe { MaybeUninit::uninit().assume_init() }; Self::DEFAULT_OUTPUT_BUFFER_SIZE];

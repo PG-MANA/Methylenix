@@ -4,10 +4,11 @@
 
 use super::FileManager;
 
-use crate::free_pages;
 use crate::kernel::collections::guid::Guid;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::Address;
+use crate::kernel::memory_manager::data_type::{Address, MSize};
+
+use crate::{alloc_non_linear_pages, free_pages};
 
 const GPT_OFFSET: usize = 0x200;
 const GPT_SIGNATURE_OFFSET: usize = 0x00;
@@ -29,42 +30,51 @@ const PARTITION_GUID_LINUX_DATA: Guid =
     Guid::new(0x0FC63DAF, 0x8483, 0x4772, 0x8E79, 0x3D69D8477DE4);
 
 pub fn detect_file_system(manager: &mut FileManager, block_device_id: usize) {
-    /* Read the first 4KiB */
     let initial_read_size = 512 * 2;
-    let first_sector_data = match get_kernel_manager_cluster().block_device_manager.read(
-        block_device_id,
-        0,
-        initial_read_size,
-    ) {
-        Ok(address) => address,
-        Err(e) => {
-            pr_err!("Failed to read data from disk: {:?}", e);
-            return;
-        }
-    };
-    let lba_sector_size = get_kernel_manager_cluster()
+    let lba_block_size = get_kernel_manager_cluster()
         .block_device_manager
-        .get_lba_sector_size(block_device_id);
+        .get_lba_block_size(block_device_id);
+    let first_block_data =
+        match alloc_non_linear_pages!(MSize::new(initial_read_size).page_align_up()) {
+            Ok(a) => a,
+
+            Err(e) => {
+                pr_err!("Failed to allocate memory: {:?}", e);
+                return;
+            }
+        };
+
+    if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
+        block_device_id,
+        first_block_data,
+        0,
+        (initial_read_size as u64 / lba_block_size).max(1),
+    ) {
+        pr_err!("Failed to read data from disk: {:?}", e);
+        return;
+    }
 
     /* Skip MBR */
 
     /* Check GPT Signature, Version, and header size */
-    let gpt_header_address = first_sector_data.to_usize() + GPT_OFFSET;
+    let gpt_header_address = first_block_data.to_usize() + GPT_OFFSET;
     if unsafe { *((gpt_header_address + GPT_SIGNATURE_OFFSET) as *const [u8; 8]) } != GPT_SIGNATURE
     {
+        let _ = free_pages!(first_block_data);
         pr_err!("Invalid GPT signature");
-        let _ = free_pages!(first_sector_data);
         return;
     }
     let version =
         u32::from_le(unsafe { *((gpt_header_address + GPT_VERSION_OFFSET) as *const u32) });
     if version != SUPPORTED_GPT_VERSION {
+        let _ = free_pages!(first_block_data);
         pr_err!("Unsupported version: {:#X}", version);
         return;
     }
     if u32::from_le(unsafe { *((gpt_header_address + GPT_HEADER_SIZE_OFFSET) as *const u32) })
         != GPT_HEADER_SIZE
     {
+        let _ = free_pages!(first_block_data);
         pr_err!("Invalid header size");
         return;
     }
@@ -92,26 +102,31 @@ pub fn detect_file_system(manager: &mut FileManager, block_device_id: usize) {
         *((gpt_header_address + GPT_SIZE_OF_PARTITION_ENTRY_OFFSET) as *const u32)
     });
 
-    let _ = free_pages!(first_sector_data);
+    let _ = free_pages!(first_block_data);
     drop(gpt_header_address);
-    drop(first_sector_data);
+    drop(first_block_data);
 
-    'sector_loop: for sector in
-        0..=((number_of_partitions * partition_entry_size) as usize / lba_sector_size)
+    'sector_loop: for block in
+        0..=((number_of_partitions * partition_entry_size) as usize / lba_block_size as usize)
     {
-        let partition_entries = match get_kernel_manager_cluster()
-            .block_device_manager
-            .read_by_lba(
-                block_device_id,
-                starting_lba_partition_entry as usize + sector,
-                1,
-            ) {
-            Ok(address) => address,
-            Err(e) => {
-                pr_err!("Failed to read data from disk: {:?}", e);
-                return;
-            }
-        };
+        let partition_entries =
+            match alloc_non_linear_pages!(MSize::new(lba_block_size as usize).page_align_up()) {
+                Ok(a) => a,
+                Err(e) => {
+                    pr_err!("Failed to allocate memory: {:?}", e);
+                    return;
+                }
+            };
+
+        if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
+            block_device_id,
+            partition_entries,
+            starting_lba_partition_entry + block as u64,
+            1,
+        ) {
+            pr_err!("Failed to read data from disk: {:?}", e);
+            return;
+        }
 
         for i in 0..(number_of_partitions as usize) {
             let partition_entry =
@@ -139,12 +154,7 @@ pub fn detect_file_system(manager: &mut FileManager, block_device_id: usize) {
                 starting_lba,
                 ending_lba,
             );
-            manager.analysis_partition(
-                block_device_id,
-                starting_lba as usize,
-                ending_lba as usize,
-                lba_sector_size,
-            );
+            manager.analysis_partition(block_device_id, starting_lba, ending_lba, lba_block_size);
         }
         let _ = free_pages!(partition_entries);
     }

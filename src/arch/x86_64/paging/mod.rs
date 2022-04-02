@@ -29,7 +29,7 @@ use crate::arch::target_arch::device::cpu;
 
 //use crate::kernel::kernel_memory_manager::physical_memory_manager::PhysicalMemoryManager;
 use crate::kernel::memory_manager::data_type::{
-    Address, MOrder, MSize, MemoryPermissionFlags, PAddress, VAddress,
+    Address, MOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 
@@ -70,7 +70,7 @@ pub struct PageManager {
 /// Paging Error enum
 ///
 /// This enum is used to pass error from PageManager.
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Copy, Debug)]
 pub enum PagingError {
     MemoryCacheRanOut,
     MemoryCacheOverflowed,
@@ -404,6 +404,7 @@ impl PageManager {
         physical_address: PAddress,
         virtual_address: VAddress,
         permission: MemoryPermissionFlags,
+        _: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if ((physical_address.to_usize() & !PAGE_MASK) != 0)
             || ((virtual_address.to_usize() & !PAGE_MASK) != 0)
@@ -446,6 +447,7 @@ impl PageManager {
         virtual_address: VAddress,
         size: MSize,
         permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if ((physical_address.to_usize() & !PAGE_MASK) != 0)
             || ((virtual_address.to_usize() & !PAGE_MASK) != 0)
@@ -460,6 +462,7 @@ impl PageManager {
                 physical_address,
                 virtual_address,
                 permission,
+                option,
             );
         }
 
@@ -531,6 +534,7 @@ impl PageManager {
                 processing_physical_address,
                 processing_virtual_address,
                 permission,
+                option,
             )?;
             processed_size += PAGE_SIZE;
         }
@@ -546,6 +550,7 @@ impl PageManager {
         pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
         permission: MemoryPermissionFlags,
+        _: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if (virtual_address.to_usize() & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);
@@ -755,6 +760,17 @@ impl PageManager {
         pml4e.set_address_set(false);
 
         Ok(())
+    }
+
+    pub fn destroy_page_table(
+        &mut self,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), PagingError> {
+        pm_manager
+            .free(direct_map_to_physical_address(self.pml4), PAGE_SIZE, false)
+            .or(Err(PagingError::MemoryCacheOverflowed))?;
+        self.pml4 = VAddress::new(0);
+        return Ok(());
     }
 
     /// Allocate the page table.

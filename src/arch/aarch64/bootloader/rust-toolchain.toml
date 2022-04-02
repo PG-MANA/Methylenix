@@ -1,0 +1,3 @@
+[toolchain]
+targets = ["aarch64-unknown-none"] 
+channel = "nightly"

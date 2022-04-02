@@ -9,9 +9,9 @@ mod path_info;
 
 pub use self::path_info::{PathInfo, PathInfoIter};
 
-use crate::free_pages;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::VAddress;
+use crate::kernel::memory_manager::data_type::{MSize, VAddress};
+use crate::{alloc_non_linear_pages, free_pages};
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -24,10 +24,10 @@ pub struct FileManager {
 //#[derive(Clone)]
 struct PartitionInfo {
     device_id: usize,
-    starting_lba: usize,
+    starting_lba: u64,
     #[allow(dead_code)]
-    ending_lba: usize,
-    lba_block_size: usize,
+    ending_lba: u64,
+    lba_block_size: u64,
 }
 
 pub struct FileInfo {
@@ -80,34 +80,42 @@ impl FileManager {
     fn analysis_partition(
         &mut self,
         device_id: usize,
-        starting_lba: usize,
-        ending_lba: usize,
-        lba_sector_size: usize,
+        starting_lba: u64,
+        ending_lba: u64,
+        lba_block_size: u64,
     ) {
-        let first_block = match get_kernel_manager_cluster()
-            .block_device_manager
-            .read_by_lba(device_id, starting_lba, 1)
-        {
-            Ok(address) => address,
-            Err(e) => {
-                pr_err!("Failed to read data from disk: {:?}", e);
-                return;
-            }
-        };
+        let first_block_data =
+            match alloc_non_linear_pages!(MSize::new(lba_block_size as usize).page_align_up()) {
+                Ok(a) => a,
+                Err(e) => {
+                    pr_err!("Failed to allocate memory: {:?}", e);
+                    return;
+                }
+            };
+        if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
+            device_id,
+            first_block_data,
+            starting_lba,
+            1,
+        ) {
+            pr_err!("Failed to read data from disk: {:?}", e);
+            return;
+        }
+
         let partition_info = PartitionInfo {
             device_id,
             starting_lba,
             ending_lba,
-            lba_block_size: lba_sector_size,
+            lba_block_size,
         };
 
-        match fat32::try_detect_file_system(&partition_info, first_block) {
+        match fat32::try_detect_file_system(&partition_info, first_block_data) {
             Ok(f) => {
                 self.partition_list.push((partition_info, Box::new(f)));
             }
             Err(_) => {}
         }
-        let _ = free_pages!(first_block);
+        let _ = free_pages!(first_block_data);
         return;
     }
 

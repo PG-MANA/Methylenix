@@ -2,17 +2,27 @@ image:    "opensuse/tumbleweed:latest"
 stages:
   - build
 
-build:
+build_x86_64:
   stage:  build
   script:
-    - zypper in -y curl grub2 grub2-x86_64-efi mtools make gcc lld xorriso
+    - zypper in -y curl grub2 grub2-x86_64-efi mtools make gcc xorriso
     - curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly
     - source ~/.cargo/env
     - rustc --version
     - cargo --version
     - rustup component add rust-src
-    - cargo install cargo-xbuild
     - make iso
   artifacts:
     paths:
       - bin/
+
+build_aarch64:
+  stage:  build
+  script:
+    - zypper in -y curl make gcc
+    - curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly
+    - source ~/.cargo/env
+    - rustc --version
+    - cargo --version
+    - rustup component add rust-src
+    - make TARGET_ARCH=aarch64

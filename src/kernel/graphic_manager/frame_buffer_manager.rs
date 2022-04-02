@@ -5,6 +5,7 @@
 //!
 
 use crate::io_remap;
+use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
@@ -25,6 +26,20 @@ impl FrameBufferManager {
             frame_buffer_height: 0,
             frame_buffer_color_depth: 0,
         }
+    }
+
+    pub fn init_by_efi_information(
+        &mut self,
+        base_address: usize,
+        _memory_size: usize,
+        pixel_info: &EfiGraphicsOutputModeInformation,
+    ) {
+        self.frame_buffer_address = base_address;
+        self.frame_buffer_width = pixel_info.horizontal_resolution as usize;
+        self.frame_buffer_height = pixel_info.vertical_resolution as usize;
+        self.frame_buffer_color_depth = 32;
+
+        return;
     }
 
     pub fn init_by_multiboot_information(&mut self, frame_buffer_info: &FrameBufferInfo) -> bool {

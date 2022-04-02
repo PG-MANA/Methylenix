@@ -132,6 +132,10 @@ impl ProcessEntry {
         self.privilege_level
     }
 
+    pub const fn get_parent_process(&self) -> *mut Self {
+        self.parent
+    }
+
     pub fn get_memory_manager(&self) -> *mut MemoryManager {
         let _lock = self.lock.lock();
         let m = self.memory_manager;
@@ -223,5 +227,28 @@ impl ProcessEntry {
         }
         self.num_of_thread -= 1;
         return Ok(());
+    }
+
+    pub fn take_thread(&mut self) -> Result<Option<&mut ThreadEntry>, TaskError> {
+        assert!(self.lock.is_locked());
+        if self.num_of_thread == 0 {
+            Ok(None)
+        } else if self.num_of_thread == 1 {
+            let single = unsafe { &mut *self.single_thread.unwrap() };
+            let _lock = single.lock.lock();
+            self.remove_thread(single)?;
+            drop(_lock);
+            Ok(Some(single))
+        } else {
+            let thread = unsafe {
+                self.thread
+                    .get_first_entry_mut(offset_of!(ThreadEntry, t_list))
+                    .unwrap()
+            };
+            let _lock = thread.lock.lock();
+            self.remove_thread(thread)?;
+            drop(_lock);
+            Ok(Some(thread))
+        }
     }
 }

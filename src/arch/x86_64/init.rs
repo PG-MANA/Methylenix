@@ -1,33 +1,37 @@
 //!
-//! Init codes
+//! Initialization Functions
 //!
 //! This module including init codes for device, memory, and task system.
 //! This module is called by boot function.
 
 pub mod multiboot;
 
-use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
-use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::device::io_apic::IoApicManager;
 use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
 use crate::arch::target_arch::device::pci::ArchDependPciManager;
 use crate::arch::target_arch::device::pit::PitManager;
 use crate::arch::target_arch::device::{cpu, pic};
-use crate::arch::target_arch::interrupt::{InterruptIndex, InterruptManager};
+use crate::arch::target_arch::interrupt::{idt::GateDescriptor, InterruptIndex, InterruptManager};
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::{
+    context::memory_layout::physical_address_to_direct_map, context::ContextManager,
+};
 
 use crate::kernel::block_device::BlockDeviceManager;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
-use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
-use crate::kernel::drivers::acpi::table::{madt::MadtManager, mcfg::McfgManager};
-use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::acpi::{
+    device::AcpiDeviceManager,
+    table::{madt::MadtManager, mcfg::McfgManager},
+    AcpiManager,
+};
 use crate::kernel::drivers::pci::PciManager;
 use crate::kernel::file_manager::FileManager;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
-use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
+use crate::kernel::memory_manager::{
+    data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
+    memory_allocator::MemoryAllocator,
 };
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::{run_queue::RunQueue, TaskManager};
@@ -38,6 +42,8 @@ use core::sync::atomic::AtomicBool;
 
 /// Memory Areas for PhysicalMemoryManager
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; PAGE_SIZE_USIZE * 2];
+
+pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// Init TaskManager
 ///
@@ -318,8 +324,6 @@ pub fn init_global_timer() {
     ));
 }
 
-pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
-
 /// Allocate CpuManager and set self pointer
 pub fn setup_cpu_manager_cluster(
     cpu_manager_address: Option<VAddress>,
@@ -494,6 +498,77 @@ pub fn init_multiple_processors_ap() {
     if num_of_cpu != 1 {
         pr_info!("Found {} CPUs", num_of_cpu);
     }
+}
+
+#[no_mangle]
+pub extern "C" fn ap_boot_main() -> ! {
+    /* Extern Assembly Symbols */
+    extern "C" {
+        pub static gdt: u64; /* boot/common.s */
+        pub static tss_descriptor_address: u64; /* boot/common.s */
+    }
+    unsafe {
+        cpu::enable_sse();
+        cpu::enable_fs_gs_base();
+    }
+
+    /* Apply kernel paging table */
+    get_kernel_manager_cluster()
+        .kernel_memory_manager
+        .set_paging_table();
+
+    /* Setup CPU Manager, it contains individual data of CPU */
+    let cpu_manager = setup_cpu_manager_cluster(None);
+
+    /* Setup memory management system */
+    let mut memory_allocator = MemoryAllocator::new();
+    memory_allocator
+        .init()
+        .expect("Failed to init MemoryAllocator");
+    mem::forget(mem::replace(
+        &mut cpu_manager.memory_allocator,
+        memory_allocator,
+    ));
+
+    /* Copy GDT from BSP and create own TSS */
+    let gdt_address = unsafe { &gdt as *const _ as usize };
+    GateDescriptor::fork_gdt_from_other_and_create_tss_and_set(gdt_address, unsafe {
+        &tss_descriptor_address as *const _ as usize - gdt_address
+    } as u16);
+
+    /* Setup InterruptManager(including LocalApicManager) */
+    let mut interrupt_manager = InterruptManager::new();
+    interrupt_manager.init_ap(
+        &mut get_kernel_manager_cluster()
+            .boot_strap_cpu_manager
+            .interrupt_manager,
+    );
+    interrupt_manager.init_ipi();
+    cpu_manager.cpu_id = interrupt_manager.get_local_apic_manager().get_apic_id() as usize;
+    mem::forget(mem::replace(
+        &mut cpu_manager.interrupt_manager,
+        interrupt_manager,
+    ));
+
+    init_local_timer();
+    init_task_ap(ap_idle);
+    init_work_queue();
+    /* Switch to ap_idle task with own stack */
+    cpu_manager.run_queue.start()
+}
+
+fn ap_idle() -> ! {
+    /* Tell BSP completing of init */
+    AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
+    get_cpu_manager_cluster()
+        .arch_depend_data
+        .local_apic_timer
+        .start_interrupt(
+            get_cpu_manager_cluster()
+                .interrupt_manager
+                .get_local_apic_manager(),
+        );
+    super::idle();
 }
 
 /// Initialize Block Device Manager and File System Manager

@@ -12,6 +12,7 @@ pub mod collections {
     #[macro_use]
     pub mod ptr_linked_list;
 }
+pub mod application_loader;
 pub mod block_device;
 pub mod drivers;
 pub mod file_manager;
@@ -20,5 +21,6 @@ pub mod manager_cluster;
 pub mod memory_manager;
 pub mod panic;
 pub mod sync;
+pub mod system_call;
 pub mod task_manager;
 pub mod timer_manager;

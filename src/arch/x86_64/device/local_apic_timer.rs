@@ -66,7 +66,7 @@ impl LocalApicTimer {
     ///
     /// This function is called when the interrupt occurred.
     /// Currently, this function sends end of interrupt and switches to next thread.
-    pub fn local_apic_timer_handler(_: usize) {
+    pub fn local_apic_timer_handler(_: usize) -> bool {
         loop {
             if get_cpu_manager_cluster().cpu_id
                 == get_kernel_manager_cluster().boot_strap_cpu_manager.cpu_id
@@ -93,7 +93,7 @@ impl LocalApicTimer {
             .arch_depend_data
             .local_apic_timer
             .write_deadline();
-        get_cpu_manager_cluster().interrupt_manager.send_eoi();
+        return true;
     }
 
     fn calculate_next_reload_value(&self, ms: u64) -> (u64, bool) {

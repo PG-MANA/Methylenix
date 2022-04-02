@@ -4,9 +4,9 @@
 
 use super::{PartitionInfo, PartitionManager, PathInfo};
 
-use crate::free_pages;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::{alloc_non_linear_pages, free_pages};
 
 use alloc::boxed::Box;
 use core::any::Any;
@@ -75,21 +75,25 @@ pub(super) fn try_detect_file_system(
         sectors_per_cluster
     );
 
-    let fat_data = match get_kernel_manager_cluster()
-        .block_device_manager
-        .read_by_lba(
-            partition_info.device_id,
-            partition_info.starting_lba
-                + number_of_reserved_sectors as usize * bytes_per_sector as usize
-                    / partition_info.lba_block_size,
-            (fat_size as usize / partition_info.lba_block_size).max(1),
-        ) {
-        Ok(address) => address,
+    let fat = match alloc_non_linear_pages!(MSize::new(fat_size as usize).page_align_up()) {
+        Ok(a) => a,
         Err(e) => {
-            pr_err!("Failed to read FAT from disk: {:?}", e);
+            pr_err!("Failed to allocate memory for FAT: {:?}", e);
             return Err(());
         }
     };
+    if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
+        partition_info.device_id,
+        fat,
+        partition_info.starting_lba
+            + (number_of_reserved_sectors as u64) * (bytes_per_sector as u64)
+                / (partition_info.lba_block_size as u64),
+        (fat_size as u64 / partition_info.lba_block_size).max(1),
+    ) {
+        let _ = free_pages!(fat);
+        pr_err!("Failed to read FAT from disk: {:?}", e);
+        return Err(());
+    }
     let fat32_info = Fat32Info {
         bytes_per_sector,
         sectors_per_cluster,
@@ -97,7 +101,7 @@ pub(super) fn try_detect_file_system(
         fat_size,
         number_of_fats,
         root_cluster,
-        fat: fat_data,
+        fat,
     };
 
     fat32_info.list_files(partition_info, root_cluster, 0);
@@ -148,7 +152,7 @@ impl PartitionManager for Fat32Info {
         partition_info: &PartitionInfo,
         file_info: &Box<dyn Any>,
         offset: usize,
-        mut length: usize,
+        length: usize,
         buffer: VAddress,
     ) -> Result<(), ()> {
         let entry_info = file_info.downcast_ref::<Fat32EntryInfo>().unwrap();
@@ -170,12 +174,6 @@ impl PartitionManager for Fat32Info {
             );
             return Err(());
         }
-        let bytes_per_cluster = self.sectors_per_cluster as usize * self.bytes_per_sector as usize;
-        let number_of_clusters_to_skip = offset / bytes_per_cluster;
-        let mut memory_offset = offset - number_of_clusters_to_skip * bytes_per_cluster;
-        //let num_of_clusters = ((length + memory_offset) / bytes_per_cluster).max(1);
-
-        /* TODO: avoid memory copy */
 
         macro_rules! next_cluster {
             ($c:expr) => {
@@ -189,33 +187,70 @@ impl PartitionManager for Fat32Info {
             };
         }
 
+        let bytes_per_cluster = self.sectors_per_cluster as usize * self.bytes_per_sector as usize;
+        let number_of_clusters_to_skip = offset / bytes_per_cluster;
+        let mut page_buffer_offset = offset - number_of_clusters_to_skip * bytes_per_cluster;
         let mut reading_cluster = entry_info.entry_cluster;
+        let mut buffer_pointer = 0usize;
+
         for _ in 0..number_of_clusters_to_skip {
             reading_cluster = next_cluster!(reading_cluster);
         }
-        let mut buffer_pointer = 0usize;
         loop {
-            let data =
-                match self.read_sector(partition_info, self.cluster_to_sector(reading_cluster)) {
-                    Ok(address) => address,
+            /* try to read max continued sectors */
+            let mut number_of_sectors = 0;
+            let mut read_bytes = 0;
+            let first_cluster = reading_cluster;
+
+            loop {
+                if (length - read_bytes + page_buffer_offset) <= bytes_per_cluster {
+                    number_of_sectors +=
+                        (1 + ((length - read_bytes + page_buffer_offset).max(1) - 1)
+                            / self.bytes_per_sector as usize) as u32;
+                    read_bytes += length - read_bytes;
+                    break;
+                } else {
+                    number_of_sectors += self.sectors_per_cluster as u32;
+                    read_bytes += bytes_per_cluster - page_buffer_offset;
+                }
+                let next_cluster = next_cluster!(reading_cluster);
+                if next_cluster != reading_cluster + 1 {
+                    break;
+                }
+                reading_cluster = next_cluster;
+            }
+            let page_buffer =
+                match alloc_non_linear_pages!(
+                    MSize::new(read_bytes + page_buffer_offset).page_align_up()
+                ) {
+                    Ok(a) => a,
                     Err(e) => {
-                        pr_err!("Failed to read data from disk: {:?}", e);
+                        pr_err!("Failed to allocate memory for read: {:?}", e);
                         return Err(());
                     }
                 };
-            let copy_size = bytes_per_cluster.min(length);
+
+            if let Err(e) = self.read_sectors(
+                partition_info,
+                page_buffer,
+                self.cluster_to_sector(first_cluster),
+                number_of_sectors,
+            ) {
+                pr_err!("Failed to read data from disk: {:?}", e);
+                let _ = free_pages!(page_buffer);
+                return Err(());
+            };
             unsafe {
                 core::ptr::copy_nonoverlapping(
-                    (data.to_usize() + memory_offset) as *const u8,
+                    (page_buffer.to_usize() + page_buffer_offset) as *const u8,
                     (buffer.to_usize() + buffer_pointer) as *mut u8,
-                    copy_size,
+                    read_bytes,
                 )
             };
-            let _ = free_pages!(data);
-            memory_offset = 0;
-            buffer_pointer += copy_size;
-            length -= copy_size;
-            if length == 0 {
+            let _ = free_pages!(page_buffer);
+            buffer_pointer += read_bytes;
+            page_buffer_offset = 0;
+            if length == buffer_pointer {
                 break;
             }
             reading_cluster = next_cluster!(reading_cluster);
@@ -231,15 +266,28 @@ impl Fat32Info {
         mut cluster: u32,
         target_entry_name: &str,
     ) -> Result<Fat32EntryInfo, ()> {
+        let directory_list_data = match alloc_non_linear_pages!(MSize::new(
+            self.bytes_per_sector as usize
+        )
+        .page_align_up())
+        {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to allocate memory for directory entries: {:?}", e);
+                return Err(());
+            }
+        };
+
         loop {
-            let directory_list_data =
-                match self.read_sector(partition_info, self.cluster_to_sector(cluster)) {
-                    Ok(address) => address,
-                    Err(e) => {
-                        pr_err!("Failed to read data from disk: {:?}", e);
-                        return Err(());
-                    }
-                };
+            if let Err(e) = self.read_sectors(
+                partition_info,
+                directory_list_data,
+                self.cluster_to_sector(cluster),
+                1,
+            ) {
+                pr_err!("Failed to read data from disk: {:?}", e);
+                return Err(());
+            }
 
             let limit = (self.bytes_per_sector as usize) * self.sectors_per_cluster as usize;
             let mut pointer = 0;
@@ -309,15 +357,28 @@ impl Fat32Info {
     }
 
     fn list_files(&self, partition_info: &PartitionInfo, mut cluster: u32, indent: usize) {
+        let directory_list_data = match alloc_non_linear_pages!(MSize::new(
+            self.bytes_per_sector as usize
+        )
+        .page_align_up())
+        {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to allocate memory for directory entries: {:?}", e);
+                return;
+            }
+        };
+
         loop {
-            let directory_list_data =
-                match self.read_sector(partition_info, self.cluster_to_sector(cluster)) {
-                    Ok(address) => address,
-                    Err(e) => {
-                        pr_err!("Failed to read data from disk: {:?}", e);
-                        return;
-                    }
-                };
+            if let Err(e) = self.read_sectors(
+                partition_info,
+                directory_list_data,
+                self.cluster_to_sector(cluster),
+                1,
+            ) {
+                pr_err!("Failed to read data from disk: {:?}", e);
+                return;
+            }
             let limit = (self.bytes_per_sector as usize) * self.sectors_per_cluster as usize;
             let mut pointer = 0;
             while limit > pointer {
@@ -389,16 +450,23 @@ impl Fat32Info {
         return;
     }
 
-    fn read_sector(&self, partition_info: &PartitionInfo, sector: u32) -> Result<VAddress, ()> {
-        get_kernel_manager_cluster()
-            .block_device_manager
-            .read_by_lba(
-                partition_info.device_id,
-                partition_info.starting_lba + sector as usize,
-                (self.sectors_per_cluster as usize * self.bytes_per_sector as usize
-                    / partition_info.lba_block_size)
-                    .max(1),
-            )
+    fn read_sectors(
+        &self,
+        partition_info: &PartitionInfo,
+        buffer: VAddress,
+        base_sector: u32,
+        number_of_sectors: u32,
+    ) -> Result<(), ()> {
+        get_kernel_manager_cluster().block_device_manager.read_lba(
+            partition_info.device_id,
+            buffer,
+            partition_info.starting_lba
+                + (base_sector as u64) * (self.bytes_per_sector as u64)
+                    / partition_info.lba_block_size,
+            (((number_of_sectors as u64) * (self.bytes_per_sector as u64))
+                / partition_info.lba_block_size)
+                .max(1),
+        )
     }
 
     fn cluster_to_sector(&self, cluster: u32) -> u32 {

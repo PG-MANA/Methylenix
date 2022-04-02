@@ -141,7 +141,7 @@ impl SmbusManager {
     const SMBUS_HOST_NOTIFY_INTERRUPT_ENABLE: u8 = 1;
 }
 
-fn smbus_handler(_: usize) {
+fn smbus_handler(_: usize) -> bool {
     pr_info!("Interrupted from SMBus.(Currently, do nothing.)");
-    get_cpu_manager_cluster().interrupt_manager.send_eoi();
+    return true;
 }

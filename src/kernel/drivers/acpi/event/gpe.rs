@@ -28,18 +28,24 @@ impl GpeManager {
 
     pub fn init(&self) {
         /* Clear GPE Status Bits */
-        for port in self.gpe_block..(self.gpe_block + self.gpe_count) {
-            write_io_byte(port, 0xFF);
-        }
+        if self.gpe_block != 0 {
+            for port in self.gpe_block..(self.gpe_block + self.gpe_count) {
+                write_io_byte(port, 0xFF);
+            }
 
-        /* Clear GPE Enable Bits */
-        for port in (self.gpe_block + self.gpe_count)..(self.gpe_block + (self.gpe_count << 1)) {
-            write_io_byte(port, 0x00);
+            /* Clear GPE Enable Bits */
+            for port in (self.gpe_block + self.gpe_count)..(self.gpe_block + (self.gpe_count << 1))
+            {
+                write_io_byte(port, 0x00);
+            }
         }
     }
 
     pub fn enable_gpe(&self, gpe: usize) -> bool {
-        if self.base_number + (self.gpe_count << 3) < gpe || gpe < self.base_number {
+        if self.gpe_block == 0
+            || self.base_number + (self.gpe_count << 3) < gpe
+            || gpe < self.base_number
+        {
             return false;
         }
         let port_index = (gpe - self.base_number) >> 3;
@@ -60,7 +66,10 @@ impl GpeManager {
     }
 
     pub fn clear_status_bit(&self, gpe: usize) -> bool {
-        if self.base_number + (self.gpe_count << 3) < gpe || gpe < self.base_number {
+        if self.gpe_block == 0
+            || self.base_number + (self.gpe_count << 3) < gpe
+            || gpe < self.base_number
+        {
             return false;
         }
         let port_index = (gpe - self.base_number) >> 3;
@@ -76,6 +85,9 @@ impl GpeManager {
     }
 
     pub fn find_general_purpose_event(&self, skip_gpe: Option<usize>) -> Option<usize> {
+        if self.gpe_block == 0 {
+            return None;
+        }
         let mut bit = skip_gpe
             .and_then(|g| Some((g - self.base_number) & !0b111))
             .unwrap_or(self.base_number);

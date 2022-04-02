@@ -18,7 +18,7 @@ use crate::kernel::memory_manager::data_type::{
 /// This driver implements TextBufferDriver trait.
 /// the buffer of VGA text mode is \[u16; width * height\]
 /// and each 16bit consists of front/back color code and ASCII code.
-pub struct VgaTextDriver {
+pub struct TextDriver {
     address: usize,
     width: usize,
     height: usize,
@@ -36,7 +36,7 @@ struct TextCursor {
     pub back_color: u32,
 }
 
-impl VgaTextDriver {
+impl TextDriver {
     pub const fn new() -> Self {
         Self {
             address: 0,
@@ -148,7 +148,7 @@ impl VgaTextDriver {
     }
 }
 
-impl TextBufferDriver for VgaTextDriver {
+impl TextBufferDriver for TextDriver {
     fn puts(&mut self, string: &str) -> bool {
         for code in string.bytes() {
             match code as char {

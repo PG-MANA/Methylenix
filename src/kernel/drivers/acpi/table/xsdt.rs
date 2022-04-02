@@ -10,11 +10,15 @@ use super::ssdt::SsdtManager;
 use super::INITIAL_MMAP_SIZE;
 use super::{AcpiTable, OptionalAcpiTable};
 
-use crate::io_remap;
+use crate::arch::target_arch::context::memory_layout::{
+    is_direct_mapped, physical_address_to_direct_map,
+};
+
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::{free_pages, io_remap};
 
 use core::mem::MaybeUninit;
 
@@ -232,29 +236,41 @@ impl XsdtManager {
 
     fn search_entry(&self, signature: &[u8; 4]) -> Option<VAddress> {
         let mut index = 0;
-        while let Some(entry_physical_address) = self.get_entry(index) {
-            if let Ok(v_address) = io_remap!(
-                entry_physical_address,
-                MSize::new(INITIAL_MMAP_SIZE),
-                MemoryPermissionFlags::rodata(),
-                MemoryOptionFlags::PRE_RESERVED | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS
-            ) {
-                if unsafe { &*(v_address.to_usize() as *const [u8; 4]) } == signature {
-                    return Some(v_address);
+        macro_rules! map_table {
+            ($address:expr) => {
+                match io_remap!(
+                    $address,
+                    MSize::new(INITIAL_MMAP_SIZE),
+                    MemoryPermissionFlags::rodata(),
+                    MemoryOptionFlags::PRE_RESERVED
+                        | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS
+                ) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        pr_err!("Failed to map ACPI Table: {:?}", e);
+                        return None;
+                    }
                 }
-                if let Err(e) = get_kernel_manager_cluster()
-                    .kernel_memory_manager
-                    .free(v_address)
+            };
+        }
+        while let Some(entry_physical_address) = self.get_entry(index) {
+            if is_direct_mapped(entry_physical_address) {
+                if unsafe {
+                    &*(physical_address_to_direct_map(entry_physical_address).to_usize()
+                        as *const [u8; 4])
+                } == signature
                 {
-                    pr_warn!(
-                        "Freeing memory map of ACPI Table was failed. Error: {:?}",
-                        e
-                    )
+                    return Some(map_table!(entry_physical_address));
                 }
             } else {
-                pr_err!("Cannot map ACPI Table.");
-                return None;
-            };
+                let virtual_address = map_table!(entry_physical_address);
+                if unsafe { &*(virtual_address.to_usize() as *const [u8; 4]) } == signature {
+                    return Some(virtual_address);
+                }
+                if let Err(e) = free_pages!(virtual_address) {
+                    pr_warn!("Failed to free the map of ACPI Table: {:?}", e)
+                }
+            }
             index += 1;
         }
         return None;

@@ -17,7 +17,7 @@ Methylenixという名前はメチレン基(Methylene)より採っています�
 
 ## 現状
 
-* APICによるデバイス割り込み
+* APIC・GICv3によるデバイス割り込み
 * メモリ・ページング動的管理
 * タスク管理
 * マルチコア対応
@@ -35,6 +35,7 @@ Methylenixという名前はメチレン基(Methylene)より採っています�
 
 ## 対応命令セット
 * x86_64
+* AArch64
 
 ## ライセンス
 Copyright 2018 PG_MANA  
@@ -61,19 +62,26 @@ limitations under the License.
 * cargo
 
 ### ビルド
-
+### x86_64
 ```shell
 git clone https://github.com/PG-MANA/Methylenix.git
 cd Methylenix
 make iso
 # created bin/img/boot.iso
-make clean
 ```
 
 なおビルド済みのisoイメージは https://repo.taprix.org/pg_mana/methylenix/iso/ にあります。
 
-## 実行
+### AArch64
+```shell
+git clone https://github.com/PG-MANA/Methylenix.git
+cd Methylenix
+make TARGET_ARCH=aarch64
+# created bin/EFI/BOOT/
+```
 
+## 実行
+### x86_64
 qemu-system-x86_64が必要です。
 
 ```shell
@@ -84,6 +92,14 @@ qemu-system-x86_64 --cdrom bin/img/boot.iso -cpu qemu64,+fsgsbase -smp 2 -m 512M
 
 # or (to emulate host cpu)
 qemu-system-x86_64 --cdrom bin/img/boot.iso  -cpu host -smp 2 -m 512M -bios /usr/bin/OVMF/OVMF.fd --enable-kvm
+```
+
+### AArch64
+qemu-system-aarch64とAArch64向けのOVMFが必要です。
+
+```shell
+# Modify "/usr/bin/OVMF/OVMF_AARCH64.fd" to your suitable path
+qemu-system-aarch64 -m 1G -cpu a64fx -machine virt,virtualization=on,gic-version=3 -smp 4 -nographic -bios /usr/bin/OVMF/OVMF_AARCH64.fd  -drive file=fat:rw:bin/,format=raw,media=disk
 ```
 
 ## ドキュメント

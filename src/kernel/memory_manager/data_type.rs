@@ -3,7 +3,7 @@
 //!
 //! This module has basic data types for Memory Manager.
 
-use crate::arch::target_arch::paging::PAGE_SHIFT;
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
 use core::convert::{From, Into};
 use core::iter::Step;
@@ -307,6 +307,13 @@ impl MSize {
 
     pub fn to_order(&self, max: Option<MOrder>) -> MOrder {
         MOrder::from_offset(*self, max.unwrap_or(MOrder::new(usize::MAX)))
+    }
+
+    pub const fn page_align_up(&self) -> Self {
+        if self.is_zero() {
+            return *self;
+        }
+        Self::new((self.0 - 1) & PAGE_MASK) + PAGE_SIZE
     }
 }
 

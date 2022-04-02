@@ -2,21 +2,25 @@
 //! NVMe Driver
 //!
 
-use crate::arch::target_arch::device::pci::nvme::setup_interrupt;
 use crate::arch::target_arch::interrupt::InterruptManager;
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE_USIZE};
 
 use crate::kernel::block_device::{BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceInfo};
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::drivers::pci::{ClassCode, PciDevice, PciDeviceDriver, PciManager};
+use crate::kernel::drivers::pci::{
+    msi::setup_msi, ClassCode, PciDevice, PciDeviceDriver, PciManager,
+};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+    Address, MIndex, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
+    VAddress,
 };
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::{TaskStatus, ThreadEntry};
 
 use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
 
+use alloc::collections::LinkedList;
 use alloc::vec::Vec;
 
 pub struct NvmeManager {
@@ -50,9 +54,9 @@ struct WaitListEntry {
 
 #[derive(Clone)]
 struct NameSpace {
-    name_space_id: u32,
-    name_space_lba_size: u64,
-    sector_size_exp_index: u8,
+    id: u32,
+    number_of_lba_blocks: u64,
+    lba_block_size_exp: u8,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -144,8 +148,8 @@ impl PciDeviceDriver for NvmeManager {
             controller_properties_base_address,
             Self::CONTROLLER_PROPERTIES_CAPABILITIES,
         );
-        /*let memory_page_max =
-        ((controller_capability & Self::CAP_MPS_MAX) >> Self::CAP_MPS_MAX_OFFSET) as u8;*/
+        let memory_page_max =
+            ((controller_capability & Self::CAP_MPS_MAX) >> Self::CAP_MPS_MAX_OFFSET) as u8;
         let memory_page_min =
             ((controller_capability & Self::CAP_MPS_MIN) >> Self::CAP_MPS_MIN_OFFSET) as u8;
         let stride = 4usize
@@ -154,8 +158,10 @@ impl PciDeviceDriver for NvmeManager {
         let max_queue =
             ((controller_capability & Self::CAP_MQES) >> Self::CAP_MQES_OFFSET) as u16 + 1;
 
-        if memory_page_min > 0 {
-            pr_err!("4KiB Memory Page is not supported.");
+        if (memory_page_min as usize + 12) > PAGE_SHIFT
+            || (memory_page_max as usize + 12) < PAGE_SHIFT
+        {
+            pr_err!("Controller is not supported of the host memory page size.");
             return;
         }
         if (((controller_capability & Self::CAP_CSS) >> Self::CAP_CSS_OFFSET) & (1 << 7)) != 0 {
@@ -297,7 +303,7 @@ impl PciDeviceDriver for NvmeManager {
             }
         };
 
-        if let Err(e) = setup_interrupt(pci_dev, nvme_manager) {
+        if let Err(e) = nvme_manager.setup_interrupt(pci_dev) {
             pr_debug!("Failed to setup interrupt: {:?}", e);
             let _ = free_pages!(admin_completion_queue_virtual_address);
             let _ = free_pages!(admin_submission_queue_virtual_address);
@@ -310,6 +316,7 @@ impl PciDeviceDriver for NvmeManager {
             Self::CONTROLLER_PROPERTIES_CONFIGURATION,
             (completion_queue_entry_size << 20)
                 | (submission_queue_entry_size << 16)
+                | (PAGE_SHIFT as u32 - 12) << 7
                 | Self::CC_ENABLE,
         );
         while (read_mmio::<u32>(
@@ -548,35 +555,32 @@ impl PciDeviceDriver for NvmeManager {
 }
 
 impl BlockDeviceDriver for NvmeManager {
-    fn read_data(
+    fn read_data_lba(
         &mut self,
         info: &BlockDeviceInfo,
-        offset: usize,
-        size: usize,
-        pages_to_write: PAddress,
+        buffer: VAddress,
+        base_lba: u64,
+        number_of_blocks: u64,
     ) -> Result<(), ()> {
-        self._read_data(0x01, info.device_id as u32, offset, size, pages_to_write)
+        self._read_data_lba(
+            0x01,
+            info.device_id as u32,
+            buffer,
+            base_lba,
+            number_of_blocks,
+        )
     }
 
-    fn read_data_by_lba(
-        &mut self,
-        info: &BlockDeviceInfo,
-        lba: usize,
-        sectors: usize,
-    ) -> Result<VAddress, ()> {
-        self._read_data_lba(0x01, info.device_id as u32, lba, sectors)
-    }
-
-    fn get_lba_sector_size(&self, info: &BlockDeviceInfo) -> usize {
-        1 << self.namespace_list[info.device_id].sector_size_exp_index as usize
+    fn get_lba_block_size(&self, info: &BlockDeviceInfo) -> u64 {
+        1 << self.namespace_list[info.device_id].lba_block_size_exp
     }
 }
 
 impl NvmeManager {
     const CONTROLLER_PROPERTIES_DEFAULT_MAP_SIZE: MSize = MSize::new(0x2000);
     const CONTROLLER_PROPERTIES_CAPABILITIES: usize = 0x00;
-    //const CAP_MPS_MAX_OFFSET: u64 = 52;
-    //const CAP_MPS_MAX: u64 = 0b1111 << Self::CAP_MPS_MAX_OFFSET;
+    const CAP_MPS_MAX_OFFSET: u64 = 52;
+    const CAP_MPS_MAX: u64 = 0b1111 << Self::CAP_MPS_MAX_OFFSET;
     const CAP_MPS_MIN_OFFSET: u64 = 48;
     const CAP_MPS_MIN: u64 = 0b1111 << Self::CAP_MPS_MIN_OFFSET;
     const CAP_CSS_OFFSET: u64 = 37;
@@ -626,11 +630,17 @@ impl NvmeManager {
         assert!(
             self.namespace_list
                 .last()
-                .and_then(|n| Some(n.name_space_id))
+                .and_then(|n| Some(n.id))
                 .unwrap_or(0)
-                < name_space.name_space_id
+                < name_space.id
         );
         self.namespace_list.push(name_space);
+    }
+
+    pub fn setup_interrupt(&mut self, pci_dev: &PciDevice) -> Result<(), ()> {
+        let interrupt_id = setup_msi(pci_dev, nvme_handler, None, true)?;
+        unsafe { NVME_LIST.push_back((interrupt_id, self as *mut _)) };
+        return Ok(());
     }
 
     fn _read_completion_queue_head_doorbell(
@@ -910,60 +920,49 @@ impl NvmeManager {
                 .free(identify_info_virtual_address);
             return Err(());
         }
-        let name_space_lba_size =
+        let name_space_number_of_lba_blocks =
             unsafe { *((identify_info_virtual_address.to_usize() + 0) as *const u64) };
         let formatted_lba_size =
             unsafe { *((identify_info_virtual_address.to_usize() + 26) as *const u8) };
-        pr_debug!("Formatted LBA Size: {:#X}", formatted_lba_size);
         let lba_index =
             (((formatted_lba_size & (0b11 << 5)) >> 5) << 4) | (formatted_lba_size & 0b1111);
-        pr_debug!("LBA Index: {}", lba_index);
+        pr_debug!(
+            "LBA Index: {lba_index}(Formatted LBA Size: {:#X})",
+            formatted_lba_size
+        );
         let lba_format_info = unsafe {
             *((identify_info_virtual_address.to_usize() + 128 + (lba_index as usize) * 4)
                 as *const u32)
         };
-        let lba_data_size = (lba_format_info >> 16) & 0xff;
-        pr_debug!("LBA Data Size: 2^{}", lba_data_size);
+        let lba_block_size_exp = ((lba_format_info >> 16) & 0xff) as u8;
+        pr_debug!("LBA Data Size: 2^{lba_block_size_exp}");
         let _ = get_kernel_manager_cluster()
             .kernel_memory_manager
             .free(identify_info_virtual_address);
         return Ok(NameSpace {
-            name_space_id,
-            name_space_lba_size,
-            sector_size_exp_index: lba_data_size as u8,
+            id: name_space_id,
+            number_of_lba_blocks: name_space_number_of_lba_blocks,
+            lba_block_size_exp,
         });
     }
 
-    fn _read_data(
+    fn _read_data_lba(
         &mut self,
         queue_id: u16,
         name_space_list_index: u32,
-        offset: usize,
-        size: usize,
-        pages_to_write: PAddress,
+        buffer: VAddress,
+        base_lba: u64,
+        number_of_blocks: u64,
     ) -> Result<(), ()> {
-        if size == 0 {
+        if number_of_blocks == 0 {
             pr_err!("Size is zero");
             return Err(());
         }
-        /*let (prp_list_virtual_address, prp_list_physical_address) = match alloc_pages_with_physical_address!(
-            MSize::new(0x1000).to_order(None).to_page_order(),
-            MemoryPermissionFlags::data(),
-            MemoryOptionFlags::DEVICE_MEMORY
-        ) {
-            Ok(a) => a,
-            Err(e) => {
-                pr_err!("Failed to alloc memory for the  PRP List: {:?}", e);
-                return Err(());
-            }
-        };
-        unsafe {
-            core::ptr::write_bytes(prp_list_virtual_address.to_usize() as *mut u8, 0, 0x1000)
-        };
-        unsafe {
-            *(prp_list_virtual_address.to_usize() as *mut u64) =
-                pages_to_write.to_usize() as u64
-        };*/
+        if (buffer & !PAGE_MASK) != 0 {
+            pr_err!("Buffer is not page aligned.");
+            return Err(());
+        }
+
         if name_space_list_index as usize > self.namespace_list.len() {
             pr_err!(
                 "Invalid name_space_list's index: {:#X}",
@@ -972,24 +971,13 @@ impl NvmeManager {
             return Err(());
         }
         let name_space = &self.namespace_list[name_space_list_index as usize];
-
-        if ((offset as u64) & ((2u64 << name_space.sector_size_exp_index) - 1)) != 0 {
-            pr_err!("Unaligned offset: {:#X}", offset);
-            return Err(());
-        }
-        let starting_lba = (offset as u64) >> name_space.sector_size_exp_index;
-        let number_of_blocks = (((size as u64) - 1) >> name_space.sector_size_exp_index) + 1;
-        if (number_of_blocks << name_space.sector_size_exp_index) > 0x1000 {
-            pr_err!("Unsupported Size: {:#X}", size);
-            return Err(());
-        } else if number_of_blocks - 1 > 0xffff {
-            pr_err!("The size({:#X}) is too big", size);
-            return Err(());
-        } else if starting_lba + number_of_blocks >= name_space.name_space_lba_size {
+        if (base_lba + (number_of_blocks << name_space.lba_block_size_exp))
+            >= name_space.number_of_lba_blocks
+        {
             pr_err!(
-                "The offset({:#X}) and size({:#X}) are exceeded from the disk size",
-                offset,
-                size
+                "The staring LBA({:#X}) and the number of blocks({:#X}) are exceeded from the disk size",
+                base_lba,
+                number_of_blocks
             );
             return Err(());
         }
@@ -997,16 +985,71 @@ impl NvmeManager {
         let mut command = [0u32; 16];
         command[0] = 0x02;
         command[1] = 0x01;
-        unsafe {
-            *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) =
-                pages_to_write.to_usize() as u64
-        };
-        /*unsafe {
-            *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
-                prp_list_physical_address.to_usize() as u64
-        };*/
-        command[10] = (starting_lba & u32::MAX as u64) as u32; /* LBA[0:31] */
-        command[11] = (starting_lba >> 32) as u32; /* LBA[32:63] */
+
+        let mut pre_list_virtual_address: Option<VAddress> = None;
+        let read_size = (number_of_blocks << name_space.lba_block_size_exp) as usize;
+        if read_size > PAGE_SIZE_USIZE {
+            let (v, prp_list_physical_address) = match alloc_pages_with_physical_address!(
+                MPageOrder::new(0),
+                MemoryPermissionFlags::data(),
+                MemoryOptionFlags::DEVICE_MEMORY
+            ) {
+                Ok(a) => a,
+                Err(e) => {
+                    pr_err!("Failed to alloc memory for the  PRP List: {:?}", e);
+                    return Err(());
+                }
+            };
+            let list = unsafe {
+                &mut *(v.to_usize()
+                    as *mut [PAddress; PAGE_SIZE_USIZE / core::mem::size_of::<PAddress>()])
+            };
+            let result = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .get_physical_address_list(
+                    buffer,
+                    MIndex::new(0),
+                    MIndex::new(
+                        (((number_of_blocks << name_space.lba_block_size_exp) as usize)
+                            >> PAGE_SHIFT)
+                            .max(1),
+                    ),
+                    list,
+                );
+            if let Err(e) = result {
+                pr_err!("Failed to get physical address list: {:?}", e);
+                return Err(());
+            } else if (result.unwrap() << PAGE_SHIFT) < read_size {
+                pr_err!("buffer is smaller than read size.");
+                let _ = free_pages!(v);
+                return Err(());
+            }
+            unsafe {
+                *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
+                    prp_list_physical_address.to_usize() as u64
+            };
+            pre_list_virtual_address = Some(v);
+        }
+
+        *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[6]) }) =
+            if let Some(p) = pre_list_virtual_address {
+                unsafe { *(p.to_usize() as *const usize) as u64 }
+            } else {
+                let mut list = [PAddress::new(0); 1];
+                let result = get_kernel_manager_cluster()
+                    .kernel_memory_manager
+                    .get_physical_address_list(buffer, MIndex::new(0), MIndex::new(1), &mut list);
+                if let Err(e) = result {
+                    pr_err!("Failed to get physical address list: {:?}", e);
+                    return Err(());
+                } else if result.unwrap() == 0 {
+                    pr_err!("buffer is smaller than read size.");
+                    return Err(());
+                }
+                list[0].to_usize() as u64
+            };
+        command[10] = (base_lba & u32::MAX as u64) as u32; /* LBA[0:31] */
+        command[11] = (base_lba >> 32) as u32; /* LBA[32:63] */
         command[12] = (number_of_blocks - 1) as u32; /* [0:15]: Number of Logical Blocks */
         let result = self.submit_command_and_wait(queue_id, command);
         if let Err(e) = result {
@@ -1021,107 +1064,6 @@ impl NvmeManager {
                 result,
                 (result[3] >> 16) & !1
             );
-            return Err(());
-        }
-        return Ok(());
-    }
-
-    fn _read_data_lba(
-        &mut self,
-        queue_id: u16,
-        name_space_list_index: u32,
-        lba: usize,
-        number_of_sectors: usize,
-    ) -> Result<VAddress, ()> {
-        if number_of_sectors == 0 {
-            pr_err!("Size is zero");
-            return Err(());
-        }
-
-        if name_space_list_index as usize > self.namespace_list.len() {
-            pr_err!(
-                "Invalid name_space_list's index: {:#X}",
-                name_space_list_index
-            );
-            return Err(());
-        }
-        let name_space = &self.namespace_list[name_space_list_index as usize];
-        if lba + (number_of_sectors << name_space.sector_size_exp_index as usize)
-            >= name_space.name_space_lba_size as usize
-        {
-            pr_err!(
-                "The staring LBA({:#X}) and the number of blocks({:#X}) are exceeded from the disk size",
-                lba,
-                number_of_sectors
-            );
-            return Err(());
-        }
-
-        let allocate_size = number_of_sectors << name_space.sector_size_exp_index as usize;
-        let (io_virtual_address, io_physical_address) = match alloc_pages_with_physical_address!(
-            MSize::new(allocate_size).to_order(None).to_page_order(),
-            MemoryPermissionFlags::data(),
-            MemoryOptionFlags::DEVICE_MEMORY
-        ) {
-            Ok(a) => a,
-            Err(e) => {
-                pr_err!("Failed to alloc memory for the I/O: {:?}", e);
-                return Err(());
-            }
-        };
-
-        let mut command = [0u32; 16];
-        command[0] = 0x02;
-        command[1] = 0x01;
-        unsafe {
-            *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) =
-                io_physical_address.to_usize() as u64
-        };
-
-        let mut pre_list_virtual_address: Option<VAddress> = None;
-        if allocate_size > 0x1000 {
-            let (v, prp_list_physical_address) = match alloc_pages_with_physical_address!(
-                MSize::new(0x1000).to_order(None).to_page_order(),
-                MemoryPermissionFlags::data(),
-                MemoryOptionFlags::DEVICE_MEMORY
-            ) {
-                Ok(a) => a,
-                Err(e) => {
-                    pr_err!("Failed to alloc memory for the  PRP List: {:?}", e);
-                    return Err(());
-                }
-            };
-
-            for i in 0..(allocate_size / 0x1000) {
-                unsafe {
-                    *((v.to_usize() + i * 8) as *mut u64) =
-                        (io_physical_address + MSize::new(0x1000)).to_usize() as u64
-                };
-            }
-            unsafe {
-                *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
-                    prp_list_physical_address.to_usize() as u64
-            };
-            pre_list_virtual_address = Some(v);
-        }
-
-        command[10] = (lba & u32::MAX as usize) as u32; /* LBA[0:31] */
-        command[11] = (lba >> 32) as u32; /* LBA[32:63] */
-        command[12] = (number_of_sectors - 1) as u32; /* [0:15]: Number of Logical Blocks */
-        let result = self.submit_command_and_wait(queue_id, command);
-        if let Err(e) = result {
-            pr_err!("Failed to execute the command: {:?}", e);
-            return Err(());
-        }
-
-        let result = result.unwrap();
-        if !Self::is_command_successful(&result) {
-            pr_err!(
-                "Failed the read command is failed:  {:#X?}(Status: {:#X})",
-                result,
-                (result[3] >> 16) & !1
-            );
-            let _ = free_pages!(io_virtual_address);
             if let Some(v) = pre_list_virtual_address {
                 let _ = free_pages!(v);
             }
@@ -1130,7 +1072,7 @@ impl NvmeManager {
         if let Some(v) = pre_list_virtual_address {
             let _ = free_pages!(v);
         }
-        return Ok(io_virtual_address);
+        return Ok(());
     }
 
     pub fn interrupt_handler(&mut self) {
@@ -1195,4 +1137,21 @@ fn read_mmio<T: Sized>(base: VAddress, offset: usize) -> T {
 
 fn write_mmio<T: Sized>(base: VAddress, offset: usize, data: T) {
     unsafe { core::ptr::write_volatile((base.to_usize() + offset) as *mut T, data) }
+}
+
+static mut NVME_LIST: LinkedList<(usize, *mut NvmeManager)> = LinkedList::new();
+
+fn nvme_handler(index: usize) -> bool {
+    if let Some(nvme) = unsafe {
+        NVME_LIST
+            .iter()
+            .find(|x| (**x).0 == index)
+            .and_then(|x| Some(x.1.clone()))
+    } {
+        unsafe { &mut *(nvme) }.interrupt_handler();
+        true
+    } else {
+        pr_err!("Unknown NVMe Device");
+        false
+    }
 }

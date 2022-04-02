@@ -3,10 +3,8 @@
 NAME = methylenix
 
 ##ターゲット
-TARGET_ARCH = $(2)
-ifeq ($(strip $(TARGET_ARCH)),)
-    TARGET_ARCH = x86_64
-endif
+TARGET_ARCH ?= x86_64
+
 RUST_TARGET = $(TARGET_ARCH)-unknown-none
 RUST_TARGET_JSON = config/$(TARGET_ARCH)/$(RUST_TARGET).json
 
@@ -14,13 +12,14 @@ RUST_TARGET_JSON = config/$(TARGET_ARCH)/$(RUST_TARGET).json
 SRC = src/
 MAKE_BASEDIR ?= $(shell pwd)/
 MAKE_BINDIR = $(MAKE_BASEDIR)bin/
+MAKE_EFIDIR = $(MAKE_BINDIR)EFI/BOOT/
 MAKE_IMGDIR = $(MAKE_BINDIR)img/
 MAKE_TMPDIR = $(MAKE_BASEDIR)tmp/
 MAKE_CONGIGDIR =  $(MAKE_BASEDIR)config/$(TARGET_ARCH)/
+BOOTLOADER = $(SRC)arch/$(TARGET_ARCH)/bootloader
 
 ##ソフトウェア
-STRIP = strip
-OBJCOPY = objcopy
+MAKE_SUB = $(MAKE) -C
 MKDIR = mkdir -p
 CP = cp -r
 RM = rm -rf
@@ -42,29 +41,40 @@ export MAKE_OBJDIR
 
 #各コマンド
 ##デフォルト動作
-default:
-	$(MAKE) kernel
+.DEFAULT: all
+
+all: bootloader kernel
 
 ##初期化動作
 init:
 	-$(MKDIR) $(MAKE_BINDIR)
 	-$(MKDIR) $(MAKE_TMPDIR)
+ifeq ($(strip $(TARGET_ARCH)), aarch64)
+	-$(MKDIR) $(MAKE_EFIDIR)
+endif
 
 clean:
 	$(RM) $(MAKE_TMPDIR)
 	$(CARGO) clean
+ifeq ($(strip $(TARGET_ARCH)), aarch64)
+	$(MAKE_SUB) $(BOOTLOADER) clean
+endif
 
-iso:
-	$(MAKE) kernel
+iso: kernel
 	-$(MKDIR) $(MAKE_IMGDIR) $(MAKE_TMPDIR)grub-iso/boot/grub/ $(MAKE_TMPDIR)grub-iso/boot/methylenix/
 	$(CP) $(MAKE_BINDIR)kernel.elf $(MAKE_TMPDIR)grub-iso/boot/methylenix/
 	$(CP) $(MAKE_CONGIGDIR)/grub  $(MAKE_TMPDIR)grub-iso/boot/
 	$(GRUBMKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso/ || $(GRUB2MKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso/
 
-kernel:
-	$(MAKE) init
-	$(MAKE) $(KERNELFILES)
+kernel: init $(KERNELFILES)
+ifeq ($(strip $(TARGET_ARCH)), aarch64)
+	$(CP) $(MAKE_BINDIR)kernel.elf $(MAKE_EFIDIR)kernel.elf
+endif
 
+bootloader: init
+ifeq ($(strip $(TARGET_ARCH)), aarch64)
+	$(MAKE_SUB) $(BOOTLOADER)
+endif
 
 # ファイル生成規則
 kernel.elf : .FORCE

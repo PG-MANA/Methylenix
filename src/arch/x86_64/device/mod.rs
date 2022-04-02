@@ -13,4 +13,4 @@ pub mod pci;
 pub mod pic;
 pub mod pit;
 pub mod serial_port;
-pub mod vga_text;
+pub mod text;
