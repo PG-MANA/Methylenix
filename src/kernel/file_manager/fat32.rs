@@ -68,27 +68,32 @@ pub(super) fn try_detect_file_system(
     let root_cluster =
         u32::from_le(unsafe { *((first_4k_data.to_usize() + ROOT_CLUSTER_OFFSET) as *const u32) });
 
+    let lba_aligned_fat_size = ((fat_size - 1) & (!(partition_info.lba_block_size as u32 - 1)))
+        + partition_info.lba_block_size as u32;
+
     pr_debug!(
-        "LBA Block Size: {:#X}, FAT Size: {:#X}, SectorsPerCluster: {:#X}",
+        "LBA Block Size: {:#X}, FAT Size: {:#X}(Aligned; {:#X}), SectorsPerCluster: {:#X}",
         partition_info.lba_block_size,
         fat_size,
+        lba_aligned_fat_size,
         sectors_per_cluster
     );
 
-    let fat = match alloc_non_linear_pages!(MSize::new(fat_size as usize).page_align_up()) {
-        Ok(a) => a,
-        Err(e) => {
-            pr_err!("Failed to allocate memory for FAT: {:?}", e);
-            return Err(());
-        }
-    };
+    let fat =
+        match alloc_non_linear_pages!(MSize::new(lba_aligned_fat_size as usize).page_align_up()) {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to allocate memory for FAT: {:?}", e);
+                return Err(());
+            }
+        };
     if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
         partition_info.device_id,
         fat,
         partition_info.starting_lba
             + (number_of_reserved_sectors as u64) * (bytes_per_sector as u64)
                 / (partition_info.lba_block_size as u64),
-        (fat_size as u64 / partition_info.lba_block_size).max(1),
+        (lba_aligned_fat_size as u64 / partition_info.lba_block_size).max(1),
     ) {
         let _ = free_pages!(fat);
         pr_err!("Failed to read FAT from disk: {:?}", e);
