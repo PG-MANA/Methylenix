@@ -8,7 +8,7 @@ use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE_USIZE};
 use crate::kernel::block_device::{BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceInfo};
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::drivers::pci::{
-    msi::setup_msi, ClassCode, PciDevice, PciDeviceDriver, PciManager,
+    msi::setup_msi_or_msi_x, ClassCode, PciDevice, PciDeviceDriver, PciManager,
 };
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
@@ -638,7 +638,7 @@ impl NvmeManager {
     }
 
     pub fn setup_interrupt(&mut self, pci_dev: &PciDevice) -> Result<(), ()> {
-        let interrupt_id = setup_msi(pci_dev, nvme_handler, None, true)?;
+        let interrupt_id = setup_msi_or_msi_x(pci_dev, nvme_handler, None, true)?;
         unsafe { NVME_LIST.push_back((interrupt_id, self as *mut _)) };
         return Ok(());
     }
