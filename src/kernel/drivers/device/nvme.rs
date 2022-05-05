@@ -988,7 +988,32 @@ impl NvmeManager {
 
         let mut pre_list_virtual_address: Option<VAddress> = None;
         let read_size = (number_of_blocks << name_space.lba_block_size_exp) as usize;
-        if read_size > PAGE_SIZE_USIZE {
+        if read_size <= PAGE_SIZE_USIZE * 2 {
+            let num_of_pages = if read_size <= PAGE_SIZE_USIZE { 1 } else { 2 };
+            let mut list = [PAddress::new(0); 2];
+            let result = get_kernel_manager_cluster()
+                .kernel_memory_manager
+                .get_physical_address_list(
+                    buffer,
+                    MIndex::new(0),
+                    MIndex::new(num_of_pages),
+                    &mut list,
+                );
+            if let Err(e) = result {
+                pr_err!("Failed to get physical address list: {:?}", e);
+                return Err(());
+            } else if result.unwrap() < num_of_pages {
+                pr_err!("buffer is smaller than read size.");
+                return Err(());
+            }
+
+            *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[6]) }) =
+                (list[0].to_usize() as u64).to_le();
+            if num_of_pages == 2 {
+                *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[8]) }) =
+                    (list[1].to_usize() as u64).to_le()
+            }
+        } else {
             let (v, prp_list_physical_address) = match alloc_pages_with_physical_address!(
                 MPageOrder::new(0),
                 MemoryPermissionFlags::data(),
@@ -1024,30 +1049,18 @@ impl NvmeManager {
                 let _ = free_pages!(v);
                 return Err(());
             }
+            let prp1 = (list[0].to_usize() as u64).to_le();
+            for i in 0..(result.unwrap() - 1) {
+                list[i] = list[i + 1];
+            }
             unsafe {
+                *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) = prp1;
                 *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
-                    prp_list_physical_address.to_usize() as u64
-            };
+                    (prp_list_physical_address.to_usize() as u64).to_le();
+            }
             pre_list_virtual_address = Some(v);
         }
 
-        *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[6]) }) =
-            if let Some(p) = pre_list_virtual_address {
-                unsafe { *(p.to_usize() as *const usize) as u64 }
-            } else {
-                let mut list = [PAddress::new(0); 1];
-                let result = get_kernel_manager_cluster()
-                    .kernel_memory_manager
-                    .get_physical_address_list(buffer, MIndex::new(0), MIndex::new(1), &mut list);
-                if let Err(e) = result {
-                    pr_err!("Failed to get physical address list: {:?}", e);
-                    return Err(());
-                } else if result.unwrap() == 0 {
-                    pr_err!("buffer is smaller than read size.");
-                    return Err(());
-                }
-                list[0].to_usize() as u64
-            };
         command[10] = (base_lba & u32::MAX as u64) as u32; /* LBA[0:31] */
         command[11] = (base_lba >> 32) as u32; /* LBA[32:63] */
         command[12] = (number_of_blocks - 1) as u32; /* [0:15]: Number of Logical Blocks */
