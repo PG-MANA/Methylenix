@@ -84,6 +84,7 @@ impl ContextManager {
             original_context_data,
             entry_address as *const fn() as usize,
             (stack_address + stack_size).to_usize(),
+        ))
     }
 
     /// Create user context data
