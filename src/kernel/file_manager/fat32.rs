@@ -207,6 +207,7 @@ impl PartitionManager for Fat32Info {
             let mut read_bytes = 0;
             let first_cluster = reading_cluster;
 
+            let page_buffer_offset_backup = page_buffer_offset;
             loop {
                 if (length - read_bytes + page_buffer_offset) <= bytes_per_cluster {
                     number_of_sectors +=
@@ -222,18 +223,24 @@ impl PartitionManager for Fat32Info {
                 if next_cluster != reading_cluster + 1 {
                     break;
                 }
+                page_buffer_offset = 0;
                 reading_cluster = next_cluster;
             }
-            let page_buffer =
-                match alloc_non_linear_pages!(
-                    MSize::new(read_bytes + page_buffer_offset).page_align_up()
-                ) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        pr_err!("Failed to allocate memory for read: {:?}", e);
-                        return Err(());
-                    }
-                };
+            page_buffer_offset = page_buffer_offset_backup;
+
+            let block_aligned_buffer_size = MSize::new(
+                (((number_of_sectors as usize) * (self.bytes_per_sector as usize))
+                    & (!(partition_info.lba_block_size as usize - 1)))
+                    + partition_info.lba_block_size as usize,
+            )
+            .page_align_up();
+            let page_buffer = match alloc_non_linear_pages!(block_aligned_buffer_size) {
+                Ok(a) => a,
+                Err(e) => {
+                    pr_err!("Failed to allocate memory for read: {:?}", e);
+                    return Err(());
+                }
+            };
 
             if let Err(e) = self.read_sectors(
                 partition_info,

@@ -1034,18 +1034,18 @@ impl NvmeManager {
                 .get_physical_address_list(
                     buffer,
                     MIndex::new(0),
-                    MIndex::new(
-                        (((number_of_blocks << name_space.lba_block_size_exp) as usize)
-                            >> PAGE_SHIFT)
-                            .max(1),
-                    ),
+                    MSize::new(read_size).page_align_up().to_index(),
                     list,
                 );
             if let Err(e) = result {
                 pr_err!("Failed to get physical address list: {:?}", e);
                 return Err(());
             } else if (result.unwrap() << PAGE_SHIFT) < read_size {
-                pr_err!("buffer is smaller than read size.");
+                pr_err!(
+                    "Expected {:#X} bytes for buffer, but its size is {:#X} bytes",
+                    read_size,
+                    result.unwrap() << PAGE_SHIFT
+                );
                 let _ = free_pages!(v);
                 return Err(());
             }
