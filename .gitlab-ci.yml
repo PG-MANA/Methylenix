@@ -26,3 +26,6 @@ build_aarch64:
     - cargo --version
     - rustup component add rust-src
     - make TARGET_ARCH=aarch64
+  artifacts:
+    paths:
+      - bin/
