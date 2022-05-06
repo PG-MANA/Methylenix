@@ -10,6 +10,7 @@ pub mod context;
 pub mod device;
 mod init;
 pub mod paging;
+pub mod system_call;
 
 use self::device::cpu;
 use self::device::io_apic::IoApicManager;

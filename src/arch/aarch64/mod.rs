@@ -15,6 +15,7 @@ pub mod device {
 mod init;
 pub mod interrupt;
 pub mod paging;
+pub mod system_call;
 
 use self::boot_info::BootInformation;
 use self::device::cpu;

@@ -149,4 +149,8 @@ impl ContextData {
             Some(unsafe { (*(self.registers.x0 as *const u64 as *const [u64; 8]))[index] })
         }
     }
+
+    pub fn set_system_call_return_value(&mut self, v: u64) {
+        self.registers.x0 = v;
+    }
 }

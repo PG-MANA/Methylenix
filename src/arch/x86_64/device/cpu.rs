@@ -255,6 +255,10 @@ pub unsafe fn set_gs_and_kernel_gs_base(address: u64) {
     wrmsr(0xC0000102, address);
 }
 
+pub unsafe fn set_fs_base(address: u64) {
+    wrmsr(0xC0000100, address)
+}
+
 /// Run ContextData.
 ///
 /// This function is called from ContextManager.

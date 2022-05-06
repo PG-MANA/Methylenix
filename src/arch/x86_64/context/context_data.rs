@@ -168,4 +168,8 @@ impl ContextData {
             })
         }
     }
+
+    pub fn set_system_call_return_value(&mut self, v: u64) {
+        self.registers.rax = v;
+    }
 }
