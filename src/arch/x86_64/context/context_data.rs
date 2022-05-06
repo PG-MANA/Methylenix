@@ -159,7 +159,7 @@ impl ContextData {
             } else if index == 3 {
                 self.registers.rdx
             } else if index == 4 {
-                self.registers.rcx
+                self.registers.r10
             } else if index == 5 {
                 self.registers.r8
             } else {

@@ -56,7 +56,7 @@ impl ContextManager {
 
         Ok(ContextData::create_context_data_for_system(
             entry_address as *const fn() as usize,
-            (stack_address + stack_size).to_usize(), //- 8, /* For Stack Alignment */
+            (stack_address + stack_size).to_usize(),
         ))
     }
 
@@ -83,8 +83,7 @@ impl ContextManager {
         Ok(ContextData::fork_context_data(
             original_context_data,
             entry_address as *const fn() as usize,
-            (stack_address + stack_size).to_usize(), //- 8, /* For Stack Alignment */
-        ))
+            (stack_address + stack_size).to_usize(),
     }
 
     /// Create user context data
@@ -100,7 +99,7 @@ impl ContextManager {
     ) -> Result<ContextData, MemoryError> {
         Ok(ContextData::create_context_data_for_user(
             entry_address,
-            stack_address.to_usize(), //- 8, /* For Stack Alignment */
+            stack_address.to_usize(),
             arguments,
         ))
     }

@@ -7,6 +7,7 @@
 pub mod tty;
 #[macro_use]
 pub mod collections {
+    pub mod auxiliary_vector;
     pub mod fifo;
     pub mod guid;
     #[macro_use]

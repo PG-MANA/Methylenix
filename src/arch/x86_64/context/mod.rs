@@ -130,7 +130,7 @@ impl ContextManager {
     ) -> Result<ContextData, MemoryError> {
         Ok(ContextData::create_context_data_for_user(
             entry_address,
-            stack_address.to_usize() - 8, /* For SystemV ABI Stack Alignment */
+            stack_address.to_usize(),
             self.user_cs as u64,
             self.user_ss as u64,
             arguments,

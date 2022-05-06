@@ -6,6 +6,7 @@ use crate::arch::target_arch::context::memory_layout::USER_STACK_END_ADDRESS;
 use crate::arch::target_arch::context::ContextManager;
 use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
 
+use crate::kernel::collections::auxiliary_vector;
 use crate::kernel::file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
 use crate::kernel::file_manager::{FileSeekOrigin, PathInfo};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -227,6 +228,13 @@ pub fn load_and_execute(
     /* Build Arguments */
     let stack_top_address = (stack_address + stack_size).to_usize();
 
+    /* Auxiliary Vector */
+    let auxiliary_vector_list: [auxiliary_vector::AuxiliaryVector; 1] =
+        [auxiliary_vector::AuxiliaryVector {
+            aux_type: auxiliary_vector::AT_NULL,
+            value: 0,
+        }];
+
     /* Calculate the position of "ap" for _start */
     let mut ap_offset_from_stack_top = 0;
     ap_offset_from_stack_top += file_name.as_bytes().len() + 1;
@@ -236,6 +244,8 @@ pub fn load_and_execute(
     for e in environments {
         ap_offset_from_stack_top += e.0.as_bytes().len() + 1 + e.1.as_bytes().len() + 1;
     }
+    ap_offset_from_stack_top +=
+        auxiliary_vector_list.len() * core::mem::size_of::<auxiliary_vector::AuxiliaryVector>();
     if (ap_offset_from_stack_top & 0b111) != 0 {
         ap_offset_from_stack_top = (ap_offset_from_stack_top & !0b111) + 8;
     }
@@ -244,7 +254,6 @@ pub fn load_and_execute(
 
     let ap_offset_from_stack_top = ap_offset_from_stack_top;
     let stack_top_address_user = USER_STACK_END_ADDRESS.to_usize() + 1;
-    let stack_pointer_offset_from_top = ((ap_offset_from_stack_top - 1) & !0b1111) + 16;
     let mut ap = stack_top_address - ap_offset_from_stack_top;
     let mut argv_env_pointer = 0;
 
@@ -299,6 +308,12 @@ pub fn load_and_execute(
 
     assert!(ap < (stack_top_address - argv_env_pointer));
 
+    /* Write auxiliary vector */
+    for e in auxiliary_vector_list {
+        unsafe { *(ap as *mut auxiliary_vector::AuxiliaryVector) = e };
+        ap += core::mem::size_of::<auxiliary_vector::AuxiliaryVector>();
+    }
+
     if let Err(e) = get_kernel_manager_cluster()
         .kernel_memory_manager
         .share_kernel_memory_with_user(
@@ -328,8 +343,8 @@ pub fn load_and_execute(
         .create_user_thread(
             process,
             header.get_entry_point() as usize,
-            &[stack_top_address_user - ap_offset_from_stack_top, 0],
-            VAddress::new(stack_top_address_user - stack_pointer_offset_from_top),
+            &[stack_top_address_user - ap_offset_from_stack_top],
+            VAddress::new(stack_top_address_user - ap_offset_from_stack_top),
             DEFAULT_PRIORITY_LEVEL,
         );
     if let Err(e) = thread {
