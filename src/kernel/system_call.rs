@@ -8,13 +8,26 @@ use system_call_number::*;
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
+use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::system_call;
+
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 
 pub fn system_call_handler(context: &mut ContextData) {
     match context.get_system_call_arguments(0).unwrap() as SysCallNumber {
         SYSCALL_EXIT => {
             pr_info!(
                 "SysCall: Exit(Return Code: {:#X})",
+                context.get_system_call_arguments(1).unwrap()
+            );
+            pr_info!("This thread will be stopped.");
+            loop {
+                unsafe { cpu::halt() };
+            }
+        }
+        SYSCALL_EXIT_GROUP => {
+            pr_info!(
+                "SysCall: ExitGroup(Return Code: {:#X})",
                 context.get_system_call_arguments(1).unwrap()
             );
             pr_info!("This thread will be stopped.");
@@ -75,6 +88,20 @@ pub fn system_call_handler(context: &mut ContextData) {
         SYSCALL_ARCH_PRCTL => {
             let v = system_call::syscall_arch_prctl(context);
             context.set_system_call_return_value(v as u64);
+        }
+        SYSCALL_SET_TID_ADDRESS => {
+            pr_debug!(
+                "Ignore set_tid_address(address: {:#X})",
+                context.get_system_call_arguments(1).unwrap()
+            );
+            let flag = InterruptManager::save_and_disable_local_irq();
+            context.set_system_call_return_value(
+                get_cpu_manager_cluster()
+                    .run_queue
+                    .get_running_thread()
+                    .get_t_id() as u64,
+            );
+            InterruptManager::restore_local_irq(flag);
         }
         s => {
             pr_err!("SysCall: Unknown({:#X})", s);
