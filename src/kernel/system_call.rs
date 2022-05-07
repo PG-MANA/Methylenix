@@ -50,13 +50,15 @@ pub fn system_call_handler(context: &mut ContextData) {
                 let mut written_bytes = 0usize;
                 let iov = context.get_system_call_arguments(2).unwrap() as usize;
                 for i in 0..(context.get_system_call_arguments(3).unwrap() as usize) {
-                    let iovec = iov + i * (core::mem::size_of::<usize>() * 2);
-                    let len = unsafe { *((iovec + core::mem::size_of::<usize>()) as *const usize) };
-                    if let Ok(s) = unsafe {
-                        core::str::from_utf8(core::slice::from_raw_parts(iovec as *const u8, len))
-                    } {
+                    use core::{mem, slice, str};
+                    let iovec = iov + i * (mem::size_of::<usize>() * 2);
+                    let iov_base = unsafe { *(iovec as *const usize) } as *const u8;
+                    let iov_len = unsafe { *((iovec + mem::size_of::<usize>()) as *const usize) };
+                    if let Ok(s) =
+                        unsafe { str::from_utf8(slice::from_raw_parts(iov_base, iov_len)) }
+                    {
                         kprint!("{s}");
-                        written_bytes += len;
+                        written_bytes += iov_len;
                     } else {
                         break;
                     }
