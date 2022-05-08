@@ -402,11 +402,12 @@ impl RunQueue {
         };
 
         let running_thread_p_id = running_thread.get_process().get_pid();
+        let next_thread_p_id = next_thread.get_process().get_pid();
 
         assert_eq!(next_thread.get_task_status(), TaskStatus::Running);
 
         if running_thread.get_t_id() == next_thread.get_t_id()
-            && running_thread_p_id == next_thread.get_process().get_pid()
+            && running_thread_p_id == next_thread_p_id
         {
             /* Same Task */
             drop(_running_thread_lock);
@@ -425,9 +426,9 @@ impl RunQueue {
         self.should_reschedule = false;
         self.running_thread = Some(next_thread);
 
-        if running_thread_p_id != next_thread.get_process().get_pid() {
+        if running_thread_p_id != next_thread_p_id {
             let memory_manager = next_thread.get_process().get_memory_manager();
-            if !memory_manager.is_null() {
+            if !memory_manager.is_null() && next_thread_p_id != 0 {
                 let memory_manager = unsafe { &mut *memory_manager };
                 memory_manager
                     .clone_kernel_memory_pages_if_needed()

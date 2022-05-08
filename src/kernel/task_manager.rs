@@ -137,7 +137,7 @@ impl TaskManager {
             0,
             core::ptr::null_mut(),
             &mut [main_thread, idle_thread],
-            memory_manager,
+            memory_manager, /* should we set null? */
             0,
         );
 
