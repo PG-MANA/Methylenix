@@ -6,10 +6,9 @@ use super::{PartitionInfo, PartitionManager, PathInfo};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
-use crate::{alloc_non_linear_pages, free_pages};
 
-use alloc::boxed::Box;
-use core::any::Any;
+use crate::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
+
 use core::mem::MaybeUninit;
 
 const FAT32_SIGNATURE: [u8; 8] = [b'F', b'A', b'T', b'3', b'2', b' ', b' ', b' '];
@@ -118,7 +117,7 @@ impl PartitionManager for Fat32Info {
         &self,
         partition_info: &PartitionInfo,
         file_name: &PathInfo,
-    ) -> Result<Box<dyn Any>, ()> {
+    ) -> Result<usize, ()> {
         let mut entry_info = Fat32EntryInfo {
             entry_cluster: self.root_cluster,
             attribute: FAT32_ATTRIBUTE_DIRECTORY,
@@ -142,25 +141,25 @@ impl PartitionManager for Fat32Info {
                 }
             }
         }
-        return Ok(Box::new(entry_info));
+        kmalloc!(Fat32EntryInfo, entry_info)
+            .and_then(|i| Ok(i as *mut _ as usize))
+            .or(Err(()))
     }
 
-    fn get_file_size(&self, _: &PartitionInfo, file_info: &Box<dyn Any>) -> Result<usize, ()> {
-        file_info
-            .downcast_ref::<Fat32EntryInfo>()
-            .and_then(|info| Some(info.file_size as usize))
-            .ok_or(())
+    fn get_file_size(&self, _: &PartitionInfo, file_info: usize) -> Result<usize, ()> {
+        let entry_info = unsafe { &*(file_info as *const Fat32EntryInfo) };
+        Ok(entry_info.file_size as usize)
     }
 
     fn read_file(
         &self,
         partition_info: &PartitionInfo,
-        file_info: &Box<dyn Any>,
+        file_info: usize,
         offset: usize,
         length: usize,
         buffer: VAddress,
     ) -> Result<(), ()> {
-        let entry_info = file_info.downcast_ref::<Fat32EntryInfo>().unwrap();
+        let entry_info = unsafe { &*(file_info as *const Fat32EntryInfo) };
         if (entry_info.attribute
             & (FAT32_ATTRIBUTE_DIRECTORY
                 | FAT32_ATTRIBUTE_VOLUME_ID
@@ -268,6 +267,10 @@ impl PartitionManager for Fat32Info {
             reading_cluster = next_cluster!(reading_cluster);
         }
         return Ok(());
+    }
+
+    fn close_file(&self, _: &PartitionInfo, file_info: usize) {
+        let _ = kfree!(unsafe { &*(file_info as *const Fat32EntryInfo) });
     }
 }
 

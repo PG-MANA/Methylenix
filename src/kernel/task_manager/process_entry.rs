@@ -6,8 +6,12 @@
 use super::{ProcessStatus, TaskError, TaskSignal, ThreadEntry};
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::file_manager::File;
 use crate::kernel::memory_manager::MemoryManager;
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
+
+use alloc::sync::Arc;
+use alloc::vec::Vec;
 
 #[allow(dead_code)]
 pub struct ProcessEntry {
@@ -26,6 +30,9 @@ pub struct ProcessEntry {
     single_thread: Option<*mut ThreadEntry>,
     privilege_level: u8,
     next_thread_id: usize,
+
+    files: Vec<Arc<Mutex<File<'static>>>>,
+    file_vec_lock: SpinLockFlag,
 }
 
 impl ProcessEntry {
@@ -58,6 +65,7 @@ impl ProcessEntry {
         self.siblings = PtrLinkedListNode::new();
         self.children = PtrLinkedList::new();
         self.thread = PtrLinkedList::new();
+        self.files = Vec::new();
 
         if threads.len() == 1 {
             let _thread_lock = threads[0].lock.lock();
@@ -250,5 +258,28 @@ impl ProcessEntry {
             drop(_lock);
             Ok(Some(thread))
         }
+    }
+
+    pub fn get_file(&self, index: usize) -> Option<Arc<Mutex<File<'static>>>> {
+        let _lock = if self.num_of_thread == 1 {
+            None
+        } else {
+            Some(self.file_vec_lock.lock())
+        };
+        let result = self.files.get(index).and_then(|f| Some(f.clone()));
+        drop(_lock);
+        result
+    }
+
+    pub fn add_file(&mut self, f: File<'static>) -> usize {
+        let _lock = if self.num_of_thread == 1 {
+            None
+        } else {
+            Some(self.file_vec_lock.lock())
+        };
+        let i = self.files.len();
+        self.files.push(Arc::new(Mutex::new(f)));
+        drop(_lock);
+        i
     }
 }

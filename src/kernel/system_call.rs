@@ -11,7 +11,9 @@ use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::system_call;
 
+use crate::kernel::file_manager::File;
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
+use crate::kernel::memory_manager::data_type::VAddress;
 
 pub fn system_call_handler(context: &mut ContextData) {
     match context.get_system_call_arguments(0).unwrap() as SysCallNumber {
@@ -36,54 +38,65 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
         }
         SYSCALL_WRITE => {
-            if context.get_system_call_arguments(1).unwrap() == 1 {
-                if let Ok(s) = unsafe {
-                    core::str::from_utf8(core::slice::from_raw_parts(
-                        context.get_system_call_arguments(2).unwrap() as *const u8,
-                        context.get_system_call_arguments(3).unwrap() as usize,
-                    ))
-                } {
-                    kprint!("{s}");
-                    context.set_system_call_return_value(
-                        context.get_system_call_arguments(3).unwrap(),
-                    );
-                } else {
-                    context.set_system_call_return_value(u64::MAX);
-                }
-            } else {
+            let flag = InterruptManager::save_and_disable_local_irq();
+            let process = get_cpu_manager_cluster()
+                .run_queue
+                .get_running_thread()
+                .get_process_mut();
+            InterruptManager::restore_local_irq(flag);
+
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
                 pr_debug!(
                     "Unknown file descriptor: {}",
                     context.get_system_call_arguments(1).unwrap()
                 );
                 context.set_system_call_return_value(u64::MAX);
+                return;
             }
+            let result = system_call_write(
+                &mut file.unwrap().lock().unwrap(),
+                context.get_system_call_arguments(2).unwrap() as *const u8,
+                context.get_system_call_arguments(3).unwrap() as usize,
+            );
+            context.set_system_call_return_value(
+                result.and_then(|r| Ok(r as u64)).unwrap_or(u64::MAX),
+            );
         }
         SYSCALL_WRITEV => {
-            if context.get_system_call_arguments(1).unwrap() == 1 {
-                let mut written_bytes = 0usize;
-                let iov = context.get_system_call_arguments(2).unwrap() as usize;
-                for i in 0..(context.get_system_call_arguments(3).unwrap() as usize) {
-                    use core::{mem, slice, str};
-                    let iovec = iov + i * (mem::size_of::<usize>() * 2);
-                    let iov_base = unsafe { *(iovec as *const usize) } as *const u8;
-                    let iov_len = unsafe { *((iovec + mem::size_of::<usize>()) as *const usize) };
-                    if let Ok(s) =
-                        unsafe { str::from_utf8(slice::from_raw_parts(iov_base, iov_len)) }
-                    {
-                        kprint!("{s}");
-                        written_bytes += iov_len;
-                    } else {
-                        break;
-                    }
-                }
-                context.set_system_call_return_value(written_bytes as u64);
-            } else {
+            let flag = InterruptManager::save_and_disable_local_irq();
+            let process = get_cpu_manager_cluster()
+                .run_queue
+                .get_running_thread()
+                .get_process_mut();
+            InterruptManager::restore_local_irq(flag);
+
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
                 pr_debug!(
                     "Unknown file descriptor: {}",
                     context.get_system_call_arguments(1).unwrap()
                 );
                 context.set_system_call_return_value(u64::MAX);
+                return;
             }
+            let file = file.unwrap();
+            let mut file_unlocked = file.lock().unwrap();
+            let mut written_bytes = 0usize;
+            let iov = context.get_system_call_arguments(2).unwrap() as usize;
+            for i in 0..(context.get_system_call_arguments(3).unwrap() as usize) {
+                use core::mem;
+                let iovec = iov + i * (mem::size_of::<usize>() * 2);
+                let iov_base = unsafe { *(iovec as *const usize) } as *const u8;
+                let iov_len = unsafe { *((iovec + mem::size_of::<usize>()) as *const usize) };
+                if let Ok(bytes) = system_call_write(&mut file_unlocked, iov_base, iov_len) {
+                    written_bytes += bytes;
+                } else {
+                    break;
+                }
+            }
+            drop(file);
+            context.set_system_call_return_value(written_bytes as u64);
         }
         SYSCALL_ARCH_PRCTL => {
             let v = system_call::syscall_arch_prctl(context);
@@ -108,4 +121,9 @@ pub fn system_call_handler(context: &mut ContextData) {
             context.set_system_call_return_value(u64::MAX);
         }
     }
+}
+
+fn system_call_write(file: &mut File, data: *const u8, len: usize) -> Result<usize, ()> {
+    //TODO: check address for security
+    file.write(VAddress::new(data as usize), len)
 }

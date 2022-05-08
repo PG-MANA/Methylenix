@@ -3,7 +3,9 @@
 //!
 
 use crate::kernel::collections::fifo::Fifo;
+use crate::kernel::file_manager::{File, FileDescriptor, FileOperationDriver, FileSeekOrigin};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
 use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
 use crate::kernel::task_manager::wait_queue::WaitQueue;
 use crate::kernel::task_manager::work_queue::WorkList;
@@ -160,12 +162,65 @@ impl TtyManager {
         drop(_lock);
         return Some(old);
     }
+
+    pub fn open_tty_as_file(&'static mut self) -> Result<File, ()> {
+        Ok(File::new(FileDescriptor::new(0, 0), self))
+    }
 }
 
 impl fmt::Write for TtyManager {
     fn write_str(&mut self, string: &str) -> fmt::Result {
         self.puts(string)
     }
+}
+
+impl FileOperationDriver for TtyManager {
+    fn read(
+        &mut self,
+        _descriptor: &mut FileDescriptor,
+        buffer: VAddress,
+        length: usize,
+    ) -> Result<usize, ()> {
+        for read_size in 0..length {
+            if let Some(c) = self.getc(true) {
+                unsafe { *((buffer.to_usize() + read_size) as *mut u8) = c };
+            } else {
+                return if read_size == 0 {
+                    Err(())
+                } else {
+                    Ok(read_size)
+                };
+            }
+        }
+        return Ok(length);
+    }
+
+    fn write(
+        &mut self,
+        _descriptor: &mut FileDescriptor,
+        buffer: VAddress,
+        length: usize,
+    ) -> Result<usize, ()> {
+        if let Ok(s) = core::str::from_utf8(unsafe {
+            core::slice::from_raw_parts(buffer.to_usize() as *const u8, length)
+        }) {
+            self.puts(s).or(Err(()))?;
+            Ok(length)
+        } else {
+            Err(())
+        }
+    }
+
+    fn seek(
+        &mut self,
+        _descriptor: &mut FileDescriptor,
+        _offset: usize,
+        _origin: FileSeekOrigin,
+    ) -> Result<usize, ()> {
+        Ok(0)
+    }
+
+    fn close(&mut self, _descriptor: FileDescriptor) {}
 }
 
 pub fn kernel_print(args: fmt::Arguments) {

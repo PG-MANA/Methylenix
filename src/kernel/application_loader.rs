@@ -26,26 +26,27 @@ pub fn load_and_execute(
     elf_machine_type: u16,
 ) -> Result<(), ()> {
     pr_debug!("Search {}", file_name);
-    let file_manager = &get_kernel_manager_cluster().file_manager;
-    let result = file_manager.file_open(PathInfo::new(file_name));
+    let result = get_kernel_manager_cluster()
+        .file_manager
+        .file_open(PathInfo::new(file_name));
     if let Err(e) = result {
         pr_err!("{} is not found: {:?}", file_name, e);
         return Err(());
     }
-    let mut file_info = result.unwrap();
+    let mut file_descriptor = result.unwrap();
 
     let head_read_size = MSize::new(1024);
     let head_data = match kmalloc!(head_read_size) {
         Ok(v) => v,
         Err(e) => {
             pr_err!("Failed to allocate memory: {:?}", e);
-            let _ = file_manager.file_close(file_info);
+            let _ = file_descriptor.close();
             return Err(());
         }
     };
-    if let Err(e) = file_manager.file_read(&mut file_info, head_data, head_read_size.to_usize()) {
+    if let Err(e) = file_descriptor.read(head_data, head_read_size.to_usize()) {
         pr_err!("Failed to read data: {:?}", e);
-        let _ = file_manager.file_close(file_info);
+        let _ = file_descriptor.close();
         let _ = kfree!(head_data, head_read_size);
         return Err(());
     }
@@ -54,7 +55,7 @@ pub fn load_and_execute(
         Ok(e) => e,
         Err(e) => {
             pr_err!("File is not valid ELF file: {:?}", e);
-            let _ = file_manager.file_close(file_info);
+            let _ = file_descriptor.close();
             let _ = kfree!(head_data, head_read_size);
             return Err(());
         }
@@ -64,7 +65,7 @@ pub fn load_and_execute(
         || !header.is_lsb()
     {
         pr_err!("The file is not executable.");
-        let _ = file_manager.file_close(file_info);
+        let _ = file_descriptor.close();
         let _ = kfree!(head_data, head_read_size);
         return Err(());
     }
@@ -73,7 +74,7 @@ pub fn load_and_execute(
         > head_read_size.to_usize()
     {
         pr_err!("Program Header is too far from head(TODO: support...)");
-        let _ = file_manager.file_close(file_info);
+        let _ = file_descriptor.close();
         let _ = kfree!(head_data, head_read_size);
         return Err(());
     }
@@ -85,7 +86,7 @@ pub fn load_and_execute(
         Ok(e) => e,
         Err(e) => {
             pr_err!("Failed to create the user process: {:?}", e);
-            let _ = file_manager.file_close(file_info);
+            let _ = file_descriptor.close();
             let _ = kfree!(head_data, head_read_size);
             return Err(());
         }
@@ -142,8 +143,7 @@ pub fn load_and_execute(
                     }
                 };
                 if program_header.get_file_size() > 0 {
-                    if let Err(e) = file_manager.file_seek(
-                        &mut file_info,
+                    if let Err(e) = file_descriptor.seek(
                         program_header.get_file_offset() as usize,
                         FileSeekOrigin::SeekSet,
                     ) {
@@ -151,8 +151,7 @@ pub fn load_and_execute(
                         let _ = free_pages!(allocated_memory);
                         Err(())?
                     }
-                    if let Err(e) = file_manager.file_read(
-                        &mut file_info,
+                    if let Err(e) = file_descriptor.read(
                         allocated_memory + align_offset,
                         program_header.get_file_size() as usize,
                     ) {
@@ -197,8 +196,9 @@ pub fn load_and_execute(
             }
         }
     };
+    let _ = file_descriptor.close();
+
     if result.is_err() {
-        let _ = file_manager.file_close(file_info);
         let _ = kfree!(head_data, head_read_size);
         if let Err(e) = get_kernel_manager_cluster()
             .task_manager
@@ -213,7 +213,6 @@ pub fn load_and_execute(
         Ok(v) => v,
         Err(e) => {
             pr_err!("Failed to alloc stack: {:?}", e);
-            let _ = file_manager.file_close(file_info);
             let _ = kfree!(head_data, head_read_size);
             if let Err(e) = get_kernel_manager_cluster()
                 .task_manager
@@ -326,7 +325,6 @@ pub fn load_and_execute(
     {
         pr_err!("Failed to map stack into user: {:?}", e);
         let _ = free_pages!(stack_address);
-        let _ = file_manager.file_close(file_info);
         let _ = kfree!(head_data, head_read_size);
         if let Err(e) = get_kernel_manager_cluster()
             .task_manager
@@ -349,7 +347,6 @@ pub fn load_and_execute(
         );
     if let Err(e) = thread {
         pr_err!("Failed to add thread: {:?}", e);
-        let _ = file_manager.file_close(file_info);
         let _ = kfree!(head_data, head_read_size);
         if let Err(e) = get_kernel_manager_cluster()
             .task_manager
@@ -359,8 +356,27 @@ pub fn load_and_execute(
         }
         return Err(());
     }
-    let _ = file_manager.file_close(file_info);
     let _ = kfree!(head_data, head_read_size);
+
+    /* Add stdout/stdin */
+    process.add_file(
+        get_kernel_manager_cluster()
+            .kernel_tty_manager
+            .open_tty_as_file()
+            .unwrap(),
+    ); /* stdin */
+    process.add_file(
+        get_kernel_manager_cluster()
+            .kernel_tty_manager
+            .open_tty_as_file()
+            .unwrap(),
+    ); /* stderr */
+    process.add_file(
+        get_kernel_manager_cluster()
+            .kernel_tty_manager
+            .open_tty_as_file()
+            .unwrap(),
+    ); /* stderr */
 
     pr_debug!("Execute {}", file_name);
     if let Err(e) = get_kernel_manager_cluster()

@@ -6,8 +6,10 @@ pub mod elf;
 mod fat32;
 mod gpt;
 mod path_info;
+mod vfs;
 
 pub use self::path_info::{PathInfo, PathInfoIter};
+pub use self::vfs::{File, FileDescriptor, FileOperationDriver, FileSeekOrigin};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
@@ -15,7 +17,6 @@ use crate::{alloc_non_linear_pages, free_pages};
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::any::Any;
 
 pub struct FileManager {
     partition_list: Vec<(PartitionInfo, Box<dyn PartitionManager>)>,
@@ -30,40 +31,25 @@ struct PartitionInfo {
     lba_block_size: u64,
 }
 
-pub struct FileInfo {
-    d: Box<dyn Any>,
-    index: usize,
-    offset: usize,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum FileSeekOrigin {
-    SeekSet,
-    SeekCur,
-    SeekEnd,
-}
-
 trait PartitionManager {
     fn search_file(
         &self,
         partition_info: &PartitionInfo,
         file_name: &PathInfo,
-    ) -> Result<Box<dyn Any>, ()>;
-
-    fn get_file_size(
-        &self,
-        partition_info: &PartitionInfo,
-        file_info: &Box<dyn Any>,
     ) -> Result<usize, ()>;
+
+    fn get_file_size(&self, partition_info: &PartitionInfo, file_info: usize) -> Result<usize, ()>;
 
     fn read_file(
         &self,
         partition_info: &PartitionInfo,
-        file_info: &Box<dyn Any>,
+        file_info: usize,
         offset: usize,
         length: usize,
         buffer: VAddress,
     ) -> Result<(), ()>;
+
+    fn close_file(&self, partition_info: &PartitionInfo, file_info: usize);
 }
 
 impl FileManager {
@@ -123,59 +109,73 @@ impl FileManager {
         self.partition_list.len()
     }
 
-    fn get_file_size(&self, file_info: &FileInfo) -> Result<usize, ()> {
-        let p = &self.partition_list[file_info.index];
-        p.1.get_file_size(&p.0, &file_info.d)
+    fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<usize, ()> {
+        let p = &self.partition_list[descriptor.get_device_index()];
+        p.1.get_file_size(&p.0, descriptor.get_data())
     }
 
-    pub fn file_open(&self, file_name: &PathInfo) -> Result<FileInfo, ()> {
+    pub fn file_open(&mut self, file_name: &PathInfo) -> Result<File, ()> {
         for (index, e) in self.partition_list.iter().enumerate() {
             match e.1.search_file(&e.0, file_name) {
-                Ok(d) => {
-                    return Ok(FileInfo {
-                        d,
-                        offset: 0,
-                        index,
-                    });
+                Ok(data) => {
+                    return Ok(File::new(FileDescriptor::new(data, index), self));
                 }
                 Err(_) => { /* continue */ }
             }
         }
         return Err(());
     }
+}
 
-    pub fn file_read(
-        &self,
-        file_info: &mut FileInfo,
+impl FileOperationDriver for FileManager {
+    fn read(
+        &mut self,
+        descriptor: &mut FileDescriptor,
         buffer: VAddress,
         length: usize,
-    ) -> Result<(), ()> {
-        let p = &self.partition_list[file_info.index];
-        let result =
-            p.1.read_file(&p.0, &file_info.d, file_info.offset, length, buffer);
+    ) -> Result<usize, ()> {
+        let p = &self.partition_list[descriptor.get_device_index()];
+        let result = p.1.read_file(
+            &p.0,
+            descriptor.get_data(),
+            descriptor.get_position(),
+            length,
+            buffer,
+        );
         if result.is_ok() {
-            file_info.offset += length;
+            descriptor.add_position(length);
         }
-        return result;
+        return result.and_then(|_| Ok(length));
     }
 
-    pub fn file_seek(
-        &self,
-        file_info: &mut FileInfo,
+    fn write(
+        &mut self,
+        _descriptor: &mut FileDescriptor,
+        _buffer: VAddress,
+        _length: usize,
+    ) -> Result<usize, ()> {
+        unimplemented!()
+    }
+
+    fn seek(
+        &mut self,
+        descriptor: &mut FileDescriptor,
         offset: usize,
         origin: FileSeekOrigin,
     ) -> Result<usize, ()> {
         match origin {
-            FileSeekOrigin::SeekSet => file_info.offset = offset,
-            FileSeekOrigin::SeekCur => file_info.offset += offset,
+            FileSeekOrigin::SeekSet => descriptor.set_position(offset),
+            FileSeekOrigin::SeekCur => descriptor.add_position(offset),
             FileSeekOrigin::SeekEnd => {
-                file_info.offset = self.get_file_size(file_info)?;
+                let pos = self.get_file_size(descriptor)?;
+                descriptor.set_position(pos);
             }
         }
-        return Ok(file_info.offset);
+        return Ok(descriptor.get_position());
     }
 
-    pub fn file_close(&self, file_info: FileInfo) {
-        drop(file_info);
+    fn close(&mut self, descriptor: FileDescriptor) {
+        let p = &self.partition_list[descriptor.get_device_index()];
+        p.1.close_file(&p.0, descriptor.get_data());
     }
 }
