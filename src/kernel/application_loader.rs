@@ -8,7 +8,9 @@ use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
 
 use crate::kernel::collections::auxiliary_vector;
 use crate::kernel::file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
-use crate::kernel::file_manager::{FileSeekOrigin, PathInfo};
+use crate::kernel::file_manager::{
+    FileSeekOrigin, PathInfo, FILE_PERMISSION_READ, FILE_PERMISSION_WRITE,
+};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
@@ -28,7 +30,7 @@ pub fn load_and_execute(
     pr_debug!("Search {}", file_name);
     let result = get_kernel_manager_cluster()
         .file_manager
-        .file_open(PathInfo::new(file_name));
+        .file_open(PathInfo::new(file_name), FILE_PERMISSION_READ);
     if let Err(e) = result {
         pr_err!("{} is not found: {:?}", file_name, e);
         return Err(());
@@ -362,19 +364,19 @@ pub fn load_and_execute(
     process.add_file(
         get_kernel_manager_cluster()
             .kernel_tty_manager
-            .open_tty_as_file()
+            .open_tty_as_file(FILE_PERMISSION_READ)
             .unwrap(),
     ); /* stdin */
     process.add_file(
         get_kernel_manager_cluster()
             .kernel_tty_manager
-            .open_tty_as_file()
+            .open_tty_as_file(FILE_PERMISSION_WRITE)
             .unwrap(),
     ); /* stderr */
     process.add_file(
         get_kernel_manager_cluster()
             .kernel_tty_manager
-            .open_tty_as_file()
+            .open_tty_as_file(FILE_PERMISSION_WRITE)
             .unwrap(),
     ); /* stderr */
 

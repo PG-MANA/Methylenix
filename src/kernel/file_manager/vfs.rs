@@ -11,6 +11,9 @@ pub enum FileSeekOrigin {
     SeekEnd,
 }
 
+pub const FILE_PERMISSION_READ: u8 = 1;
+pub const FILE_PERMISSION_WRITE: u8 = 1 << 1;
+
 pub trait FileOperationDriver {
     fn read(
         &mut self,
@@ -40,6 +43,7 @@ pub struct FileDescriptor {
     data: usize,
     position: usize,
     device_index: usize,
+    permission: u8,
 }
 
 pub struct File<'a> {
@@ -48,10 +52,11 @@ pub struct File<'a> {
 }
 
 impl FileDescriptor {
-    pub fn new(data: usize, device_index: usize) -> Self {
+    pub fn new(data: usize, device_index: usize, permission: u8) -> Self {
         Self {
             data,
             position: 0,
+            permission,
             device_index,
         }
     }
@@ -82,10 +87,16 @@ impl<'a> File<'a> {
     }
 
     pub fn read(&mut self, buffer: VAddress, length: usize) -> Result<usize, ()> {
+        if (self.descriptor.permission & FILE_PERMISSION_READ) == 0 {
+            return Err(());
+        }
         self.driver.read(&mut self.descriptor, buffer, length)
     }
 
     pub fn write(&mut self, buffer: VAddress, length: usize) -> Result<usize, ()> {
+        if (self.descriptor.permission & FILE_PERMISSION_WRITE) == 0 {
+            return Err(());
+        }
         self.driver.write(&mut self.descriptor, buffer, length)
     }
 

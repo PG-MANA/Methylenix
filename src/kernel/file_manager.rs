@@ -9,7 +9,10 @@ mod path_info;
 mod vfs;
 
 pub use self::path_info::{PathInfo, PathInfoIter};
-pub use self::vfs::{File, FileDescriptor, FileOperationDriver, FileSeekOrigin};
+pub use self::vfs::{
+    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
+    FILE_PERMISSION_WRITE,
+};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
@@ -114,11 +117,14 @@ impl FileManager {
         p.1.get_file_size(&p.0, descriptor.get_data())
     }
 
-    pub fn file_open(&mut self, file_name: &PathInfo) -> Result<File, ()> {
+    pub fn file_open(&mut self, file_name: &PathInfo, permission: u8) -> Result<File, ()> {
         for (index, e) in self.partition_list.iter().enumerate() {
             match e.1.search_file(&e.0, file_name) {
                 Ok(data) => {
-                    return Ok(File::new(FileDescriptor::new(data, index), self));
+                    return Ok(File::new(
+                        FileDescriptor::new(data, index, permission),
+                        self,
+                    ));
                 }
                 Err(_) => { /* continue */ }
             }
