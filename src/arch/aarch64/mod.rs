@@ -189,15 +189,7 @@ fn main_process() -> ! {
         ELF_MACHINE_AA64,
     );
 
-    let tty = &mut get_kernel_manager_cluster().kernel_tty_manager;
-    loop {
-        if let Some(c) = tty.getc(true) {
-            kprint!("{}", c as char);
-            if tty.flush().is_err() {
-                pr_err!("Cannot flush text.");
-            }
-        }
-    }
+    idle()
 }
 
 fn idle() -> ! {
