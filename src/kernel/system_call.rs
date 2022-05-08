@@ -56,7 +56,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
             let result = system_call_write(
                 &mut file.unwrap().lock().unwrap(),
-                context.get_system_call_arguments(2).unwrap() as *const u8,
+                context.get_system_call_arguments(2).unwrap() as usize,
                 context.get_system_call_arguments(3).unwrap() as usize,
             );
             context.set_system_call_return_value(
@@ -87,7 +87,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             for i in 0..(context.get_system_call_arguments(3).unwrap() as usize) {
                 use core::mem;
                 let iovec = iov + i * (mem::size_of::<usize>() * 2);
-                let iov_base = unsafe { *(iovec as *const usize) } as *const u8;
+                let iov_base = unsafe { *(iovec as *const usize) };
                 let iov_len = unsafe { *((iovec + mem::size_of::<usize>()) as *const usize) };
                 if let Ok(bytes) = system_call_write(&mut file_unlocked, iov_base, iov_len) {
                     written_bytes += bytes;
@@ -123,7 +123,12 @@ pub fn system_call_handler(context: &mut ContextData) {
     }
 }
 
-fn system_call_write(file: &mut File, data: *const u8, len: usize) -> Result<usize, ()> {
+fn system_call_write(file: &mut File, data: usize, len: usize) -> Result<usize, ()> {
     //TODO: check address for security
-    file.write(VAddress::new(data as usize), len)
+    if data == 0 {
+        return if len == 0 { Ok(0) } else { Err(()) };
+    } else if len == 0 {
+        return Ok(0);
+    }
+    file.write(VAddress::new(data), len)
 }
