@@ -184,6 +184,9 @@ impl FileOperationDriver for TtyManager {
         for read_size in 0..length {
             if let Some(c) = self.getc(true) {
                 unsafe { *((buffer.to_usize() + read_size) as *mut u8) = c };
+                if c == b'\n' {
+                    return Ok(read_size + 1);
+                }
             } else {
                 return if read_size == 0 {
                     Err(())
@@ -205,6 +208,7 @@ impl FileOperationDriver for TtyManager {
             core::slice::from_raw_parts(buffer.to_usize() as *const u8, length)
         }) {
             self.puts(s).or(Err(()))?;
+            self.flush().or(Err(()))?;
             Ok(length)
         } else {
             Err(())

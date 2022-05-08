@@ -156,9 +156,9 @@ impl PartitionManager for Fat32Info {
         partition_info: &PartitionInfo,
         file_info: usize,
         offset: usize,
-        length: usize,
+        mut length: usize,
         buffer: VAddress,
-    ) -> Result<(), ()> {
+    ) -> Result<usize, ()> {
         let entry_info = unsafe { &*(file_info as *const Fat32EntryInfo) };
         if (entry_info.attribute
             & (FAT32_ATTRIBUTE_DIRECTORY
@@ -170,14 +170,12 @@ impl PartitionManager for Fat32Info {
             return Err(());
         }
         if offset + length > entry_info.file_size as usize {
-            pr_err!(
-                "offset({:#X}) and length({:#X}) is exceeded the file size({:#X})",
-                offset,
-                length,
-                entry_info.file_size
-            );
-            return Err(());
+            if offset >= entry_info.file_size as usize {
+                return Ok(0);
+            }
+            length -= entry_info.file_size as usize - offset;
         }
+        let length = length;
 
         macro_rules! next_cluster {
             ($c:expr) => {
@@ -266,7 +264,7 @@ impl PartitionManager for Fat32Info {
             }
             reading_cluster = next_cluster!(reading_cluster);
         }
-        return Ok(());
+        return Ok(buffer_pointer);
     }
 
     fn close_file(&self, _: &PartitionInfo, file_info: usize) {

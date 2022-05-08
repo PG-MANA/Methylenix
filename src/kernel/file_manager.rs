@@ -50,7 +50,7 @@ trait PartitionManager {
         offset: usize,
         length: usize,
         buffer: VAddress,
-    ) -> Result<(), ()>;
+    ) -> Result<usize, ()>;
 
     fn close_file(&self, partition_info: &PartitionInfo, file_info: usize);
 }
@@ -148,10 +148,10 @@ impl FileOperationDriver for FileManager {
             length,
             buffer,
         );
-        if result.is_ok() {
-            descriptor.add_position(length);
+        if let Ok(s) = result {
+            descriptor.add_position(s);
         }
-        return result.and_then(|_| Ok(length));
+        return result;
     }
 
     fn write(
