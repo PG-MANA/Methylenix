@@ -38,6 +38,27 @@ pub struct ProcessEntry {
 impl ProcessEntry {
     pub const PROCESS_ENTRY_ALIGN: usize = 0;
 
+    fn new() -> Self {
+        Self {
+            p_list: PtrLinkedListNode::new(),
+            children: PtrLinkedList::new(),
+            siblings: PtrLinkedListNode::new(),
+            lock: SpinLockFlag::new(),
+            thread: PtrLinkedList::new(),
+            signal: TaskSignal::Normal,
+            status: ProcessStatus::New,
+            memory_manager: core::ptr::null_mut(),
+            process_id: 0,
+            parent: core::ptr::null_mut(),
+            num_of_thread: 0,
+            single_thread: None,
+            privilege_level: 0,
+            next_thread_id: 0,
+            files: Vec::new(),
+            file_vec_lock: SpinLockFlag::new(),
+        }
+    }
+
     /// Init ProcessEntry and set ThreadEntries to `Self::thread`.
     ///
     /// **`threads` must be unlocked.**
@@ -49,23 +70,14 @@ impl ProcessEntry {
         memory_manager: *mut MemoryManager,
         privilege_level: u8,
     ) {
-        self.lock = SpinLockFlag::new();
-        let _lock = self.lock.lock();
-
-        self.signal = TaskSignal::Normal;
-        self.status = ProcessStatus::Normal;
+        core::mem::forget(core::mem::replace(self, Self::new()));
         self.parent = parent;
         self.process_id = p_id;
         self.privilege_level = privilege_level;
         self.memory_manager = memory_manager;
         self.num_of_thread = threads.len();
         self.next_thread_id = 1;
-        /* Init List */
-        self.p_list = PtrLinkedListNode::new();
-        self.siblings = PtrLinkedListNode::new();
-        self.children = PtrLinkedList::new();
-        self.thread = PtrLinkedList::new();
-        self.files = Vec::new();
+        let _lock = self.lock.lock();
 
         if threads.len() == 1 {
             let _thread_lock = threads[0].lock.lock();

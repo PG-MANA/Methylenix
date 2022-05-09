@@ -31,6 +31,26 @@ pub struct ThreadEntry {
 impl ThreadEntry {
     pub const THREAD_ENTRY_ALIGN: usize = 0;
 
+    fn new(
+        process: NonNull<ProcessEntry>,
+        context_data: ContextData,
+        scheduling_class: SchedulingClass,
+    ) -> Self {
+        Self {
+            t_list: PtrLinkedListNode::new(),
+            run_list: PtrLinkedListNode::new(),
+            sleep_list: PtrLinkedListNode::new(),
+            lock: SpinLockFlag::new(),
+            time_slice: 0,
+            status: TaskStatus::New,
+            thread_id: 0,
+            process,
+            context_data,
+            priority_level: 0,
+            scheduling_class,
+        }
+    }
+
     pub fn init(
         &mut self,
         process: *mut ProcessEntry,
@@ -38,34 +58,30 @@ impl ThreadEntry {
         scheduling_class: SchedulingClass,
         context_data: ContextData,
     ) {
-        self.lock = SpinLockFlag::new();
-        let _lock = self.lock.lock();
-        self.t_list = PtrLinkedListNode::new();
-        self.run_list = PtrLinkedListNode::new();
-        self.sleep_list = PtrLinkedListNode::new();
-        self.time_slice = 0;
-        self.status = TaskStatus::New;
-        self.thread_id = 0;
-        self.process = NonNull::new(process).unwrap();
-        self.context_data = context_data;
+        core::mem::forget(core::mem::replace(
+            self,
+            Self::new(
+                NonNull::new(process).unwrap(),
+                context_data,
+                scheduling_class,
+            ),
+        ));
         self.priority_level = priority_level;
         self.scheduling_class = scheduling_class;
     }
 
     pub fn fork_data(&mut self, original_thread: &Self, context_data: ContextData) {
         assert!(original_thread.lock.is_locked());
-        self.lock = SpinLockFlag::new();
-        let _lock = self.lock.lock();
-        self.t_list = PtrLinkedListNode::new();
-        self.run_list = PtrLinkedListNode::new();
-        self.sleep_list = PtrLinkedListNode::new();
-        self.time_slice = 0;
+        core::mem::forget(core::mem::replace(
+            self,
+            Self::new(
+                original_thread.process,
+                context_data,
+                original_thread.scheduling_class,
+            ),
+        ));
         self.status = TaskStatus::New;
-        self.thread_id = 0;
-        self.process = original_thread.process;
         self.priority_level = original_thread.priority_level;
-        self.scheduling_class = original_thread.scheduling_class;
-        self.context_data = context_data;
     }
 
     pub fn set_process(&mut self, process: *mut ProcessEntry) {
