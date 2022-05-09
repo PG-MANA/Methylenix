@@ -18,7 +18,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::{TaskStatus, ThreadEntry};
 
-use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
+use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kfree, kmalloc};
 
 use alloc::collections::LinkedList;
 use alloc::vec::Vec;
@@ -750,10 +750,20 @@ impl NvmeManager {
             return Err(());
         }
         let irq = InterruptManager::save_and_disable_local_irq();
-        let mut wait_list = WaitListEntry {
-            list: PtrLinkedListNode::new(),
-            result: [0u32; 4],
-            thread: get_cpu_manager_cluster().run_queue.get_running_thread(),
+        let wait_list = match kmalloc!(
+            WaitListEntry,
+            WaitListEntry {
+                list: PtrLinkedListNode::new(),
+                result: [0u32; 4],
+                thread: get_cpu_manager_cluster().run_queue.get_running_thread(),
+            }
+        ) {
+            Ok(e) => e,
+            Err(e) => {
+                pr_err!("Failed to allocate wait list: {:?}", e);
+                InterruptManager::restore_local_irq(irq);
+                return Err(());
+            }
         };
         let queue = &mut self.io_queue_list[queue_id as usize - 1];
         let _lock = queue.lock.lock();
@@ -769,8 +779,14 @@ impl NvmeManager {
         get_cpu_manager_cluster()
             .run_queue
             .sleep_current_thread(Some(irq), TaskStatus::Interruptible)
-            .or(Err(()))?;
-        return Ok(wait_list.result);
+            .or_else(|e| {
+                pr_err!("Failed to sleep: {:#?}", e);
+                let _ = kfree!(wait_list);
+                Err(())
+            })?;
+        let result = wait_list.result;
+        let _ = kfree!(wait_list);
+        return Ok(result);
     }
 
     fn _take_completed_command(
