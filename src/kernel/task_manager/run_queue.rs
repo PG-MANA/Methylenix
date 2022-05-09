@@ -5,6 +5,7 @@
 //! RunQueue will be usually used only specific cpu, but some methods may be called from other cpu,
 //! therefore, it has SpinLock.
 
+use super::process_entry::ProcessEntry;
 use super::thread_entry::ThreadEntry;
 use super::{TaskError, TaskStatus};
 
@@ -191,6 +192,18 @@ impl RunQueue {
     pub fn get_running_thread(&mut self) -> &mut ThreadEntry {
         assert!(!is_interrupt_enabled());
         unsafe { &mut *self.running_thread.unwrap() }
+    }
+
+    pub fn get_running_process(&mut self) -> &mut ProcessEntry {
+        unsafe { (&mut *self.running_thread.unwrap()).get_process_mut() }
+    }
+
+    pub fn get_running_pid(&self) -> usize {
+        if let Some(t) = self.running_thread {
+            unsafe { &*t }.get_process().get_pid()
+        } else {
+            super::KERNEL_PID
+        }
     }
 
     pub fn copy_running_thread_data(&self) -> Result<ThreadEntry, TaskError> {

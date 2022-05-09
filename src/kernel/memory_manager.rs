@@ -30,7 +30,8 @@ use crate::arch::target_arch::paging::{
     PAGE_SIZE_USIZE,
 };
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
+use crate::kernel::task_manager::KERNEL_PID;
 
 pub struct MemoryManager {
     virtual_memory_manager: VirtualMemoryManager,
@@ -76,14 +77,7 @@ impl MemoryManager {
     }
 
     pub fn clone_kernel_memory_pages_if_needed(&mut self) -> Result<(), MemoryError> {
-        /* Depend on the architecture */
-        if !NEED_COPY_HIGH_MEMORY_PAGE_TABLE {
-            return Ok(());
-        }
-        if self.is_kernel_memory_manager() {
-            return Ok(());
-        }
-        self.clone_kernel_memory_pages()
+        self._clone_kernel_memory_pages_if_needed()
     }
 
     fn _clone_kernel_memory_pages_if_needed(&mut self) -> Result<(), MemoryError> {
@@ -91,10 +85,17 @@ impl MemoryManager {
         if !NEED_COPY_HIGH_MEMORY_PAGE_TABLE {
             return Ok(());
         }
-        if self.is_kernel_memory_manager() {
-            return Ok(());
+        if self.is_kernel_memory_manager()
+        /*  is above if expression really necessary? */
+        {
+            if get_cpu_manager_cluster().run_queue.get_running_pid() == KERNEL_PID {
+                return Ok(());
+            } /* running thread must be some */
+            let running_process = get_cpu_manager_cluster().run_queue.get_running_process();
+            unsafe { &mut *running_process.get_memory_manager() }.clone_kernel_memory_pages()
+        } else {
+            self.clone_kernel_memory_pages()
         }
-        self.clone_kernel_memory_pages()
     }
 
     fn add_physical_memory_manager_pool(

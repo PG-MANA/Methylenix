@@ -29,6 +29,8 @@ use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::scheduling_class::user::UserSchedulingClass;
 use crate::{kfree, kmalloc};
 
+pub const KERNEL_PID: usize = 0;
+
 pub struct TaskManager {
     lock: IrqSaveSpinLockFlag,
     kernel_process: *mut ProcessEntry,
@@ -134,7 +136,7 @@ impl TaskManager {
         let memory_manager = &mut get_kernel_manager_cluster().kernel_memory_manager;
 
         kernel_process.init(
-            0,
+            KERNEL_PID,
             core::ptr::null_mut(),
             &mut [main_thread, idle_thread],
             memory_manager, /* should we set null? */
