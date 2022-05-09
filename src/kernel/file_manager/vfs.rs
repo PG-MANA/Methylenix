@@ -14,6 +14,26 @@ pub enum FileSeekOrigin {
 pub const FILE_PERMISSION_READ: u8 = 1;
 pub const FILE_PERMISSION_WRITE: u8 = 1 << 1;
 
+#[repr(transparent)]
+struct FakeDriver {}
+static mut FAKE_DRIVER: FakeDriver = FakeDriver {};
+
+impl FileOperationDriver for FakeDriver {
+    fn read(&mut self, _: &mut FileDescriptor, _: VAddress, _: usize) -> Result<usize, ()> {
+        Err(())
+    }
+
+    fn write(&mut self, _: &mut FileDescriptor, _: VAddress, _: usize) -> Result<usize, ()> {
+        Err(())
+    }
+
+    fn seek(&mut self, _: &mut FileDescriptor, _: usize, _: FileSeekOrigin) -> Result<usize, ()> {
+        Err(())
+    }
+
+    fn close(&mut self, _: FileDescriptor) {}
+}
+
 pub trait FileOperationDriver {
     fn read(
         &mut self,
@@ -84,6 +104,20 @@ impl FileDescriptor {
 impl<'a> File<'a> {
     pub fn new(descriptor: FileDescriptor, driver: &'a mut dyn FileOperationDriver) -> Self {
         Self { descriptor, driver }
+    }
+
+    pub fn new_invalid() -> Self {
+        Self {
+            descriptor: FileDescriptor::new(0, 0, 0),
+            driver: unsafe { &mut FAKE_DRIVER },
+        }
+    }
+
+    pub fn is_invalid(&self) -> bool {
+        self.descriptor.permission == 0
+            && self.descriptor.data == 0
+            && self.descriptor.device_index == 0
+            && self.descriptor.position == 0
     }
 
     pub fn read(&mut self, buffer: VAddress, length: usize) -> Result<usize, ()> {

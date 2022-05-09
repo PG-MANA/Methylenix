@@ -11,8 +11,8 @@ use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::system_call;
 
-use crate::kernel::file_manager::File;
-use crate::kernel::manager_cluster::get_cpu_manager_cluster;
+use crate::kernel::file_manager::{File, PathInfo, FILE_PERMISSION_READ};
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
 
 pub fn system_call_handler(context: &mut ContextData) {
@@ -38,12 +38,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
         }
         SYSCALL_WRITE => {
-            let flag = InterruptManager::save_and_disable_local_irq();
-            let process = get_cpu_manager_cluster()
-                .run_queue
-                .get_running_thread()
-                .get_process_mut();
-            InterruptManager::restore_local_irq(flag);
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
 
             let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
             if file.is_none() {
@@ -64,12 +59,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             );
         }
         SYSCALL_WRITEV => {
-            let flag = InterruptManager::save_and_disable_local_irq();
-            let process = get_cpu_manager_cluster()
-                .run_queue
-                .get_running_thread()
-                .get_process_mut();
-            InterruptManager::restore_local_irq(flag);
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
 
             let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
             if file.is_none() {
@@ -96,7 +86,90 @@ pub fn system_call_handler(context: &mut ContextData) {
                 }
             }
             drop(file);
-            context.set_system_call_return_value(written_bytes as u64);
+            if written_bytes == 0 {
+                context.set_system_call_return_value(u64::MAX);
+            } else {
+                context.set_system_call_return_value(written_bytes as u64);
+            }
+        }
+        SYSCALL_READ => {
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
+                pr_debug!(
+                    "Unknown file descriptor: {}",
+                    context.get_system_call_arguments(1).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let result = file.unwrap().lock().unwrap().read(
+                VAddress::new(context.get_system_call_arguments(2).unwrap() as usize),
+                context.get_system_call_arguments(3).unwrap() as usize,
+            );
+            context.set_system_call_return_value(
+                result.and_then(|r| Ok(r as u64)).unwrap_or(u64::MAX),
+            );
+        }
+        SYSCALL_OPEN => {
+            const O_RDONLY: u64 = 0;
+            const O_LARGEFILE: u64 = 00100000;
+
+            let mut str_len = 0usize;
+            let file_name = context.get_system_call_arguments(1).unwrap() as usize;
+            while unsafe { *((file_name + str_len) as *const u8) } != 0 {
+                str_len += 1;
+            }
+            let mut flag = context.get_system_call_arguments(2).unwrap();
+            flag &= !O_LARGEFILE;
+            if flag == O_RDONLY {
+                if let Ok(s) = core::str::from_utf8(unsafe {
+                    core::slice::from_raw_parts(file_name as *const u8, str_len)
+                }) {
+                    if let Ok(f) = get_kernel_manager_cluster()
+                        .file_manager
+                        .file_open(PathInfo::new(s), FILE_PERMISSION_READ)
+                    {
+                        pr_debug!("File is found.");
+                        let flag = InterruptManager::save_and_disable_local_irq();
+                        let process = get_cpu_manager_cluster()
+                            .run_queue
+                            .get_running_thread()
+                            .get_process_mut();
+                        InterruptManager::restore_local_irq(flag);
+                        let fd = process.add_file(f);
+                        context.set_system_call_return_value(fd as u64);
+                    } else {
+                        pr_warn!("{} is not found.", s);
+                    }
+                } else {
+                    pr_warn!("Failed to convert file name to utf-8");
+                    context.set_system_call_return_value(u64::MAX);
+                }
+            } else {
+                pr_warn!(
+                    "Unsupported flags: {:#X}",
+                    context.get_system_call_arguments(2).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+            }
+        }
+        SYSCALL_CLOSE => {
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
+                pr_debug!(
+                    "Unknown file descriptor: {}",
+                    context.get_system_call_arguments(1).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let file = unsafe {
+                core::ptr::replace(&mut *file.unwrap().lock().unwrap(), File::new_invalid())
+            };
+            file.close();
+            context.set_system_call_return_value(0);
         }
         SYSCALL_ARCH_PRCTL => {
             let v = system_call::syscall_arch_prctl(context);
