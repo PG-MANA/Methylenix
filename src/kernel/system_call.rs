@@ -13,7 +13,9 @@ use crate::arch::target_arch::system_call;
 
 use crate::kernel::file_manager::{File, PathInfo, FILE_PERMISSION_READ};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::VAddress;
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+};
 
 pub fn system_call_handler(context: &mut ContextData) {
     match context.get_system_call_arguments(0).unwrap() as SysCallNumber {
@@ -189,6 +191,48 @@ pub fn system_call_handler(context: &mut ContextData) {
             );
             InterruptManager::restore_local_irq(flag);
         }
+        SYSCALL_BRK => {
+            pr_debug!(
+                "BRK(Address: {:#X}) is ignored.",
+                context.get_system_call_arguments(1).unwrap()
+            );
+            context.set_system_call_return_value(u64::MAX);
+        }
+        SYSCALL_MMAP => {
+            let address = context.get_system_call_arguments(1).unwrap();
+            let size = context.get_system_call_arguments(2).unwrap();
+            let prot = context.get_system_call_arguments(3).unwrap_or(0);
+            let flags = context.get_system_call_arguments(4).unwrap_or(0);
+            let fd = context.get_system_call_arguments(5).unwrap_or(0);
+            let offset = context.get_system_call_arguments(6).unwrap_or(0);
+            context.set_system_call_return_value(
+                system_call_memory_map(
+                    address as usize,
+                    size as usize,
+                    prot as usize,
+                    flags as usize,
+                    fd as usize,
+                    offset as usize,
+                )
+                .unwrap_or(usize::MAX) as u64,
+            );
+        }
+        SYSCALL_MUNMAP => {
+            let address = context.get_system_call_arguments(1).unwrap();
+            let memory_manager = unsafe {
+                &mut *(get_cpu_manager_cluster()
+                    .run_queue
+                    .get_running_process()
+                    .get_memory_manager())
+            };
+            let result = memory_manager.free(VAddress::new(address as usize));
+            context.set_system_call_return_value(if let Err(e) = result {
+                pr_err!("Failed to free memory: {:?}", e);
+                u64::MAX
+            } else {
+                0
+            });
+        }
         s => {
             pr_err!("SysCall: Unknown({:#X})", s);
             context.set_system_call_return_value(u64::MAX);
@@ -204,4 +248,63 @@ fn system_call_write(file: &mut File, data: usize, len: usize) -> Result<usize, 
         return Ok(0);
     }
     file.write(VAddress::new(data), len)
+}
+
+fn system_call_memory_map(
+    address: usize,
+    size: usize,
+    prot: usize,
+    flags: usize,
+    _fd: usize,
+    _offset: usize,
+) -> Result<usize, ()> {
+    /* PROT */
+    const PROT_NONE: usize = 0x00;
+    const PROT_READ: usize = 0x01;
+    const PROT_WRITE: usize = 0x02;
+    const PROT_EXEC: usize = 0x04;
+
+    /* FLAGS */
+    //const MAP_SHARED: usize = 0x01;
+    //const MAP_PRIVATE: usize = 0x02;
+    //const MAP_FIXED: usize = 0x10;
+    const MAP_ANONYMOUS: usize = 0x20;
+
+    if size == 0 {
+        pr_err!("Size is zero.");
+        return Err(());
+    }
+    let size = MSize::new(size).page_align_up();
+
+    let memory_permission = MemoryPermissionFlags::new(
+        (prot & PROT_READ) != 0,
+        (prot & PROT_WRITE) != 0,
+        (prot & PROT_EXEC) != 0,
+        prot != PROT_NONE,
+    );
+    if (flags & MAP_ANONYMOUS) == 0 {
+        pr_err!("Flags({:#X}) is not anonymous.", flags);
+        return Err(());
+    }
+    let memory_options = MemoryOptionFlags::ALLOC | MemoryOptionFlags::USER;
+
+    let memory_manager = unsafe {
+        &mut *(get_cpu_manager_cluster()
+            .run_queue
+            .get_running_process()
+            .get_memory_manager())
+    };
+
+    if address != 0 {
+        /* Memory Map */
+        pr_warn!("Address({:#X}) will be ignored.", address);
+    }
+    /* Memory Allocation */
+    let result =
+        memory_manager.alloc_nonlinear_pages(size, memory_permission, Some(memory_options));
+    if let Err(e) = result {
+        pr_err!("Failed to allocate memory: {:?}", e);
+        return Err(());
+    }
+    return Ok(result.unwrap().to_usize());
 }

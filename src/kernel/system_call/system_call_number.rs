@@ -13,3 +13,6 @@ pub const SYSCALL_CLOSE: SysCallNumber = 0x03;
 pub const SYSCALL_WRITEV: SysCallNumber = 0x14;
 pub const SYSCALL_ARCH_PRCTL: SysCallNumber = 0x9E;
 pub const SYSCALL_SET_TID_ADDRESS: SysCallNumber = 0xDA;
+pub const SYSCALL_BRK: SysCallNumber = 0x0C;
+pub const SYSCALL_MMAP: SysCallNumber = 0x09;
+pub const SYSCALL_MUNMAP: SysCallNumber = 0x0B;
