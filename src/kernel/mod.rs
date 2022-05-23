@@ -16,6 +16,7 @@ pub mod collections {
 pub mod application_loader;
 pub mod block_device;
 pub mod drivers;
+pub mod ethernet_device;
 pub mod file_manager;
 pub mod graphic_manager;
 pub mod manager_cluster;

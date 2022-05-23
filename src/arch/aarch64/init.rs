@@ -680,6 +680,16 @@ pub fn init_block_devices_and_file_system_early() {
     ));
 }
 
+/// Initialize Ethernet Manager and
+///
+/// This function must be called before calling device scan functions.
+pub fn init_ethernet_manager_early() {
+    mem::forget(mem::replace(
+        &mut get_kernel_manager_cluster().ethernet_device_manager,
+        EthernetDeviceManager::new(),
+    ));
+}
+
 /// Search partitions and try to mount them
 ///
 /// This function will be called after completing the device initializations.

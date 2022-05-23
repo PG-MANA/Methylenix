@@ -14,6 +14,7 @@ use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
 use crate::kernel::drivers::acpi::event::AcpiEventManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::pci::PciManager;
+use crate::kernel::ethernet_device::EthernetDeviceManager;
 use crate::kernel::file_manager::FileManager;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
@@ -38,6 +39,7 @@ pub struct KernelManagerCluster {
     pub task_manager: TaskManager,
     pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
     pub block_device_manager: BlockDeviceManager,
+    pub ethernet_device_manager: EthernetDeviceManager,
     pub file_manager: FileManager,
     pub acpi_manager: Mutex<AcpiManager>,
     pub acpi_event_manager: AcpiEventManager,

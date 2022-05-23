@@ -168,6 +168,7 @@ fn main_process() -> ! {
     draw_boot_logo();
 
     init_block_devices_and_file_system_early();
+    init_ethernet_manager_early();
 
     if init_pci_early() {
         if !init_acpi_later() {

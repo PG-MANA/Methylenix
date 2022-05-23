@@ -175,6 +175,7 @@ fn main_process() -> ! {
     }
 
     init_block_devices_and_file_system_later();
+    init_ethernet_manager_early();
 
     /* Test */
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [

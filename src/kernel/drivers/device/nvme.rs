@@ -71,13 +71,13 @@ impl PciDeviceDriver for NvmeManager {
     const BASE_CLASS_CODE: u8 = 0x01;
     const SUB_CLASS_CODE: u8 = 0x08;
 
-    fn setup_device(pci_dev: &PciDevice, class_code: ClassCode) {
+    fn setup_device(pci_dev: &PciDevice, class_code: ClassCode) -> Result<(), ()> {
         if class_code.programming_interface != 2 && class_code.programming_interface != 3 {
             pr_err!(
                 "Unsupported programming interface: {:#X}",
                 class_code.programming_interface
             );
-            return;
+            return Err(());
         }
         macro_rules! read_pci {
             ($offset:expr, $size:expr) => {
@@ -88,7 +88,7 @@ impl PciDeviceDriver for NvmeManager {
                     Ok(d) => d,
                     Err(e) => {
                         pr_err!("Failed to read PCI configuration space: {:?},", e);
-                        return;
+                        return Err(());
                     }
                 }
             };
@@ -100,7 +100,7 @@ impl PciDeviceDriver for NvmeManager {
                     .write_data(pci_dev, $offset, $data)
                 {
                     pr_err!("Failed to read PCI configuration space: {:?},", e);
-                    return;
+                    return Err(());
                 }
             };
         }
@@ -108,7 +108,7 @@ impl PciDeviceDriver for NvmeManager {
         let base_address_0 = read_pci!(PciManager::PCI_BAR_0, 4);
         if base_address_0 & 0x01 != 0 {
             pr_err!("Expected MMIO");
-            return;
+            return Err(());
         }
         let is_64bit_bar_address = ((base_address_0 >> 1) & 0b11) == 0b10;
         let base_address = (base_address_0 & !0b1111) as usize
@@ -131,7 +131,7 @@ impl PciDeviceDriver for NvmeManager {
         );
         if let Err(e) = controller_property_base_address {
             pr_err!("Failed to map NVMe Controller Properties: {:?}", e);
-            return;
+            return Err(());
         }
 
         let controller_properties_base_address = controller_property_base_address.unwrap();
@@ -141,7 +141,7 @@ impl PciDeviceDriver for NvmeManager {
         );
         if version > ((2 << 16) | (0 << 8)) {
             pr_err!("Unsupported NVMe version: {:#X}", version);
-            return;
+            return Err(());
         }
 
         let controller_capability = read_mmio::<u64>(
@@ -162,7 +162,7 @@ impl PciDeviceDriver for NvmeManager {
             || (memory_page_max as usize + 12) < PAGE_SHIFT
         {
             pr_err!("Controller is not supported of the host memory page size.");
-            return;
+            return Err(());
         }
         if (((controller_capability & Self::CAP_CSS) >> Self::CAP_CSS_OFFSET) & (1 << 7)) != 0 {
             pr_warn!("I/O command set is not supported.");
@@ -193,7 +193,7 @@ impl PciDeviceDriver for NvmeManager {
                 submission_queue_entry_size,
                 completion_queue_entry_size
             );
-            return;
+            return Err(());
         }
 
         if (controller_configuration & Self::CC_ENABLE) != 0 {
@@ -224,7 +224,7 @@ impl PciDeviceDriver for NvmeManager {
                 Ok(a) => a,
                 Err(e) => {
                     pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
-                    return;
+                    return Err(());
                 }
             };
         let (admin_completion_queue_virtual_address, admin_completion_queue_physical_address) =
@@ -237,7 +237,7 @@ impl PciDeviceDriver for NvmeManager {
                 Err(e) => {
                     pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
                     let _ = free_pages!(admin_submission_queue_virtual_address);
-                    return;
+                    return Err(());
                 }
             };
         /* Zero clear admin completion queue */
@@ -261,7 +261,7 @@ impl PciDeviceDriver for NvmeManager {
 
             let _ = free_pages!(admin_completion_queue_virtual_address);
             let _ = free_pages!(admin_submission_queue_virtual_address);
-            return;
+            return Err(());
         }
 
         write_mmio::<u32>(
@@ -299,7 +299,7 @@ impl PciDeviceDriver for NvmeManager {
             Ok(n) => n,
             Err(e) => {
                 pr_err!("Failed to allocate memory for NVMe manager: {:?}", e);
-                return;
+                return Err(());
             }
         };
 
@@ -307,7 +307,7 @@ impl PciDeviceDriver for NvmeManager {
             pr_debug!("Failed to setup interrupt: {:?}", e);
             let _ = free_pages!(admin_completion_queue_virtual_address);
             let _ = free_pages!(admin_submission_queue_virtual_address);
-            return;
+            return Err(());
         }
 
         /* Set Controller Configuration and Enable */
@@ -336,7 +336,7 @@ impl PciDeviceDriver for NvmeManager {
             Ok(a) => a,
             Err(e) => {
                 pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
-                return;
+                return Err(());
             }
         };
 
@@ -350,7 +350,7 @@ impl PciDeviceDriver for NvmeManager {
         {
             pr_err!("Failed to wait the command: {:?}", e);
             let _ = free_pages!(identify_info_virtual_address);
-            return;
+            return Err(());
         }
         let result = nvme_manager.take_completed_admin_command();
         if !Self::is_command_successful(&result) {
@@ -360,7 +360,7 @@ impl PciDeviceDriver for NvmeManager {
                 (result[3] >> 16) & !1
             );
             let _ = free_pages!(identify_info_virtual_address);
-            return;
+            return Err(());
         }
         pr_debug!(
             "Vendor ID: {:#X}, SerialNumber: {}",
@@ -391,7 +391,7 @@ impl PciDeviceDriver for NvmeManager {
             Err(e) => {
                 pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
                 let _ = free_pages!(identify_info_virtual_address);
-                return;
+                return Err(());
             }
         };
         let (io_completion_queue_virtual_address, io_completion_queue_physical_address) = match alloc_pages_with_physical_address!(
@@ -404,7 +404,7 @@ impl PciDeviceDriver for NvmeManager {
                 pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
                 let _ = free_pages!(identify_info_virtual_address);
                 let _ = free_pages!(io_submission_queue_virtual_address);
-                return;
+                return Err(());
             }
         };
 
@@ -435,7 +435,7 @@ impl PciDeviceDriver for NvmeManager {
             let _ = free_pages!(identify_info_virtual_address);
             let _ = free_pages!(io_completion_queue_virtual_address);
             let _ = free_pages!(io_submission_queue_virtual_address);
-            return;
+            return Err(());
         }
         let result = nvme_manager.take_completed_admin_command();
         if !Self::is_command_successful(&result) {
@@ -447,7 +447,7 @@ impl PciDeviceDriver for NvmeManager {
             let _ = free_pages!(identify_info_virtual_address);
             let _ = free_pages!(io_completion_queue_virtual_address);
             let _ = free_pages!(io_submission_queue_virtual_address);
-            return;
+            return Err(());
         }
 
         let num_of_submission_queue_entries =
@@ -470,7 +470,7 @@ impl PciDeviceDriver for NvmeManager {
             let _ = free_pages!(identify_info_virtual_address);
             let _ = free_pages!(io_completion_queue_virtual_address);
             let _ = free_pages!(io_submission_queue_virtual_address);
-            return;
+            return Err(());
         }
         let result = nvme_manager.take_completed_admin_command();
         if !Self::is_command_successful(&result) {
@@ -482,7 +482,7 @@ impl PciDeviceDriver for NvmeManager {
             let _ = free_pages!(identify_info_virtual_address);
             let _ = free_pages!(io_completion_queue_virtual_address);
             let _ = free_pages!(io_submission_queue_virtual_address);
-            return;
+            return Err(());
         }
 
         let io_queue = Queue::new(
@@ -506,7 +506,7 @@ impl PciDeviceDriver for NvmeManager {
         {
             pr_err!("Failed to wait the command: {:?}", e);
             let _ = free_pages!(identify_info_virtual_address);
-            return;
+            return Err(());
         }
         let result = nvme_manager.take_completed_admin_command();
         if !Self::is_command_successful(&result) {
@@ -516,7 +516,7 @@ impl PciDeviceDriver for NvmeManager {
                 (result[3] >> 16) & !1
             );
             let _ = free_pages!(identify_info_virtual_address);
-            return;
+            return Err(());
         }
 
         let nsid_table =
@@ -546,11 +546,11 @@ impl PciDeviceDriver for NvmeManager {
             let _ = free_pages!(identify_info_virtual_address);
             let _ = free_pages!(admin_completion_queue_virtual_address);
             let _ = free_pages!(admin_submission_queue_virtual_address);
-            return;
+            return Ok(());
         }
 
         let _ = free_pages!(identify_info_virtual_address);
-        return;
+        return Ok(());
     }
 }
 

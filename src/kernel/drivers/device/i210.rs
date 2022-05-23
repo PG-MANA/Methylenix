@@ -1,0 +1,349 @@
+//!
+//! Intel(R) Ethernet Controller I210
+//!
+
+use crate::kernel::drivers::pci::{ClassCode, PciDevice, PciDeviceDriver, PciManager};
+use crate::kernel::ethernet_device::{
+    EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo,
+};
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+};
+use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
+
+use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
+
+pub struct I210Manager {
+    base_address: VAddress,
+    transfer_ring_buffer: VAddress,
+    transfer_ring_lock: IrqSaveSpinLockFlag,
+    transfer_tail: u32,
+    receive_ring_buffer: VAddress,
+    receive_ring_lock: IrqSaveSpinLockFlag,
+    receive_tail: u32,
+}
+
+impl PciDeviceDriver for I210Manager {
+    const BASE_CLASS_CODE: u8 = 0x02;
+    const SUB_CLASS_CODE: u8 = 0x00;
+
+    fn setup_device(pci_dev: &PciDevice, _class_code: ClassCode) -> Result<(), ()> {
+        let pci_manager = &get_kernel_manager_cluster().pci_manager;
+
+        let vendor_id = pci_manager.read_vendor_id(pci_dev).unwrap_or(0);
+        if vendor_id != Self::VENDOR_ID {
+            return Err(());
+        }
+        /*let device_id = pci_manager.read_data(pci_dev, 0x02, 0x02).unwrap_or(0) as u16;
+        let mut is_target_device = false;
+        for e in Self::DEVICE_ID {
+            if device_id == e {
+                is_target_device = true;
+                break;
+            }
+        }
+        if !is_target_device {
+            return Err(());
+        }*/
+        let mut command_status =
+            pci_manager.read_data(pci_dev, PciManager::PCI_CONFIGURATION_COMMAND, 4)?;
+        command_status &= !PciManager::COMMAND_INTERRUPT_DISABLE_BIT;
+        pci_manager.write_data(
+            pci_dev,
+            PciManager::PCI_CONFIGURATION_COMMAND,
+            command_status,
+        )?;
+        let mut base_address = pci_manager.read_base_address_register(pci_dev, 0)? as usize;
+        if (base_address & (1 << 2)) != 0 {
+            base_address |= (pci_manager.read_base_address_register(pci_dev, 1)? as usize) << 32;
+        }
+        base_address &= !((1 << 4) - 1);
+        pr_debug!("Base Address: {:#X}", base_address);
+        let controller_base_address = io_remap!(
+            PAddress::new(base_address),
+            MSize::new(Self::REGISTER_MAP_SIZE),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::DEVICE_MEMORY
+        );
+        if let Err(e) = controller_base_address {
+            pr_err!("Failed to map memory: {:?}", e);
+            return Err(());
+        }
+        let controller_base_address = controller_base_address.unwrap();
+        write_mmio(controller_base_address, Self::CTRL_OFFSET, Self::CTRL_RST);
+        let mut i = 0;
+        while i < Self::SPIN_TIMEOUT {
+            if (read_mmio::<u32>(controller_base_address, Self::CTRL_OFFSET) & Self::CTRL_RST) == 0
+            {
+                break;
+            }
+            i += 1;
+        }
+        if i == Self::SPIN_TIMEOUT {
+            pr_err!("Failed to reset device");
+            return Err(());
+        }
+        write_mmio(
+            controller_base_address,
+            Self::CTRL_OFFSET,
+            Self::CTRL_FD | Self::CTRL_SLU,
+        );
+
+        let receive_packet_size = read_mmio::<u32>(controller_base_address, Self::RXPBSIZE_OFFSET)
+            & Self::RXPBSIZE_RXPBSIZE;
+        let transfer_packet_size = read_mmio::<u32>(controller_base_address, Self::TXPBSIZE_OFFSET)
+            & Self::TXPBSIZE_TXPB0SIZE;
+        pr_debug!(
+            "RX Packet Size: {:#X} KB, TX Packet Size: {:#X} KB",
+            receive_packet_size,
+            transfer_packet_size
+        );
+
+        /* Allocate ring buffers */
+        let (tx_ring_buffer_virtual_address, tx_ring_buffer_physical_address) = match alloc_pages_with_physical_address!(
+            MSize::new(Self::TX_DESC_SIZE * Self::NUM_OF_TX_DESC)
+                .page_align_up()
+                .to_order(None)
+                .to_page_order(),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::DEVICE_MEMORY
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to allocate memory: {:?}", e);
+                return Err(());
+            }
+        };
+        let (rx_ring_buffer_virtual_address, rx_ring_buffer_physical_address) = match alloc_pages_with_physical_address!(
+            MSize::new(Self::RX_DESC_SIZE * Self::NUM_OF_RX_DESC)
+                .page_align_up()
+                .to_order(None)
+                .to_page_order(),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::DEVICE_MEMORY
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                let _ = free_pages!(tx_ring_buffer_virtual_address);
+                pr_err!("Failed to allocate memory: {:?}", e);
+                return Err(());
+            }
+        };
+
+        for i in 0..Self::NUM_OF_RX_DESC {
+            unsafe {
+                *((rx_ring_buffer_virtual_address.to_usize()
+                    + i * Self::RX_DESC_SIZE
+                    + core::mem::size_of::<u64>()) as *mut u64) = 0
+            };
+        }
+
+        for i in 0..Self::NUM_OF_TX_DESC {
+            unsafe {
+                *((tx_ring_buffer_virtual_address.to_usize()
+                    + i * Self::TX_DESC_SIZE
+                    + core::mem::size_of::<u64>()) as *mut u64) = 0
+            };
+        }
+
+        /* Setup receive registers */
+        write_mmio(
+            controller_base_address,
+            Self::RDBAL_OFFSET,
+            (rx_ring_buffer_physical_address.to_usize() & u32::MAX as usize) as u32,
+        );
+        write_mmio(
+            controller_base_address,
+            Self::RDBAH_OFFSET,
+            (rx_ring_buffer_physical_address.to_usize() >> u32::BITS) as u32,
+        );
+        write_mmio(
+            controller_base_address,
+            Self::RDLEN_OFFSET,
+            (Self::RX_DESC_SIZE * Self::NUM_OF_RX_DESC) as u32,
+        );
+        write_mmio(controller_base_address, Self::RDH_OFFSET, 0);
+        write_mmio(
+            controller_base_address,
+            Self::RDT_OFFSET,
+            Self::NUM_OF_RX_DESC,
+        );
+        write_mmio(
+            controller_base_address,
+            Self::RCTL_OFFSET,
+            Self::RCTL_RXEN | Self::RCTL_BAM,
+        );
+
+        /* Setup transfer registers */
+        write_mmio(
+            controller_base_address,
+            Self::TIPG_OFFSET,
+            (0x08 << Self::TIPG_IPGT_OFFSET)
+                | (0x04 << Self::TIPG_IPGR1_OFFSET)
+                | (0x06 << Self::TIPG_IPGR_OFFSET),
+        );
+        write_mmio(
+            controller_base_address,
+            Self::TDBAL_OFFSET,
+            (tx_ring_buffer_physical_address.to_usize() & u32::MAX as usize) as u32,
+        );
+        write_mmio(
+            controller_base_address,
+            Self::TDBAH_OFFSET,
+            (tx_ring_buffer_physical_address.to_usize() >> u32::BITS) as u32,
+        );
+        write_mmio(
+            controller_base_address,
+            Self::TDLEN_OFFSET,
+            (Self::TX_DESC_SIZE * Self::NUM_OF_TX_DESC) as u32,
+        );
+        write_mmio(controller_base_address, Self::RDH_OFFSET, 0);
+        write_mmio(
+            controller_base_address,
+            Self::RDT_OFFSET,
+            Self::NUM_OF_RX_DESC,
+        );
+        write_mmio(controller_base_address, Self::TDH_OFFSET, 0);
+        write_mmio(controller_base_address, Self::TDT_OFFSET, 0);
+        write_mmio(
+            controller_base_address,
+            Self::TCTL_OFFSET,
+            Self::TCTL_TXEN | Self::TCTL_PSP | Self::TCTL_BAM,
+        );
+
+        let manager = match kmalloc!(
+            Self,
+            Self {
+                base_address: controller_base_address,
+                transfer_ring_buffer: tx_ring_buffer_virtual_address,
+                transfer_tail: 0,
+                transfer_ring_lock: IrqSaveSpinLockFlag::new(),
+                receive_ring_buffer: rx_ring_buffer_virtual_address,
+                receive_tail: 0,
+                receive_ring_lock: IrqSaveSpinLockFlag::new(),
+            }
+        ) {
+            Ok(e) => e,
+            Err(e) => {
+                pr_err!("Failed to initialize manager: {:?}", e);
+                return Err(());
+            }
+        };
+
+        let descriptor = EthernetDeviceDescriptor::new(0, manager);
+        get_kernel_manager_cluster()
+            .ethernet_device_manager
+            .add_device(descriptor);
+        return Ok(());
+    }
+}
+
+impl EthernetDeviceDriver for I210Manager {
+    fn send(
+        &mut self,
+        _info: &EthernetDeviceInfo,
+        buffer: VAddress,
+        length: MSize,
+    ) -> Result<MSize, ()> {
+        self.transfer_data_legacy(buffer, length)
+            .and_then(|_| Ok(length))
+    }
+}
+
+fn read_mmio<T: Sized>(base: VAddress, offset: usize) -> T {
+    unsafe { core::ptr::read_volatile((base.to_usize() + offset) as *const T) }
+}
+
+fn write_mmio<T: Sized>(base: VAddress, offset: usize, data: T) {
+    unsafe { core::ptr::write_volatile((base.to_usize() + offset) as *mut T, data) }
+}
+
+impl I210Manager {
+    const VENDOR_ID: u16 = 0x8086;
+    //const DEVICE_ID: [u16; 5] = [0x1531, 0x1533, 0x1536, 0x1537, 0x1538];
+
+    const REGISTER_MAP_SIZE: usize = 128 * 1024;
+
+    const TX_DESC_SIZE: usize = 128;
+    const NUM_OF_TX_DESC: usize = 32;
+    const RX_DESC_SIZE: usize = 128;
+    const NUM_OF_RX_DESC: usize = 32;
+
+    const CTRL_OFFSET: usize = 0x0000;
+    const CTRL_FD: u32 = 1;
+    const CTRL_SLU: u32 = 1 << 6;
+    const CTRL_RST: u32 = 1 << 26;
+
+    const RCTL_OFFSET: usize = 0x0100;
+    const RCTL_RXEN: u32 = 1 << 1;
+    const RCTL_BAM: u32 = 1 << 15;
+
+    const TCTL_OFFSET: usize = 0x0400;
+    const TCTL_TXEN: u32 = 1 << 1;
+    const TCTL_PSP: u32 = 1 << 3;
+    const TCTL_BAM: u32 = 1 << 15;
+
+    const TIPG_OFFSET: usize = 0x0410;
+    const TIPG_IPGT_OFFSET: u32 = 0x00;
+    const TIPG_IPGR1_OFFSET: u32 = 0x0A;
+    const TIPG_IPGR_OFFSET: u32 = 0x14;
+
+    const RXPBSIZE_OFFSET: usize = 0x2404;
+    const RXPBSIZE_RXPBSIZE: u32 = (1 << 6) - 1;
+
+    const RDBAL_OFFSET: usize = 0x2800;
+    const RDBAH_OFFSET: usize = 0x2804;
+    const RDLEN_OFFSET: usize = 0x2808;
+
+    const RDH_OFFSET: usize = 0x02810;
+    const RDT_OFFSET: usize = 0x02818;
+
+    const TXPBSIZE_OFFSET: usize = 0x3404;
+    const TXPBSIZE_TXPB0SIZE: u32 = (1 << 6) - 1;
+
+    const TDBAL_OFFSET: usize = 0x3800;
+    const TDBAH_OFFSET: usize = 0x3804;
+    const TDLEN_OFFSET: usize = 0x3808;
+
+    const TDH_OFFSET: usize = 0x03810;
+    const TDT_OFFSET: usize = 0x03818;
+
+    const SPIN_TIMEOUT: u32 = 0x10000;
+
+    fn transfer_data_legacy(&mut self, buffer: VAddress, length: MSize) -> Result<(), ()> {
+        const CMD_EOP: u64 = 1 << 24;
+        let mut remaining_length = length.to_usize();
+        let _lock = self.transfer_ring_lock.lock();
+        while remaining_length > 0 {
+            let transfer_length = if remaining_length > u16::MAX as usize {
+                u16::MAX as usize
+            } else {
+                remaining_length
+            };
+
+            let mut command = transfer_length as u64;
+            if transfer_length == remaining_length {
+                command |= CMD_EOP;
+            }
+            let descriptor: [u64; 2] = [buffer.to_usize() as u64, command];
+
+            unsafe {
+                *((self.transfer_ring_buffer.to_usize()
+                    + ((self.transfer_tail as usize) * (2 * core::mem::size_of::<u64>())))
+                    as *mut u64) = descriptor[0];
+                *((self.transfer_ring_buffer.to_usize()
+                    + ((self.transfer_tail as usize) * (2 * core::mem::size_of::<u64>())
+                        + core::mem::size_of::<u64>())) as *mut u64) = descriptor[1];
+            }
+            self.transfer_tail += 1;
+            if self.transfer_tail == Self::NUM_OF_TX_DESC as u32 {
+                self.transfer_tail = 0;
+            }
+            write_mmio(self.base_address, Self::TDT_OFFSET, self.transfer_tail);
+            remaining_length -= transfer_length;
+        }
+        drop(_lock);
+        return Ok(());
+    }
+}
