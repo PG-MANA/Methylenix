@@ -29,6 +29,7 @@ use crate::kernel::drivers::efi::{
     EFI_ACPI_2_0_TABLE_GUID, EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE,
 };
 use crate::kernel::drivers::pci::PciManager;
+use crate::kernel::ethernet_device::EthernetDeviceManager;
 use crate::kernel::file_manager::{
     elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD},
     FileManager,

@@ -110,7 +110,7 @@ pub fn setup_msi_x(
         .pci_manager
         .read_data(pci_dev, 0x34, 1)?;
     pr_debug!("Capability: {:#X}", capability);
-    let mut msi_x_capability = if capability == 0 { 0x80}else{capability};
+    let mut msi_x_capability = if capability == 0 { 0x80 } else { capability };
     let mut message_control: u32;
     loop {
         message_control =

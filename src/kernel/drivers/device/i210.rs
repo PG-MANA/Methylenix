@@ -22,6 +22,7 @@ pub struct I210Manager {
     receive_ring_buffer: VAddress,
     receive_ring_lock: IrqSaveSpinLockFlag,
     receive_tail: u32,
+    mac_address: [u8; 6],
 }
 
 impl PciDeviceDriver for I210Manager {
@@ -163,18 +164,14 @@ impl PciDeviceDriver for I210Manager {
             Self::RDLEN_OFFSET,
             (Self::RX_DESC_SIZE * Self::NUM_OF_RX_DESC) as u32,
         );
+
         write_mmio(controller_base_address, Self::RDH_OFFSET, 0);
-        write_mmio(
-            controller_base_address,
-            Self::RDT_OFFSET,
-            Self::NUM_OF_RX_DESC,
-        );
+        write_mmio(controller_base_address, Self::RDT_OFFSET, 0);
         write_mmio(
             controller_base_address,
             Self::RCTL_OFFSET,
             Self::RCTL_RXEN | Self::RCTL_BAM,
         );
-
         /* Setup transfer registers */
         write_mmio(
             controller_base_address,
@@ -198,12 +195,6 @@ impl PciDeviceDriver for I210Manager {
             Self::TDLEN_OFFSET,
             (Self::TX_DESC_SIZE * Self::NUM_OF_TX_DESC) as u32,
         );
-        write_mmio(controller_base_address, Self::RDH_OFFSET, 0);
-        write_mmio(
-            controller_base_address,
-            Self::RDT_OFFSET,
-            Self::NUM_OF_RX_DESC,
-        );
         write_mmio(controller_base_address, Self::TDH_OFFSET, 0);
         write_mmio(controller_base_address, Self::TDT_OFFSET, 0);
         write_mmio(
@@ -211,6 +202,74 @@ impl PciDeviceDriver for I210Manager {
             Self::TCTL_OFFSET,
             Self::TCTL_TXEN | Self::TCTL_PSP | Self::TCTL_BAM,
         );
+
+        /* get mac address */
+        let mut mac_address: [u8; 6] = [0; 6];
+        let i = u32::from_le(read_mmio::<u32>(
+            controller_base_address,
+            Self::INVM_DATA_OFFSET,
+        ));
+        mac_address[0] = (i & u8::MAX as u32) as u8;
+        mac_address[1] = ((i >> u8::BITS) & u8::MAX as u32) as u8;
+        mac_address[2] = ((i >> (u8::BITS * 2)) & u8::MAX as u32) as u8;
+        mac_address[3] = (i >> (u8::BITS * 3)) as u8;
+        let i = u32::from_le(read_mmio::<u32>(
+            controller_base_address,
+            Self::INVM_DATA_OFFSET + core::mem::size_of::<u32>(),
+        ));
+        mac_address[4] = (i & u8::MAX as u32) as u8;
+        mac_address[5] = ((i >> u8::BITS) & u8::MAX as u32) as u8;
+        if mac_address[0] == 0 {
+            let controller = read_mmio::<u32>(controller_base_address, Self::EEC_OFFSET);
+            if (controller & Self::EEC_EE_DET) != 0 {
+                write_mmio(
+                    controller_base_address,
+                    Self::EEC_OFFSET,
+                    controller | Self::EEC_EE_REQ,
+                );
+                let read_data = |address: u32| -> u16 {
+                    write_mmio(
+                        controller_base_address,
+                        Self::EERD_OFFSET,
+                        1 | (address << 2),
+                    );
+                    let mut i = 0;
+                    let mut data: u32 = 0;
+                    while i < Self::SPIN_TIMEOUT {
+                        data = read_mmio(controller_base_address, Self::EERD_OFFSET);
+                        if (data & (1 << 1)) != 0 {
+                            break;
+                        }
+                        i += 1;
+                    }
+                    (data >> 16) as u16
+                };
+                for i in 0..=2 {
+                    let d = read_data(i);
+                    mac_address[2 * (i as usize)] = (d & u8::MAX as u16) as u8;
+                    mac_address[2 * (i as usize) + 1] = (d >> u8::BITS) as u8;
+                }
+                write_mmio(controller_base_address, Self::EEC_OFFSET, controller);
+            } else {
+                pr_err!("EEPROM is not accessible");
+            }
+        }
+        if mac_address[0] == 0 {
+            let d = read_mmio::<u32>(controller_base_address, Self::RAL_OFFSET);
+            mac_address[0] = (d & u8::MAX as u32) as u8;
+            mac_address[1] = ((d >> u8::BITS) & u8::MAX as u32) as u8;
+            mac_address[2] = ((d >> (u8::BITS * 2)) & u8::MAX as u32) as u8;
+            mac_address[3] = (d >> (u8::BITS * 3)) as u8;
+            let d = read_mmio::<u32>(
+                controller_base_address,
+                Self::RAL_OFFSET + core::mem::size_of::<u32>(),
+            );
+            mac_address[4] = (d & u8::MAX as u32) as u8;
+            mac_address[5] = ((d >> u8::BITS) & u8::MAX as u32) as u8;
+        }
+        if mac_address[0] == 0 {
+            pr_err!("Failed to get MAC Address");
+        }
 
         let manager = match kmalloc!(
             Self,
@@ -222,6 +281,7 @@ impl PciDeviceDriver for I210Manager {
                 receive_ring_buffer: rx_ring_buffer_virtual_address,
                 receive_tail: 0,
                 receive_ring_lock: IrqSaveSpinLockFlag::new(),
+                mac_address,
             }
         ) {
             Ok(e) => e,
@@ -308,6 +368,18 @@ impl I210Manager {
 
     const TDH_OFFSET: usize = 0x03810;
     const TDT_OFFSET: usize = 0x03818;
+
+    //const RAL_OFFSET: usize = 0x5400;
+    const RAL_OFFSET: usize = 0x0040;
+
+    //const EEC_OFFSET:usize = 0x12010;
+    //const EERD_OFFSET:usize = 0x12014;
+    const EEC_OFFSET: usize = 0x0010;
+    const EERD_OFFSET: usize = 0x0014;
+    const EEC_EE_REQ: u32 = 1 << 6;
+    const EEC_EE_DET: u32 = 1 << 19;
+
+    const INVM_DATA_OFFSET: usize = 0x12120;
 
     const SPIN_TIMEOUT: u32 = 0x10000;
 
