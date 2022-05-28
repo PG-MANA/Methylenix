@@ -12,8 +12,8 @@ use alloc::vec::Vec;
 
 /*const PREAMBLE: (u8, usize) = (0b10101010, 7);
 const SFD: u8 = 0b10101011;
-const IPG: usize = 12;*/
-const MIN_FRAME_DATA_SIZE: usize = 46;
+const IPG: usize = 12;
+const MIN_FRAME_DATA_SIZE: usize = 46;*/
 const MAX_FRAME_DATA_SIZE: usize = 1500;
 const MAX_FRAME_SIZE: usize = MAX_FRAME_DATA_SIZE + 30 /*+ IPG*/ /*+ 8*/;
 const MAC_ADDRESS_SIZE: usize = 6;

@@ -6,6 +6,8 @@ use super::{ipv4, udp};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 
 const DHCP_PAYLOAD_SIZE: usize = 300;
+const DHCP_SENDER_PORT: u16 = 68;
+const DHCP_DESTINATION_PORT: u16 = 67;
 
 pub fn create_dhcp_discover_packet(device_id: usize) {
     let mac_address = match get_kernel_manager_cluster()
@@ -40,21 +42,17 @@ pub fn create_dhcp_discover_packet(device_id: usize) {
         .copy_from_slice(&mac_address);
     buffer[DHCP_PAYLOAD_BASE + DHCP_PAYLOAD_SIZE - 48] = 0xFF;
 
-    let udp_header = udp::create_udp_header(&buffer[DHCP_PAYLOAD_BASE..], false, 68, 67).unwrap();
-    buffer[ipv4::IPV4_DEFAULT_HEADER_SIZE..(ipv4::IPV4_DEFAULT_HEADER_SIZE + udp::UDP_HEADER_SIZE)]
-        .copy_from_slice(&udp_header);
-    buffer[0..ipv4::IPV4_DEFAULT_HEADER_SIZE].copy_from_slice(
-        &ipv4::create_default_ipv4_header(
-            DHCP_PAYLOAD_SIZE + udp::UDP_HEADER_SIZE,
-            0,
-            true,
-            128,
-            udp::IPV4_PROTOCOL_UDP,
-            0,
-            0xffffffff,
-        )
-        .unwrap(),
-    );
+    let udp_ipv4_header = udp::create_ipv4_udp_header(
+        &buffer[DHCP_PAYLOAD_BASE..],
+        DHCP_SENDER_PORT,
+        0,
+        DHCP_DESTINATION_PORT,
+        0xffffffff,
+        1,
+    )
+    .expect("Failed to create packet");
+    buffer[0..DHCP_PAYLOAD_BASE].copy_from_slice(&udp_ipv4_header);
+
     let _ = get_kernel_manager_cluster()
         .ethernet_device_manager
         .send_data(
