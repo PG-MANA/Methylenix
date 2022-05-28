@@ -197,6 +197,7 @@ fn main_process() -> ! {
         ELF_MACHINE_AMD64,
     );
 
+    crate::kernel::network_manager::dhcp::get_ipv4_address(0);
     idle()
 }
 

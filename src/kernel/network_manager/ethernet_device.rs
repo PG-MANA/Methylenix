@@ -241,24 +241,13 @@ impl EthernetDeviceManager {
             *((allocated_data_address.to_usize() + 12) as *const [u8; 2])
         });
 
-        pr_debug!(
-            "From: {:X}:{:X}:{:X}:{:X}:{:X}:{:X}, Type: {:#X}",
-            sender_mac_address[0],
-            sender_mac_address[1],
-            sender_mac_address[2],
-            sender_mac_address[3],
-            sender_mac_address[4],
-            sender_mac_address[5],
-            frame_type
-        );
-        let _ = kfree!(allocated_data_address, data_length);
-
         match frame_type {
             ipv4::ETHERNET_TYPE_IPV4 => {
                 ipv4::ipv4_packet_handler(
                     allocated_data_address,
                     data_length,
                     ETHERNET_PAYLOAD_OFFSET,
+                    sender_mac_address,
                 );
             }
             arp::ETHERNET_TYPE_ARP => {
@@ -266,6 +255,7 @@ impl EthernetDeviceManager {
                     allocated_data_address,
                     data_length,
                     ETHERNET_PAYLOAD_OFFSET,
+                    sender_mac_address,
                 );
             }
             t => {
@@ -276,6 +266,7 @@ impl EthernetDeviceManager {
                         data_length.to_usize(),
                     )
                 });
+                let _ = kfree!(allocated_data_address, data_length);
             }
         }
     }

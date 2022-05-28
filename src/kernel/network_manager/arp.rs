@@ -2,6 +2,8 @@
 //! Address Resolution Protocol
 //!
 
+use super::AddressPrinter;
+
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
@@ -23,12 +25,6 @@ const PROTOCOL_TYPE_IPV4: u16 = 0x0800;
 
 const OPCODE_REQUEST: u16 = 0x0001;
 const OPCODE_REPLY: u16 = 0x0002;
-
-struct AddressPrinter<'a> {
-    address: &'a [u8],
-    is_hex: bool,
-    separator: char,
-}
 
 pub fn create_ethernet_ipv4_arp_packet(
     mac_address: [u8; 6],
@@ -77,7 +73,12 @@ pub fn send_ethernet_ipv4_arp_packet(
         .and_then(|_| Ok(()))
 }
 
-pub fn arp_packet_handler(allocated_data_base: VAddress, data_length: MSize, packet_offset: usize) {
+pub fn arp_packet_handler(
+    allocated_data_base: VAddress,
+    data_length: MSize,
+    packet_offset: usize,
+    _sender_mac_address: [u8; 6],
+) {
     if data_length.to_usize() < (packet_offset + core::mem::size_of::<ArpPacket>()) {
         pr_err!("Invalid ARP packet");
         let _ = kfree!(allocated_data_base, data_length);
@@ -125,21 +126,4 @@ pub fn arp_packet_handler(allocated_data_base: VAddress, data_length: MSize, pac
         }
     }
     let _ = kfree!(allocated_data_base, data_length);
-}
-
-impl<'a> core::fmt::Display for AddressPrinter<'a> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        use core::fmt::Write;
-        for (i, d) in self.address.iter().enumerate() {
-            if self.is_hex {
-                f.write_fmt(format_args!("{:02X}", *d))?;
-            } else {
-                f.write_fmt(format_args!("{}", *d))?;
-            }
-            if i != self.address.len() - 1 {
-                f.write_char(self.separator)?;
-            }
-        }
-        return Ok(());
-    }
 }

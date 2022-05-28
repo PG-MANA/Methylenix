@@ -2,7 +2,10 @@
 //! IPv4
 //!
 
-use crate::kernel::memory_manager::data_type::{MSize, VAddress};
+use super::udp;
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+
+use crate::kfree;
 
 const IPV4_VERSION: u8 = 0x04;
 const IPV4_DEFAULT_IHL: u8 = 0x05;
@@ -59,5 +62,46 @@ pub fn ipv4_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     packet_offset: usize,
+    _sender_mac_address: [u8; 6],
 ) {
+    let ipv4_base = allocated_data_base.to_usize() + packet_offset;
+    if ((unsafe { *(ipv4_base as *const u8) } >> 4) & 0xf) != IPV4_VERSION {
+        pr_err!(
+            "Invalid IP version: {}",
+            (unsafe { *(ipv4_base as *const u8) })
+        );
+        let _ = kfree!(allocated_data_base, data_length);
+        return;
+    }
+    let header_length = (unsafe { *(ipv4_base as *const u8) } & 0b1111) as usize * 4;
+    let packet_size = u16::from_be(unsafe { *((ipv4_base + 2) as *const u16) });
+    if ((packet_size as usize) + packet_offset) > data_length.to_usize() {
+        pr_err!("Invalid IP packet size: {:#X}", packet_size);
+        let _ = kfree!(allocated_data_base, data_length);
+        return;
+    }
+    let fragments = u16::from_be(unsafe { *((ipv4_base + 6) as *const u16) });
+    let is_fragmented = ((fragments >> 13) & 1) != 0;
+    if is_fragmented {
+        pr_err!("Packet is fragmented: TODO...");
+        let _ = kfree!(allocated_data_base, data_length);
+        return;
+    }
+    let protocol_type = unsafe { *((ipv4_base + 9) as *const u8) };
+    let sender_ipv4_address = u32::from_be(unsafe { *((ipv4_base + 12) as *const u32) });
+    let target_ipv4_address = u32::from_be(unsafe { *((ipv4_base + 16) as *const u32) });
+
+    match protocol_type {
+        udp::IPV4_PROTOCOL_UDP => udp::udp_ipv4_packet_handler(
+            allocated_data_base,
+            data_length,
+            packet_offset + header_length,
+            sender_ipv4_address,
+            target_ipv4_address,
+        ),
+        t => {
+            pr_err!("Unknown Protocol Type: {:#X}", t);
+            let _ = kfree!(allocated_data_base, data_length);
+        }
+    }
 }
