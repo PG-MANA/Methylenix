@@ -50,7 +50,10 @@ pub fn setup_msi(
                 .read_data(pci_dev, usable_capability, 4)?;
 
         if (message_control & 0xff) != 0x05 {
-            pr_debug!("Capability ID is not for MSI");
+            pr_debug!(
+                "Capability ID({:#X}) is not for MSI",
+                (message_control & 0xff)
+            );
         } else if (message_control & (1 << 16)) != 0 {
             pr_debug!("Capability Pointer: {:#X} is in use.", usable_capability);
         } else {

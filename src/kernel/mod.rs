@@ -16,11 +16,11 @@ pub mod collections {
 pub mod application_loader;
 pub mod block_device;
 pub mod drivers;
-pub mod ethernet_device;
 pub mod file_manager;
 pub mod graphic_manager;
 pub mod manager_cluster;
 pub mod memory_manager;
+pub mod network_manager;
 pub mod panic;
 pub mod sync;
 pub mod system_call;

@@ -33,11 +33,11 @@ use crate::kernel::memory_manager::{
     data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
     memory_allocator::MemoryAllocator,
 };
+use crate::kernel::network_manager::ethernet_device::EthernetDeviceManager;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::{run_queue::RunQueue, TaskManager};
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager, Timer};
 
-use crate::kernel::ethernet_device::EthernetDeviceManager;
 use core::mem;
 use core::sync::atomic::AtomicBool;
 

@@ -2,17 +2,23 @@
 //! Intel(R) Ethernet Controller I210
 //!
 
-use crate::kernel::drivers::pci::{ClassCode, PciDevice, PciDeviceDriver, PciManager};
-use crate::kernel::ethernet_device::{
-    EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo,
+use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
+
+use crate::kernel::drivers::pci::{
+    msi::setup_msi_or_msi_x, ClassCode, PciDevice, PciDeviceDriver, PciManager,
 };
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+use crate::kernel::memory_manager::data_type::*;
+use crate::kernel::network_manager::ethernet_device::{
+    EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo,
 };
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
+
+use core::mem::MaybeUninit;
+
+use alloc::collections::LinkedList;
 
 pub struct I210Manager {
     base_address: VAddress,
@@ -22,8 +28,10 @@ pub struct I210Manager {
     receive_ring_buffer: VAddress,
     receive_ring_lock: IrqSaveSpinLockFlag,
     receive_tail: u32,
-    mac_address: [u8; 6],
+    receive_buffer: VAddress,
 }
+
+static mut I210_LIST: LinkedList<(usize, *mut I210Manager)> = LinkedList::new();
 
 impl PciDeviceDriver for I210Manager {
     const BASE_CLASS_CODE: u8 = 0x02;
@@ -132,11 +140,29 @@ impl PciDeviceDriver for I210Manager {
             }
         };
 
+        let (receive_buffer, receive_buffer_physical_address) = match alloc_pages_with_physical_address!(
+            MSize::new(2048 * Self::NUM_OF_RX_DESC)
+                .page_align_up()
+                .to_order(None)
+                .to_page_order(),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::DEVICE_MEMORY
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                let _ = free_pages!(tx_ring_buffer_virtual_address);
+                let _ = free_pages!(rx_ring_buffer_virtual_address);
+                pr_err!("Failed to allocate memory: {:?}", e);
+                return Err(());
+            }
+        };
         for i in 0..Self::NUM_OF_RX_DESC {
             unsafe {
+                *((rx_ring_buffer_virtual_address.to_usize() + i * Self::RX_DESC_SIZE)
+                    as *mut u64) = (receive_buffer_physical_address.to_usize() + i * 2048) as u64;
                 *((rx_ring_buffer_virtual_address.to_usize()
                     + i * Self::RX_DESC_SIZE
-                    + core::mem::size_of::<u64>()) as *mut u64) = 0
+                    + core::mem::size_of::<u64>()) as *mut u64) = 0;
             };
         }
 
@@ -165,13 +191,24 @@ impl PciDeviceDriver for I210Manager {
             (Self::RX_DESC_SIZE * Self::NUM_OF_RX_DESC) as u32,
         );
 
-        write_mmio(controller_base_address, Self::RDH_OFFSET, 0);
-        write_mmio(controller_base_address, Self::RDT_OFFSET, 0);
+        write_mmio(controller_base_address, Self::RDH_OFFSET, 0u32);
+        write_mmio(
+            controller_base_address,
+            Self::RDT_OFFSET,
+            (Self::NUM_OF_RX_DESC - 1) as u32,
+        );
         write_mmio(
             controller_base_address,
             Self::RCTL_OFFSET,
-            Self::RCTL_RXEN | Self::RCTL_BAM,
+            Self::RCTL_RXEN
+                | Self::RCTL_BAM
+                | Self::RCTL_BSIZE_2048
+                | Self::RCTL_SBP
+                | Self::RCTL_UPE
+                | Self::RCTL_MPE
+                | Self::RCTL_SECRC,
         );
+
         /* Setup transfer registers */
         write_mmio(
             controller_base_address,
@@ -195,8 +232,8 @@ impl PciDeviceDriver for I210Manager {
             Self::TDLEN_OFFSET,
             (Self::TX_DESC_SIZE * Self::NUM_OF_TX_DESC) as u32,
         );
-        write_mmio(controller_base_address, Self::TDH_OFFSET, 0);
-        write_mmio(controller_base_address, Self::TDT_OFFSET, 0);
+        write_mmio(controller_base_address, Self::TDH_OFFSET, 0u32);
+        write_mmio(controller_base_address, Self::TDT_OFFSET, 0u32);
         write_mmio(
             controller_base_address,
             Self::TCTL_OFFSET,
@@ -281,7 +318,7 @@ impl PciDeviceDriver for I210Manager {
                 receive_ring_buffer: rx_ring_buffer_virtual_address,
                 receive_tail: 0,
                 receive_ring_lock: IrqSaveSpinLockFlag::new(),
-                mac_address,
+                receive_buffer,
             }
         ) {
             Ok(e) => e,
@@ -291,7 +328,20 @@ impl PciDeviceDriver for I210Manager {
             }
         };
 
-        let descriptor = EthernetDeviceDescriptor::new(0, manager);
+        if let Ok(interrupt_id) = setup_msi_or_msi_x(pci_dev, i210_handler, None, false) {
+            unsafe { I210_LIST.push_back((interrupt_id, manager as *mut _)) };
+            write_mmio(controller_base_address, Self::IMC_OFFSET, u32::MAX);
+            /* Clear Interrupt  Status */
+            let _ = read_mmio::<u32>(controller_base_address, Self::ICR_OFFSET);
+            /* Enable interrupt */
+            write_mmio(
+                controller_base_address,
+                Self::IMS_OFFSET,
+                (1u32 << 7) | (1u32 << 0) | (1u32 << 1/* For compatibility */),
+            );
+        }
+
+        let descriptor = EthernetDeviceDescriptor::new(0, mac_address, manager);
         get_kernel_manager_cluster()
             .ethernet_device_manager
             .add_device(descriptor);
@@ -306,8 +356,52 @@ impl EthernetDeviceDriver for I210Manager {
         buffer: VAddress,
         length: MSize,
     ) -> Result<MSize, ()> {
-        self.transfer_data_legacy(buffer, length)
-            .and_then(|_| Ok(length))
+        if length.to_usize() > u16::MAX as usize {
+            return Err(());
+        }
+        let mut physical_address_list: [PAddress; (u16::MAX as usize) / PAGE_SIZE_USIZE] =
+            unsafe { MaybeUninit::assume_init(MaybeUninit::uninit()) };
+        let result = get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .get_physical_address_list(
+                buffer,
+                MIndex::new(0),
+                length.page_align_up().to_index(),
+                &mut physical_address_list,
+            );
+        if let Err(e) = result {
+            pr_err!("Failed to get physical address list: {:?}", e);
+            return Err(());
+        }
+        let pages = result.unwrap();
+        let mut processed_pages = 0;
+        let mut processed_size = 0;
+        while processed_pages < pages && processed_size < length.to_usize() {
+            let mut i = 1;
+            let mut size_to_send = 0;
+            loop {
+                if (size_to_send + PAGE_SIZE_USIZE) < (length.to_usize() - processed_size) {
+                    if physical_address_list[processed_pages + i]
+                        != physical_address_list[processed_pages] + MIndex::new(i).to_offset()
+                    {
+                        break;
+                    }
+                    size_to_send += PAGE_SIZE_USIZE;
+                    i += 1;
+                } else {
+                    size_to_send += length.to_usize() - processed_size - size_to_send;
+                    break;
+                }
+            }
+            self.transfer_data_legacy(
+                physical_address_list[processed_pages],
+                MSize::new(size_to_send),
+            )?;
+            processed_pages += i;
+            processed_size += size_to_send;
+        }
+
+        return Ok(MSize::new(processed_size));
     }
 }
 
@@ -335,9 +429,17 @@ impl I210Manager {
     const CTRL_SLU: u32 = 1 << 6;
     const CTRL_RST: u32 = 1 << 26;
 
+    //const ICR_OFFSET: usize = 0x1500;
+    const ICR_OFFSET: usize = 0x00C0;
+
     const RCTL_OFFSET: usize = 0x0100;
     const RCTL_RXEN: u32 = 1 << 1;
+    const RCTL_SBP: u32 = 1 << 2;
+    const RCTL_UPE: u32 = 1 << 3;
+    const RCTL_MPE: u32 = 1 << 4;
     const RCTL_BAM: u32 = 1 << 15;
+    const RCTL_BSIZE_2048: u32 = 0b00 << 16;
+    const RCTL_SECRC: u32 = 1 << 26;
 
     const TCTL_OFFSET: usize = 0x0400;
     const TCTL_TXEN: u32 = 1 << 1;
@@ -348,6 +450,11 @@ impl I210Manager {
     const TIPG_IPGT_OFFSET: u32 = 0x00;
     const TIPG_IPGR1_OFFSET: u32 = 0x0A;
     const TIPG_IPGR_OFFSET: u32 = 0x14;
+
+    //const IMS_OFFSET: usize = 0x1508;
+    const IMS_OFFSET: usize = 0x00D0;
+    //const IMC_OFFSET: usize = 0x150C;
+    const IMC_OFFSET: usize = 0x00D8;
 
     const RXPBSIZE_OFFSET: usize = 0x2404;
     const RXPBSIZE_RXPBSIZE: u32 = (1 << 6) - 1;
@@ -383,7 +490,7 @@ impl I210Manager {
 
     const SPIN_TIMEOUT: u32 = 0x10000;
 
-    fn transfer_data_legacy(&mut self, buffer: VAddress, length: MSize) -> Result<(), ()> {
+    fn transfer_data_legacy(&mut self, buffer: PAddress, length: MSize) -> Result<(), ()> {
         const CMD_EOP: u64 = 1 << 24;
         let mut remaining_length = length.to_usize();
         let _lock = self.transfer_ring_lock.lock();
@@ -417,5 +524,54 @@ impl I210Manager {
         }
         drop(_lock);
         return Ok(());
+    }
+
+    pub fn interrupt_handler(&mut self) {
+        let icr = read_mmio::<u32>(self.base_address, Self::ICR_OFFSET);
+        pr_debug!("ICR: {:#X}", icr);
+        let _lock = self.receive_ring_lock.lock();
+        let receive_ring_buffer = unsafe {
+            &mut *(self.receive_ring_buffer.to_usize()
+                as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
+                    / core::mem::size_of::<u64>()])
+        };
+        let mut cursor = self.receive_tail as usize;
+        while ((receive_ring_buffer[2 * cursor + 1] >> 31) & 0x01) != 0 {
+            let length = receive_ring_buffer[2 * cursor + 1] & (1 << 16 - 1);
+            pr_debug!("{cursor}: {length}");
+            if length > 0 {
+                let buffer = kmalloc!(MSize::new(length as usize));
+                if let Ok(buffer) = buffer {
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(
+                            (self.receive_buffer.to_usize() + 2048 * cursor) as *const u8,
+                            buffer.to_usize() as *mut u8,
+                            length as usize,
+                        )
+                    };
+                    /* Throw ethernet manager */
+                } else {
+                    pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
+                }
+            }
+            receive_ring_buffer[2 * cursor + 1] = 0;
+            write_mmio(self.base_address, Self::RDT_OFFSET, cursor as u32);
+            cursor = (cursor + 1) & (Self::NUM_OF_RX_DESC - 1);
+        }
+    }
+}
+
+fn i210_handler(index: usize) -> bool {
+    if let Some(i210) = unsafe {
+        I210_LIST
+            .iter()
+            .find(|x| (**x).0 == index)
+            .and_then(|x| Some(x.1.clone()))
+    } {
+        unsafe { &mut *(i210) }.interrupt_handler();
+        true
+    } else {
+        pr_err!("Unknown i210 Device");
+        false
     }
 }
