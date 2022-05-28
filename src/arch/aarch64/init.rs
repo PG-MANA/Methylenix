@@ -29,7 +29,6 @@ use crate::kernel::drivers::efi::{
     EFI_ACPI_2_0_TABLE_GUID, EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE,
 };
 use crate::kernel::drivers::pci::PciManager;
-use crate::kernel::ethernet_device::EthernetDeviceManager;
 use crate::kernel::file_manager::{
     elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD},
     FileManager,
@@ -45,6 +44,7 @@ use crate::kernel::memory_manager::{
     virtual_memory_manager::VirtualMemoryManager,
     MemoryManager,
 };
+use crate::kernel::network_manager::ethernet_device::EthernetDeviceManager;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::{run_queue::RunQueue, TaskManager};
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager};

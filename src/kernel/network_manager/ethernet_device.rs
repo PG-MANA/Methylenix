@@ -3,11 +3,14 @@
 //!
 //!
 
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
+use crate::kernel::task_manager::ThreadEntry;
 
 use crate::{alloc_non_linear_pages, free_pages};
 
+use alloc::collections::LinkedList;
 use alloc::vec::Vec;
 
 /*const PREAMBLE: (u8, usize) = (0b10101010, 7);
@@ -19,18 +22,11 @@ const MAX_FRAME_SIZE: usize = MAX_FRAME_DATA_SIZE + 30 /*+ IPG*/ /*+ 8*/;
 const MAC_ADDRESS_SIZE: usize = 6;
 
 pub trait EthernetDeviceDriver {
-    fn send(
-        &mut self,
-        info: &EthernetDeviceInfo,
-        buffer: VAddress,
-        length: MSize,
-    ) -> Result<MSize, ()>;
+    fn send(&mut self, info: &EthernetDeviceInfo, entry: &mut TxEntry) -> Result<MSize, ()>;
 }
 
 #[derive(Clone)]
 pub struct EthernetDeviceInfo {
-    pub info_id: usize,
-    pub device_id: usize,
     pub mac_address: [u8; 6],
 }
 
@@ -43,6 +39,48 @@ pub struct EthernetDeviceDescriptor {
 pub struct EthernetDeviceManager {
     lock: IrqSaveSpinLockFlag,
     device_list: Vec<EthernetDeviceDescriptor>,
+    tx_list: LinkedList<TxEntry>,
+    next_id: u32,
+}
+
+pub struct TxEntry {
+    entry_id: u32,
+    buffer: VAddress,
+    length: MSize,
+    number_of_remaining_frames: usize,
+    thread: Option<&'static mut ThreadEntry>,
+    result: u8,
+}
+
+impl TxEntry {
+    pub fn get_buffer(&self) -> VAddress {
+        self.buffer
+    }
+
+    pub fn get_id(&self) -> u32 {
+        self.entry_id
+    }
+
+    pub fn get_length(&self) -> MSize {
+        self.length
+    }
+
+    pub fn get_number_of_frame(&self) -> usize {
+        self.number_of_remaining_frames
+    }
+
+    pub fn set_number_of_frame(&mut self, n: usize) {
+        self.number_of_remaining_frames = n;
+    }
+}
+
+#[allow(dead_code)]
+pub struct RxEntry {
+    buffer: VAddress,
+    length: MSize,
+    number_of_remaining_frames: usize,
+    thread: Option<&'static mut ThreadEntry>,
+    result: u8,
 }
 
 impl EthernetDeviceManager {
@@ -50,12 +88,13 @@ impl EthernetDeviceManager {
         Self {
             lock: IrqSaveSpinLockFlag::new(),
             device_list: Vec::new(),
+            tx_list: LinkedList::new(),
+            next_id: 0,
         }
     }
 
-    pub fn add_device(&mut self, mut d: EthernetDeviceDescriptor) {
+    pub fn add_device(&mut self, d: EthernetDeviceDescriptor) {
         let _lock = self.lock.lock();
-        d.info.info_id = self.device_list.len();
         self.device_list.push(d);
         drop(_lock);
     }
@@ -66,7 +105,7 @@ impl EthernetDeviceManager {
         data: &[u8],
         target_mac_address: [u8; 6],
         ether_type: u16,
-    ) -> Result<MSize, ()> {
+    ) -> Result<(), ()> {
         if device_id >= self.device_list.len() {
             return Err(());
         }
@@ -76,7 +115,7 @@ impl EthernetDeviceManager {
                     * (MAX_FRAME_SIZE - MAX_FRAME_DATA_SIZE)),
         )
         .page_align_up();
-        pr_debug!("Needed Buffer size: {needed_buffer_size}");
+        pr_debug!("Needed Buffer size for frames: {needed_buffer_size}");
         let send_buffer = match alloc_non_linear_pages!(needed_buffer_size) {
             Ok(a) => a,
             Err(e) => {
@@ -84,6 +123,7 @@ impl EthernetDeviceManager {
                 return Err(());
             }
         };
+        let _lock = self.lock.lock();
         let descriptor = &self.device_list[device_id];
         let result = create_ethernet_frame(
             descriptor,
@@ -99,11 +139,24 @@ impl EthernetDeviceManager {
             let _ = free_pages!(send_buffer);
             return Err(());
         }
-        unsafe { &mut *(self.device_list[device_id].driver) }.send(
-            &self.device_list[device_id].info,
-            send_buffer,
-            result.unwrap(),
-        )
+        let mut entry = TxEntry {
+            entry_id: self.next_id,
+            buffer: send_buffer,
+            length: result.unwrap(),
+            number_of_remaining_frames: 0,
+            thread: None,
+            result: 0,
+        };
+        let result = unsafe { &mut *(self.device_list[device_id].driver) }
+            .send(&self.device_list[device_id].info, &mut entry);
+        if result.is_ok() {
+            self.next_id = self.next_id.overflowing_add(1).0;
+            self.tx_list.push_back(entry);
+        } else {
+            let _ = free_pages!(send_buffer);
+        }
+        drop(_lock);
+        return result.and_then(|_| Ok(()));
     }
 
     pub fn get_mac_address(&self, device_id: usize) -> Result<[u8; 6], ()> {
@@ -112,20 +165,50 @@ impl EthernetDeviceManager {
         }
         Ok(self.device_list[device_id].info.mac_address)
     }
+
+    pub fn update_transmit_status(&mut self, id: u32, is_successful: bool) {
+        let _lock = self.lock.lock();
+        if self.tx_list.len() == 0 {
+            return;
+        }
+        let mut cursor = self.tx_list.cursor_front_mut();
+        loop {
+            let e = cursor.current().unwrap();
+            if e.entry_id == id {
+                /* Found */
+                if !is_successful {
+                    e.result |= 1;
+                }
+                e.number_of_remaining_frames -= 1;
+                if e.number_of_remaining_frames == 0 {
+                    let thread = core::mem::replace(&mut e.thread, None);
+                    if let Some(thread) = thread {
+                        if let Err(error) = get_kernel_manager_cluster()
+                            .task_manager
+                            .wake_up_thread(thread)
+                        {
+                            pr_err!("Failed to wake up the thread: {:?}", error);
+                        }
+                    } else {
+                        pr_debug!("Free the buffer({})", e.buffer);
+                        let _ = free_pages!(e.buffer);
+                        let _ = cursor.remove_current();
+                    }
+                }
+                break;
+            }
+            if cursor.peek_next().is_none() {
+                break;
+            }
+            cursor.move_next();
+        }
+    }
 }
 
 impl EthernetDeviceDescriptor {
-    pub fn new(
-        device_id: usize,
-        mac_address: [u8; 6],
-        driver: *mut dyn EthernetDeviceDriver,
-    ) -> Self {
+    pub fn new(mac_address: [u8; 6], driver: *mut dyn EthernetDeviceDriver) -> Self {
         Self {
-            info: EthernetDeviceInfo {
-                info_id: 0,
-                mac_address,
-                device_id,
-            },
+            info: EthernetDeviceInfo { mac_address },
             driver,
         }
     }

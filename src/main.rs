@@ -21,6 +21,7 @@
 #![feature(step_trait)]
 #![feature(try_blocks)]
 #![feature(type_name_of_val)]
+#![feature(linked_list_cursors)]
 
 #[macro_use]
 extern crate alloc;

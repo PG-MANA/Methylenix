@@ -10,7 +10,7 @@ use crate::kernel::drivers::pci::{
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::*;
 use crate::kernel::network_manager::ethernet_device::{
-    EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo,
+    EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo, TxEntry,
 };
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
@@ -24,7 +24,9 @@ pub struct I210Manager {
     base_address: VAddress,
     transfer_ring_buffer: VAddress,
     transfer_ring_lock: IrqSaveSpinLockFlag,
+    transfer_ids: [u32; Self::NUM_OF_TX_DESC],
     transfer_tail: u32,
+    transfer_head: u32,
     receive_ring_buffer: VAddress,
     receive_ring_lock: IrqSaveSpinLockFlag,
     receive_tail: u32,
@@ -313,7 +315,9 @@ impl PciDeviceDriver for I210Manager {
             Self {
                 base_address: controller_base_address,
                 transfer_ring_buffer: tx_ring_buffer_virtual_address,
+                transfer_ids: [0; Self::NUM_OF_TX_DESC],
                 transfer_tail: 0,
+                transfer_head: 0,
                 transfer_ring_lock: IrqSaveSpinLockFlag::new(),
                 receive_ring_buffer: rx_ring_buffer_virtual_address,
                 receive_tail: 0,
@@ -341,7 +345,7 @@ impl PciDeviceDriver for I210Manager {
             );
         }
 
-        let descriptor = EthernetDeviceDescriptor::new(0, mac_address, manager);
+        let descriptor = EthernetDeviceDescriptor::new(mac_address, manager);
         get_kernel_manager_cluster()
             .ethernet_device_manager
             .add_device(descriptor);
@@ -350,13 +354,8 @@ impl PciDeviceDriver for I210Manager {
 }
 
 impl EthernetDeviceDriver for I210Manager {
-    fn send(
-        &mut self,
-        _info: &EthernetDeviceInfo,
-        buffer: VAddress,
-        length: MSize,
-    ) -> Result<MSize, ()> {
-        if length.to_usize() > u16::MAX as usize {
+    fn send(&mut self, _info: &EthernetDeviceInfo, entry: &mut TxEntry) -> Result<MSize, ()> {
+        if entry.get_length().to_usize() > u16::MAX as usize {
             return Err(());
         }
         let mut physical_address_list: [PAddress; (u16::MAX as usize) / PAGE_SIZE_USIZE] =
@@ -364,9 +363,9 @@ impl EthernetDeviceDriver for I210Manager {
         let result = get_kernel_manager_cluster()
             .kernel_memory_manager
             .get_physical_address_list(
-                buffer,
+                entry.get_buffer(),
                 MIndex::new(0),
-                length.page_align_up().to_index(),
+                entry.get_length().page_align_up().to_index(),
                 &mut physical_address_list,
             );
         if let Err(e) = result {
@@ -376,11 +375,13 @@ impl EthernetDeviceDriver for I210Manager {
         let pages = result.unwrap();
         let mut processed_pages = 0;
         let mut processed_size = 0;
-        while processed_pages < pages && processed_size < length.to_usize() {
+        while processed_pages < pages && processed_size < entry.get_length().to_usize() {
             let mut i = 1;
             let mut size_to_send = 0;
             loop {
-                if (size_to_send + PAGE_SIZE_USIZE) < (length.to_usize() - processed_size) {
+                if (size_to_send + PAGE_SIZE_USIZE)
+                    < (entry.get_length().to_usize() - processed_size)
+                {
                     if physical_address_list[processed_pages + i]
                         != physical_address_list[processed_pages] + MIndex::new(i).to_offset()
                     {
@@ -389,14 +390,16 @@ impl EthernetDeviceDriver for I210Manager {
                     size_to_send += PAGE_SIZE_USIZE;
                     i += 1;
                 } else {
-                    size_to_send += length.to_usize() - processed_size - size_to_send;
+                    size_to_send += entry.get_length().to_usize() - processed_size - size_to_send;
                     break;
                 }
             }
-            self.transfer_data_legacy(
+            let n = self.transfer_data_legacy(
                 physical_address_list[processed_pages],
                 MSize::new(size_to_send),
+                entry.get_id(),
             )?;
+            entry.set_number_of_frame(n + entry.get_number_of_frame());
             processed_pages += i;
             processed_size += size_to_send;
         }
@@ -431,6 +434,8 @@ impl I210Manager {
 
     //const ICR_OFFSET: usize = 0x1500;
     const ICR_OFFSET: usize = 0x00C0;
+    const ICR_TX_FINISHED: u32 = 0b11;
+    const ICR_RX_FINISHED: u32 = 1 << 7;
 
     const RCTL_OFFSET: usize = 0x0100;
     const RCTL_RXEN: u32 = 1 << 1;
@@ -490,10 +495,18 @@ impl I210Manager {
 
     const SPIN_TIMEOUT: u32 = 0x10000;
 
-    fn transfer_data_legacy(&mut self, buffer: PAddress, length: MSize) -> Result<(), ()> {
+    fn transfer_data_legacy(
+        &mut self,
+        buffer: PAddress,
+        length: MSize,
+        id: u32,
+    ) -> Result<usize, ()> {
         const CMD_EOP: u64 = 1 << 24;
+        const CMD_RS: u64 = 1 << 27;
         let mut remaining_length = length.to_usize();
+        let mut number_of_descriptors = 0;
         let _lock = self.transfer_ring_lock.lock();
+
         while remaining_length > 0 {
             let transfer_length = if remaining_length > u16::MAX as usize {
                 u16::MAX as usize
@@ -505,6 +518,7 @@ impl I210Manager {
             if transfer_length == remaining_length {
                 command |= CMD_EOP;
             }
+            command |= CMD_RS;
             let descriptor: [u64; 2] = [buffer.to_usize() as u64, command];
 
             unsafe {
@@ -515,48 +529,81 @@ impl I210Manager {
                     + ((self.transfer_tail as usize) * (2 * core::mem::size_of::<u64>())
                         + core::mem::size_of::<u64>())) as *mut u64) = descriptor[1];
             }
+            self.transfer_ids[self.transfer_tail as usize] = id;
             self.transfer_tail += 1;
             if self.transfer_tail == Self::NUM_OF_TX_DESC as u32 {
                 self.transfer_tail = 0;
             }
             write_mmio(self.base_address, Self::TDT_OFFSET, self.transfer_tail);
             remaining_length -= transfer_length;
+            number_of_descriptors += 1;
         }
         drop(_lock);
-        return Ok(());
+        return Ok(number_of_descriptors);
     }
 
     pub fn interrupt_handler(&mut self) {
         let icr = read_mmio::<u32>(self.base_address, Self::ICR_OFFSET);
         pr_debug!("ICR: {:#X}", icr);
-        let _lock = self.receive_ring_lock.lock();
-        let receive_ring_buffer = unsafe {
-            &mut *(self.receive_ring_buffer.to_usize()
-                as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
-                    / core::mem::size_of::<u64>()])
-        };
-        let mut cursor = self.receive_tail as usize;
-        while ((receive_ring_buffer[2 * cursor + 1] >> 31) & 0x01) != 0 {
-            let length = receive_ring_buffer[2 * cursor + 1] & (1 << 16 - 1);
-            pr_debug!("{cursor}: {length}");
-            if length > 0 {
-                let buffer = kmalloc!(MSize::new(length as usize));
-                if let Ok(buffer) = buffer {
-                    unsafe {
-                        core::ptr::copy_nonoverlapping(
-                            (self.receive_buffer.to_usize() + 2048 * cursor) as *const u8,
-                            buffer.to_usize() as *mut u8,
-                            length as usize,
-                        )
-                    };
-                    /* Throw ethernet manager */
-                } else {
-                    pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
+
+        if (icr & Self::ICR_RX_FINISHED) != 0 {
+            pr_debug!("Received Packet");
+            let _lock = self.receive_ring_lock.lock();
+            let receive_ring_buffer = unsafe {
+                &mut *(self.receive_ring_buffer.to_usize()
+                    as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
+                        / core::mem::size_of::<u64>()])
+            };
+            let mut cursor = self.receive_tail as usize;
+            while ((receive_ring_buffer[2 * cursor + 1] >> 31) & 0x01) != 0 {
+                let length = receive_ring_buffer[2 * cursor + 1] & (1 << 16 - 1);
+                pr_debug!("{cursor}: {length}");
+                if length > 0 {
+                    let buffer = kmalloc!(MSize::new(length as usize));
+                    if let Ok(buffer) = buffer {
+                        unsafe {
+                            core::ptr::copy_nonoverlapping(
+                                (self.receive_buffer.to_usize() + 2048 * cursor) as *const u8,
+                                buffer.to_usize() as *mut u8,
+                                length as usize,
+                            )
+                        };
+                        /* Throw ethernet manager */
+                    } else {
+                        pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
+                    }
+                }
+                receive_ring_buffer[2 * cursor + 1] = 0;
+                write_mmio(self.base_address, Self::RDT_OFFSET, cursor as u32);
+                cursor = (cursor + 1) & (Self::NUM_OF_RX_DESC - 1);
+            }
+        }
+        if (icr & Self::ICR_TX_FINISHED) != 0 {
+            let _lock = self.transfer_ring_lock.lock();
+            let transfer_ring_buffer = unsafe {
+                &mut *(self.transfer_ring_buffer.to_usize()
+                    as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE
+                        / core::mem::size_of::<u64>()])
+            };
+
+            while ((transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] >> 24) & (1 << 3)/* CMD::RS */)
+                != 0
+            {
+                //let cmd = ((receive_ring_buffer[2 * self.transfer_head + 1] >> 24) & 0xff) as u8;
+                let id = self.transfer_ids[self.transfer_head as usize];
+                let done = transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] & (1 << 32);
+                if done == 0 {
+                    pr_err!("Failed to transmit frame: id:{id}");
+                }
+                get_kernel_manager_cluster()
+                    .ethernet_device_manager
+                    .update_transmit_status(id, done != 0);
+                transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] = 0;
+                self.transfer_head += 1;
+                if self.transfer_head == Self::NUM_OF_TX_DESC as u32 {
+                    self.transfer_head = 0;
                 }
             }
-            receive_ring_buffer[2 * cursor + 1] = 0;
-            write_mmio(self.base_address, Self::RDT_OFFSET, cursor as u32);
-            cursor = (cursor + 1) & (Self::NUM_OF_RX_DESC - 1);
         }
     }
 }
