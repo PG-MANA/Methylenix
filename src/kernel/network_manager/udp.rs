@@ -16,6 +16,65 @@ use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNo
 pub const UDP_HEADER_SIZE: usize = 0x08;
 pub const IPV4_PROTOCOL_UDP: u8 = 0x11;
 
+#[repr(C)]
+struct UdpPacket {
+    sender_port: u16,
+    destination_port: u16,
+    packet_length: u16,
+    checksum: u16,
+}
+
+#[allow(dead_code)]
+impl UdpPacket {
+    #[allow(dead_code)]
+    pub const fn new(sender_port: u16, destination_port: u16, packet_length: u16) -> Self {
+        assert!(core::mem::size_of::<Self>() == UDP_HEADER_SIZE);
+        Self {
+            sender_port: sender_port.to_be(),
+            destination_port: destination_port.to_be(),
+            packet_length: packet_length.to_be(),
+            checksum: 0,
+        }
+    }
+
+    pub fn from_buffer(buffer: &mut [u8]) -> &mut Self {
+        assert!(buffer.len() >= UDP_HEADER_SIZE);
+        unsafe { &mut *(buffer.as_mut_ptr() as usize as *mut Self) }
+    }
+
+    pub const fn get_sender_port(&self) -> u16 {
+        u16::from_be(self.sender_port)
+    }
+
+    pub fn set_sender_port(&mut self, port: u16) {
+        self.sender_port = port.to_be();
+    }
+
+    pub const fn get_destination_port(&self) -> u16 {
+        u16::from_be(self.destination_port)
+    }
+
+    pub fn set_destination_port(&mut self, port: u16) {
+        self.destination_port = port.to_be();
+    }
+
+    pub const fn get_packet_length(&self) -> u16 {
+        u16::from_be(self.packet_length)
+    }
+
+    pub fn set_packet_length(&mut self, length: u16) {
+        self.packet_length = length.to_be();
+    }
+
+    pub const fn get_checksum(&self) -> u16 {
+        u16::from_be(self.checksum)
+    }
+
+    pub const fn set_checksum(&mut self, checksum: u16) {
+        self.checksum = checksum.to_be();
+    }
+}
+
 pub struct UdpPortListenEntry {
     //    pub thread: &'static mut ThreadEntry,
     list: PtrLinkedListNode<Self>,
@@ -54,23 +113,21 @@ pub fn create_ipv4_udp_header(
     destination_ipv4_address: u32,
     packet_id: u16,
 ) -> Result<[u8; UDP_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE], ()> {
-    if data.len() > u16::MAX as usize {
+    if (data.len() + UDP_HEADER_SIZE) > u16::MAX as usize {
         return Err(());
     }
     let mut header = [0u8; UDP_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE];
-    const UDP_HEADER_BASE: usize = ipv4::IPV4_DEFAULT_HEADER_SIZE;
+    let (ipv4_header, udp_header) = header.split_at_mut(ipv4::IPV4_DEFAULT_HEADER_SIZE);
+    let udp_header = UdpPacket::from_buffer(udp_header);
 
-    header[UDP_HEADER_BASE..=(UDP_HEADER_BASE + 1)].copy_from_slice(&sender_port.to_be_bytes());
-    header[(UDP_HEADER_BASE + 2)..=(UDP_HEADER_BASE + 3)]
-        .copy_from_slice(&destination_port.to_be_bytes());
-    header[(UDP_HEADER_BASE + 4)..=(UDP_HEADER_BASE + 5)]
-        .copy_from_slice(&(data.len() as u16).to_be_bytes());
+    udp_header.set_sender_port(sender_port);
+    udp_header.set_destination_port(destination_port);
+    udp_header.set_packet_length((data.len() + UDP_HEADER_SIZE) as u16);
 
     ipv4::create_default_ipv4_header(
-        &mut header[0..UDP_HEADER_BASE],
-        data.len(),
+        ipv4_header,
+        udp_header.get_packet_length() as usize,
         packet_id,
-        true,
         ipv4::get_default_ttl(),
         IPV4_PROTOCOL_UDP,
         sender_ipv4_address,
@@ -100,32 +157,43 @@ pub fn udp_ipv4_packet_handler(
     data_length: MSize,
     packet_offset: usize,
     sender_ipv4_address: u32,
-    target_ipv4_address: u32,
+    destination_ipv4_address: u32,
 ) {
     let udp_base = allocated_data_base.to_usize() + packet_offset;
-    let sender_port = u16::from_be(unsafe { *(udp_base as *const u16) });
-    let target_port = u16::from_be(unsafe { *((udp_base + 2) as *const u16) });
-    let length = u16::from_be(unsafe { *((udp_base + 4) as *const u16) });
-    if (length as usize) + packet_offset > data_length.to_usize() {
-        pr_err!("Invalid payload size: {:#X}", length);
+    if (packet_offset + UDP_HEADER_SIZE) > data_length.to_usize() {
+        pr_err!("Invalid UDP packet");
         let _ = kfree!(allocated_data_base, data_length);
         return;
     }
+    let udp_packet =
+        UdpPacket::from_buffer(unsafe { &mut *(udp_base as *mut [u8; UDP_HEADER_SIZE]) });
+    if (udp_packet.get_packet_length() as usize) + packet_offset > data_length.to_usize() {
+        pr_err!(
+            "Invalid payload size: {:#X}",
+            udp_packet.get_packet_length()
+        );
+        let _ = kfree!(allocated_data_base, data_length);
+        return;
+    }
+
+    let sender_port = udp_packet.get_sender_port();
+    let destination_port = udp_packet.get_destination_port();
+
     pr_debug!(
         "UDP Packet: {{From: {}:{}, To: {}:{}, Length: {}}}",
         AddressPrinter {
-            address: &sender_ipv4_address.to_be_bytes(),
+            address: &destination_ipv4_address.to_be_bytes(),
             separator: '.',
             is_hex: false
         },
         sender_port,
         AddressPrinter {
-            address: &target_ipv4_address.to_be_bytes(),
+            address: &destination_ipv4_address.to_be_bytes(),
             separator: '.',
             is_hex: false
         },
-        target_port,
-        length
+        destination_port,
+        udp_packet.get_packet_length() - UDP_HEADER_SIZE as u16
     );
 
     let _lock = unsafe { UDP_PORT_MANAGER.0.lock() };
@@ -135,8 +203,8 @@ pub fn udp_ipv4_packet_handler(
             .iter_mut(offset_of!(UdpPortListenEntry, list))
     } {
         if (e.from_ipv4_address == 0 || e.from_ipv4_address == sender_ipv4_address)
-            && (e.to_ipv4_address == 0 || e.to_ipv4_address == target_ipv4_address)
-            && (e.port == target_port)
+            && (e.to_ipv4_address == 0 || e.to_ipv4_address == destination_ipv4_address)
+            && (e.port == destination_port)
         {
             let e = UdpPortListenEntry {
                 list: PtrLinkedListNode::new(),
@@ -157,18 +225,18 @@ pub fn udp_ipv4_packet_handler(
     pr_debug!(
         "Unprocessed UDP Packet: {{From: {}:{}, To: {}:{}, Length: {}}}",
         AddressPrinter {
-            address: &sender_ipv4_address.to_be_bytes(),
+            address: &destination_ipv4_address.to_be_bytes(),
             separator: '.',
             is_hex: false
         },
-        sender_port,
+        udp_packet.get_sender_port(),
         AddressPrinter {
-            address: &target_ipv4_address.to_be_bytes(),
+            address: &destination_ipv4_address.to_be_bytes(),
             separator: '.',
             is_hex: false
         },
-        target_port,
-        length
+        udp_packet.get_destination_port(),
+        udp_packet.get_packet_length() - UDP_HEADER_SIZE as u16
     );
 
     let _ = kfree!(allocated_data_base, data_length);
