@@ -2,6 +2,8 @@
 //! IPv4
 //!
 
+use crate::kernel::memory_manager::data_type::{MSize, VAddress};
+
 const IPV4_VERSION: u8 = 0x04;
 const IPV4_DEFAULT_IHL: u8 = 0x05;
 pub const IPV4_DEFAULT_HEADER_SIZE: usize = IPV4_DEFAULT_IHL as usize * 4;
@@ -51,4 +53,11 @@ pub fn create_default_ipv4_header(
 
 pub fn get_default_ttl() -> u8 {
     128
+}
+
+pub fn ipv4_packet_handler(
+    allocated_data_base: VAddress,
+    data_length: MSize,
+    packet_offset: usize,
+) {
 }

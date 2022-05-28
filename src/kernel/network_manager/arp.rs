@@ -3,8 +3,10 @@
 //!
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
-/*
+use crate::kfree;
+
 #[repr(C)]
 struct ArpPacket {
     hardware_type: u16,
@@ -12,14 +14,21 @@ struct ArpPacket {
     hardware_address_length: u8,
     protocol_address_length: u8,
     op_code: u16,
-}*/
+}
 
-const ETHERNET_TYPE_ARP: u16 = 0x0806;
+pub const ETHERNET_TYPE_ARP: u16 = 0x0806;
 
 const HARDWARE_TYPE_ETHERNET: u16 = 0x0001;
 const PROTOCOL_TYPE_IPV4: u16 = 0x0800;
 
 const OPCODE_REQUEST: u16 = 0x0001;
+const OPCODE_REPLY: u16 = 0x0002;
+
+struct AddressPrinter<'a> {
+    address: &'a [u8],
+    is_hex: bool,
+    separator: char,
+}
 
 pub fn create_ethernet_ipv4_arp_packet(
     mac_address: [u8; 6],
@@ -66,4 +75,71 @@ pub fn send_ethernet_ipv4_arp_packet(
             ETHERNET_TYPE_ARP,
         )
         .and_then(|_| Ok(()))
+}
+
+pub fn arp_packet_handler(allocated_data_base: VAddress, data_length: MSize, packet_offset: usize) {
+    if data_length.to_usize() < (packet_offset + core::mem::size_of::<ArpPacket>()) {
+        pr_err!("Invalid ARP packet");
+        let _ = kfree!(allocated_data_base, data_length);
+        return;
+    }
+    let arp_big_endian =
+        unsafe { &*((allocated_data_base.to_usize() + packet_offset) as *const ArpPacket) };
+
+    match u16::from_be(arp_big_endian.op_code) {
+        OPCODE_REPLY => {
+            let hardware_separator = ':';
+            let (protocol_separator, protocol_hex) =
+                match u16::from_be(arp_big_endian.protocol_type) {
+                    PROTOCOL_TYPE_IPV4 => ('.', false),
+                    _ => (':', true),
+                };
+            let hardware_printer = AddressPrinter {
+                address: unsafe {
+                    core::slice::from_raw_parts(
+                        (allocated_data_base.to_usize() + packet_offset + 8) as *const u8,
+                        arp_big_endian.hardware_address_length as usize,
+                    )
+                },
+                separator: hardware_separator,
+                is_hex: true,
+            };
+            let address_printer = AddressPrinter {
+                address: unsafe {
+                    core::slice::from_raw_parts(
+                        (allocated_data_base.to_usize()
+                            + packet_offset
+                            + 8
+                            + arp_big_endian.hardware_address_length as usize)
+                            as *const u8,
+                        arp_big_endian.protocol_address_length as usize,
+                    )
+                },
+                separator: protocol_separator,
+                is_hex: protocol_hex,
+            };
+            pr_info!("{} is {}", address_printer, hardware_printer);
+        }
+        op => {
+            pr_err!("Unknown op_code: {:#X}", op);
+        }
+    }
+    let _ = kfree!(allocated_data_base, data_length);
+}
+
+impl<'a> core::fmt::Display for AddressPrinter<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use core::fmt::Write;
+        for (i, d) in self.address.iter().enumerate() {
+            if self.is_hex {
+                f.write_fmt(format_args!("{:02X}", *d))?;
+            } else {
+                f.write_fmt(format_args!("{}", *d))?;
+            }
+            if i != self.address.len() - 1 {
+                f.write_char(self.separator)?;
+            }
+        }
+        return Ok(());
+    }
 }

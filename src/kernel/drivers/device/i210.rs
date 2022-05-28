@@ -158,22 +158,23 @@ impl PciDeviceDriver for I210Manager {
                 return Err(());
             }
         };
+        let rx_ring_buffer = unsafe {
+            &mut *(rx_ring_buffer_virtual_address.to_usize()
+                as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
+                    / core::mem::size_of::<u64>()])
+        };
         for i in 0..Self::NUM_OF_RX_DESC {
-            unsafe {
-                *((rx_ring_buffer_virtual_address.to_usize() + i * Self::RX_DESC_SIZE)
-                    as *mut u64) = (receive_buffer_physical_address.to_usize() + i * 2048) as u64;
-                *((rx_ring_buffer_virtual_address.to_usize()
-                    + i * Self::RX_DESC_SIZE
-                    + core::mem::size_of::<u64>()) as *mut u64) = 0;
-            };
+            rx_ring_buffer[2 * i] = (receive_buffer_physical_address.to_usize() + i * 2048) as u64;
+            rx_ring_buffer[2 * i + 1] = 0;
         }
 
+        let tx_ring_buffer = unsafe {
+            &mut *(tx_ring_buffer_virtual_address.to_usize()
+                as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE
+                    / core::mem::size_of::<u64>()])
+        };
         for i in 0..Self::NUM_OF_TX_DESC {
-            unsafe {
-                *((tx_ring_buffer_virtual_address.to_usize()
-                    + i * Self::TX_DESC_SIZE
-                    + core::mem::size_of::<u64>()) as *mut u64) = 0
-            };
+            tx_ring_buffer[2 * i + 1] = 0;
         }
 
         /* Setup receive registers */
@@ -544,10 +545,9 @@ impl I210Manager {
 
     pub fn interrupt_handler(&mut self) {
         let icr = read_mmio::<u32>(self.base_address, Self::ICR_OFFSET);
-        pr_debug!("ICR: {:#X}", icr);
+        //pr_debug!("ICR: {:#X}", icr);
 
         if (icr & Self::ICR_RX_FINISHED) != 0 {
-            pr_debug!("Received Packet");
             let _lock = self.receive_ring_lock.lock();
             let receive_ring_buffer = unsafe {
                 &mut *(self.receive_ring_buffer.to_usize()
@@ -555,9 +555,10 @@ impl I210Manager {
                         / core::mem::size_of::<u64>()])
             };
             let mut cursor = self.receive_tail as usize;
-            while ((receive_ring_buffer[2 * cursor + 1] >> 31) & 0x01) != 0 {
-                let length = receive_ring_buffer[2 * cursor + 1] & (1 << 16 - 1);
-                pr_debug!("{cursor}: {length}");
+            while ((receive_ring_buffer[2 * cursor + 1] >> 32) & 0x01) != 0 {
+                let length = receive_ring_buffer[2 * cursor + 1] & ((1 << 16) - 1);
+                //let end_of_packets = ((receive_ring_buffer[2 * cursor + 1] >> 33) & 0x01) != 0;
+                //pr_debug!("{cursor}: {length}(Is last: {end_of_packets})");
                 if length > 0 {
                     let buffer = kmalloc!(MSize::new(length as usize));
                     if let Ok(buffer) = buffer {
@@ -569,6 +570,9 @@ impl I210Manager {
                             )
                         };
                         /* Throw ethernet manager */
+                        get_kernel_manager_cluster()
+                            .ethernet_device_manager
+                            .received_data_handler(buffer, MSize::new(length as usize));
                     } else {
                         pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
                     }
@@ -577,6 +581,7 @@ impl I210Manager {
                 write_mmio(self.base_address, Self::RDT_OFFSET, cursor as u32);
                 cursor = (cursor + 1) & (Self::NUM_OF_RX_DESC - 1);
             }
+            self.receive_tail = cursor as u32;
         }
         if (icr & Self::ICR_TX_FINISHED) != 0 {
             let _lock = self.transfer_ring_lock.lock();

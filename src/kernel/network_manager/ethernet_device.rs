@@ -3,12 +3,15 @@
 //!
 //!
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use super::{arp, ipv4};
+
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
+use crate::kernel::task_manager::work_queue::WorkList;
 use crate::kernel::task_manager::ThreadEntry;
 
-use crate::{alloc_non_linear_pages, free_pages};
+use crate::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
 
 use alloc::collections::LinkedList;
 use alloc::vec::Vec;
@@ -17,6 +20,7 @@ use alloc::vec::Vec;
 const SFD: u8 = 0b10101011;
 const IPG: usize = 12;
 const MIN_FRAME_DATA_SIZE: usize = 46;*/
+const ETHERNET_PAYLOAD_OFFSET: usize = 14;
 const MAX_FRAME_DATA_SIZE: usize = 1500;
 const MAX_FRAME_SIZE: usize = MAX_FRAME_DATA_SIZE + 30 /*+ IPG*/ /*+ 8*/;
 const MAC_ADDRESS_SIZE: usize = 6;
@@ -190,7 +194,7 @@ impl EthernetDeviceManager {
                             pr_err!("Failed to wake up the thread: {:?}", error);
                         }
                     } else {
-                        pr_debug!("Free the buffer({})", e.buffer);
+                        //pr_debug!("Free the buffer({})", e.buffer);
                         let _ = free_pages!(e.buffer);
                         let _ = cursor.remove_current();
                     }
@@ -201,6 +205,78 @@ impl EthernetDeviceManager {
                 break;
             }
             cursor.move_next();
+        }
+    }
+
+    const WORKER_DATA_SIZE: usize = core::mem::size_of::<(VAddress, MSize)>();
+
+    pub fn received_data_handler(&mut self, allocated_data: VAddress, length: MSize) {
+        let address = match kmalloc!(MSize::new(Self::WORKER_DATA_SIZE)) {
+            Ok(a) => a,
+            Err(e) => {
+                pr_err!("Failed to allocate memory: {:?}", e);
+                let _ = kfree!(allocated_data, length);
+                return;
+            }
+        };
+        unsafe { *(address.to_usize() as *mut (VAddress, MSize)) = (allocated_data, length) };
+
+        let work = WorkList::new(Self::packet_worker, address.to_usize());
+        if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(work) {
+            pr_err!("Failed to add worker: {:?}", e);
+            let _ = kfree!(allocated_data, length);
+            let _ = kfree!(address, MSize::new(Self::WORKER_DATA_SIZE));
+        }
+    }
+
+    pub fn packet_worker(data: usize) {
+        let allocated_data_address: VAddress;
+        let data_length: MSize;
+        unsafe { (allocated_data_address, data_length) = *(data as *const (VAddress, MSize)) };
+        let _ = kfree!(VAddress::new(data), MSize::new(Self::WORKER_DATA_SIZE));
+
+        let sender_mac_address =
+            unsafe { *((allocated_data_address.to_usize() + 6) as *const [u8; 6]) };
+        let frame_type = u16::from_be_bytes(unsafe {
+            *((allocated_data_address.to_usize() + 12) as *const [u8; 2])
+        });
+
+        pr_debug!(
+            "From: {:X}:{:X}:{:X}:{:X}:{:X}:{:X}, Type: {:#X}",
+            sender_mac_address[0],
+            sender_mac_address[1],
+            sender_mac_address[2],
+            sender_mac_address[3],
+            sender_mac_address[4],
+            sender_mac_address[5],
+            frame_type
+        );
+        let _ = kfree!(allocated_data_address, data_length);
+
+        match frame_type {
+            ipv4::ETHERNET_TYPE_IPV4 => {
+                ipv4::ipv4_packet_handler(
+                    allocated_data_address,
+                    data_length,
+                    ETHERNET_PAYLOAD_OFFSET,
+                );
+            }
+            arp::ETHERNET_TYPE_ARP => {
+                arp::arp_packet_handler(
+                    allocated_data_address,
+                    data_length,
+                    ETHERNET_PAYLOAD_OFFSET,
+                );
+            }
+            t => {
+                pr_err!("Unknown frame_type: {:#X}", t);
+                pr_debug!("Data: {:#X?}", unsafe {
+                    core::slice::from_raw_parts(
+                        allocated_data_address.to_usize() as *const u8,
+                        data_length.to_usize(),
+                    )
+                });
+            }
         }
     }
 }
