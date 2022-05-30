@@ -2,7 +2,7 @@
 //! UDP
 //!
 
-use super::{ipv4, AddressPrinter};
+use super::{ethernet_device::EthernetFrameInfo, ipv4, AddressPrinter};
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
@@ -156,8 +156,8 @@ pub fn udp_ipv4_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     packet_offset: usize,
-    sender_ipv4_address: u32,
-    destination_ipv4_address: u32,
+    _frame_info: EthernetFrameInfo,
+    ipv4_packet_info: ipv4::Ipv4PacketInfo,
 ) {
     let udp_base = allocated_data_base.to_usize() + packet_offset;
     if (packet_offset + UDP_HEADER_SIZE) > data_length.to_usize() {
@@ -182,13 +182,13 @@ pub fn udp_ipv4_packet_handler(
     pr_debug!(
         "UDP Packet: {{From: {}:{}, To: {}:{}, Length: {}}}",
         AddressPrinter {
-            address: &destination_ipv4_address.to_be_bytes(),
+            address: &ipv4_packet_info.get_sender_address().to_be_bytes(),
             separator: '.',
             is_hex: false
         },
         sender_port,
         AddressPrinter {
-            address: &destination_ipv4_address.to_be_bytes(),
+            address: &ipv4_packet_info.get_destination_address().to_be_bytes(),
             separator: '.',
             is_hex: false
         },
@@ -202,15 +202,17 @@ pub fn udp_ipv4_packet_handler(
             .1
             .iter_mut(offset_of!(UdpPortListenEntry, list))
     } {
-        if (e.from_ipv4_address == 0 || e.from_ipv4_address == sender_ipv4_address)
-            && (e.to_ipv4_address == 0 || e.to_ipv4_address == destination_ipv4_address)
+        if (e.from_ipv4_address == 0
+            || e.from_ipv4_address == ipv4_packet_info.get_sender_address())
+            && (e.to_ipv4_address == 0
+                || e.to_ipv4_address == ipv4_packet_info.get_destination_address())
             && (e.port == destination_port)
         {
             let e = UdpPortListenEntry {
                 list: PtrLinkedListNode::new(),
                 entry: e.entry,
-                from_ipv4_address: e.from_ipv4_address,
-                to_ipv4_address: e.to_ipv4_address,
+                from_ipv4_address: ipv4_packet_info.get_sender_address(),
+                to_ipv4_address: ipv4_packet_info.get_destination_address(),
                 port: e.port,
                 allocated_data_address: allocated_data_base,
                 data_length,
@@ -225,17 +227,17 @@ pub fn udp_ipv4_packet_handler(
     pr_debug!(
         "Unprocessed UDP Packet: {{From: {}:{}, To: {}:{}, Length: {}}}",
         AddressPrinter {
-            address: &destination_ipv4_address.to_be_bytes(),
+            address: &ipv4_packet_info.get_sender_address().to_be_bytes(),
             separator: '.',
             is_hex: false
         },
-        udp_packet.get_sender_port(),
+        sender_port,
         AddressPrinter {
-            address: &destination_ipv4_address.to_be_bytes(),
+            address: &ipv4_packet_info.get_destination_address().to_be_bytes(),
             separator: '.',
             is_hex: false
         },
-        udp_packet.get_destination_port(),
+        destination_port,
         udp_packet.get_packet_length() - UDP_HEADER_SIZE as u16
     );
 

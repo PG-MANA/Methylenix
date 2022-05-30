@@ -21,6 +21,7 @@ use core::mem::MaybeUninit;
 use alloc::collections::LinkedList;
 
 pub struct I210Manager {
+    device_id: usize,
     base_address: VAddress,
     transfer_ring_buffer: VAddress,
     transfer_ring_lock: IrqSaveSpinLockFlag,
@@ -314,6 +315,7 @@ impl PciDeviceDriver for I210Manager {
         let manager = match kmalloc!(
             Self,
             Self {
+                device_id: 0,
                 base_address: controller_base_address,
                 transfer_ring_buffer: tx_ring_buffer_virtual_address,
                 transfer_ids: [0; Self::NUM_OF_TX_DESC],
@@ -333,6 +335,11 @@ impl PciDeviceDriver for I210Manager {
             }
         };
 
+        let descriptor = EthernetDeviceDescriptor::new(mac_address, manager);
+        manager.device_id = get_kernel_manager_cluster()
+            .ethernet_device_manager
+            .add_device(descriptor);
+
         if let Ok(interrupt_id) = setup_msi_or_msi_x(pci_dev, i210_handler, None, false) {
             unsafe { I210_LIST.push_back((interrupt_id, manager as *mut _)) };
             write_mmio(controller_base_address, Self::IMC_OFFSET, u32::MAX);
@@ -345,11 +352,6 @@ impl PciDeviceDriver for I210Manager {
                 (1u32 << 7) | (1u32 << 0) | (1u32 << 1/* For compatibility */),
             );
         }
-
-        let descriptor = EthernetDeviceDescriptor::new(mac_address, manager);
-        get_kernel_manager_cluster()
-            .ethernet_device_manager
-            .add_device(descriptor);
         return Ok(());
     }
 }
@@ -572,7 +574,11 @@ impl I210Manager {
                         /* Throw ethernet manager */
                         get_kernel_manager_cluster()
                             .ethernet_device_manager
-                            .received_data_handler(buffer, MSize::new(length as usize));
+                            .received_data_handler(
+                                self.device_id,
+                                buffer,
+                                MSize::new(length as usize),
+                            );
                     } else {
                         pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
                     }
@@ -602,7 +608,7 @@ impl I210Manager {
                 }
                 get_kernel_manager_cluster()
                     .ethernet_device_manager
-                    .update_transmit_status(id, done != 0);
+                    .update_transmit_status(self.device_id, id, done != 0);
                 transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] = 0;
                 self.transfer_head += 1;
                 if self.transfer_head == Self::NUM_OF_TX_DESC as u32 {

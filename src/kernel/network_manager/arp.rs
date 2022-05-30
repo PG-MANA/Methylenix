@@ -2,7 +2,7 @@
 //! Address Resolution Protocol
 //!
 
-use super::AddressPrinter;
+use super::{ethernet_device::EthernetFrameInfo, AddressPrinter};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
@@ -77,7 +77,7 @@ pub fn arp_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     packet_offset: usize,
-    _sender_mac_address: [u8; 6],
+    _frame_info: EthernetFrameInfo,
 ) {
     if data_length.to_usize() < (packet_offset + core::mem::size_of::<ArpPacket>()) {
         pr_err!("Invalid ARP packet");

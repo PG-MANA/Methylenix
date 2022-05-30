@@ -2,7 +2,8 @@
 //! IPv4
 //!
 
-use super::udp;
+use super::{ethernet_device::EthernetFrameInfo, udp};
+
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 use crate::kfree;
@@ -25,6 +26,21 @@ struct DefaultIpv4Packet {
     checksum: u16,
     sender_ip_address: u32,
     destination_ip_address: u32,
+}
+
+pub struct Ipv4PacketInfo {
+    sender_ipv4_address: u32,
+    destination_ipv4_address: u32,
+}
+
+impl Ipv4PacketInfo {
+    pub fn get_sender_address(&self) -> u32 {
+        self.sender_ipv4_address
+    }
+
+    pub fn get_destination_address(&self) -> u32 {
+        self.destination_ipv4_address
+    }
 }
 
 #[allow(dead_code)]
@@ -197,7 +213,7 @@ pub fn ipv4_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     packet_offset: usize,
-    _sender_mac_address: [u8; 6],
+    frame_info: EthernetFrameInfo,
 ) {
     let ipv4_base = allocated_data_base.to_usize() + packet_offset;
     let ipv4_packet = DefaultIpv4Packet::from_buffer(unsafe {
@@ -222,13 +238,17 @@ pub fn ipv4_packet_handler(
         let _ = kfree!(allocated_data_base, data_length);
         return;
     }
+    let packet_info = Ipv4PacketInfo {
+        sender_ipv4_address: ipv4_packet.get_sender_ip_address(),
+        destination_ipv4_address: ipv4_packet.get_destination_ip_address(),
+    };
     match ipv4_packet.get_protocol() {
         udp::IPV4_PROTOCOL_UDP => udp::udp_ipv4_packet_handler(
             allocated_data_base,
             data_length,
             packet_offset + header_length,
-            ipv4_packet.get_sender_ip_address(),
-            ipv4_packet.get_destination_ip_address(),
+            frame_info,
+            packet_info,
         ),
         t => {
             pr_err!("Unknown Protocol Type: {:#X}", t);

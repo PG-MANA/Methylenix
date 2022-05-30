@@ -78,13 +78,17 @@ impl TxEntry {
     }
 }
 
-#[allow(dead_code)]
+#[derive(Clone)]
 pub struct RxEntry {
     buffer: VAddress,
     length: MSize,
-    number_of_remaining_frames: usize,
-    thread: Option<&'static mut ThreadEntry>,
-    result: u8,
+    device_id: usize,
+}
+
+#[allow(dead_code)]
+pub struct EthernetFrameInfo {
+    device_id: usize,
+    sender_mac_address: [u8; 6],
 }
 
 impl EthernetDeviceManager {
@@ -97,10 +101,12 @@ impl EthernetDeviceManager {
         }
     }
 
-    pub fn add_device(&mut self, d: EthernetDeviceDescriptor) {
+    pub fn add_device(&mut self, d: EthernetDeviceDescriptor) -> usize {
         let _lock = self.lock.lock();
+        let device_id = self.device_list.len();
         self.device_list.push(d);
         drop(_lock);
+        return device_id;
     }
 
     pub fn send_data(
@@ -170,7 +176,7 @@ impl EthernetDeviceManager {
         Ok(self.device_list[device_id].info.mac_address)
     }
 
-    pub fn update_transmit_status(&mut self, id: u32, is_successful: bool) {
+    pub fn update_transmit_status(&mut self, _device_id: usize, id: u32, is_successful: bool) {
         let _lock = self.lock.lock();
         if self.tx_list.len() == 0 {
             return;
@@ -208,10 +214,20 @@ impl EthernetDeviceManager {
         }
     }
 
-    const WORKER_DATA_SIZE: usize = core::mem::size_of::<(VAddress, MSize)>();
-
-    pub fn received_data_handler(&mut self, allocated_data: VAddress, length: MSize) {
-        let address = match kmalloc!(MSize::new(Self::WORKER_DATA_SIZE)) {
+    pub fn received_data_handler(
+        &mut self,
+        device_id: usize,
+        allocated_data: VAddress,
+        length: MSize,
+    ) {
+        let rx_entry = match kmalloc!(
+            RxEntry,
+            RxEntry {
+                buffer: allocated_data,
+                length,
+                device_id
+            }
+        ) {
             Ok(a) => a,
             Err(e) => {
                 pr_err!("Failed to allocate memory: {:?}", e);
@@ -219,54 +235,54 @@ impl EthernetDeviceManager {
                 return;
             }
         };
-        unsafe { *(address.to_usize() as *mut (VAddress, MSize)) = (allocated_data, length) };
-
-        let work = WorkList::new(Self::packet_worker, address.to_usize());
+        let work = WorkList::new(Self::packet_worker, rx_entry as *const _ as usize);
         if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(work) {
             pr_err!("Failed to add worker: {:?}", e);
             let _ = kfree!(allocated_data, length);
-            let _ = kfree!(address, MSize::new(Self::WORKER_DATA_SIZE));
+            let _ = kfree!(rx_entry);
         }
     }
 
     pub fn packet_worker(data: usize) {
-        let allocated_data_address: VAddress;
-        let data_length: MSize;
-        unsafe { (allocated_data_address, data_length) = *(data as *const (VAddress, MSize)) };
-        let _ = kfree!(VAddress::new(data), MSize::new(Self::WORKER_DATA_SIZE));
+        let rx_entry = unsafe { &*(data as *const RxEntry) };
+        let cloned_rx_entry = rx_entry.clone();
+        let _ = kfree!(rx_entry);
+        let rx_entry = cloned_rx_entry;
 
-        let sender_mac_address =
-            unsafe { *((allocated_data_address.to_usize() + 6) as *const [u8; 6]) };
-        let frame_type = u16::from_be_bytes(unsafe {
-            *((allocated_data_address.to_usize() + 12) as *const [u8; 2])
-        });
+        let sender_mac_address = unsafe { *((rx_entry.buffer.to_usize() + 6) as *const [u8; 6]) };
+        let frame_type =
+            u16::from_be_bytes(unsafe { *((rx_entry.buffer.to_usize() + 12) as *const [u8; 2]) });
+        let frame_info = EthernetFrameInfo {
+            device_id: rx_entry.device_id,
+            sender_mac_address,
+        };
 
         match frame_type {
             ipv4::ETHERNET_TYPE_IPV4 => {
                 ipv4::ipv4_packet_handler(
-                    allocated_data_address,
-                    data_length,
+                    rx_entry.buffer,
+                    rx_entry.length,
                     ETHERNET_PAYLOAD_OFFSET,
-                    sender_mac_address,
+                    frame_info,
                 );
             }
             arp::ETHERNET_TYPE_ARP => {
                 arp::arp_packet_handler(
-                    allocated_data_address,
-                    data_length,
+                    rx_entry.buffer,
+                    rx_entry.length,
                     ETHERNET_PAYLOAD_OFFSET,
-                    sender_mac_address,
+                    frame_info,
                 );
             }
             t => {
                 pr_err!("Unknown frame_type: {:#X}", t);
                 pr_debug!("Data: {:#X?}", unsafe {
                     core::slice::from_raw_parts(
-                        allocated_data_address.to_usize() as *const u8,
-                        data_length.to_usize(),
+                        rx_entry.buffer.to_usize() as *const u8,
+                        rx_entry.length.to_usize(),
                     )
                 });
-                let _ = kfree!(allocated_data_address, data_length);
+                let _ = kfree!(rx_entry.buffer, rx_entry.length);
             }
         }
     }
