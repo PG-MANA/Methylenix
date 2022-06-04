@@ -89,6 +89,7 @@ pub struct RxEntry {
 pub struct EthernetFrameInfo {
     device_id: usize,
     sender_mac_address: [u8; 6],
+    frame_type: u16,
 }
 
 impl EthernetDeviceManager {
@@ -107,6 +108,15 @@ impl EthernetDeviceManager {
         self.device_list.push(d);
         drop(_lock);
         return device_id;
+    }
+
+    pub fn reply_data(&mut self, frame_info: EthernetFrameInfo, data: &[u8]) -> Result<(), ()> {
+        self.send_data(
+            frame_info.device_id,
+            data,
+            frame_info.sender_mac_address,
+            frame_info.frame_type,
+        )
     }
 
     pub fn send_data(
@@ -255,6 +265,7 @@ impl EthernetDeviceManager {
         let frame_info = EthernetFrameInfo {
             device_id: rx_entry.device_id,
             sender_mac_address,
+            frame_type,
         };
 
         match frame_type {

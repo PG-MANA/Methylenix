@@ -357,6 +357,7 @@ fn packet_handler(entry: &udp::UdpPortListenEntry) {
                     is_hex: false
                 },
             );
+            ipv4::set_default_ipv4_address(unsafe { DEVICE_ID }, offered_address);
         }
         &DHCP_MESSAGE_TYPE_PNACK => {
             pr_debug!(
@@ -367,6 +368,7 @@ fn packet_handler(entry: &udp::UdpPortListenEntry) {
                     is_hex: false
                 },
             );
+            send_dhcp_discover_packet(unsafe { DEVICE_ID });
         }
         _ => {
             pr_err!("Unknown packet type: {:#X?}", packet_type);
