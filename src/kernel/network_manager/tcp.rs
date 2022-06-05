@@ -42,6 +42,9 @@ pub struct TcpSessionInfo {
     lock: SpinLockFlag,
     handler: TcpDataHandler,
     //event_handler,
+    /// segment_info is **the arrived segment information**.
+    /// the **sender** means **opposite**, and the **destination** means **our side**.
+    /// Be careful when reply data.
     segment_info: TcpSegmentInfo,
     window_size: u16,
     buffer_list: LinkedList<SessionBuffer>,
@@ -87,6 +90,14 @@ impl TcpSegmentInfo {
 
     pub fn get_destination_port(&self) -> u16 {
         self.destination_port
+    }
+
+    pub fn get_their_port(&self) -> u16 {
+        self.get_sender_port()
+    }
+
+    pub fn get_our_port(&self) -> u16 {
+        self.get_destination_port()
     }
 
     pub fn get_packet_info(&self) -> &ipv4::Ipv4PacketInfo {
@@ -337,14 +348,12 @@ static mut TCP_BIND_MANAGER: (IrqSaveSpinLockFlag, LinkedList<TcpPortListenEntry
 static mut TCP_SESSION_MANAGER: (IrqSaveSpinLockFlag, LinkedList<TcpSessionInfo>) =
     (IrqSaveSpinLockFlag::new(), LinkedList::new());
 
-fn send_ack_syn_ipv4(
+fn reply_ack_ipv4(
     acknowledgement_number: u32,
     sequence_number: u32,
-    destination_port: u16,
-    sender_port: u16,
     window_size: u16,
-    packet_info: ipv4::Ipv4PacketInfo,
-    frame_info: EthernetFrameInfo,
+    segment_info: &TcpSegmentInfo,
+    is_syn_active: bool,
 ) -> Result<(), ()> {
     const HEADER_SIZE: usize = core::mem::size_of::<DefaultTcpSegment>();
     let mut header = [0u8; HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE];
@@ -353,15 +362,17 @@ fn send_ack_syn_ipv4(
 
     tcp_segment.set_header_length(HEADER_SIZE as u8);
     tcp_segment.set_ack_active();
-    tcp_segment.set_syn_active();
-    tcp_segment.set_destination_port(destination_port);
-    tcp_segment.set_sender_port(sender_port);
+    if is_syn_active {
+        tcp_segment.set_syn_active();
+    }
+    tcp_segment.set_destination_port(segment_info.get_their_port());
+    tcp_segment.set_sender_port(segment_info.get_our_port());
     tcp_segment.set_acknowledgement_number(acknowledgement_number);
     tcp_segment.set_sequence_number(sequence_number);
     tcp_segment.set_window_size(window_size);
     tcp_segment.set_checksum_ipv4(
-        packet_info.get_destination_address(),
-        packet_info.get_sender_address(),
+        segment_info.get_packet_info().get_our_address(),
+        segment_info.get_packet_info().get_their_address(),
         HEADER_SIZE as u16,
         &[],
     );
@@ -372,64 +383,19 @@ fn send_ack_syn_ipv4(
         0,
         ipv4::get_default_ttl(),
         IPV4_PROTOCOL_TCP,
-        packet_info.get_destination_address(),
-        packet_info.get_sender_address(),
+        segment_info.get_packet_info().get_our_address(),
+        segment_info.get_packet_info().get_their_address(),
     )?;
     get_kernel_manager_cluster()
         .network_manager
-        .reply_data_frame(frame_info, &header)
-}
-
-fn send_ack_ipv4(
-    acknowledgement_number: u32,
-    sequence_number: u32,
-    destination_port: u16,
-    sender_port: u16,
-    window_size: u16,
-    packet_info: ipv4::Ipv4PacketInfo,
-    frame_info: EthernetFrameInfo,
-) -> Result<(), ()> {
-    const HEADER_SIZE: usize = core::mem::size_of::<DefaultTcpSegment>();
-    let mut header = [0u8; HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE];
-    let (ipv4_header, tcp_header) = header.split_at_mut(ipv4::IPV4_DEFAULT_HEADER_SIZE);
-    let tcp_segment = DefaultTcpSegment::from_buffer(tcp_header);
-
-    tcp_segment.set_header_length(HEADER_SIZE as u8);
-    tcp_segment.set_ack_active();
-    tcp_segment.set_destination_port(destination_port);
-    tcp_segment.set_sender_port(sender_port);
-    tcp_segment.set_acknowledgement_number(acknowledgement_number);
-    tcp_segment.set_sequence_number(sequence_number);
-    tcp_segment.set_window_size(window_size);
-    tcp_segment.set_checksum_ipv4(
-        packet_info.get_destination_address(),
-        packet_info.get_sender_address(),
-        HEADER_SIZE as u16,
-        &[],
-    );
-
-    ipv4::create_default_ipv4_header(
-        ipv4_header,
-        HEADER_SIZE as usize,
-        0,
-        ipv4::get_default_ttl(),
-        IPV4_PROTOCOL_TCP,
-        packet_info.get_destination_address(),
-        packet_info.get_sender_address(),
-    )?;
-    get_kernel_manager_cluster()
-        .network_manager
-        .reply_data_frame(frame_info, &header)
+        .reply_data_frame(segment_info.frame_info.clone(), &header)
 }
 
 fn send_fin_ipv4(
     acknowledgement_number: u32,
     sequence_number: u32,
-    destination_port: u16,
-    sender_port: u16,
     window_size: u16,
-    packet_info: ipv4::Ipv4PacketInfo,
-    frame_info: EthernetFrameInfo,
+    segment_info: &TcpSegmentInfo,
 ) -> Result<(), ()> {
     const HEADER_SIZE: usize = core::mem::size_of::<DefaultTcpSegment>();
     let mut header = [0u8; HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE];
@@ -439,14 +405,14 @@ fn send_fin_ipv4(
     tcp_segment.set_header_length(HEADER_SIZE as u8);
     tcp_segment.set_fin_active();
     tcp_segment.set_ack_active();
-    tcp_segment.set_destination_port(destination_port);
-    tcp_segment.set_sender_port(sender_port);
+    tcp_segment.set_destination_port(segment_info.get_their_port());
+    tcp_segment.set_sender_port(segment_info.get_our_port());
     tcp_segment.set_acknowledgement_number(acknowledgement_number);
     tcp_segment.set_sequence_number(sequence_number);
     tcp_segment.set_window_size(window_size);
     tcp_segment.set_checksum_ipv4(
-        packet_info.get_destination_address(),
-        packet_info.get_sender_address(),
+        segment_info.get_packet_info().get_our_address(),
+        segment_info.get_packet_info().get_their_address(),
         HEADER_SIZE as u16,
         &[],
     );
@@ -457,12 +423,12 @@ fn send_fin_ipv4(
         0,
         ipv4::get_default_ttl(),
         IPV4_PROTOCOL_TCP,
-        packet_info.get_destination_address(),
-        packet_info.get_sender_address(),
+        segment_info.get_packet_info().get_our_address(),
+        segment_info.get_packet_info().get_their_address(),
     )?;
     get_kernel_manager_cluster()
         .network_manager
-        .reply_data_frame(frame_info, &header)
+        .reply_data_frame(segment_info.frame_info.clone(), &header)
 }
 
 fn send_data_ipv4(
@@ -486,14 +452,14 @@ fn send_data_ipv4(
     tcp_segment.set_header_length(HEADER_SIZE as u8);
     tcp_segment.set_psh_active();
     tcp_segment.set_ack_active();
-    tcp_segment.set_destination_port(segment_info.get_sender_port());
-    tcp_segment.set_sender_port(segment_info.get_destination_port());
+    tcp_segment.set_destination_port(segment_info.get_their_port());
+    tcp_segment.set_sender_port(segment_info.get_our_port());
     tcp_segment.set_acknowledgement_number(acknowledgement_number);
     tcp_segment.set_sequence_number(sequence_number);
     tcp_segment.set_window_size(window_size);
     tcp_segment.set_checksum_ipv4(
-        segment_info.packet_info.get_destination_address(),
-        segment_info.packet_info.get_sender_address(),
+        segment_info.packet_info.get_our_address(),
+        segment_info.packet_info.get_their_address(),
         HEADER_SIZE as u16,
         unsafe {
             core::slice::from_raw_parts(data_address.to_usize() as *const u8, data_size.to_usize())
@@ -506,8 +472,8 @@ fn send_data_ipv4(
         0,
         ipv4::get_default_ttl(),
         IPV4_PROTOCOL_TCP,
-        segment_info.packet_info.get_destination_address(),
-        segment_info.packet_info.get_sender_address(),
+        segment_info.packet_info.get_our_address(),
+        segment_info.packet_info.get_their_address(),
     )?;
     temporary_buffer[0..header.len()].copy_from_slice(&header);
     unsafe {
@@ -687,17 +653,15 @@ fn receive_packet_handler(
     e.last_acknowledge_number = tcp_segment_header.get_acknowledgement_number();
     drop(_lock);
     /* Send ACK */
-    if let Err(e) = send_ack_ipv4(
+    if let Err(e) = reply_ack_ipv4(
         tcp_segment_header
             .get_sequence_number()
             .overflowing_add(data_size as u32)
             .0,
         tcp_segment_header.get_acknowledgement_number(),
-        tcp_segment_header.get_sender_port(),
-        tcp_segment_header.get_destination_port(),
         tcp_segment_header.get_window_size(),
-        ipv4_packet_info,
-        frame_info,
+        &e.segment_info,
+        false,
     ) {
         pr_err!("Failed to send ACK:{:?}", e);
     }
@@ -775,16 +739,14 @@ pub fn tcp_ipv4_packet_handler(
                         e.status = TcpSessionStatus::HalfClose;
                     }
                 }
-                if let Err(err) = send_ack_ipv4(
+                if let Err(err) = reply_ack_ipv4(
                     tcp_segment.get_sequence_number() + 1,
                     tcp_segment.get_acknowledgement_number(),
-                    e.segment_info.get_sender_port(),
-                    e.segment_info.get_destination_port(),
                     e.window_size,
-                    ipv4_packet_info.clone(),
-                    frame_info.clone(),
+                    &e.segment_info,
+                    false,
                 ) {
-                    pr_err!("Failed to send FIN: {:?}", err);
+                    pr_err!("Failed to send ACK: {:?}", err);
                     return;
                 }
                 e.last_acknowledge_number = tcp_segment.get_sequence_number();
@@ -829,7 +791,7 @@ pub fn tcp_ipv4_packet_handler(
                             let sequence_number = 1; /* TODO: randomise */
                             let session_entry = TcpSessionInfo {
                                 lock: SpinLockFlag::new(),
-                                segment_info,
+                                segment_info: segment_info.clone(),
                                 window_size: tcp_segment.get_window_size(),
                                 buffer_list: LinkedList::new(),
                                 next_sequence_number: sequence_number + 1,
@@ -840,14 +802,12 @@ pub fn tcp_ipv4_packet_handler(
                             let _session_lock = unsafe { TCP_SESSION_MANAGER.0.lock() };
                             unsafe { TCP_SESSION_MANAGER.1.push_front(session_entry) };
                             drop(_session_lock);
-                            if let Err(err) = send_ack_syn_ipv4(
+                            if let Err(err) = reply_ack_ipv4(
                                 tcp_segment.get_sequence_number() + 1,
                                 sequence_number,
-                                tcp_segment.get_sender_port(),
-                                tcp_segment.get_destination_port(),
                                 tcp_segment.get_window_size(),
-                                ipv4_packet_info.clone(),
-                                frame_info,
+                                &segment_info,
+                                true,
                             ) {
                                 pr_err!("Failed to send SYN-ACK: {:?}", err);
                             }
@@ -950,11 +910,8 @@ pub fn close_session(segment_info: &mut TcpSegmentInfo) {
                     if let Err(err) = send_fin_ipv4(
                         e.next_sequence_number,
                         e.last_acknowledge_number,
-                        e.segment_info.get_sender_port(),
-                        e.segment_info.get_destination_port(),
                         e.window_size,
-                        segment_info.packet_info.clone(),
-                        segment_info.frame_info.clone(),
+                        &e.segment_info,
                     ) {
                         pr_err!("Failed to send FIN: {:?}", err);
                         return;

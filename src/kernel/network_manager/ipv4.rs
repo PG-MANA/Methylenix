@@ -30,6 +30,9 @@ struct DefaultIpv4Packet {
     destination_ip_address: u32,
 }
 
+/// PacketInfo is **the arrived segment information**.
+/// the **sender** means **opposite**, and the **destination** means **our side**.
+/// Be careful when reply data.
 #[derive(Clone)]
 pub struct Ipv4PacketInfo {
     sender_ipv4_address: u32,
@@ -43,6 +46,14 @@ impl Ipv4PacketInfo {
 
     pub fn get_destination_address(&self) -> u32 {
         self.destination_ipv4_address
+    }
+
+    pub fn get_their_address(&self) -> u32 {
+        self.get_sender_address()
+    }
+
+    pub fn get_our_address(&self) -> u32 {
+        self.get_destination_address()
     }
 }
 

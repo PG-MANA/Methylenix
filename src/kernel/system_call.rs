@@ -305,12 +305,12 @@ pub fn system_call_handler(context: &mut ContextData) {
                 return;
             }
             //let sock_addr_address = context.get_system_call_arguments(2).unwrap();
-            let sock_addr_size = context.get_system_call_arguments(3).unwrap();
-            if sock_addr_size as usize != core::mem::size_of::<network::SockAddr>() {
+            //let sock_addr_size_address = context.get_system_call_arguments(3).unwrap();
+            /*if sock_addr_size as usize != core::mem::size_of::<network::SockAddr>() {
                 pr_debug!("Unsupported the size of SockAddr: {sock_addr_size}");
                 context.set_system_call_return_value(u64::MAX);
                 return;
-            }
+            }*/
             let file = file.unwrap();
             let result = network::accept(&mut file.lock().unwrap());
             if let Err(err) = result {
@@ -357,6 +357,8 @@ pub fn system_call_handler(context: &mut ContextData) {
                     return;
                 }
             };
+            //let sock_addr_address = context.get_system_call_arguments(5).unwrap();
+            //let sock_addr_size_address = context.get_system_call_arguments(6).unwrap();
 
             match network::recv_from(
                 &mut file.lock().unwrap(),
@@ -403,6 +405,8 @@ pub fn system_call_handler(context: &mut ContextData) {
                     return;
                 }
             };
+            //let sock_addr_address = context.get_system_call_arguments(5).unwrap();
+            //let sock_addr_size = context.get_system_call_arguments(6).unwrap();
 
             match network::send_to(
                 &mut file.lock().unwrap(),
