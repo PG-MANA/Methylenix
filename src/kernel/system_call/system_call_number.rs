@@ -16,3 +16,10 @@ pub const SYSCALL_SET_TID_ADDRESS: SysCallNumber = 0xDA;
 pub const SYSCALL_BRK: SysCallNumber = 0x0C;
 pub const SYSCALL_MMAP: SysCallNumber = 0x09;
 pub const SYSCALL_MUNMAP: SysCallNumber = 0x0B;
+
+pub const SYSCALL_SOCKET: SysCallNumber = 0x29;
+pub const SYSCALL_ACCEPT: SysCallNumber = 0x2B;
+pub const SYSCALL_SENDTO: SysCallNumber = 0x2C;
+pub const SYSCALL_RECVFROM: SysCallNumber = 0x2D;
+pub const SYSCALL_BIND: SysCallNumber = 0x31;
+pub const SYSCALL_LISTEN: SysCallNumber = 0x32;

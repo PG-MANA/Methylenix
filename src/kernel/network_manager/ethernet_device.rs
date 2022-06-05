@@ -85,11 +85,17 @@ pub struct RxEntry {
     device_id: usize,
 }
 
-#[allow(dead_code)]
+#[derive(Clone)]
 pub struct EthernetFrameInfo {
     device_id: usize,
     sender_mac_address: [u8; 6],
     frame_type: u16,
+}
+
+impl EthernetFrameInfo {
+    pub fn get_device_id(&self) -> usize {
+        self.device_id
+    }
 }
 
 impl EthernetDeviceManager {

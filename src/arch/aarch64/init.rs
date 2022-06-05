@@ -44,7 +44,6 @@ use crate::kernel::memory_manager::{
     virtual_memory_manager::VirtualMemoryManager,
     MemoryManager,
 };
-use crate::kernel::network_manager::ethernet_device::EthernetDeviceManager;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::task_manager::{run_queue::RunQueue, TaskManager};
 use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager};
@@ -681,14 +680,11 @@ pub fn init_block_devices_and_file_system_early() {
     ));
 }
 
-/// Initialize Ethernet Manager and
+/// Initialize Network Manager
 ///
 /// This function must be called before calling device scan functions.
-pub fn init_ethernet_manager_early() {
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().ethernet_device_manager,
-        EthernetDeviceManager::new(),
-    ));
+pub fn init_network_manager_early() {
+    get_kernel_manager_cluster().network_manager.init();
 }
 
 /// Search partitions and try to mount them

@@ -17,6 +17,7 @@
 #![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
+#![feature(ptr_metadata)]
 #![feature(raw_ref_op)]
 #![feature(step_trait)]
 #![feature(try_blocks)]

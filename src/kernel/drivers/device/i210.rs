@@ -337,8 +337,8 @@ impl PciDeviceDriver for I210Manager {
 
         let descriptor = EthernetDeviceDescriptor::new(mac_address, manager);
         manager.device_id = get_kernel_manager_cluster()
-            .ethernet_device_manager
-            .add_device(descriptor);
+            .network_manager
+            .add_ethernet_device(descriptor);
 
         if let Ok(interrupt_id) = setup_msi_or_msi_x(pci_dev, i210_handler, None, false) {
             unsafe { I210_LIST.push_back((interrupt_id, manager as *mut _)) };
@@ -573,8 +573,8 @@ impl I210Manager {
                         };
                         /* Throw ethernet manager */
                         get_kernel_manager_cluster()
-                            .ethernet_device_manager
-                            .received_data_handler(
+                            .network_manager
+                            .received_ethernet_frame_handler(
                                 self.device_id,
                                 buffer,
                                 MSize::new(length as usize),
@@ -607,8 +607,8 @@ impl I210Manager {
                     pr_err!("Failed to transmit frame: id:{id}");
                 }
                 get_kernel_manager_cluster()
-                    .ethernet_device_manager
-                    .update_transmit_status(self.device_id, id, done != 0);
+                    .network_manager
+                    .update_ethernet_transmit_status(self.device_id, id, done != 0);
                 transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] = 0;
                 self.transfer_head += 1;
                 if self.transfer_head == Self::NUM_OF_TX_DESC as u32 {

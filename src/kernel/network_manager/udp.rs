@@ -78,7 +78,7 @@ impl UdpPacket {
 pub struct UdpPortListenEntry {
     //    pub thread: &'static mut ThreadEntry,
     list: PtrLinkedListNode<Self>,
-    pub entry: fn(&Self),
+    pub entry: fn(&Self, packet_info: &ipv4::Ipv4PacketInfo, frame_info: &EthernetFrameInfo),
     pub from_ipv4_address: u32,
     pub to_ipv4_address: u32,
     pub port: u16,
@@ -88,7 +88,12 @@ pub struct UdpPortListenEntry {
 }
 
 impl UdpPortListenEntry {
-    pub fn new(entry: fn(&Self), from_ipv4_address: u32, to_ipv4_address: u32, port: u16) -> Self {
+    pub fn new(
+        entry: fn(&Self, packet_info: &ipv4::Ipv4PacketInfo, frame_info: &EthernetFrameInfo),
+        from_ipv4_address: u32,
+        to_ipv4_address: u32,
+        port: u16,
+    ) -> Self {
         Self {
             list: PtrLinkedListNode::new(),
             entry,
@@ -156,7 +161,7 @@ pub fn udp_ipv4_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     packet_offset: usize,
-    _frame_info: EthernetFrameInfo,
+    frame_info: EthernetFrameInfo,
     ipv4_packet_info: ipv4::Ipv4PacketInfo,
 ) {
     let udp_base = allocated_data_base.to_usize() + packet_offset;
@@ -219,7 +224,7 @@ pub fn udp_ipv4_packet_handler(
                 offset: MSize::new(UDP_HEADER_SIZE + packet_offset),
             };
             drop(_lock);
-            (e.entry)(&e);
+            (e.entry)(&e, &ipv4_packet_info, &frame_info);
             return;
         }
     }

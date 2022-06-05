@@ -168,7 +168,7 @@ fn main_process() -> ! {
     draw_boot_logo();
 
     init_block_devices_and_file_system_early();
-    init_ethernet_manager_early();
+    init_network_manager_early();
 
     if init_pci_early() {
         if !init_acpi_later() {
@@ -184,6 +184,8 @@ fn main_process() -> ! {
 
     init_block_devices_and_file_system_later();
 
+    crate::kernel::network_manager::dhcp::get_ipv4_address(0);
+
     /* Test */
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
         ("OSTYPE", crate::OS_NAME),
@@ -197,7 +199,6 @@ fn main_process() -> ! {
         ELF_MACHINE_AMD64,
     );
 
-    crate::kernel::network_manager::dhcp::get_ipv4_address(0);
     idle()
 }
 

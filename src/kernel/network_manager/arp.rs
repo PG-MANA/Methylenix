@@ -51,8 +51,8 @@ pub fn send_ethernet_ipv4_arp_packet(
     target_ipv4_address: u32,
 ) -> Result<(), ()> {
     let mac_address = match get_kernel_manager_cluster()
-        .ethernet_device_manager
-        .get_mac_address(device_id)
+        .network_manager
+        .get_ethernet_mac_address(device_id)
     {
         Ok(a) => a,
         Err(_) => {
@@ -62,8 +62,8 @@ pub fn send_ethernet_ipv4_arp_packet(
     };
 
     get_kernel_manager_cluster()
-        .ethernet_device_manager
-        .send_data(
+        .network_manager
+        .send_data_frame(
             device_id,
             create_ethernet_ipv4_arp_packet(mac_address, sender_ipv4_address, target_ipv4_address)
                 .as_slice(),

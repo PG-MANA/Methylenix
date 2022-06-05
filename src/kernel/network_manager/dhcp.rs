@@ -2,7 +2,7 @@
 //! DHCP
 //!
 
-use super::{ipv4, udp, AddressPrinter};
+use super::{ethernet_device::EthernetFrameInfo, ipv4, udp, AddressPrinter};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize};
@@ -66,8 +66,8 @@ fn read_bytes_from_slice<const LEN: usize>(buffer: &[u8], offset: usize) -> &[u8
 
 pub fn send_dhcp_discover_packet(device_id: usize) {
     let mac_address = match get_kernel_manager_cluster()
-        .ethernet_device_manager
-        .get_mac_address(device_id)
+        .network_manager
+        .get_ethernet_mac_address(device_id)
     {
         Ok(a) => a,
         Err(_) => {
@@ -156,8 +156,8 @@ pub fn send_dhcp_discover_packet(device_id: usize) {
     buffer[0..DHCP_PAYLOAD_BASE].copy_from_slice(&udp_ipv4_header);
 
     let _ = get_kernel_manager_cluster()
-        .ethernet_device_manager
-        .send_data(
+        .network_manager
+        .send_data_frame(
             device_id,
             &buffer,
             DHCP_DESTINATION_MAC_ADDRESS,
@@ -165,10 +165,14 @@ pub fn send_dhcp_discover_packet(device_id: usize) {
         );
 }
 
-pub fn send_dhcp_request_packet(device_id: usize, transaction_id: u32, offered_address: u32) {
+pub fn send_dhcp_request_packet(
+    frame_info: &EthernetFrameInfo,
+    transaction_id: u32,
+    offered_address: u32,
+) {
     let mac_address = match get_kernel_manager_cluster()
-        .ethernet_device_manager
-        .get_mac_address(device_id)
+        .network_manager
+        .get_ethernet_mac_address(frame_info.get_device_id())
     {
         Ok(a) => a,
         Err(_) => {
@@ -282,9 +286,9 @@ pub fn send_dhcp_request_packet(device_id: usize, transaction_id: u32, offered_a
     buffer[0..DHCP_PAYLOAD_BASE].copy_from_slice(&udp_ipv4_header);
 
     let _ = get_kernel_manager_cluster()
-        .ethernet_device_manager
-        .send_data(
-            device_id,
+        .network_manager
+        .send_data_frame(
+            frame_info.get_device_id(),
             &buffer,
             DHCP_DESTINATION_MAC_ADDRESS,
             ipv4::ETHERNET_TYPE_IPV4,
@@ -303,12 +307,14 @@ pub fn get_ipv4_address(device_id: usize) {
         pr_err!("Failed to add listener");
         return;
     }
-    unsafe { DEVICE_ID = device_id };
     send_dhcp_discover_packet(device_id);
 }
 
-static mut DEVICE_ID: usize = 0;
-fn packet_handler(entry: &udp::UdpPortListenEntry) {
+fn packet_handler(
+    entry: &udp::UdpPortListenEntry,
+    _packet_info: &ipv4::Ipv4PacketInfo,
+    frame_info: &EthernetFrameInfo,
+) {
     if entry.data_length < entry.offset + MSize::new(DHCP_MAGIC_OFFSET + DHCP_MAGIC.len()) {
         pr_err!("Invalid packet size");
         let _ = kfree!(entry.allocated_data_address, entry.data_length);
@@ -346,7 +352,7 @@ fn packet_handler(entry: &udp::UdpPortListenEntry) {
                     is_hex: false
                 },
             );
-            send_dhcp_request_packet(unsafe { DEVICE_ID }, transaction_id, offered_address);
+            send_dhcp_request_packet(frame_info, transaction_id, offered_address);
         }
         &DHCP_MESSAGE_TYPE_PACK => {
             pr_debug!(
@@ -357,7 +363,7 @@ fn packet_handler(entry: &udp::UdpPortListenEntry) {
                     is_hex: false
                 },
             );
-            ipv4::set_default_ipv4_address(unsafe { DEVICE_ID }, offered_address);
+            ipv4::set_default_ipv4_address(frame_info.get_device_id(), offered_address);
         }
         &DHCP_MESSAGE_TYPE_PNACK => {
             pr_debug!(
@@ -368,7 +374,7 @@ fn packet_handler(entry: &udp::UdpPortListenEntry) {
                     is_hex: false
                 },
             );
-            send_dhcp_discover_packet(unsafe { DEVICE_ID });
+            send_dhcp_discover_packet(frame_info.get_device_id());
         }
         _ => {
             pr_err!("Unknown packet type: {:#X?}", packet_type);

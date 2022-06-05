@@ -92,6 +92,7 @@ impl FileDescriptor {
     pub fn add_position(&mut self, position: usize) {
         self.position += position;
     }
+
     pub fn set_position(&mut self, position: usize) {
         self.position = position;
     }
@@ -113,22 +114,40 @@ impl<'a> File<'a> {
         }
     }
 
-    pub fn is_invalid(&self) -> bool {
+    pub const fn is_invalid(&self) -> bool {
         self.descriptor.permission == 0
             && self.descriptor.data == 0
             && self.descriptor.device_index == 0
             && self.descriptor.position == 0
     }
 
+    pub const fn is_readable(&self) -> bool {
+        (self.descriptor.permission & FILE_PERMISSION_READ) != 0
+    }
+
+    pub const fn is_writable(&self) -> bool {
+        (self.descriptor.permission & FILE_PERMISSION_WRITE) != 0
+    }
+
+    pub const fn get_descriptor(&self) -> &FileDescriptor {
+        &self.descriptor
+    }
+
+    pub fn get_driver_address(&self) -> usize {
+        (self.driver as *const dyn FileOperationDriver)
+            .to_raw_parts()
+            .0 as usize
+    }
+
     pub fn read(&mut self, buffer: VAddress, length: usize) -> Result<usize, ()> {
-        if (self.descriptor.permission & FILE_PERMISSION_READ) == 0 {
+        if !self.is_readable() {
             return Err(());
         }
         self.driver.read(&mut self.descriptor, buffer, length)
     }
 
     pub fn write(&mut self, buffer: VAddress, length: usize) -> Result<usize, ()> {
-        if (self.descriptor.permission & FILE_PERMISSION_WRITE) == 0 {
+        if !self.is_writable() {
             return Err(());
         }
         self.driver.write(&mut self.descriptor, buffer, length)

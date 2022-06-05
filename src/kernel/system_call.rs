@@ -2,6 +2,7 @@
 //! System Call Handler
 //!
 
+mod network;
 mod system_call_number;
 
 use system_call_number::*;
@@ -133,12 +134,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                         .file_open(PathInfo::new(s), FILE_PERMISSION_READ)
                     {
                         pr_debug!("File is found.");
-                        let flag = InterruptManager::save_and_disable_local_irq();
-                        let process = get_cpu_manager_cluster()
-                            .run_queue
-                            .get_running_thread()
-                            .get_process_mut();
-                        InterruptManager::restore_local_irq(flag);
+                        let process = get_cpu_manager_cluster().run_queue.get_running_process();
                         let fd = process.add_file(f);
                         context.set_system_call_return_value(fd as u64);
                     } else {
@@ -233,6 +229,197 @@ pub fn system_call_handler(context: &mut ContextData) {
                 0
             });
         }
+        SYSCALL_SOCKET => {
+            let domain_number = context.get_system_call_arguments(1).unwrap();
+            let socket_type_number = context.get_system_call_arguments(2).unwrap();
+            let protocol_number = context.get_system_call_arguments(3).unwrap();
+            let socket = network::create_socket(domain_number, socket_type_number, protocol_number);
+            if let Err(err) = socket {
+                pr_err!("Failed to create socket: {:?}", err);
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let fd = process.add_file(socket.unwrap());
+            context.set_system_call_return_value(fd as u64);
+        }
+        SYSCALL_BIND => {
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
+                pr_debug!(
+                    "Unknown file descriptor: {}",
+                    context.get_system_call_arguments(1).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let file = file.unwrap();
+            let sock_addr_address = context.get_system_call_arguments(2).unwrap();
+            let sock_addr_size = context.get_system_call_arguments(3).unwrap();
+            if sock_addr_size as usize != core::mem::size_of::<network::SockAddr>() {
+                pr_debug!("Unsupported the size of SockAddr: {sock_addr_size}");
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            if let Err(err) = network::bind_socket(&mut file.lock().unwrap(), unsafe {
+                &*(sock_addr_address as usize as *const network::SockAddr)
+            }) {
+                pr_err!("Failed to bind socket: {:?}", err);
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            context.set_system_call_return_value(0);
+        }
+        SYSCALL_LISTEN => {
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
+                pr_debug!(
+                    "Unknown file descriptor: {}",
+                    context.get_system_call_arguments(1).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let file = file.unwrap();
+            let max_connection = context.get_system_call_arguments(2).unwrap();
+            if let Err(err) =
+                network::listen_socket(&mut file.lock().unwrap(), max_connection as usize)
+            {
+                pr_err!("Failed to listen socket: {:?}", err);
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            context.set_system_call_return_value(0);
+        }
+        SYSCALL_ACCEPT => {
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
+                pr_debug!(
+                    "Unknown file descriptor: {}",
+                    context.get_system_call_arguments(1).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            //let sock_addr_address = context.get_system_call_arguments(2).unwrap();
+            let sock_addr_size = context.get_system_call_arguments(3).unwrap();
+            if sock_addr_size as usize != core::mem::size_of::<network::SockAddr>() {
+                pr_debug!("Unsupported the size of SockAddr: {sock_addr_size}");
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let file = file.unwrap();
+            let result = network::accept(&mut file.lock().unwrap());
+            if let Err(err) = result {
+                pr_debug!("Failed to accept connection: {:?}", err);
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let (file, sock_addr) = result.unwrap();
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let fd = process.add_file(file);
+            /*let _ = write_data_into_user(
+                VAddress::new(sock_addr_address as usize),
+                MSize::new(sock_addr_size as usize),
+                VAddress::new(&sock_addr as *const _ as usize),
+            );*/
+            context.set_system_call_return_value(fd as u64);
+        }
+        SYSCALL_RECVFROM => {
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
+                pr_debug!(
+                    "Unknown file descriptor: {}",
+                    context.get_system_call_arguments(1).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let file = file.unwrap();
+            let buffer_size = MSize::new(context.get_system_call_arguments(3).unwrap() as usize);
+            let buffer_address = match check_user_address(
+                context.get_system_call_arguments(2).unwrap() as usize,
+                buffer_size,
+                false,
+                true,
+            ) {
+                Ok(a) => a,
+                Err(_) => {
+                    pr_err!(
+                        "Invalid user address: {:#X}",
+                        context.get_system_call_arguments(2).unwrap()
+                    );
+                    context.set_system_call_return_value(u64::MAX);
+                    return;
+                }
+            };
+
+            match network::recv_from(
+                &mut file.lock().unwrap(),
+                buffer_address,
+                buffer_size,
+                context.get_system_call_arguments(4).unwrap() as usize,
+                None,
+            ) {
+                Ok(a) => {
+                    context.set_system_call_return_value(a.to_usize() as u64);
+                }
+                Err(err) => {
+                    pr_err!("Failed to receive data: {:?}", err);
+                    context.set_system_call_return_value(u64::MAX);
+                }
+            }
+        }
+        SYSCALL_SENDTO => {
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
+                pr_debug!(
+                    "Unknown file descriptor: {}",
+                    context.get_system_call_arguments(1).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+            let file = file.unwrap();
+            let buffer_size = MSize::new(context.get_system_call_arguments(3).unwrap() as usize);
+            let buffer_address = match check_user_address(
+                context.get_system_call_arguments(2).unwrap() as usize,
+                buffer_size,
+                true,
+                false,
+            ) {
+                Ok(a) => a,
+                Err(_) => {
+                    pr_err!(
+                        "Invalid user address: {:#X}",
+                        context.get_system_call_arguments(2).unwrap()
+                    );
+                    context.set_system_call_return_value(u64::MAX);
+                    return;
+                }
+            };
+
+            match network::send_to(
+                &mut file.lock().unwrap(),
+                buffer_address,
+                buffer_size,
+                context.get_system_call_arguments(4).unwrap() as usize,
+                None,
+            ) {
+                Ok(a) => {
+                    context.set_system_call_return_value(a.to_usize() as u64);
+                }
+                Err(err) => {
+                    pr_err!("Failed to send data: {:?}", err);
+                    context.set_system_call_return_value(u64::MAX);
+                }
+            }
+        }
         s => {
             pr_err!("SysCall: Unknown({:#X})", s);
             context.set_system_call_return_value(u64::MAX);
@@ -307,4 +494,21 @@ fn system_call_memory_map(
         return Err(());
     }
     return Ok(result.unwrap().to_usize());
+}
+
+fn check_user_address(
+    user_address: usize,
+    _size: MSize,
+    _read: bool,
+    _write: bool,
+) -> Result<VAddress, ()> {
+    Ok(VAddress::new(user_address))
+}
+
+fn read_data_from_user(user_address: VAddress, size: MSize, buffer: VAddress) -> Result<(), ()> {
+    unimplemented!()
+}
+
+fn write_data_into_user(user_address: VAddress, size: MSize, buffer: VAddress) -> Result<(), ()> {
+    unimplemented!()
 }

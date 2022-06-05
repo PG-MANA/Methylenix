@@ -12,6 +12,7 @@ pub mod collections {
     pub mod guid;
     #[macro_use]
     pub mod ptr_linked_list;
+    pub mod ring_buffer;
 }
 pub mod application_loader;
 pub mod block_device;
