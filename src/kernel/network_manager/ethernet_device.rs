@@ -254,6 +254,7 @@ impl EthernetDeviceManager {
                             pr_err!("Failed to wake up the thread: {:?}", error);
                         }
                     } else {
+                        pr_debug!("Free the buffer");
                         if s.number_of_memory_buffer > (s.memory_buffer.len() - 1) {
                             let _ = free_pages!(e.buffer.0);
                         } else {
@@ -275,6 +276,7 @@ impl EthernetDeviceManager {
         allocated_data: VAddress,
         length: MSize,
     ) {
+        pr_debug!("Received a frame");
         let rx_entry = match kmalloc!(
             RxEntry,
             RxEntry {
