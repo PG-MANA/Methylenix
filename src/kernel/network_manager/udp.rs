@@ -84,7 +84,8 @@ pub struct UdpPortListenEntry {
     pub port: u16,
     pub allocated_data_address: VAddress,
     pub data_length: MSize,
-    pub offset: MSize,
+    pub payload_size: MSize,
+    pub payload_offset: MSize,
 }
 
 impl UdpPortListenEntry {
@@ -102,7 +103,8 @@ impl UdpPortListenEntry {
             port,
             allocated_data_address: VAddress::new(0),
             data_length: MSize::new(0),
-            offset: MSize::new(0),
+            payload_size: MSize::new(0),
+            payload_offset: MSize::new(0),
         }
     }
 }
@@ -161,6 +163,7 @@ pub fn udp_ipv4_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     packet_offset: usize,
+    packet_size: usize,
     frame_info: EthernetFrameInfo,
     ipv4_packet_info: ipv4::Ipv4PacketInfo,
 ) {
@@ -180,7 +183,15 @@ pub fn udp_ipv4_packet_handler(
         let _ = kfree!(allocated_data_base, data_length);
         return;
     }
-
+    if packet_size != udp_packet.get_packet_length() as usize {
+        pr_err!(
+            "Invalid UDP packet size: Expected {} bytes, found: {} bytes",
+            packet_size,
+            udp_packet.get_packet_length()
+        );
+        let _ = kfree!(allocated_data_base, data_length);
+        return;
+    }
     let sender_port = udp_packet.get_sender_port();
     let destination_port = udp_packet.get_destination_port();
 
@@ -221,7 +232,8 @@ pub fn udp_ipv4_packet_handler(
                 port: e.port,
                 allocated_data_address: allocated_data_base,
                 data_length,
-                offset: MSize::new(UDP_HEADER_SIZE + packet_offset),
+                payload_size: MSize::new(udp_packet.get_packet_length() as usize - UDP_HEADER_SIZE),
+                payload_offset: MSize::new(UDP_HEADER_SIZE + packet_offset),
             };
             drop(_lock);
             (e.entry)(&e, &ipv4_packet_info, &frame_info);

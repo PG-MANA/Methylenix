@@ -20,6 +20,7 @@ struct SessionBuffer {
     allocated_data_base: VAddress,
     data_length: MSize,
     payload_offset: usize,
+    payload_size: usize,
     sequence_number: u32,
 }
 
@@ -615,14 +616,14 @@ pub fn unbind_port(port: u16, acceptable_address: AddressInfo) -> Result<(), ()>
 fn receive_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
-    packet_offset: usize,
+    payload_offset: usize,
+    payload_size: usize,
     frame_info: EthernetFrameInfo,
     ipv4_packet_info: ipv4::Ipv4PacketInfo,
     tcp_segment_header: &DefaultTcpSegment,
     e: &mut TcpSessionInfo,
 ) {
-    let data_size = data_length.to_usize() - packet_offset - tcp_segment_header.get_header_length();
-    if data_size > u16::MAX as usize {
+    if payload_size > u16::MAX as usize {
         pr_err!("Invalid packet size");
         let _ = kfree!(allocated_data_base, data_length);
         return;
@@ -637,9 +638,8 @@ fn receive_packet_handler(
         };
         /* Arrived next data */
         if let Err(err) = (e.handler)(
-            allocated_data_base
-                + MSize::new(packet_offset + tcp_segment_header.get_header_length()),
-            MSize::new(data_size),
+            allocated_data_base + MSize::new(payload_offset),
+            MSize::new(payload_size),
             segment_info.clone(),
         ) {
             pr_err!("Failed to notify data: {:?}", err);
@@ -650,20 +650,18 @@ fn receive_packet_handler(
             /* The packets are not arrived sequentially */
             let mut next_sequence_number = tcp_segment_header
                 .get_sequence_number()
-                .overflowing_add(data_size as u32)
+                .overflowing_add(payload_size as u32)
                 .0;
             'outer_loop: loop {
                 let mut cursor = e.buffer_list.cursor_front_mut();
                 while let Some(buffer_entry) = cursor.current() {
                     if buffer_entry.sequence_number == next_sequence_number {
-                        let buffer_data_size =
-                            buffer_entry.data_length.to_usize() - buffer_entry.payload_offset;
                         next_sequence_number =
-                            next_sequence_number.overflowing_add(data_size as u32).0;
+                            next_sequence_number.overflowing_add(payload_size as u32).0;
                         if let Err(err) = (e.handler)(
                             buffer_entry.allocated_data_base
                                 + MSize::new(buffer_entry.payload_offset),
-                            MSize::new(buffer_data_size),
+                            MSize::new(buffer_entry.payload_size),
                             segment_info.clone(),
                         ) {
                             pr_err!("Failed to notify data: {:?}", err);
@@ -679,20 +677,21 @@ fn receive_packet_handler(
         }
         e.expected_arrive_sequence_number = tcp_segment_header
             .get_sequence_number()
-            .overflowing_add(data_size as u32)
+            .overflowing_add(payload_size as u32)
             .0;
     } else {
         /* Arrived the data after of the next data */
         e.buffer_list.push_back(SessionBuffer {
             allocated_data_base,
             data_length,
-            payload_offset: packet_offset + tcp_segment_header.get_header_length(),
+            payload_offset,
+            payload_size,
             sequence_number: tcp_segment_header.get_sequence_number(),
         });
     }
     e.last_sent_acknowledge_number = tcp_segment_header
         .get_sequence_number()
-        .overflowing_add(data_size as u32)
+        .overflowing_add(payload_size as u32)
         .0;
     //e.last_sent_sequence_number = tcp_segment_header.get_acknowledgement_number();
 
@@ -713,18 +712,19 @@ fn receive_packet_handler(
 pub fn tcp_ipv4_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
-    packet_offset: usize,
+    segment_offset: usize,
+    segment_size: usize,
     frame_info: EthernetFrameInfo,
     ipv4_packet_info: ipv4::Ipv4PacketInfo,
 ) {
     const TCP_DEFAULT_PACKET_SIZE: usize = core::mem::size_of::<DefaultTcpSegment>();
-    if (packet_offset + TCP_DEFAULT_PACKET_SIZE) > data_length.to_usize() {
+    if TCP_DEFAULT_PACKET_SIZE > segment_size {
         pr_warn!("Invalid TCP segment");
         let _ = kfree!(allocated_data_base, data_length);
         return;
     }
     let tcp_segment = DefaultTcpSegment::from_buffer(unsafe {
-        &mut *((allocated_data_base.to_usize() + packet_offset)
+        &mut *((allocated_data_base.to_usize() + segment_offset)
             as *mut [u8; TCP_DEFAULT_PACKET_SIZE])
     });
 
@@ -745,7 +745,7 @@ pub fn tcp_ipv4_packet_handler(
             is_hex: false
         },
         destination_port,
-        (data_length.to_usize() - packet_offset - tcp_segment.get_header_length()),
+        segment_size,
         tcp_segment.get_header_length(),
         tcp_segment.is_ack_active(),
         tcp_segment.is_syn_active(),
@@ -946,9 +946,7 @@ pub fn tcp_ipv4_packet_handler(
                     | TcpSessionStatus::OpenOppositeClosed
                     | TcpSessionStatus::ClosedOppositeOpened => {
                         drop(_session_lock);
-                        if tcp_segment.get_header_length()
-                            == (data_length.to_usize() - packet_offset)
-                        {
+                        if tcp_segment.get_header_length() == segment_size {
                             /* ACK only */
                             //todo!();
                             return;
@@ -956,7 +954,8 @@ pub fn tcp_ipv4_packet_handler(
                             return receive_packet_handler(
                                 allocated_data_base,
                                 data_length,
-                                packet_offset,
+                                segment_offset + tcp_segment.get_header_length(),
+                                segment_size - tcp_segment.get_header_length(),
                                 frame_info,
                                 ipv4_packet_info,
                                 tcp_segment,
@@ -984,7 +983,8 @@ pub fn tcp_ipv4_packet_handler(
                 return receive_packet_handler(
                     allocated_data_base,
                     data_length,
-                    packet_offset,
+                    segment_offset + tcp_segment.get_header_length(),
+                    segment_size - tcp_segment.get_header_length(),
                     frame_info,
                     ipv4_packet_info,
                     tcp_segment,

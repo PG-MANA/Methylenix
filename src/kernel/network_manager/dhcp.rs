@@ -315,7 +315,7 @@ fn packet_handler(
     _packet_info: &ipv4::Ipv4PacketInfo,
     frame_info: &EthernetFrameInfo,
 ) {
-    if entry.data_length < entry.offset + MSize::new(DHCP_MAGIC_OFFSET + DHCP_MAGIC.len()) {
+    if entry.payload_size < MSize::new(DHCP_MAGIC_OFFSET + DHCP_MAGIC.len()) {
         pr_err!("Invalid packet size");
         let _ = kfree!(entry.allocated_data_address, entry.data_length);
         return;
@@ -323,8 +323,8 @@ fn packet_handler(
 
     let dhcp_packet = unsafe {
         core::slice::from_raw_parts(
-            (entry.allocated_data_address + entry.offset).to_usize() as *const u8,
-            (entry.data_length - entry.offset).to_usize(),
+            (entry.allocated_data_address + entry.payload_offset).to_usize() as *const u8,
+            entry.payload_size.to_usize(),
         )
     };
 
