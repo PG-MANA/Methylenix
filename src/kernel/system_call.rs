@@ -12,7 +12,7 @@ use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::system_call;
 
-use crate::kernel::file_manager::{File, PathInfo, FILE_PERMISSION_READ};
+use crate::kernel::file_manager::{File, FileSeekOrigin, PathInfo, FILE_PERMISSION_READ};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
@@ -151,6 +151,43 @@ pub fn system_call_handler(context: &mut ContextData) {
                 );
                 context.set_system_call_return_value(u64::MAX);
             }
+        }
+        SYSCALL_LSEEK => {
+            const SEEK_SET: u64 = 0x00;
+            const SEEK_CUR: u64 = 0x01;
+            const SEEK_END: u64 = 0x02;
+            let seek_origin = match context.get_system_call_arguments(3).unwrap() {
+                SEEK_SET => FileSeekOrigin::SeekSet,
+                SEEK_CUR => FileSeekOrigin::SeekCur,
+                SEEK_END => FileSeekOrigin::SeekEnd,
+                _ => {
+                    pr_debug!(
+                        "Invalid Seek Option: {:#X}",
+                        context.get_system_call_arguments(3).unwrap()
+                    );
+                    context.set_system_call_return_value(u64::MAX);
+                    return;
+                }
+            };
+
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
+            if file.is_none() {
+                pr_debug!(
+                    "Unknown file descriptor: {}",
+                    context.get_system_call_arguments(1).unwrap()
+                );
+                context.set_system_call_return_value(u64::MAX);
+                return;
+            }
+
+            let result = file.unwrap().lock().unwrap().seek(
+                context.get_system_call_arguments(2).unwrap() as usize,
+                seek_origin,
+            );
+            context.set_system_call_return_value(
+                result.and_then(|r| Ok(r as u64)).unwrap_or(u64::MAX),
+            );
         }
         SYSCALL_CLOSE => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();

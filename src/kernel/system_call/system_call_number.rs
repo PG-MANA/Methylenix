@@ -10,6 +10,7 @@ pub const SYSCALL_READ: SysCallNumber = 0x00;
 pub const SYSCALL_WRITE: SysCallNumber = 0x01;
 pub const SYSCALL_OPEN: SysCallNumber = 0x02;
 pub const SYSCALL_CLOSE: SysCallNumber = 0x03;
+pub const SYSCALL_LSEEK: SysCallNumber = 0x08;
 pub const SYSCALL_WRITEV: SysCallNumber = 0x14;
 pub const SYSCALL_ARCH_PRCTL: SysCallNumber = 0x9E;
 pub const SYSCALL_SET_TID_ADDRESS: SysCallNumber = 0xDA;
