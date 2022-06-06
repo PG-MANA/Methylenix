@@ -133,7 +133,6 @@ pub fn system_call_handler(context: &mut ContextData) {
                         .file_manager
                         .file_open(PathInfo::new(s), FILE_PERMISSION_READ)
                     {
-                        pr_debug!("File is found.");
                         let process = get_cpu_manager_cluster().run_queue.get_running_process();
                         let fd = process.add_file(f);
                         context.set_system_call_return_value(fd as u64);
@@ -272,7 +271,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             let protocol_number = context.get_system_call_arguments(3).unwrap();
             let socket = network::create_socket(domain_number, socket_type_number, protocol_number);
             if let Err(err) = socket {
-                pr_err!("Failed to create socket: {:?}", err);
+                pr_warn!("Failed to create socket: {:?}", err);
                 context.set_system_call_return_value(u64::MAX);
                 return;
             }
@@ -386,7 +385,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             ) {
                 Ok(a) => a,
                 Err(_) => {
-                    pr_err!(
+                    pr_warn!(
                         "Invalid user address: {:#X}",
                         context.get_system_call_arguments(2).unwrap()
                     );
@@ -408,7 +407,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                     context.set_system_call_return_value(a.to_usize() as u64);
                 }
                 Err(err) => {
-                    pr_err!("Failed to receive data: {:?}", err);
+                    pr_warn!("Failed to receive data: {:?}", err);
                     context.set_system_call_return_value(u64::MAX);
                 }
             }

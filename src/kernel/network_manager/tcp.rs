@@ -719,7 +719,7 @@ pub fn tcp_ipv4_packet_handler(
 ) {
     const TCP_DEFAULT_PACKET_SIZE: usize = core::mem::size_of::<DefaultTcpSegment>();
     if (packet_offset + TCP_DEFAULT_PACKET_SIZE) > data_length.to_usize() {
-        pr_err!("Invalid TCP segment");
+        pr_warn!("Invalid TCP segment");
         let _ = kfree!(allocated_data_base, data_length);
         return;
     }
