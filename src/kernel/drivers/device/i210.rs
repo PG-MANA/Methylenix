@@ -2,8 +2,6 @@
 //! Intel(R) Ethernet Controller I210
 //!
 
-use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
-
 use crate::kernel::drivers::pci::{
     msi::setup_msi_or_msi_x, ClassCode, PciDevice, PciDeviceDriver, PciManager,
 };
@@ -15,8 +13,6 @@ use crate::kernel::network_manager::ethernet_device::{
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
-
-use core::mem::MaybeUninit;
 
 use alloc::collections::LinkedList;
 
@@ -358,56 +354,13 @@ impl PciDeviceDriver for I210Manager {
 
 impl EthernetDeviceDriver for I210Manager {
     fn send(&mut self, _info: &EthernetDeviceInfo, entry: &mut TxEntry) -> Result<MSize, ()> {
-        if entry.get_length().to_usize() > u16::MAX as usize {
-            return Err(());
-        }
-        let mut physical_address_list: [PAddress; (u16::MAX as usize) / PAGE_SIZE_USIZE] =
-            unsafe { MaybeUninit::assume_init(MaybeUninit::uninit()) };
-        let result = get_kernel_manager_cluster()
-            .kernel_memory_manager
-            .get_physical_address_list(
-                entry.get_buffer(),
-                MIndex::new(0),
-                entry.get_length().page_align_up().to_index(),
-                &mut physical_address_list,
-            );
-        if let Err(e) = result {
-            pr_err!("Failed to get physical address list: {:?}", e);
-            return Err(());
-        }
-        let pages = result.unwrap();
-        let mut processed_pages = 0;
-        let mut processed_size = 0;
-        while processed_pages < pages && processed_size < entry.get_length().to_usize() {
-            let mut i = 1;
-            let mut size_to_send = 0;
-            loop {
-                if (size_to_send + PAGE_SIZE_USIZE)
-                    < (entry.get_length().to_usize() - processed_size)
-                {
-                    if physical_address_list[processed_pages + i]
-                        != physical_address_list[processed_pages] + MIndex::new(i).to_offset()
-                    {
-                        break;
-                    }
-                    size_to_send += PAGE_SIZE_USIZE;
-                    i += 1;
-                } else {
-                    size_to_send += entry.get_length().to_usize() - processed_size - size_to_send;
-                    break;
-                }
-            }
-            let n = self.transfer_data_legacy(
-                physical_address_list[processed_pages],
-                MSize::new(size_to_send),
-                entry.get_id(),
-            )?;
-            entry.set_number_of_frame(n + entry.get_number_of_frame());
-            processed_pages += i;
-            processed_size += size_to_send;
-        }
-
-        return Ok(MSize::new(processed_size));
+        let n = self.transfer_data_legacy(
+            entry.get_physical_buffer(),
+            entry.get_length(),
+            entry.get_id(),
+        )?;
+        entry.set_number_of_frame(n);
+        return Ok(entry.get_length());
     }
 }
 
@@ -509,7 +462,6 @@ impl I210Manager {
         let mut remaining_length = length.to_usize();
         let mut number_of_descriptors = 0;
         let _lock = self.transfer_ring_lock.lock();
-
         while remaining_length > 0 {
             let transfer_length = if remaining_length > u16::MAX as usize {
                 u16::MAX as usize
