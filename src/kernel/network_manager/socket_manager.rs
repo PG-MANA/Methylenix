@@ -12,7 +12,7 @@ use crate::kernel::file_manager::{
 };
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
 use crate::kernel::task_manager::wait_queue::WaitQueue;
 
 use crate::{kfree, kmalloc};
@@ -20,7 +20,7 @@ use crate::{kfree, kmalloc};
 const DEFAULT_BUFFER_SIZE: usize = 4096;
 
 pub struct SocketManager {
-    lock: SpinLockFlag,
+    lock: IrqSaveSpinLockFlag,
     active_socket: PtrLinkedList<SocketInfo>,
     listening_socket: PtrLinkedList<SocketInfo>,
 }
@@ -65,7 +65,7 @@ pub enum Protocol {
 impl SocketManager {
     pub fn new() -> Self {
         Self {
-            lock: SpinLockFlag::new(),
+            lock: IrqSaveSpinLockFlag::new(),
             active_socket: PtrLinkedList::new(),
             listening_socket: PtrLinkedList::new(),
         }
@@ -139,7 +139,7 @@ impl SocketManager {
         }
         let file_descriptor = file.get_descriptor();
         let socket_info = unsafe { &mut *(file_descriptor.get_data() as *mut SocketInfo) };
-
+        let _self_lock = self.lock.lock();
         let _socket_lock = socket_info.lock.lock();
         if let SegmentInfo::Listening(listen_info) = &socket_info.segment_info {
             match socket_info.protocol {
@@ -156,8 +156,6 @@ impl SocketManager {
                         return Err(());
                     }
                     socket_info.list = PtrLinkedListNode::new();
-                    // Socket info is not inserted yet, so we can lock self after socket.
-                    let _self_lock = self.lock.lock();
                     self.listening_socket.insert_tail(&mut socket_info.list);
                     drop(_socket_lock);
                     drop(_self_lock);
@@ -179,7 +177,7 @@ impl SocketManager {
         }
         let socket_info =
             unsafe { &mut *(listening_socket_file.get_descriptor().get_data() as *mut SocketInfo) };
-
+        let mut _self_lock = self.lock.lock();
         let mut _socket_lock = socket_info.lock.lock();
         if let SegmentInfo::Listening(listen_info) = &mut socket_info.segment_info {
             match socket_info.protocol {
@@ -188,7 +186,9 @@ impl SocketManager {
                     while listen_info.waiting_socket.is_empty() {
                         /* Is the timing of unlock OK? */
                         drop(_socket_lock);
+                        drop(_self_lock);
                         let _ = socket_info.wait_queue.add_current_thread();
+                        _self_lock = self.lock.lock();
                         _socket_lock = socket_info.lock.lock();
                     }
                     let child_socket = unsafe {
@@ -200,7 +200,6 @@ impl SocketManager {
                     drop(_socket_lock);
                     // child_socket is not inserted yet, so we can lock self after socket.
                     child_socket.list = PtrLinkedListNode::new();
-                    let _self_lock = self.lock.lock();
                     self.active_socket.insert_tail(&mut child_socket.list);
                     drop(_self_lock);
                     Ok(File::new(

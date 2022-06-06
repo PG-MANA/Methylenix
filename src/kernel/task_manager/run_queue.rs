@@ -78,7 +78,7 @@ impl RunQueue {
         let _irq = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let thread = Self::get_highest_priority_thread(&mut self.run_list)
-            .expect("There is no thread to start.");
+            .unwrap_or(unsafe { &mut *self.idle_thread });
 
         thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(thread);
