@@ -50,10 +50,7 @@ pub fn setup_msi(
                 .read_data(pci_dev, usable_capability, 4)?;
 
         if (message_control & 0xff) != 0x05 {
-            pr_debug!(
-                "Capability ID({:#X}) is not for MSI",
-                (message_control & 0xff)
-            );
+            pr_debug!("Capability ID is not for MSI");
         } else if (message_control & (1 << 16)) != 0 {
             pr_debug!("Capability Pointer: {:#X} is in use.", usable_capability);
         } else {
@@ -162,8 +159,8 @@ pub fn setup_msi_x(
         .setup_msi_interrupt(handler, priority, is_level_trigger)?;
 
     let msi_x_table_address = match io_remap!(
-        PAddress::new(msi_x_table_address + table_offset as usize),
-        MSize::new((number_of_entries as usize) << 4).page_align_up(),
+        PAddress::new(msi_x_table_address),
+        MSize::new(table_offset as usize + ((number_of_entries as usize) << 4)).page_align_up(),
         MemoryPermissionFlags::data()
     ) {
         Ok(a) => a,
@@ -172,7 +169,7 @@ pub fn setup_msi_x(
             return Err(());
         }
     };
-    let msi_x_target_address = msi_x_table_address.to_usize();
+    let msi_x_target_address = msi_x_table_address.to_usize() + table_offset as usize;
 
     unsafe {
         *(msi_x_target_address as *mut u32) = (info.message_address & u32::MAX as u64) as u32;
