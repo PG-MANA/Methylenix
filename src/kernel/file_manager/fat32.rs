@@ -136,7 +136,11 @@ impl PartitionManager for Fat32Info {
                     entry_info = entry;
                 }
                 Err(_) => {
-                    pr_debug!("Failed to search: {}(In {})", file_name.as_str(), e);
+                    pr_debug!(
+                        "Failed to search: {}(Failed to search: {})",
+                        file_name.as_str(),
+                        e
+                    );
                     return Err(());
                 }
             }
@@ -346,7 +350,25 @@ impl Fat32Info {
                     ((u16::from_le(unsafe { *((entry_base + 20) as *const u16) }) as u32) << 16)
                         | u16::from_le(unsafe { *((entry_base + 26) as *const u16) }) as u32;
 
-                if entry_name_ascii == target_entry_name {
+                let compare_str = |entry_name: &str, target_name: &str| -> bool {
+                    if !target_name.is_ascii() {
+                        false
+                    } else if target_name.len() != entry_name.len() {
+                        false
+                    } else {
+                        for (a, b) in entry_name
+                            .as_bytes()
+                            .iter()
+                            .zip(target_name.as_bytes().iter())
+                        {
+                            if a.to_ascii_uppercase() != b.to_ascii_uppercase() {
+                                return false;
+                            }
+                        }
+                        true
+                    }
+                };
+                if compare_str(entry_name_ascii, target_entry_name) {
                     let _ = free_pages!(directory_list_data);
                     return Ok(Fat32EntryInfo {
                         entry_cluster,
