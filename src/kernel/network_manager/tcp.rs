@@ -48,8 +48,9 @@ pub struct TcpSessionInfo {
     segment_info: TcpSegmentInfo,
     window_size: u16,
     buffer_list: LinkedList<SessionBuffer>,
+    expected_arrive_sequence_number: u32,
     next_sequence_number: u32,
-    last_acknowledge_number: u32,
+    last_sent_acknowledge_number: u32,
     status: TcpSessionStatus,
 }
 
@@ -521,11 +522,16 @@ pub fn send_data(
             for i in 0..number_of_segments {
                 let base = MSize::new(i * MAX_SEGMENT_SIZE);
                 let send_size = (data_size - base).min(MSize::new(MAX_SEGMENT_SIZE));
+                pr_debug!(
+                    "Next Sequence: {}, Ack: {}",
+                    e.next_sequence_number,
+                    e.last_sent_acknowledge_number
+                );
                 send_data_ipv4(
                     buffer,
                     data_address + base,
                     send_size,
-                    e.last_acknowledge_number,
+                    e.last_sent_acknowledge_number,
                     e.next_sequence_number,
                     e.window_size,
                     segment_info,
@@ -592,7 +598,7 @@ fn receive_packet_handler(
         return;
     }
     let _lock = e.lock.lock();
-    if tcp_segment_header.get_sequence_number() == e.next_sequence_number {
+    if tcp_segment_header.get_sequence_number() == e.expected_arrive_sequence_number {
         let segment_info = TcpSegmentInfo {
             sender_port: tcp_segment_header.get_sender_port(),
             destination_port: tcp_segment_header.get_destination_port(),
@@ -606,7 +612,7 @@ fn receive_packet_handler(
             MSize::new(data_size),
             segment_info.clone(),
         ) {
-            pr_err!("Failed to notify data");
+            pr_err!("Failed to notify data: {:?}", err);
         }
         let _ = kfree!(allocated_data_base, data_length);
 
@@ -641,6 +647,10 @@ fn receive_packet_handler(
                 break;
             }
         }
+        e.expected_arrive_sequence_number = tcp_segment_header
+            .get_sequence_number()
+            .overflowing_add(data_size as u32)
+            .0;
     } else {
         /* Arrived the data after of the next data */
         e.buffer_list.push_back(SessionBuffer {
@@ -650,15 +660,18 @@ fn receive_packet_handler(
             sequence_number: tcp_segment_header.get_sequence_number(),
         });
     }
-    e.last_acknowledge_number = tcp_segment_header.get_acknowledgement_number();
+    e.last_sent_acknowledge_number = tcp_segment_header
+        .get_sequence_number()
+        .overflowing_add(data_size as u32)
+        .0;
+    //e.last_sent_sequence_number = tcp_segment_header.get_acknowledgement_number();
+
     drop(_lock);
+
     /* Send ACK */
     if let Err(e) = reply_ack_ipv4(
-        tcp_segment_header
-            .get_sequence_number()
-            .overflowing_add(data_size as u32)
-            .0,
-        tcp_segment_header.get_acknowledgement_number(),
+        e.last_sent_acknowledge_number,
+        e.next_sequence_number,
         tcp_segment_header.get_window_size(),
         &e.segment_info,
         false,
@@ -739,9 +752,16 @@ pub fn tcp_ipv4_packet_handler(
                         e.status = TcpSessionStatus::HalfClose;
                     }
                 }
+                e.last_sent_acknowledge_number =
+                    e.last_sent_acknowledge_number.overflowing_add(1).0;
+                pr_debug!(
+                    "Sent: {}, Correct: {}",
+                    e.next_sequence_number,
+                    tcp_segment.get_sequence_number().overflowing_add(1).0
+                );
                 if let Err(err) = reply_ack_ipv4(
-                    tcp_segment.get_sequence_number() + 1,
-                    tcp_segment.get_acknowledgement_number(),
+                    e.last_sent_acknowledge_number,
+                    e.next_sequence_number,
                     e.window_size,
                     &e.segment_info,
                     false,
@@ -749,11 +769,7 @@ pub fn tcp_ipv4_packet_handler(
                     pr_err!("Failed to send ACK: {:?}", err);
                     return;
                 }
-                e.last_acknowledge_number = tcp_segment.get_sequence_number();
-                e.next_sequence_number = tcp_segment
-                    .get_acknowledgement_number()
-                    .overflowing_add(1)
-                    .0;
+                //e.next_sequence_number = e.next_sequence_number.overflowing_add(1).0;
                 if should_delete {
                     e.free_buffer();
                     drop(_lock);
@@ -788,14 +804,16 @@ pub fn tcp_ipv4_packet_handler(
                         let handler = (e.handler)(segment_info.clone());
                         if let Ok(handler) = handler {
                             e.number_of_active_connection += 1;
-                            let sequence_number = 1; /* TODO: randomise */
+                            let sequence_number = 1u32; /* TODO: randomise */
                             let session_entry = TcpSessionInfo {
                                 lock: SpinLockFlag::new(),
                                 segment_info: segment_info.clone(),
                                 window_size: tcp_segment.get_window_size(),
                                 buffer_list: LinkedList::new(),
-                                next_sequence_number: sequence_number + 1,
-                                last_acknowledge_number: 0,
+                                next_sequence_number: sequence_number.overflowing_add(1).0,
+                                expected_arrive_sequence_number: tcp_segment.get_sequence_number()
+                                    + 1,
+                                last_sent_acknowledge_number: 0,
                                 status: TcpSessionStatus::HalfOpen,
                                 handler,
                             };
@@ -830,10 +848,11 @@ pub fn tcp_ipv4_packet_handler(
                 && e.segment_info.get_sender_port() == sender_port
             {
                 if e.status == TcpSessionStatus::HalfOpen {
-                    if tcp_segment.get_acknowledgement_number() == e.next_sequence_number {
+                    if tcp_segment.get_sequence_number() == e.expected_arrive_sequence_number
+                        && tcp_segment.get_acknowledgement_number() == e.next_sequence_number
+                    {
+                        pr_debug!("Socket Open");
                         e.status = TcpSessionStatus::Open;
-                        e.next_sequence_number = tcp_segment.get_sequence_number();
-                        e.last_acknowledge_number = tcp_segment.get_acknowledgement_number();
                     }
                 } else if e.status == TcpSessionStatus::Closing {
                     let _lock = e.lock.lock();
@@ -908,18 +927,15 @@ pub fn close_session(segment_info: &mut TcpSegmentInfo) {
                 TcpSessionStatus::Closing => { /* Do nothing */ }
                 _ => {
                     if let Err(err) = send_fin_ipv4(
+                        e.last_sent_acknowledge_number,
                         e.next_sequence_number,
-                        e.last_acknowledge_number,
                         e.window_size,
                         &e.segment_info,
                     ) {
                         pr_err!("Failed to send FIN: {:?}", err);
                         return;
                     }
-                    let acknowledge_number = e.last_acknowledge_number;
-                    e.last_acknowledge_number = e.next_sequence_number;
-                    e.next_sequence_number = acknowledge_number.overflowing_add(1).0;
-                    e.status = TcpSessionStatus::Closing;
+                    e.next_sequence_number = e.next_sequence_number.overflowing_add(1).0;
                 }
             }
         }
