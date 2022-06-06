@@ -44,7 +44,7 @@ pub type TcpDataHandler = fn(
 ) -> Result<(), ()>;
 
 pub struct TcpSessionInfo {
-    lock: SpinLockFlag,
+    lock: IrqSaveSpinLockFlag,
     handler: TcpDataHandler,
     //event_handler,
     /// segment_info is **the arrived segment information**.
@@ -73,7 +73,7 @@ impl TcpSessionInfo {
 pub type TcpPortListenerHandler = fn(segment_info: TcpSegmentInfo) -> Result<TcpDataHandler, ()>;
 
 pub struct TcpPortListenEntry {
-    lock: SpinLockFlag,
+    lock: IrqSaveSpinLockFlag,
     handler: TcpPortListenerHandler,
     port: u16,
     acceptable_address: AddressInfo,
@@ -548,11 +548,11 @@ pub fn send_data(
                 let base = MSize::new(i * MAX_SEGMENT_SIZE);
                 let send_size = (data_size - base).min(MSize::new(MAX_SEGMENT_SIZE));
                 pr_debug!(
-                    "Next Sequence: {}, Ack: {}",
+                    "Next Sequence: {}, Ack: {}, Remaining Segments: {}",
                     e.next_sequence_number,
-                    e.last_sent_acknowledge_number
+                    e.last_sent_acknowledge_number,
+                    number_of_segments - i,
                 );
-                pr_debug!("Send Size: {}", send_size.to_usize());
                 send_data_ipv4(
                     buffer,
                     data_address + base,
@@ -566,11 +566,6 @@ pub fn send_data(
                     .next_sequence_number
                     .overflowing_add(send_size.to_usize() as u32)
                     .0;
-                pr_debug!(
-                    "Next Sequence: {}, Ack: {}",
-                    e.next_sequence_number,
-                    e.last_sent_acknowledge_number
-                );
             }
             let _ = kfree!(temporary_buffer, MSize::new(MAX_TRANSMISSION_UNIT));
             return Ok(());
@@ -588,7 +583,7 @@ pub fn bind_port(
 ) -> Result<(), ()> {
     /* TODO: port check */
     let entry = TcpPortListenEntry {
-        lock: SpinLockFlag::new(),
+        lock: IrqSaveSpinLockFlag::new(),
         port,
         acceptable_address,
         max_acceptable_connection,
@@ -818,12 +813,6 @@ pub fn tcp_ipv4_packet_handler(
                     }
                 }
                 if should_send_ack {
-                    pr_debug!(
-                        "Our: {}, Correct: {}",
-                        e.last_sent_acknowledge_number.overflowing_add(1).0,
-                        tcp_segment.get_sequence_number().overflowing_add(1).0
-                    );
-
                     e.last_sent_acknowledge_number =
                         tcp_segment.get_sequence_number().overflowing_add(1).0;
                     if let Err(err) = reply_ack_ipv4(
@@ -873,7 +862,7 @@ pub fn tcp_ipv4_packet_handler(
                             e.number_of_active_connection += 1;
                             let sequence_number = 1u32; /* TODO: randomise */
                             let session_entry = TcpSessionInfo {
-                                lock: SpinLockFlag::new(),
+                                lock: IrqSaveSpinLockFlag::new(),
                                 segment_info: segment_info.clone(),
                                 window_size: tcp_segment.get_window_size(),
                                 buffer_list: LinkedList::new(),
