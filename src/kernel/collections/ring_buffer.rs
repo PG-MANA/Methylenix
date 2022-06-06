@@ -38,6 +38,10 @@ impl Ringbuffer {
         self.read_ptr = size.to_usize() - 1;
     }
 
+    pub fn unset_buffer(&mut self) {
+        *self = Self::new()
+    }
+
     fn add_pointer(&self, p: usize, v: usize) -> usize {
         (p + v) & (self.size.to_usize() - 1)
     }

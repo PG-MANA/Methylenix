@@ -381,18 +381,14 @@ impl SocketManager {
                 socket_info.send_ring_buffer.get_buffer_address(),
                 socket_info.send_ring_buffer.get_buffer_size()
             );
-            socket_info
-                .send_ring_buffer
-                .set_new_buffer(VAddress::new(0), MSize::new(0));
+            socket_info.send_ring_buffer.unset_buffer();
         }
         if !socket_info.receive_ring_buffer.get_buffer_size().is_zero() {
             let _ = kfree!(
                 socket_info.receive_ring_buffer.get_buffer_address(),
                 socket_info.receive_ring_buffer.get_buffer_size()
             );
-            socket_info
-                .receive_ring_buffer
-                .set_new_buffer(VAddress::new(0), MSize::new(0));
+            socket_info.receive_ring_buffer.unset_buffer();
         }
         match &mut socket_info.segment_info {
             SegmentInfo::Invalid => { /* Do nothing */ }
