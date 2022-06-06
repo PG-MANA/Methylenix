@@ -80,6 +80,8 @@ impl From<MemoryError> for TaskError {
 }
 
 impl TaskManager {
+    pub const FLAG_LOCAL_THREAD: u8 = 1;
+
     pub const fn new() -> Self {
         Self {
             lock: IrqSaveSpinLockFlag::new(),
@@ -222,6 +224,7 @@ impl TaskManager {
         entry_address: fn() -> !,
         stack_size: Option<MSize>,
         kernel_priority: u8,
+        flag: u8,
     ) -> Result<&'static mut ThreadEntry, TaskError> {
         let _lock = self.lock.lock();
         let result = try {
@@ -232,6 +235,9 @@ impl TaskManager {
             forked_thread
                 .set_priority_level(KernelSchedulingClass::get_custom_priority(kernel_priority));
             forked_thread.set_task_status(TaskStatus::New);
+            if (flag & Self::FLAG_LOCAL_THREAD) != 0 {
+                forked_thread.set_local_thread();
+            }
             forked_thread
         };
 
@@ -455,21 +461,23 @@ impl TaskManager {
         let current_cpu_load = get_cpu_manager_cluster()
             .run_queue
             .get_number_of_running_threads();
-        for cpu in unsafe {
-            get_kernel_manager_cluster()
-                .cpu_list
-                .iter_mut(offset_of!(CpuManagerCluster, list))
-        } {
-            let load = cpu.run_queue.get_number_of_running_threads();
-            if load < current_cpu_load {
-                let should_interrupt_cpu = cpu.run_queue.assign_thread(thread)?;
-                drop(_thread_lock);
-                if should_interrupt_cpu {
-                    get_cpu_manager_cluster()
-                        .interrupt_manager
-                        .send_reschedule_ipi(cpu.cpu_id);
+        if !thread.is_local_thread() {
+            for cpu in unsafe {
+                get_kernel_manager_cluster()
+                    .cpu_list
+                    .iter_mut(offset_of!(CpuManagerCluster, list))
+            } {
+                let load = cpu.run_queue.get_number_of_running_threads();
+                if load < current_cpu_load {
+                    let should_interrupt_cpu = cpu.run_queue.assign_thread(thread)?;
+                    drop(_thread_lock);
+                    if should_interrupt_cpu {
+                        get_cpu_manager_cluster()
+                            .interrupt_manager
+                            .send_reschedule_ipi(cpu.cpu_id);
+                    }
+                    return Ok(());
                 }
-                return Ok(());
             }
         }
 

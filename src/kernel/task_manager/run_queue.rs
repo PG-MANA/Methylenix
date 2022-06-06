@@ -169,18 +169,12 @@ impl RunQueue {
         interrupt_flag: Option<StoredIrqData>,
         task_status: TaskStatus,
     ) -> Result<(), TaskError> {
-        assert!(!unsafe { &mut *self.running_thread.unwrap() }
-            .lock
-            .is_locked());
-        assert_ne!(task_status, TaskStatus::Running);
-
         let irq = interrupt_flag.unwrap_or_else(|| InterruptManager::save_and_disable_local_irq());
         let lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let _running_thread_lock = running_thread.lock.lock();
         running_thread.set_task_status(task_status);
-        drop(_running_thread_lock);
-        self._schedule(None, Some(irq), Some(lock));
+        self._schedule(None, Some(irq), Some(lock), Some(_running_thread_lock));
         return Ok(());
     }
 
@@ -306,9 +300,8 @@ impl RunQueue {
     /// `thread` must be locked.
     pub fn assign_thread(&mut self, thread: &mut ThreadEntry) -> Result<bool, TaskError> {
         assert!(thread.lock.is_locked());
-        let _lock = self.lock.lock();
-        /* To avoid task switch holding other cpu's run_queue_lock */
         let irq = InterruptManager::save_and_disable_local_irq();
+        let _lock = self.lock.lock(); /* To avoid task switch holding other cpu's run_queue_lock */
         self._add_thread(thread)?;
         let thread_priority = thread.get_priority_level();
         let should_reschedule =
@@ -352,6 +345,7 @@ impl RunQueue {
         current_context: Option<&ContextData>,
         interrupt_flag: Option<StoredIrqData>,
         lock: Option<SpinLockFlagHolder>,
+        running_thread_lock: Option<SpinLockFlagHolder>,
     ) {
         let interrupt_flag =
             interrupt_flag.unwrap_or_else(|| InterruptManager::save_and_disable_local_irq());
@@ -369,7 +363,8 @@ impl RunQueue {
                 }
             };
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
-        let _running_thread_lock = running_thread.lock.lock();
+        let _running_thread_lock =
+            running_thread_lock.unwrap_or_else(|| running_thread.lock.lock());
         let next_thread = if running_thread.get_task_status() != TaskStatus::Running {
             if let Some(next_thread) = unsafe {
                 running_thread
@@ -475,6 +470,6 @@ impl RunQueue {
     /// This function checks current running thread and if it has to change task, this will call switch_to_next_thread.
     /// This function can be called in the interruptable status.([Self::lock] must be unlocked.)
     pub fn schedule(&mut self, current_context: Option<&ContextData>) {
-        self._schedule(current_context, None, None)
+        self._schedule(current_context, None, None, None)
     }
 }

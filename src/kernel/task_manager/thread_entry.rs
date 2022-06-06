@@ -26,10 +26,12 @@ pub struct ThreadEntry {
     context_data: ContextData,
     priority_level: u8,
     scheduling_class: SchedulingClass,
+    flags: u8,
 }
 
 impl ThreadEntry {
     pub const THREAD_ENTRY_ALIGN: usize = 0;
+    pub const FLAG_LOCAL_THREAD: u8 = 1;
 
     fn new(
         process: NonNull<ProcessEntry>,
@@ -48,6 +50,7 @@ impl ThreadEntry {
             context_data,
             priority_level: 0,
             scheduling_class,
+            flags: 0,
         }
     }
 
@@ -141,6 +144,7 @@ impl ThreadEntry {
             context_data: self.context_data.clone(),
             priority_level: self.priority_level,
             scheduling_class: self.scheduling_class,
+            flags: 0,
         }
     }
 
@@ -150,5 +154,13 @@ impl ThreadEntry {
             number_of_threads,
             timer_interval,
         );
+    }
+
+    pub fn is_local_thread(&self) -> bool {
+        (self.flags & Self::FLAG_LOCAL_THREAD) != 0
+    }
+
+    pub fn set_local_thread(&mut self) {
+        self.flags |= Self::FLAG_LOCAL_THREAD;
     }
 }

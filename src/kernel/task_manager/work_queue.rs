@@ -48,7 +48,12 @@ impl WorkQueue {
             .expect("Failed to init memory pool for WorkList");
 
         let thread = task_manager
-            .create_kernel_thread_for_init(Self::work_queue_thread, None, Self::DEFAULT_PRIORITY)
+            .create_kernel_thread_for_init(
+                Self::work_queue_thread,
+                None,
+                Self::DEFAULT_PRIORITY,
+                TaskManager::FLAG_LOCAL_THREAD,
+            )
             .expect("Cannot add the soft interrupt daemon.");
         self.daemon_thread = thread as *mut _;
         InterruptManager::restore_local_irq(irq);
@@ -71,7 +76,6 @@ impl WorkQueue {
         };
 
         self.work_queue.insert_tail(&mut work.list);
-
         let worker_thread = unsafe { &mut *self.daemon_thread };
         let _worker_thread_lock = worker_thread.lock.lock();
         if worker_thread.get_task_status() != TaskStatus::Running {
