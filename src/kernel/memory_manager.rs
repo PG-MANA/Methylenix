@@ -564,7 +564,7 @@ macro_rules! kmalloc {
             ))
             .and_then(|addr| {
                 let o = unsafe { &mut *(addr.to_usize() as *mut $t) };
-                core::mem::forget(core::mem::replace(o, $initial_value));
+                init_struct!(o, $initial_value);
                 Ok(o)
             })
     };

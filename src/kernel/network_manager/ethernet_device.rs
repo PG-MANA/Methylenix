@@ -3,7 +3,7 @@
 //!
 //!
 
-use super::{arp, ipv4};
+use super::{arp, ipv4, LinkType, NetworkError};
 
 use crate::arch::target_arch::paging::{PAGE_SIZE, PAGE_SIZE_USIZE};
 
@@ -29,13 +29,29 @@ const MAX_FRAME_DATA_SIZE: usize = 1500;
 const MAX_FRAME_SIZE: usize = MAX_FRAME_DATA_SIZE + 30 /*+ IPG*/ /*+ 8*/;
 const MAC_ADDRESS_SIZE: usize = 6;
 
+#[derive(Clone)]
+pub struct MacAddress([u8; 6]);
+
+impl MacAddress {
+    pub fn new(inner: [u8; 6]) -> Self {
+        Self(inner)
+    }
+    pub fn inner(&self) -> &[u8; 6] {
+        &self.0
+    }
+}
+
 pub trait EthernetDeviceDriver {
-    fn send(&mut self, info: &EthernetDeviceInfo, entry: &mut TxEntry) -> Result<MSize, ()>;
+    fn send(
+        &mut self,
+        info: &EthernetDeviceInfo,
+        entry: &mut TxEntry,
+    ) -> Result<MSize, NetworkError>;
 }
 
 #[derive(Clone)]
 pub struct EthernetDeviceInfo {
-    pub mac_address: [u8; 6],
+    pub mac_address: MacAddress,
 }
 
 #[derive(Clone)]
@@ -98,11 +114,19 @@ pub struct RxEntry {
 #[derive(Clone)]
 pub struct EthernetFrameInfo {
     device_id: usize,
-    sender_mac_address: [u8; 6],
+    sender_mac_address: MacAddress,
     frame_type: u16,
 }
 
 impl EthernetFrameInfo {
+    pub fn new(device_id: usize, mac_address_to_send: MacAddress) -> Self {
+        Self {
+            device_id,
+            sender_mac_address: mac_address_to_send,
+            frame_type: 0,
+        }
+    }
+
     pub fn get_device_id(&self) -> usize {
         self.device_id
     }
@@ -129,11 +153,15 @@ impl EthernetDeviceManager {
         return device_id;
     }
 
-    pub fn reply_data(&mut self, frame_info: EthernetFrameInfo, data: &[u8]) -> Result<(), ()> {
+    pub fn reply_data(
+        &mut self,
+        frame_info: &EthernetFrameInfo,
+        data: &[u8],
+    ) -> Result<(), NetworkError> {
         self.send_data(
             frame_info.device_id,
             data,
-            frame_info.sender_mac_address,
+            &frame_info.sender_mac_address,
             frame_info.frame_type,
         )
     }
@@ -142,16 +170,16 @@ impl EthernetDeviceManager {
         &mut self,
         device_id: usize,
         data: &[u8],
-        target_mac_address: [u8; 6],
+        target_mac_address: &MacAddress,
         ether_type: u16,
-    ) -> Result<(), ()> {
+    ) -> Result<(), NetworkError> {
         if data.len() >= (PAGE_SIZE_USIZE - ETHERNET_PAYLOAD_OFFSET) {
             pr_err!("Invalid data size: {:#X}", data.len());
-            return Err(());
+            return Err(NetworkError::DataSizeError);
         }
         let mut _lock = self.lock.lock();
         if device_id >= self.device_list.len() {
-            return Err(());
+            return Err(NetworkError::InvalidDevice);
         }
         let buffer = if self.number_of_memory_buffer == 0 {
             let v = match alloc_pages_with_physical_address!(
@@ -162,7 +190,7 @@ impl EthernetDeviceManager {
                 Ok(v) => v,
                 Err(err) => {
                     pr_err!("Failed to allocate memory: {:?}", err);
-                    return Err(());
+                    return Err(NetworkError::MemoryError(err));
                 }
             };
             v
@@ -185,7 +213,7 @@ impl EthernetDeviceManager {
         if let Err(e) = result {
             pr_err!("Failed to create packet: {:?}", e);
             let _ = free_pages!(buffer.0);
-            return Err(());
+            return Err(e);
         }
         let mut entry = TxEntry {
             entry_id: self.next_id,
@@ -210,11 +238,11 @@ impl EthernetDeviceManager {
         return result.and_then(|_| Ok(()));
     }
 
-    pub fn get_mac_address(&self, device_id: usize) -> Result<[u8; 6], ()> {
+    pub fn get_mac_address(&self, device_id: usize) -> Result<MacAddress, NetworkError> {
         if device_id >= self.device_list.len() {
-            return Err(());
+            return Err(NetworkError::InvalidDevice);
         }
-        Ok(self.device_list[device_id].info.mac_address)
+        Ok(self.device_list[device_id].info.mac_address.clone())
     }
 
     pub fn update_transmit_status(&mut self, _device_id: usize, id: u32, is_successful: bool) {
@@ -292,7 +320,7 @@ impl EthernetDeviceManager {
                 return;
             }
         };
-        let work = WorkList::new(Self::packet_worker, rx_entry as *const _ as usize);
+        let work = WorkList::new(Self::frame_worker, rx_entry as *const _ as usize);
         if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(work) {
             pr_err!("Failed to add worker: {:?}", e);
             let _ = kfree!(allocated_data, length);
@@ -300,13 +328,14 @@ impl EthernetDeviceManager {
         }
     }
 
-    pub fn packet_worker(data: usize) {
+    pub fn frame_worker(data: usize) {
         let rx_entry = unsafe { &*(data as *const RxEntry) };
         let cloned_rx_entry = rx_entry.clone();
         let _ = kfree!(rx_entry);
         let rx_entry = cloned_rx_entry;
 
-        let sender_mac_address = unsafe { *((rx_entry.buffer.to_usize() + 6) as *const [u8; 6]) };
+        let sender_mac_address =
+            MacAddress::new(unsafe { *((rx_entry.buffer.to_usize() + 6) as *const [u8; 6]) });
         let frame_type =
             u16::from_be_bytes(unsafe { *((rx_entry.buffer.to_usize() + 12) as *const [u8; 2]) });
         let frame_info = EthernetFrameInfo {
@@ -321,15 +350,7 @@ impl EthernetDeviceManager {
                     rx_entry.buffer,
                     rx_entry.length,
                     ETHERNET_PAYLOAD_OFFSET,
-                    frame_info,
-                );
-            }
-            arp::ETHERNET_TYPE_ARP => {
-                arp::arp_packet_handler(
-                    rx_entry.buffer,
-                    rx_entry.length,
-                    ETHERNET_PAYLOAD_OFFSET,
-                    frame_info,
+                    LinkType::Ethernet(frame_info),
                 );
             }
             t => {
@@ -347,7 +368,7 @@ impl EthernetDeviceManager {
 }
 
 impl EthernetDeviceDescriptor {
-    pub fn new(mac_address: [u8; 6], driver: *mut dyn EthernetDeviceDriver) -> Self {
+    pub fn new(mac_address: MacAddress, driver: *mut dyn EthernetDeviceDriver) -> Self {
         Self {
             info: EthernetDeviceInfo { mac_address },
             driver,
@@ -359,11 +380,11 @@ fn create_ethernet_frame(
     ethernet_descriptor: &EthernetDeviceDescriptor,
     send_buffer: VAddress,
     send_buffer_size: MSize,
-    target_mac_address: [u8; 6],
+    target_mac_address: &MacAddress,
     frame_type: u16,
     data_buffer: VAddress,
     data_size: MSize,
-) -> Result<MSize, ()> {
+) -> Result<MSize, NetworkError> {
     let max_number_of_frames = send_buffer_size.to_usize() / MAX_FRAME_SIZE;
     let mut sent_size: usize = 0;
     let mut buffer_pointer: usize = 0;
@@ -380,10 +401,10 @@ fn create_ethernet_frame(
             *((send_buffer.to_usize() + buffer_pointer) as *mut u8) = SFD;
             buffer_pointer += core::mem::size_of_val(&SFD);
             crc_start = send_buffer.to_usize() + buffer_pointer;*/
-            *((send_buffer.to_usize() + buffer_pointer) as *mut [u8; 6]) = target_mac_address;
+            *((send_buffer.to_usize() + buffer_pointer) as *mut [u8; 6]) = target_mac_address.0;
             buffer_pointer += MAC_ADDRESS_SIZE;
             *((send_buffer.to_usize() + buffer_pointer) as *mut [u8; 6]) =
-                ethernet_descriptor.info.mac_address;
+                *ethernet_descriptor.info.mac_address.inner();
             buffer_pointer += MAC_ADDRESS_SIZE;
             *((send_buffer.to_usize() + buffer_pointer) as *mut [u8; 2]) = frame_type.to_be_bytes();
             buffer_pointer += core::mem::size_of_val(&frame_type);

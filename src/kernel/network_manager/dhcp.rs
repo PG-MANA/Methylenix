@@ -2,12 +2,17 @@
 //! DHCP
 //!
 
-use super::{ethernet_device::EthernetFrameInfo, ipv4, udp, AddressPrinter};
+use super::{
+    ethernet_device::{EthernetFrameInfo, MacAddress},
+    ipv4::{set_default_ipv4_address, Ipv4ConnectionInfo},
+    udp::UdpConnectionInfo,
+    AddressPrinter, InternetType, LinkType, TransportType,
+};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
-use crate::kfree;
+use core::mem::MaybeUninit;
 
 const DHCP_SENDER_PORT: u16 = 68;
 const DHCP_DESTINATION_PORT: u16 = 67;
@@ -52,6 +57,8 @@ const DHCP_TERMINATE: u8 = 0xFF;
 const DHCP_DESTINATION_MAC_ADDRESS: [u8; 6] = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
 const DHCP_DESTINATION_IPV4_ADDRESS: u32 = 0xffff_ffff;
 
+const DHCP_PACKET_SIZE: usize = 300;
+
 fn write_byte_into_buffer(buffer: &mut [u8], base: usize, offset: usize, data: u8) {
     buffer[base + offset] = data;
 }
@@ -64,25 +71,14 @@ fn read_bytes_from_slice<const LEN: usize>(buffer: &[u8], offset: usize) -> &[u8
     unsafe { &*(buffer[offset..].as_ptr() as usize as *const [u8; LEN]) }
 }
 
-pub fn send_dhcp_discover_packet(device_id: usize) {
-    let mac_address = match get_kernel_manager_cluster()
-        .network_manager
-        .get_ethernet_mac_address(device_id)
-    {
-        Ok(a) => a,
-        Err(_) => {
-            pr_err!("Device is not found");
-            return;
-        }
-    };
-    let mut buffer: [u8; (DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET + 6 + 1)
-        + udp::UDP_HEADER_SIZE
-        + ipv4::IPV4_DEFAULT_HEADER_SIZE] = [0;
-        (DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET + 6 + 1)
-            + udp::UDP_HEADER_SIZE
-            + ipv4::IPV4_DEFAULT_HEADER_SIZE];
+pub fn create_dhcp_discover_packet(
+    mac_address: &MacAddress,
+    transaction_id: u32,
+) -> [u8; DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET + 6 + 1] {
+    let mut buffer: [u8; DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET + 6 + 1] =
+        [0; DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET + 6 + 1];
+    const DHCP_PAYLOAD_BASE: usize = 0;
 
-    const DHCP_PAYLOAD_BASE: usize = udp::UDP_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE;
     write_byte_into_buffer(
         &mut buffer,
         DHCP_PAYLOAD_BASE,
@@ -105,13 +101,13 @@ pub fn send_dhcp_discover_packet(device_id: usize) {
         &mut buffer,
         DHCP_PAYLOAD_BASE,
         DHCP_XID_OFFSET,
-        &1u32.to_be_bytes(),
+        &transaction_id.to_be_bytes(),
     );
     write_bytes_into_buffer(
         &mut buffer,
         DHCP_PAYLOAD_BASE,
         DHCP_CLIENT_MAC_ADDRESS_OFFSET,
-        &mac_address,
+        &mac_address.inner(),
     );
     write_bytes_into_buffer(
         &mut buffer,
@@ -135,58 +131,25 @@ pub fn send_dhcp_discover_packet(device_id: usize) {
         &mut buffer,
         DHCP_PAYLOAD_BASE,
         DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET,
-        &mac_address,
+        &mac_address.inner(),
     );
     write_byte_into_buffer(
         &mut buffer,
         DHCP_PAYLOAD_BASE,
-        DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET + mac_address.len(),
+        DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET + mac_address.inner().len(),
         DHCP_TERMINATE,
     );
-
-    let udp_ipv4_header = udp::create_ipv4_udp_header(
-        &buffer[DHCP_PAYLOAD_BASE..],
-        DHCP_SENDER_PORT,
-        0,
-        DHCP_DESTINATION_PORT,
-        DHCP_DESTINATION_IPV4_ADDRESS,
-        1,
-    )
-    .expect("Failed to create packet");
-    buffer[0..DHCP_PAYLOAD_BASE].copy_from_slice(&udp_ipv4_header);
-
-    let _ = get_kernel_manager_cluster()
-        .network_manager
-        .send_data_frame(
-            device_id,
-            &buffer,
-            DHCP_DESTINATION_MAC_ADDRESS,
-            ipv4::ETHERNET_TYPE_IPV4,
-        );
+    return buffer;
 }
 
-pub fn send_dhcp_request_packet(
-    frame_info: &EthernetFrameInfo,
+pub fn create_dhcp_request_packet(
+    mac_address: &MacAddress,
     transaction_id: u32,
     offered_address: u32,
-) {
-    let mac_address = match get_kernel_manager_cluster()
-        .network_manager
-        .get_ethernet_mac_address(frame_info.get_device_id())
-    {
-        Ok(a) => a,
-        Err(_) => {
-            pr_err!("Device is not found");
-            return;
-        }
-    };
-    let mut buffer: [u8; (DHCP_REQUEST_IP_OFFSET + 4 + 1)
-        + udp::UDP_HEADER_SIZE
-        + ipv4::IPV4_DEFAULT_HEADER_SIZE] = [0; (DHCP_REQUEST_IP_OFFSET + 4 + 1)
-        + udp::UDP_HEADER_SIZE
-        + ipv4::IPV4_DEFAULT_HEADER_SIZE];
+) -> [u8; DHCP_REQUEST_IP_OFFSET + 4 + 1] {
+    let mut buffer: [u8; DHCP_REQUEST_IP_OFFSET + 4 + 1] = [0; DHCP_REQUEST_IP_OFFSET + 4 + 1];
+    const DHCP_PAYLOAD_BASE: usize = 0;
 
-    const DHCP_PAYLOAD_BASE: usize = udp::UDP_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE;
     write_byte_into_buffer(
         &mut buffer,
         DHCP_PAYLOAD_BASE,
@@ -221,7 +184,7 @@ pub fn send_dhcp_request_packet(
         &mut buffer,
         DHCP_PAYLOAD_BASE,
         DHCP_CLIENT_MAC_ADDRESS_OFFSET,
-        &mac_address,
+        &mac_address.inner(),
     );
     write_bytes_into_buffer(
         &mut buffer,
@@ -245,7 +208,7 @@ pub fn send_dhcp_request_packet(
         &mut buffer,
         DHCP_PAYLOAD_BASE,
         DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET,
-        &mac_address,
+        &mac_address.inner(),
     );
     write_byte_into_buffer(
         &mut buffer,
@@ -272,88 +235,194 @@ pub fn send_dhcp_request_packet(
         DHCP_TERMINATE,
     );
 
-    let udp_ipv4_header = udp::create_ipv4_udp_header(
-        &buffer[DHCP_PAYLOAD_BASE
-            ..=(DHCP_PAYLOAD_BASE + DHCP_REQUEST_IP_OFFSET + offered_address.to_be_bytes().len())],
-        DHCP_SENDER_PORT,
-        0,
-        DHCP_DESTINATION_PORT,
-        DHCP_DESTINATION_IPV4_ADDRESS,
-        2,
-    )
-    .expect("Failed to create packet");
+    return buffer;
+}
 
-    buffer[0..DHCP_PAYLOAD_BASE].copy_from_slice(&udp_ipv4_header);
-
-    let _ = get_kernel_manager_cluster()
+pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
+    let mac_address = get_kernel_manager_cluster()
         .network_manager
-        .send_data_frame(
-            frame_info.get_device_id(),
-            &buffer,
-            DHCP_DESTINATION_MAC_ADDRESS,
-            ipv4::ETHERNET_TYPE_IPV4,
+        .get_ethernet_mac_address(device_id);
+    if let Err(e) = mac_address {
+        pr_err!("Failed to get mac address: {:?}", e);
+        return Err(());
+    }
+    let mac_address = mac_address.unwrap();
+    let transaction_id = 124u32;
+
+    let socket = get_kernel_manager_cluster()
+        .network_manager
+        .get_socket_manager()
+        .add_socket(
+            LinkType::Ethernet(EthernetFrameInfo::new(
+                device_id,
+                MacAddress::new(DHCP_DESTINATION_MAC_ADDRESS),
+            )),
+            InternetType::Ipv4(Ipv4ConnectionInfo::new(0, DHCP_DESTINATION_IPV4_ADDRESS)),
+            TransportType::Udp(UdpConnectionInfo::new(
+                DHCP_SENDER_PORT,
+                DHCP_DESTINATION_PORT,
+            )),
         );
-}
-
-pub fn get_ipv4_address(device_id: usize) {
-    if udp::add_udp_port_listener(udp::UdpPortListenEntry::new(
-        packet_handler,
-        0,
-        0,
-        DHCP_SENDER_PORT,
-    ))
-    .is_err()
-    {
-        pr_err!("Failed to add listener");
-        return;
+    if let Err(e) = socket {
+        pr_err!("Failed to add socket: {:?}", e);
+        return Err(());
     }
-    send_dhcp_discover_packet(device_id);
-}
+    let socket = socket.unwrap();
 
-fn packet_handler(
-    entry: &udp::UdpPortListenEntry,
-    _packet_info: &ipv4::Ipv4PacketInfo,
-    frame_info: &EthernetFrameInfo,
-) {
-    if entry.payload_size < MSize::new(DHCP_MAGIC_OFFSET + DHCP_MAGIC.len()) {
-        pr_err!("Invalid packet size");
-        let _ = kfree!(entry.allocated_data_address, entry.data_length);
-        return;
-    }
+    let buffer = create_dhcp_discover_packet(&mac_address, transaction_id);
 
-    let dhcp_packet = unsafe {
-        core::slice::from_raw_parts(
-            (entry.allocated_data_address + entry.payload_offset).to_usize() as *const u8,
-            entry.payload_size.to_usize(),
+    let result = get_kernel_manager_cluster()
+        .network_manager
+        .get_socket_manager()
+        .send_socket(
+            socket,
+            VAddress::new(&buffer as *const _ as usize),
+            MSize::new(buffer.len()),
         )
-    };
+        .and_then(|sent| {
+            if sent.to_usize() == buffer.len() {
+                Ok(())
+            } else {
+                Err(())
+            }
+        });
 
-    if dhcp_packet[DHCP_MAGIC_OFFSET..(DHCP_MAGIC_OFFSET + DHCP_MAGIC.len())] != DHCP_MAGIC {
-        pr_err!("DHCP Signature is invalid");
-        let _ = kfree!(entry.allocated_data_address, entry.data_length);
-        return;
+    if let Err(e) = result {
+        let _ = get_kernel_manager_cluster()
+            .network_manager
+            .get_socket_manager()
+            .close_socket(socket);
+        pr_err!("Failed to send discover request: {:?}", e);
+        return Err(());
     }
+
+    let buffer: MaybeUninit<[u8; DHCP_PACKET_SIZE]> = MaybeUninit::uninit();
+
+    let result = get_kernel_manager_cluster()
+        .network_manager
+        .get_socket_manager()
+        .read_socket(
+            socket,
+            VAddress::new(buffer.as_ptr() as usize),
+            MSize::new(DHCP_PACKET_SIZE),
+            true,
+        );
+
+    if let Err(e) = result {
+        let _ = get_kernel_manager_cluster()
+            .network_manager
+            .get_socket_manager()
+            .close_socket(socket);
+        pr_err!("Failed to read socket: {:?}", e);
+        return Err(());
+    }
+
+    let read_size = result.unwrap();
+    if read_size < MSize::new(DHCP_MAGIC_OFFSET + DHCP_MAGIC.len()) {
+        pr_err!("Invalid packet size");
+        return Err(());
+    }
+
+    let buffer = unsafe { buffer.assume_init() };
     let packet_type: &[u8; DHCP_MESSAGE_TYPE_LEN] =
-        read_bytes_from_slice(dhcp_packet, DHCP_MESSAGE_TYPE_OFFSET);
-    let transaction_id = u32::from_be_bytes(*read_bytes_from_slice(dhcp_packet, DHCP_XID_OFFSET));
+        read_bytes_from_slice(&buffer, DHCP_MESSAGE_TYPE_OFFSET);
+    let received_transaction_id =
+        u32::from_be_bytes(*read_bytes_from_slice(&buffer, DHCP_XID_OFFSET));
     let offered_address = u32::from_be_bytes(*read_bytes_from_slice(
-        dhcp_packet,
+        &buffer,
         DHCP_OFFERED_IP_ADDRESS_OFFSET,
     ));
 
-    pr_debug!("Transaction ID: {transaction_id}");
+    if packet_type != DHCP_MESSAGE_TYPE_OFFER || received_transaction_id != transaction_id {
+        pr_err!("Invalid packet type: {:#X?}", packet_type);
+        pr_err!("TransactionId: {transaction_id} <=> {received_transaction_id}");
+        return Err(());
+    }
+    pr_debug!(
+        "Offered IPv4 Address: {}",
+        AddressPrinter {
+            address: &offered_address.to_be_bytes(),
+            separator: '.',
+            is_hex: false
+        },
+    );
+
+    /* Send Request */
+    let buffer = create_dhcp_request_packet(&mac_address, transaction_id, offered_address);
+
+    let result = get_kernel_manager_cluster()
+        .network_manager
+        .get_socket_manager()
+        .send_socket(
+            socket,
+            VAddress::new(&buffer as *const _ as usize),
+            MSize::new(buffer.len()),
+        )
+        .and_then(|sent| {
+            if sent.to_usize() == buffer.len() {
+                Ok(())
+            } else {
+                Err(())
+            }
+        });
+
+    if let Err(e) = result {
+        let _ = get_kernel_manager_cluster()
+            .network_manager
+            .get_socket_manager()
+            .close_socket(socket);
+        pr_err!("Failed to send request request: {:?}", e);
+        return Err(());
+    }
+
+    let buffer: MaybeUninit<[u8; DHCP_PACKET_SIZE]> = MaybeUninit::uninit();
+
+    let result = get_kernel_manager_cluster()
+        .network_manager
+        .get_socket_manager()
+        .read_socket(
+            socket,
+            VAddress::new(buffer.as_ptr() as usize),
+            MSize::new(DHCP_PACKET_SIZE),
+            true,
+        );
+
+    if let Err(e) = result {
+        let _ = get_kernel_manager_cluster()
+            .network_manager
+            .get_socket_manager()
+            .close_socket(socket);
+        pr_err!("Failed to read socket: {:?}", e);
+        return Err(());
+    }
+
+    let _ = get_kernel_manager_cluster()
+        .network_manager
+        .get_socket_manager()
+        .close_socket(socket);
+
+    let read_size = result.unwrap();
+    if read_size < MSize::new(DHCP_MAGIC_OFFSET + DHCP_MAGIC.len()) {
+        pr_err!("Invalid packet size");
+        return Err(());
+    }
+
+    let buffer = unsafe { buffer.assume_init() };
+    let packet_type: &[u8; DHCP_MESSAGE_TYPE_LEN] =
+        read_bytes_from_slice(&buffer, DHCP_MESSAGE_TYPE_OFFSET);
+    let received_transaction_id =
+        u32::from_be_bytes(*read_bytes_from_slice(&buffer, DHCP_XID_OFFSET));
+    let offered_address = u32::from_be_bytes(*read_bytes_from_slice(
+        &buffer,
+        DHCP_OFFERED_IP_ADDRESS_OFFSET,
+    ));
+
+    if received_transaction_id != transaction_id {
+        pr_err!("TransactionId: {transaction_id} <=> {received_transaction_id}");
+        return Err(());
+    }
+
     match packet_type {
-        &DHCP_MESSAGE_TYPE_OFFER => {
-            pr_debug!(
-                "Offered IPv4 Address: {}",
-                AddressPrinter {
-                    address: &offered_address.to_be_bytes(),
-                    separator: '.',
-                    is_hex: false
-                },
-            );
-            send_dhcp_request_packet(frame_info, transaction_id, offered_address);
-        }
         &DHCP_MESSAGE_TYPE_PACK => {
             pr_debug!(
                 "Request is accepted: My IPv4 Address is {}",
@@ -363,7 +432,8 @@ fn packet_handler(
                     is_hex: false
                 },
             );
-            ipv4::set_default_ipv4_address(frame_info.get_device_id(), offered_address);
+            set_default_ipv4_address(device_id, offered_address);
+            Ok(offered_address)
         }
         &DHCP_MESSAGE_TYPE_PNACK => {
             pr_debug!(
@@ -374,12 +444,11 @@ fn packet_handler(
                     is_hex: false
                 },
             );
-            send_dhcp_discover_packet(frame_info.get_device_id());
+            Err(())
         }
         _ => {
             pr_err!("Unknown packet type: {:#X?}", packet_type);
+            Err(())
         }
     }
-
-    let _ = kfree!(entry.allocated_data_address, entry.data_length);
 }

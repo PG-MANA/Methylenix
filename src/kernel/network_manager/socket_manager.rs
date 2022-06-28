@@ -2,14 +2,11 @@
 //! Socket Manager
 //!
 
-use super::{tcp, AddressInfo};
+use super::{ipv4, tcp, udp, InternetType, LinkType, NetworkError, TransportType};
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::collections::ring_buffer::Ringbuffer;
-use crate::kernel::file_manager::{
-    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
-    FILE_PERMISSION_WRITE,
-};
+use crate::kernel::file_manager::{FileDescriptor, FileOperationDriver, FileSeekOrigin};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
@@ -17,49 +14,31 @@ use crate::kernel::task_manager::wait_queue::WaitQueue;
 
 use crate::{kfree, kmalloc};
 
+use core::ptr::copy_nonoverlapping;
+
 const DEFAULT_BUFFER_SIZE: usize = 4096;
 
 pub struct SocketManager {
     lock: IrqSaveSpinLockFlag,
-    active_socket: PtrLinkedList<SocketInfo>,
+    active_socket: PtrLinkedList<Socket>,
     listening_socket: PtrLinkedList<SocketInfo>,
 }
 
-struct ListeningInfo {
-    address: AddressInfo,
-    port: u16,
-    waiting_socket: PtrLinkedList<SocketInfo>,
+struct SocketLayerInfo {
+    link: LinkType,
+    internet: InternetType,
+    transport: TransportType,
 }
 
-enum SegmentInfo {
-    Invalid,
-    Listening(ListeningInfo),
-    Tcp(tcp::TcpSegmentInfo),
-}
-
-pub struct SocketInfo {
+pub struct Socket {
     list: PtrLinkedListNode<Self>,
     lock: SpinLockFlag,
-    segment_info: SegmentInfo,
-    domain: Domain,
-    protocol: Protocol,
+    is_active: bool,
+    layer_info: SocketLayerInfo,
     wait_queue: WaitQueue,
     send_ring_buffer: Ringbuffer,
     receive_ring_buffer: Ringbuffer,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum Domain {
-    Unix,
-    Ipv4,
-    Ipv6,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum Protocol {
-    Raw,
-    Tcp,
-    Udp,
+    waiting_socket: PtrLinkedList<Self>,
 }
 
 impl SocketManager {
@@ -71,353 +50,493 @@ impl SocketManager {
         }
     }
 
-    pub fn create_socket_as_file(
+    pub fn add_socket(
         &'static mut self,
-        domain: Domain,
-        protocol: Protocol,
-    ) -> Result<File, ()> {
+        link_type: LinkType,
+        internet_type: InternetType,
+        transport_type: TransportType,
+    ) -> Result<&'static mut Socket, NetworkError> {
         match kmalloc!(
-            SocketInfo,
-            SocketInfo {
+            Socket,
+            Socket {
                 list: PtrLinkedListNode::new(),
                 lock: SpinLockFlag::new(),
-                domain,
-                protocol,
-                segment_info: SegmentInfo::Invalid,
+                layer_info: SocketLayerInfo {
+                    link: link_type,
+                    internet: internet_type,
+                    transport: transport_type
+                },
+                is_active: true,
                 wait_queue: WaitQueue::new(),
                 send_ring_buffer: Ringbuffer::new(),
-                receive_ring_buffer: Ringbuffer::new()
+                receive_ring_buffer: Ringbuffer::new(),
+                waiting_socket: PtrLinkedList::new()
             }
         ) {
-            Ok(d) => Ok(File::new(
-                FileDescriptor::new(d as *mut _ as usize, 0, 0),
-                self,
-            )),
+            Ok(s) => {
+                let _lock = self.lock.lock();
+                self.active_socket.insert_tail(&mut s.list);
+                drop(_lock);
+                Ok(s)
+            }
             Err(e) => {
-                pr_err!("Failed to allocate memory: {:?}", e);
-                return Err(());
+                pr_err!("Failed to create socket: {:?}", e);
+                Err(NetworkError::MemoryError(e))
             }
         }
     }
 
-    pub fn bind_socket(
-        &mut self,
-        file: &mut File,
-        address: AddressInfo,
-        port: u16,
-    ) -> Result<(), ()> {
-        if file.get_driver_address() != self as *mut _ as usize {
-            pr_err!("Invalid file descriptor");
-            return Err(());
-        }
-        let file_descriptor = file.get_descriptor();
-        let socket_info = unsafe { &mut *(file_descriptor.get_data() as *mut SocketInfo) };
-        if !matches!(socket_info.segment_info, SegmentInfo::Invalid) {
-            pr_err!("Socket is already used");
-            return Err(());
-        }
-        if address != AddressInfo::Any
-            && ((socket_info.domain == Domain::Ipv4 && !matches!(AddressInfo::Ipv4, address))
-                || (socket_info.domain == Domain::Ipv6 && !matches!(AddressInfo::Ipv6, address)))
-        {
-            pr_err!("Invalid address");
-            return Err(());
-        }
-
-        socket_info.segment_info = SegmentInfo::Listening(ListeningInfo {
-            address,
-            port,
-            waiting_socket: PtrLinkedList::new(),
-        });
-        return Ok(());
+    pub fn add_listening_socket(
+        &'static mut self,
+        link_type: LinkType,
+        internet_type: InternetType,
+        transport_type: TransportType,
+    ) -> Result<&'static mut Socket, NetworkError> {
+        self.add_socket(link_type, internet_type, transport_type)
     }
 
-    pub fn listen_socket(&mut self, file: &mut File, max_connection: usize) -> Result<(), ()> {
-        if file.get_driver_address() != self as *mut _ as usize {
-            pr_err!("Invalid file descriptor");
-            return Err(());
-        }
-        let file_descriptor = file.get_descriptor();
-        let socket_info = unsafe { &mut *(file_descriptor.get_data() as *mut SocketInfo) };
-        let _self_lock = self.lock.lock();
-        let _socket_lock = socket_info.lock.lock();
-        if let SegmentInfo::Listening(listen_info) = &socket_info.segment_info {
-            match socket_info.protocol {
-                Protocol::Raw => Err(()),
-                Protocol::Tcp => {
-                    let result = tcp::bind_port(
-                        listen_info.port,
-                        listen_info.address.clone(),
-                        max_connection,
-                        Self::tcp_open_handler,
-                    );
-                    if let Err(err) = result {
-                        pr_err!("Failed to listen TCP socket: {:?}", err);
-                        return Err(());
-                    }
-                    socket_info.list = PtrLinkedListNode::new();
-                    self.listening_socket.insert_tail(&mut socket_info.list);
-                    drop(_socket_lock);
-                    drop(_self_lock);
-                    result
-                }
-                Protocol::Udp => Err(()),
+    pub fn activate_waiting_socket(
+        &'static mut self,
+        socket: &mut Socket,
+        allow_sleep: bool,
+    ) -> Result<&'static mut Socket, NetworkError> {
+        let _socket_lock = socket.lock.lock();
+
+        if let Some(waiting_socket) = unsafe {
+            socket
+                .waiting_socket
+                .take_first_entry(offset_of!(Socket, list))
+        } {
+            drop(_socket_lock);
+            waiting_socket.list = PtrLinkedListNode::new();
+            let _lock = self.lock.lock();
+
+            self.active_socket.insert_tail(&mut waiting_socket.list);
+            drop(_lock);
+            Ok(waiting_socket)
+        } else if allow_sleep {
+            drop(_socket_lock);
+            if let Err(err) = socket.wait_queue.add_current_thread() {
+                pr_err!("Failed to add current thread: {:?}", err);
+                return Err(NetworkError::InternalError);
             }
+            self.activate_waiting_socket(socket, allow_sleep)
         } else {
             drop(_socket_lock);
-            pr_err!("Socket is not listenable");
-            return Err(());
+            Err(NetworkError::InvalidSocket /* Really OK?*/)
         }
     }
 
-    pub fn accept_client(&'static mut self, listening_socket_file: &mut File) -> Result<File, ()> {
-        if listening_socket_file.get_driver_address() != self as *mut _ as usize {
-            pr_err!("Invalid file descriptor");
-            return Err(());
-        }
-        let socket_info =
-            unsafe { &mut *(listening_socket_file.get_descriptor().get_data() as *mut SocketInfo) };
-        let mut _self_lock = self.lock.lock();
-        let mut _socket_lock = socket_info.lock.lock();
-        if let SegmentInfo::Listening(listen_info) = &mut socket_info.segment_info {
-            match socket_info.protocol {
-                Protocol::Raw => Err(()),
-                Protocol::Tcp => {
-                    while listen_info.waiting_socket.is_empty() {
-                        /* Is the timing of unlock OK? */
-                        drop(_socket_lock);
-                        drop(_self_lock);
-                        let _ = socket_info.wait_queue.add_current_thread();
-                        _self_lock = self.lock.lock();
-                        _socket_lock = socket_info.lock.lock();
-                    }
-                    let child_socket = unsafe {
-                        listen_info
-                            .waiting_socket
-                            .take_first_entry(offset_of!(SocketInfo, list))
-                    }
-                    .unwrap();
-                    drop(_socket_lock);
-                    // child_socket is not inserted yet, so we can lock self after socket.
-                    child_socket.list = PtrLinkedListNode::new();
-                    self.active_socket.insert_tail(&mut child_socket.list);
-                    drop(_self_lock);
-                    Ok(File::new(
-                        FileDescriptor::new(
-                            child_socket as *mut _ as usize,
-                            0,
-                            FILE_PERMISSION_READ | FILE_PERMISSION_WRITE,
-                        ),
-                        self,
-                    ))
-                }
-                Protocol::Udp => Err(()),
-            }
-        } else {
-            drop(_socket_lock);
-            pr_err!("Socket is not listening socket");
-            Err(())
-        }
-    }
-
-    pub fn read_data(
+    pub fn read_socket(
         &mut self,
-        socket_file: &mut File,
+        socket: &mut Socket,
         buffer_address: VAddress,
         buffer_size: MSize,
-    ) -> Result<MSize, ()> {
-        if !socket_file.is_readable() {
-            pr_debug!("Socket is not readable",);
-            return Err(());
-        }
-        if socket_file.get_driver_address() != self as *mut _ as usize {
-            pr_err!("Invalid file descriptor");
-            return Err(());
-        }
-        let file_descriptor = socket_file.get_descriptor();
-        let socket_info = unsafe { &mut *(file_descriptor.get_data() as *mut SocketInfo) };
-        let mut _lock = socket_info.lock.lock();
-        let mut read_size: MSize;
-        loop {
-            read_size = socket_info
-                .receive_ring_buffer
-                .read(buffer_address, buffer_size);
-            if !read_size.is_zero() {
-                break;
-            }
+        allow_sleep: bool,
+    ) -> Result<MSize, NetworkError> {
+        let _lock = socket.lock.lock();
+        let read_size = socket.receive_ring_buffer.read(buffer_address, buffer_size);
+        if read_size.is_zero() && allow_sleep {
             drop(_lock);
-            if let Err(err) = socket_info.wait_queue.add_current_thread() {
-                pr_err!("Failed to sleep: {:?}", err);
-                return Err(());
+            if let Err(e) = socket.wait_queue.add_current_thread() {
+                pr_err!("Failed to sleep current thread: {:?}", e);
+                return Err(NetworkError::InternalError);
             }
-            _lock = socket_info.lock.lock();
+            return self.read_socket(socket, buffer_address, buffer_size, allow_sleep);
         }
         return Ok(read_size);
     }
 
-    pub fn write_data(
+    pub fn send_socket(
         &mut self,
-        socket_file: &mut File,
+        socket: &mut Socket,
         buffer_address: VAddress,
         buffer_size: MSize,
-    ) -> Result<MSize, ()> {
-        if !socket_file.is_writable() {
-            pr_debug!("Socket is not writable",);
-            return Err(());
-        }
-        if socket_file.get_driver_address() != self as *mut _ as usize {
-            pr_err!("Invalid file descriptor");
-            return Err(());
-        }
-        let file_descriptor = socket_file.get_descriptor();
-        let socket_info = unsafe { &mut *(file_descriptor.get_data() as *mut SocketInfo) };
-        let _lock = socket_info.lock.lock();
-        match &mut socket_info.segment_info {
-            SegmentInfo::Invalid => Err(()),
-            SegmentInfo::Listening(_) => Err(()),
-            SegmentInfo::Tcp(segment) => {
-                tcp::send_data(segment, buffer_address, buffer_size)?;
-                Ok(buffer_size)
-            }
-        }
-    }
-
-    pub fn tcp_data_handler(
-        data_base_address: VAddress,
-        data_length: MSize,
-        segment_info: tcp::TcpSegmentInfo,
-    ) -> Result<(), ()> {
-        let s = get_kernel_manager_cluster()
-            .network_manager
-            .get_socket_manager();
-        let _self_lock = s.lock.lock();
-        for e in unsafe { s.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
-            if e.protocol == Protocol::Tcp {
-                if let SegmentInfo::Tcp(info) = &mut e.segment_info {
-                    if segment_info.is_equal(info) {
-                        let _sock_lock = e.lock.lock();
-                        if e.receive_ring_buffer.get_buffer_size().is_zero() {
-                            let new_buffer_size = MSize::new(DEFAULT_BUFFER_SIZE);
-                            match kmalloc!(new_buffer_size) {
-                                Ok(a) => {
-                                    e.receive_ring_buffer.set_new_buffer(a, new_buffer_size);
-                                }
-                                Err(err) => {
-                                    pr_err!("Failed to allocate memory: {:?}", err);
-                                    return Err(());
-                                }
-                            }
-                        }
-                        let written_size =
-                            e.receive_ring_buffer.write(data_base_address, data_length);
-                        let _ = e.wait_queue.wakeup_all();
-                        drop(_sock_lock);
-                        drop(_self_lock);
-                        if written_size < data_length {
-                            pr_err!("{} bytes are overflowed.", (data_length - written_size));
-                        }
-                        return Ok(());
-                    }
+    ) -> Result<MSize, NetworkError> {
+        let _lock = socket.lock.lock();
+        match &mut socket.layer_info.transport {
+            TransportType::Tcp(session_info) => match &socket.layer_info.internet {
+                InternetType::None => {
+                    return Err(NetworkError::InvalidSocket);
                 }
-            }
-        }
-        drop(_self_lock);
-        return Err(());
-    }
+                InternetType::Ipv4(v4) => {
+                    return tcp::send_tcp_ipv4_data(
+                        session_info,
+                        buffer_address,
+                        buffer_size,
+                        v4,
+                        &socket.layer_info.link,
+                    )
+                    .and_then(|_| Ok(buffer_size))
+                }
+                InternetType::Ipv6(_) => {
+                    unimplemented!();
+                }
+            },
+            TransportType::Udp(u) => match &socket.layer_info.internet {
+                InternetType::None => {
+                    return Err(NetworkError::InvalidSocket);
+                }
+                InternetType::Ipv4(v4) => {
+                    let send_buffer_size =
+                        MSize::new(udp::UDP_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE)
+                            + buffer_size;
+                    let send_buffer = match kmalloc!(send_buffer_size) {
+                        Ok(a) => a,
+                        Err(e) => {
+                            pr_err!("Failed to allocate buffer: {:?}", e);
+                            return Err(NetworkError::MemoryError(e));
+                        }
+                    };
 
-    pub fn tcp_open_handler(segment_info: tcp::TcpSegmentInfo) -> Result<tcp::TcpDataHandler, ()> {
-        let s = get_kernel_manager_cluster()
-            .network_manager
-            .get_socket_manager();
-        let _self_lock = s.lock.lock();
-        for e in unsafe { s.listening_socket.iter_mut(offset_of!(SocketInfo, list)) } {
-            if e.protocol == Protocol::Tcp {
-                if let SegmentInfo::Listening(info) = &mut e.segment_info {
-                    if info.port == segment_info.get_destination_port()
-                        && (info.address == AddressInfo::Any
-                            || info.address
-                                == AddressInfo::Ipv4(
-                                    segment_info.get_packet_info().get_destination_address(),
-                                ))
-                    {
-                        let _socket_lock = e.lock.lock();
-                        /* Create Socket */
-                        let child_socket = kmalloc!(
-                            SocketInfo,
-                            SocketInfo {
-                                list: PtrLinkedListNode::new(),
-                                lock: SpinLockFlag::new(),
-                                segment_info: SegmentInfo::Tcp(segment_info),
-                                domain: e.domain,
-                                protocol: e.protocol,
-                                wait_queue: WaitQueue::new(),
-                                send_ring_buffer: Ringbuffer::new(),
-                                receive_ring_buffer: Ringbuffer::new(),
-                            }
+                    let header_buffer = unsafe {
+                        &mut *(send_buffer.to_usize()
+                            as *mut [u8; udp::UDP_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE])
+                    };
+                    udp::create_ipv4_udp_header(
+                        header_buffer,
+                        unsafe {
+                            core::slice::from_raw_parts(
+                                buffer_address.to_usize() as *const u8,
+                                buffer_size.to_usize(),
+                            )
+                        },
+                        u.get_sender_port(),
+                        v4.get_sender_address(),
+                        u.get_destination_port(),
+                        v4.get_destination_address(),
+                        0,
+                    )?;
+
+                    unsafe {
+                        copy_nonoverlapping(
+                            buffer_address.to_usize() as *const u8,
+                            (send_buffer.to_usize() + header_buffer.len()) as *mut u8,
+                            buffer_size.to_usize(),
                         );
-                        if let Err(err) = child_socket {
-                            pr_err!("Failed to allocate memory: {:?}", err);
-                            return Err(());
-                        }
-                        let child_socket = child_socket.unwrap();
-                        info.waiting_socket.insert_tail(&mut child_socket.list);
-                        let _ = e.wait_queue.wakeup_one();
-                        drop(_socket_lock);
-                        drop(_self_lock);
-                        return Ok(Self::tcp_data_handler);
                     }
+                    let send_buffer_slice = unsafe {
+                        core::slice::from_raw_parts(
+                            send_buffer.to_usize() as *const u8,
+                            send_buffer_size.to_usize(),
+                        )
+                    };
+
+                    let result = match &socket.layer_info.link {
+                        LinkType::None => Err(NetworkError::InvalidSocket),
+                        LinkType::Ethernet(ether) => {
+                            drop(_lock); //TODO: clone ether
+                            get_kernel_manager_cluster()
+                                .network_manager
+                                .ethernet_manager
+                                .reply_data(ether, send_buffer_slice)
+                        }
+                    };
+                    let _ = kfree!(send_buffer, send_buffer_size);
+                    return result.and_then(|_| Ok(buffer_size));
                 }
-            }
+                InternetType::Ipv6(_) => {
+                    unimplemented!()
+                }
+            },
         }
-        return Err(());
     }
 
-    fn _close_socket(&mut self, socket_info: &mut SocketInfo, is_active: bool) -> Result<(), ()> {
+    pub fn close_socket(&mut self, socket: &'static mut Socket) -> Result<(), NetworkError> {
+        let _lock = self.lock.lock();
+        self._close_socket(socket)
+    }
+
+    fn _close_socket(&mut self, socket: &mut Socket) -> Result<(), NetworkError> {
         assert!(self.lock.is_locked());
-        let _socket_lock = socket_info.lock.lock();
-        if !socket_info.send_ring_buffer.get_buffer_size().is_zero() {
+        let _socket_lock = socket.lock.lock();
+        if !socket.receive_ring_buffer.get_buffer_size().is_zero() {
             let _ = kfree!(
-                socket_info.send_ring_buffer.get_buffer_address(),
-                socket_info.send_ring_buffer.get_buffer_size()
+                socket.receive_ring_buffer.get_buffer_address(),
+                socket.receive_ring_buffer.get_buffer_size()
             );
-            socket_info.send_ring_buffer.unset_buffer();
+            socket.receive_ring_buffer.unset_buffer();
         }
-        if !socket_info.receive_ring_buffer.get_buffer_size().is_zero() {
+        if !socket.send_ring_buffer.get_buffer_size().is_zero() {
             let _ = kfree!(
-                socket_info.receive_ring_buffer.get_buffer_address(),
-                socket_info.receive_ring_buffer.get_buffer_size()
+                socket.send_ring_buffer.get_buffer_address(),
+                socket.send_ring_buffer.get_buffer_size()
             );
-            socket_info.receive_ring_buffer.unset_buffer();
+            socket.send_ring_buffer.unset_buffer();
         }
-        match &mut socket_info.segment_info {
-            SegmentInfo::Invalid => { /* Do nothing */ }
-            SegmentInfo::Listening(l) => {
-                match socket_info.protocol {
-                    Protocol::Raw => { /*TODO: ... */ }
-                    Protocol::Tcp => {
-                        tcp::unbind_port(l.port, l.address.clone())?;
-                    }
-                    Protocol::Udp => { /*TODO: ... */ }
-                }
-                while let Some(e) = unsafe {
-                    l.waiting_socket
-                        .take_first_entry(offset_of!(SocketInfo, list))
-                } {
-                    self._close_socket(e, false)?;
-                    let _ = kfree!(e);
-                }
+        match &mut socket.layer_info.transport {
+            TransportType::Tcp(session_info) => {
+                socket.is_active = tcp::close_tcp_session(
+                    session_info,
+                    &mut socket.layer_info.internet,
+                    &mut socket.layer_info.link,
+                )?;
             }
-            SegmentInfo::Tcp(segment_info) => {
-                tcp::close_session(segment_info);
-                if is_active {
-                    self.active_socket.remove(&mut socket_info.list);
-                }
+            TransportType::Udp(_) => {
+                socket.is_active = false;
             }
         }
-        socket_info.segment_info = SegmentInfo::Invalid;
-        let _ = socket_info.wait_queue.wakeup_all();
+        while let Some(child_socket) = unsafe {
+            socket
+                .waiting_socket
+                .take_first_entry(offset_of!(Socket, list))
+        } {
+            let _child_socket_lock = child_socket.lock.lock();
+            self._close_socket(child_socket)?;
+            if child_socket.is_active {
+                self.active_socket.insert_tail(&mut child_socket.list);
+                drop(_child_socket_lock);
+            } else {
+                drop(_child_socket_lock);
+                let _ = kfree!(child_socket);
+            }
+        }
+
+        let _ = socket.wait_queue.wakeup_all();
         drop(_socket_lock);
         return Ok(());
+    }
+
+    /* Data Recieve Handlers */
+
+    pub fn udp_segment_handler(
+        &mut self,
+        _link_info: LinkType,
+        transport_info: InternetType,
+        udp_segment_info: udp::UdpSegmentInfo,
+        data_buffer: VAddress,
+        data_length: MSize,
+        payload_base: usize,
+    ) {
+        let _lock = self.lock.lock();
+        for e in unsafe { self.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
+            if let TransportType::Udp(udp_info) = &e.layer_info.transport {
+                if e.is_active
+                    && udp_info.get_destination_port()
+                        == udp_segment_info.connection_info.get_destination_port()
+                    && (udp_info.get_sender_port() == udp::UDP_PORT_ANY
+                        || udp_info.get_sender_port()
+                            == udp_segment_info.connection_info.get_sender_port())
+                {
+                    match &e.layer_info.internet {
+                        InternetType::None => { /* Check: OK */ }
+                        InternetType::Ipv4(ipv4_info) => {
+                            let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else {break;};
+
+                            if ipv4_info.get_sender_address() != ipv4::IPV4_ADDRESS_ANY {
+                                if ipv4_info.get_sender_address()
+                                    != arrive_ipv4_info.get_sender_address()
+                                {
+                                    break;
+                                }
+                            }
+                            if ipv4_info.get_destination_address() != ipv4::IPV4_ADDRESS_ANY {
+                                if ipv4_info.get_destination_address()
+                                    != arrive_ipv4_info.get_destination_address()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                        InternetType::Ipv6(_) => {
+                            unimplemented!()
+                        }
+                    }
+                    drop(_lock);
+                    let _socket_lock = e.lock.lock();
+                    let payload_size = MSize::new(udp_segment_info.payload_size);
+                    if e.receive_ring_buffer.get_buffer_size().is_zero() {
+                        let new_buffer_size = MSize::new(DEFAULT_BUFFER_SIZE);
+                        match kmalloc!(new_buffer_size) {
+                            Ok(a) => {
+                                e.receive_ring_buffer.set_new_buffer(a, new_buffer_size);
+                            }
+                            Err(err) => {
+                                pr_err!("Failed to allocate memory: {:?}", err);
+                                let _ = kfree!(data_buffer, data_length);
+                                return;
+                            }
+                        }
+                    }
+                    let written_size = e
+                        .receive_ring_buffer
+                        .write(data_buffer + MSize::new(payload_base), payload_size);
+                    if payload_size != written_size {
+                        pr_warn!("Overflowed {} Bytes", payload_size - written_size);
+                    }
+                    drop(_socket_lock);
+                    let _ = kfree!(data_buffer, data_length);
+                    return;
+                }
+            }
+        }
+        drop(_lock);
+        pr_debug!("UDP segment will be deleted...");
+        let _ = kfree!(data_buffer, data_length);
+    }
+
+    /* TCP Port Open Handler */
+    pub fn tcp_port_open_handler(
+        &mut self,
+        link_info: LinkType,
+        internet_info: InternetType,
+        tcp_segment_info: &tcp::TcpSegmentInfo,
+        new_session_info: tcp::TcpSessionInfo,
+    ) -> Result<(), NetworkError> {
+        let _lock = self.lock.lock();
+        for e in unsafe { self.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
+            if let TransportType::Tcp(tcp_info) = &e.layer_info.transport {
+                if e.is_active
+                    && tcp_info.get_status() == tcp::TcpSessionStatus::Listening
+                    && tcp_segment_info.get_destination_port() == tcp_info.get_our_port()
+                    && (tcp_info.get_their_port() == tcp::TCP_PORT_ANY
+                        || tcp_info.get_their_port() == tcp_segment_info.get_sender_port())
+                {
+                    match &e.layer_info.internet {
+                        InternetType::None => { /* Check: OK */ }
+                        InternetType::Ipv4(ipv4_info) => {
+                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
+
+                            if ipv4_info.get_sender_address() != ipv4::IPV4_ADDRESS_ANY {
+                                if ipv4_info.get_sender_address()
+                                    != arrive_ipv4_info.get_sender_address()
+                                {
+                                    break;
+                                }
+                            }
+                            if ipv4_info.get_destination_address() != ipv4::IPV4_ADDRESS_ANY {
+                                if ipv4_info.get_destination_address()
+                                    != arrive_ipv4_info.get_destination_address()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                        InternetType::Ipv6(_) => {
+                            unimplemented!()
+                        }
+                    }
+
+                    let child_socket = kmalloc!(
+                        Socket,
+                        Socket {
+                            list: PtrLinkedListNode::new(),
+                            lock: SpinLockFlag::new(),
+                            layer_info: SocketLayerInfo {
+                                link: link_info,
+                                internet: internet_info,
+                                transport: TransportType::Tcp(new_session_info),
+                            },
+                            wait_queue: WaitQueue::new(),
+                            send_ring_buffer: Ringbuffer::new(),
+                            receive_ring_buffer: Ringbuffer::new(),
+                            waiting_socket: PtrLinkedList::new(),
+                        }
+                    );
+                    if let Err(err) = child_socket {
+                        pr_err!("Failed to allocate memory: {:?}", err);
+                        return Err(NetworkError::MemoryError(err));
+                    }
+                    let child_socket = child_socket.unwrap();
+                    let _socket_lock = e.lock.lock();
+                    e.waiting_socket.insert_tail(&mut child_socket.list);
+                    drop(_socket_lock);
+                    drop(_lock);
+                    return Ok(());
+                }
+            }
+        }
+        drop(_lock);
+        return Err(NetworkError::InvalidAddress);
+    }
+
+    pub fn tcp_update_status<F>(
+        &mut self,
+        _link_info: LinkType,
+        internet_info: InternetType,
+        update_function: F,
+    ) -> Result<(), NetworkError>
+    where
+        F: FnOnce(&mut tcp::TcpSessionInfo) -> Result<bool /* Active */, NetworkError>,
+    {
+        let _lock = self.lock.lock();
+        for e in unsafe { self.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
+            if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
+                if e.is_active
+                    && tcp_segment_info.get_destination_port() == tcp_info.get_our_port()
+                    && tcp_info.get_their_port() == tcp_segment_info.get_sender_port()
+                {
+                    match &e.layer_info.internet {
+                        InternetType::None => { /* Check: OK */ }
+                        InternetType::Ipv4(ipv4_info) => {
+                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
+                            if ipv4_info.get_sender_address()
+                                != arrive_ipv4_info.get_sender_address()
+                                || ipv4_info.get_destination_address()
+                                    != arrive_ipv4_info.get_destination_address()
+                            {
+                                break;
+                            }
+                        }
+                        InternetType::Ipv6(_) => {
+                            unimplemented!()
+                        }
+                    }
+                    let _socket_lock = e.lock.lock();
+                    let result =
+                        update_function(tcp_info).and_then(|active| Ok(e.is_active = active));
+                    drop(_socket_lock);
+                    drop(_lock);
+                    return result;
+                }
+            }
+        }
+        drop(_lock);
+        return Err(NetworkError::InvalidAddress);
+    }
+
+    pub fn tcp_data_receive_handler<F>(
+        &mut self,
+        _link_info: LinkType,
+        internet_info: InternetType,
+        process_function: F,
+    ) -> Result<(), NetworkError>
+    where
+        F: FnOnce(&mut tcp::TcpSessionInfo, &mut Ringbuffer) -> Result<(), NetworkError>,
+    {
+        let _lock = self.lock.lock();
+        for e in unsafe { self.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
+            if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
+                if e.is_active
+                    && tcp_segment_info.get_destination_port() == tcp_info.get_our_port()
+                    && tcp_info.get_their_port() == tcp_segment_info.get_sender_port()
+                {
+                    match &e.layer_info.internet {
+                        InternetType::None => { /* Check: OK */ }
+                        InternetType::Ipv4(ipv4_info) => {
+                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
+                            if ipv4_info.get_sender_address()
+                                != arrive_ipv4_info.get_sender_address()
+                                || ipv4_info.get_destination_address()
+                                    != arrive_ipv4_info.get_destination_address()
+                            {
+                                break;
+                            }
+                        }
+                        InternetType::Ipv6(_) => {
+                            unimplemented!()
+                        }
+                    }
+                    let _socket_lock = e.lock.lock();
+                    let result = process_function(tcp_info, &mut e.receive_ring_buffer);
+                    drop(_socket_lock);
+                    drop(_lock);
+                    return result;
+                }
+            }
+        }
+        drop(_lock);
+        return Err(NetworkError::InvalidAddress);
     }
 }
 
@@ -445,12 +564,9 @@ impl FileOperationDriver for SocketManager {
     }
 
     fn close(&mut self, descriptor: FileDescriptor) {
-        let _self_lock = self.lock.lock();
         let socket_info = unsafe { &mut *(descriptor.get_data() as *mut SocketInfo) };
-        if let Err(err) = self._close_socket(socket_info, true) {
+        if let Err(err) = self.close_socket(socket_info) {
             pr_err!("Failed to close socket: {:?}", err);
-        } else {
-            let _ = kfree!(socket_info);
         }
     }
 }

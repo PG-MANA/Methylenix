@@ -2,7 +2,7 @@
 //! IPv4
 //!
 
-use super::{ethernet_device::EthernetFrameInfo, tcp, udp};
+use super::{tcp, udp, LinkType, NetworkError};
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
@@ -15,6 +15,7 @@ const IPV4_DEFAULT_IHL: u8 = 0x05;
 pub const IPV4_DEFAULT_HEADER_SIZE: usize = IPV4_DEFAULT_IHL as usize * 4;
 pub const ETHERNET_TYPE_IPV4: u16 = 0x0800;
 const MAX_PACKET_SIZE: u16 = u16::MAX;
+pub const IPV4_ADDRESS_ANY: u32 = 0;
 
 #[repr(C)]
 struct DefaultIpv4Packet {
@@ -30,22 +31,29 @@ struct DefaultIpv4Packet {
     destination_ip_address: u32,
 }
 
-/// PacketInfo is **the arrived segment information**.
+/// Ipv4ConnectionInfo is **the arrived segment information**.
 /// the **sender** means **opposite**, and the **destination** means **our side**.
 /// Be careful when reply data.
 #[derive(Clone)]
-pub struct Ipv4PacketInfo {
-    sender_ipv4_address: u32,
-    destination_ipv4_address: u32,
+pub struct Ipv4ConnectionInfo {
+    sender_address: u32,
+    destination_address: u32,
 }
 
-impl Ipv4PacketInfo {
+impl Ipv4ConnectionInfo {
+    pub fn new(our_address: u32, their_address: u32) -> Self {
+        Self {
+            sender_address: their_address,
+            destination_address: our_address,
+        }
+    }
+
     pub fn get_sender_address(&self) -> u32 {
-        self.sender_ipv4_address
+        self.sender_address
     }
 
     pub fn get_destination_address(&self) -> u32 {
-        self.destination_ipv4_address
+        self.destination_address
     }
 
     pub fn get_their_address(&self) -> u32 {
@@ -128,12 +136,12 @@ impl DefaultIpv4Packet {
         self.fragment_offset = 0;
     }
 
-    pub const fn get_fragment_offset(&self) -> usize {
-        ((u16::from_be(self.fragment_offset) & 0x1fff) as usize) << 3
+    pub const fn get_fragment_offset(&self) -> u16 {
+        (u16::from_be(self.fragment_offset) & 0x1fff) << 3
     }
 
     #[allow(dead_code)]
-    pub fn set_fragment_offset(&mut self, fragment_offset: usize) {
+    pub fn set_fragment_offset(&mut self, fragment_offset: u16) {
         assert_eq!(fragment_offset & 0b111, 0);
         assert!((fragment_offset >> 3) <= 0x1fff);
         self.fragment_offset = ((u16::from_be(self.fragment_offset) & !0x1fff)
@@ -201,11 +209,11 @@ pub fn create_default_ipv4_header(
     protocol: u8,
     sender_ipv4_address: u32,
     destination_ipv4_address: u32,
-) -> Result<(), ()> {
+) -> Result<(), NetworkError> {
     if data_size > ((MAX_PACKET_SIZE as usize) - IPV4_DEFAULT_HEADER_SIZE) {
-        return Err(());
+        return Err(NetworkError::DataSizeError);
     } else if header_buffer.len() < IPV4_DEFAULT_HEADER_SIZE {
-        return Err(());
+        return Err(NetworkError::DataSizeError);
     }
     let ipv4_packet = DefaultIpv4Packet::from_buffer(header_buffer);
     ipv4_packet.set_version_and_header_length();
@@ -229,7 +237,7 @@ pub fn ipv4_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     packet_offset: usize,
-    frame_info: EthernetFrameInfo,
+    link_info: LinkType,
 ) {
     let ipv4_base = allocated_data_base.to_usize() + packet_offset;
     let ipv4_packet = DefaultIpv4Packet::from_buffer(unsafe {
@@ -254,26 +262,27 @@ pub fn ipv4_packet_handler(
         let _ = kfree!(allocated_data_base, data_length);
         return;
     }
-    let packet_info = Ipv4PacketInfo {
-        sender_ipv4_address: ipv4_packet.get_sender_ip_address(),
-        destination_ipv4_address: ipv4_packet.get_destination_ip_address(),
+    let ipv4_packet_info = Ipv4ConnectionInfo {
+        sender_address: ipv4_packet.get_sender_ip_address(),
+        destination_address: ipv4_packet.get_destination_ip_address(),
     };
+
     match ipv4_packet.get_protocol() {
-        udp::IPV4_PROTOCOL_UDP => udp::udp_ipv4_packet_handler(
+        udp::IPV4_PROTOCOL_UDP => udp::udp_ipv4_segment_handler(
             allocated_data_base,
             data_length,
             packet_offset + header_length,
             packet_size as usize - header_length,
-            frame_info,
-            packet_info,
+            link_info,
+            ipv4_packet_info,
         ),
         tcp::IPV4_PROTOCOL_TCP => tcp::tcp_ipv4_packet_handler(
             allocated_data_base,
             data_length,
             packet_offset + header_length,
             packet_size as usize - header_length,
-            frame_info,
-            packet_info,
+            link_info,
+            ipv4_packet_info,
         ),
         t => {
             pr_err!("Unknown Protocol Type: {:#X}", t);

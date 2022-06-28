@@ -7,6 +7,12 @@
 pub mod tty;
 #[macro_use]
 pub mod collections {
+    #[macro_export]
+    macro_rules! init_struct {
+        ($st:expr, $v:expr) => {
+            core::mem::forget(core::mem::replace(&mut $st, $v))
+        };
+    }
     pub mod auxiliary_vector;
     pub mod fifo;
     pub mod guid;

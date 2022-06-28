@@ -3,14 +3,42 @@
 //!
 
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
+use crate::kernel::memory_manager::MemoryError;
 
-pub mod arp;
 pub mod dhcp;
 pub mod ethernet_device;
 pub mod ipv4;
 pub mod socket_manager;
 pub mod tcp;
 pub mod udp;
+
+enum LinkType {
+    None,
+    Ethernet(ethernet_device::EthernetFrameInfo),
+}
+
+#[derive(Clone)]
+enum InternetType {
+    None,
+    Ipv4(ipv4::Ipv4ConnectionInfo),
+    Ipv6(()),
+}
+
+enum TransportType {
+    Tcp(tcp::TcpSessionInfo),
+    Udp(udp::UdpConnectionInfo),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+enum NetworkError {
+    InvalidDevice,
+    DataSizeError,
+    InvalidSocket,
+    InvalidAddress,
+    InternalError,
+    MemoryError(MemoryError),
+    DataOverflowed,
+}
 
 struct AddressPrinter<'a> {
     address: &'a [u8],
@@ -49,14 +77,11 @@ pub struct NetworkManager {
 
 impl NetworkManager {
     pub fn init(&mut self) {
-        core::mem::forget(core::mem::replace(
-            &mut self.ethernet_manager,
-            ethernet_device::EthernetDeviceManager::new(),
-        ));
-        core::mem::forget(core::mem::replace(
-            &mut self.socket_manager,
-            socket_manager::SocketManager::new(),
-        ));
+        init_struct!(
+            self.ethernet_manager,
+            ethernet_device::EthernetDeviceManager::new()
+        );
+        init_struct!(self.socket_manager, socket_manager::SocketManager::new());
     }
 
     pub fn add_ethernet_device(
@@ -90,28 +115,10 @@ impl NetworkManager {
         &mut self.socket_manager
     }
 
-    pub fn get_ethernet_mac_address(&self, device_id: usize) -> Result<[u8; 6], ()> {
-        self.ethernet_manager.get_mac_address(device_id)
-    }
-
-    /// Arguments will be changed.
-    pub fn send_data_frame(
-        &mut self,
+    pub fn get_ethernet_mac_address(
+        &self,
         device_id: usize,
-        data: &[u8],
-        target_mac_address: [u8; 6],
-        ether_type: u16,
-    ) -> Result<(), ()> {
-        self.ethernet_manager
-            .send_data(device_id, data, target_mac_address, ether_type)
-    }
-
-    /// frame_info will be encapsulated.
-    pub fn reply_data_frame(
-        &mut self,
-        frame_info: ethernet_device::EthernetFrameInfo,
-        data: &[u8],
-    ) -> Result<(), ()> {
-        self.ethernet_manager.reply_data(frame_info, data)
+    ) -> Result<ethernet_device::MacAddress, NetworkError> {
+        self.ethernet_manager.get_mac_address(device_id)
     }
 }
