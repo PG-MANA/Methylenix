@@ -6,7 +6,6 @@ use super::{ipv4, tcp, udp, InternetType, LinkType, NetworkError, TransportType}
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::collections::ring_buffer::Ringbuffer;
-use crate::kernel::file_manager::{FileDescriptor, FileOperationDriver, FileSeekOrigin};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
@@ -15,6 +14,8 @@ use crate::kernel::task_manager::wait_queue::WaitQueue;
 use crate::{kfree, kmalloc};
 
 use core::ptr::copy_nonoverlapping;
+
+pub mod socket_system_call;
 
 const DEFAULT_BUFFER_SIZE: usize = 4096;
 
@@ -50,29 +51,33 @@ impl SocketManager {
         }
     }
 
-    pub fn add_socket(
-        &'static mut self,
+    pub fn create_socket(
+        &mut self,
         link_type: LinkType,
         internet_type: InternetType,
         transport_type: TransportType,
+    ) -> Result<Socket, NetworkError> {
+        Ok(Socket {
+            list: PtrLinkedListNode::new(),
+            lock: SpinLockFlag::new(),
+            layer_info: SocketLayerInfo {
+                link: link_type,
+                internet: internet_type,
+                transport: transport_type,
+            },
+            is_active: true,
+            wait_queue: WaitQueue::new(),
+            send_ring_buffer: Ringbuffer::new(),
+            receive_ring_buffer: Ringbuffer::new(),
+            waiting_socket: PtrLinkedList::new(),
+        })
+    }
+
+    pub fn add_socket(
+        &'static mut self,
+        socket: Socket,
     ) -> Result<&'static mut Socket, NetworkError> {
-        match kmalloc!(
-            Socket,
-            Socket {
-                list: PtrLinkedListNode::new(),
-                lock: SpinLockFlag::new(),
-                layer_info: SocketLayerInfo {
-                    link: link_type,
-                    internet: internet_type,
-                    transport: transport_type
-                },
-                is_active: true,
-                wait_queue: WaitQueue::new(),
-                send_ring_buffer: Ringbuffer::new(),
-                receive_ring_buffer: Ringbuffer::new(),
-                waiting_socket: PtrLinkedList::new()
-            }
-        ) {
+        match kmalloc!(Socket, socket) {
             Ok(s) => {
                 let _lock = self.lock.lock();
                 self.active_socket.insert_tail(&mut s.list);
@@ -88,11 +93,12 @@ impl SocketManager {
 
     pub fn add_listening_socket(
         &'static mut self,
-        link_type: LinkType,
-        internet_type: InternetType,
-        transport_type: TransportType,
-    ) -> Result<&'static mut Socket, NetworkError> {
-        self.add_socket(link_type, internet_type, transport_type)
+        socket: &'static mut Socket,
+    ) -> Result<(), NetworkError> {
+        let _lock = self.lock.lock();
+        self.active_socket.insert_tail(&mut socket.list);
+        drop(_lock);
+        Ok(())
     }
 
     pub fn activate_waiting_socket(
@@ -537,36 +543,5 @@ impl SocketManager {
         }
         drop(_lock);
         return Err(NetworkError::InvalidAddress);
-    }
-}
-
-impl FileOperationDriver for SocketManager {
-    fn read(
-        &mut self,
-        _descriptor: &mut FileDescriptor,
-        _buffer: VAddress,
-        _length: usize,
-    ) -> Result<usize, ()> {
-        return Err(());
-    }
-
-    fn write(
-        &mut self,
-        _descriptor: &mut FileDescriptor,
-        _buffer: VAddress,
-        _length: usize,
-    ) -> Result<usize, ()> {
-        return Err(());
-    }
-
-    fn seek(&mut self, _: &mut FileDescriptor, _: usize, _: FileSeekOrigin) -> Result<usize, ()> {
-        return Err(());
-    }
-
-    fn close(&mut self, descriptor: FileDescriptor) {
-        let socket_info = unsafe { &mut *(descriptor.get_data() as *mut SocketInfo) };
-        if let Err(err) = self.close_socket(socket_info) {
-            pr_err!("Failed to close socket: {:?}", err);
-        }
     }
 }

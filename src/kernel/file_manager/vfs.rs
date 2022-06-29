@@ -2,7 +2,7 @@
 //! Virtual File System
 //!
 
-use crate::kernel::memory_manager::data_type::VAddress;
+use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum FileSeekOrigin {
@@ -16,7 +16,7 @@ pub const FILE_PERMISSION_WRITE: u8 = 1 << 1;
 
 #[repr(transparent)]
 struct FakeDriver {}
-static mut FAKE_DRIVER: FakeDriver = FakeDriver {};
+pub static mut FAKE_DRIVER: FakeDriver = FakeDriver {};
 
 impl FileOperationDriver for FakeDriver {
     fn read(&mut self, _: &mut FileDescriptor, _: VAddress, _: usize) -> Result<usize, ()> {
@@ -39,29 +39,29 @@ pub trait FileOperationDriver {
         &mut self,
         descriptor: &mut FileDescriptor,
         buffer: VAddress,
-        length: usize,
-    ) -> Result<usize, ()>;
+        length: MSize,
+    ) -> Result<MSize, ()>;
 
     fn write(
         &mut self,
         descriptor: &mut FileDescriptor,
         buffer: VAddress,
-        length: usize,
-    ) -> Result<usize, ()>;
+        length: MSize,
+    ) -> Result<MSize, ()>;
 
     fn seek(
         &mut self,
         descriptor: &mut FileDescriptor,
-        offset: usize,
+        offset: MOffset,
         origin: FileSeekOrigin,
-    ) -> Result<usize, ()>;
+    ) -> Result<MOffset, ()>;
 
     fn close(&mut self, descriptor: FileDescriptor);
 }
 
 pub struct FileDescriptor {
     data: usize,
-    position: usize,
+    position: MOffset,
     device_index: usize,
     permission: u8,
 }
@@ -75,7 +75,7 @@ impl FileDescriptor {
     pub fn new(data: usize, device_index: usize, permission: u8) -> Self {
         Self {
             data,
-            position: 0,
+            position: MOffset::new(0),
             permission,
             device_index,
         }
@@ -89,15 +89,15 @@ impl FileDescriptor {
         self.device_index
     }
 
-    pub fn add_position(&mut self, position: usize) {
+    pub fn add_position(&mut self, position: MOffset) {
         self.position += position;
     }
 
-    pub fn set_position(&mut self, position: usize) {
+    pub fn set_position(&mut self, position: MOffset) {
         self.position = position;
     }
 
-    pub const fn get_position(&self) -> usize {
+    pub const fn get_position(&self) -> MOffset {
         self.position
     }
 }
@@ -139,21 +139,21 @@ impl<'a> File<'a> {
             .0 as usize
     }
 
-    pub fn read(&mut self, buffer: VAddress, length: usize) -> Result<usize, ()> {
+    pub fn read(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, ()> {
         if !self.is_readable() {
             return Err(());
         }
         self.driver.read(&mut self.descriptor, buffer, length)
     }
 
-    pub fn write(&mut self, buffer: VAddress, length: usize) -> Result<usize, ()> {
+    pub fn write(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, ()> {
         if !self.is_writable() {
             return Err(());
         }
         self.driver.write(&mut self.descriptor, buffer, length)
     }
 
-    pub fn seek(&mut self, offset: usize, origin: FileSeekOrigin) -> Result<usize, ()> {
+    pub fn seek(&mut self, offset: MOffset, origin: FileSeekOrigin) -> Result<MOffset, ()> {
         self.driver.seek(&mut self.descriptor, offset, origin)
     }
 

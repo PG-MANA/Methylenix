@@ -62,6 +62,20 @@ pub struct TcpSessionInfo {
 }
 
 impl TcpSessionInfo {
+    pub fn new(our_port: u16, their_port: u16) -> Self {
+        Self {
+            status: TcpSessionStatus::Closed,
+            our_port,
+            their_port,
+            window_size: 0,
+            expected_arrival_sequence_number: 0,
+            next_sequence_number: 0,
+            last_sent_acknowledge_number: 0,
+            receive_buffer_list: LinkedList::new(),
+            send_buffer_list: PtrLinkedList::new(),
+        }
+    }
+
     pub fn get_our_port(&self) -> u16 {
         self.our_port
     }

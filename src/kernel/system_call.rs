@@ -2,7 +2,6 @@
 //! System Call Handler
 //!
 
-mod network;
 mod system_call_number;
 
 use system_call_number::*;
@@ -15,8 +14,9 @@ use crate::arch::target_arch::system_call;
 use crate::kernel::file_manager::{File, FileSeekOrigin, PathInfo, FILE_PERMISSION_READ};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+    Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
 };
+use crate::kernel::network_manager::socket_manager::socket_system_call;
 
 pub fn system_call_handler(context: &mut ContextData) {
     match context.get_system_call_arguments(0).unwrap() as SysCallNumber {
@@ -108,10 +108,12 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
             let result = file.unwrap().lock().unwrap().read(
                 VAddress::new(context.get_system_call_arguments(2).unwrap() as usize),
-                context.get_system_call_arguments(3).unwrap() as usize,
+                MSize::new(context.get_system_call_arguments(3).unwrap() as usize),
             );
             context.set_system_call_return_value(
-                result.and_then(|r| Ok(r as u64)).unwrap_or(u64::MAX),
+                result
+                    .and_then(|r| Ok(r.to_usize() as u64))
+                    .unwrap_or(u64::MAX),
             );
         }
         SYSCALL_OPEN => {
@@ -181,11 +183,13 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
 
             let result = file.unwrap().lock().unwrap().seek(
-                context.get_system_call_arguments(2).unwrap() as usize,
+                MOffset::new(context.get_system_call_arguments(2).unwrap() as usize),
                 seek_origin,
             );
             context.set_system_call_return_value(
-                result.and_then(|r| Ok(r as u64)).unwrap_or(u64::MAX),
+                result
+                    .and_then(|r| Ok(r.to_usize() as u64))
+                    .unwrap_or(u64::MAX),
             );
         }
         SYSCALL_CLOSE => {
@@ -269,7 +273,11 @@ pub fn system_call_handler(context: &mut ContextData) {
             let domain_number = context.get_system_call_arguments(1).unwrap();
             let socket_type_number = context.get_system_call_arguments(2).unwrap();
             let protocol_number = context.get_system_call_arguments(3).unwrap();
-            let socket = network::create_socket(domain_number, socket_type_number, protocol_number);
+            let socket = socket_system_call::create_socket(
+                domain_number,
+                socket_type_number,
+                protocol_number,
+            );
             if let Err(err) = socket {
                 pr_warn!("Failed to create socket: {:?}", err);
                 context.set_system_call_return_value(u64::MAX);
@@ -298,7 +306,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                 context.set_system_call_return_value(u64::MAX);
                 return;
             }
-            if let Err(err) = network::bind_socket(&mut file.lock().unwrap(), unsafe {
+            if let Err(err) = socket_system_call::bind_socket(&mut file.lock().unwrap(), unsafe {
                 &*(sock_addr_address as usize as *const network::SockAddr)
             }) {
                 pr_err!("Failed to bind socket: {:?}", err);
@@ -320,9 +328,10 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
             let file = file.unwrap();
             let max_connection = context.get_system_call_arguments(2).unwrap();
-            if let Err(err) =
-                network::listen_socket(&mut file.lock().unwrap(), max_connection as usize)
-            {
+            if let Err(err) = socket_system_call::listen_socket(
+                &mut file.lock().unwrap(),
+                max_connection as usize,
+            ) {
                 pr_err!("Failed to listen socket: {:?}", err);
                 context.set_system_call_return_value(u64::MAX);
                 return;
@@ -348,7 +357,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                 return;
             }*/
             let file = file.unwrap();
-            let result = network::accept(&mut file.lock().unwrap());
+            let result = socket_system_call::accept(&mut file.lock().unwrap());
             if let Err(err) = result {
                 pr_debug!("Failed to accept connection: {:?}", err);
                 context.set_system_call_return_value(u64::MAX);
@@ -396,7 +405,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             //let sock_addr_address = context.get_system_call_arguments(5).unwrap();
             //let sock_addr_size_address = context.get_system_call_arguments(6).unwrap();
 
-            match network::recv_from(
+            match socket_system_call::recv_from(
                 &mut file.lock().unwrap(),
                 buffer_address,
                 buffer_size,
@@ -444,7 +453,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             //let sock_addr_address = context.get_system_call_arguments(5).unwrap();
             //let sock_addr_size = context.get_system_call_arguments(6).unwrap();
 
-            match network::send_to(
+            match socket_system_call::send_to(
                 &mut file.lock().unwrap(),
                 buffer_address,
                 buffer_size,
@@ -474,7 +483,8 @@ fn system_call_write(file: &mut File, data: usize, len: usize) -> Result<usize, 
     } else if len == 0 {
         return Ok(0);
     }
-    file.write(VAddress::new(data), len)
+    file.write(VAddress::new(data), MSize::new(len))
+        .and_then(|s| Ok(s.to_usize()))
 }
 
 fn system_call_memory_map(

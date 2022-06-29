@@ -10,12 +10,12 @@ mod vfs;
 
 pub use self::path_info::{PathInfo, PathInfoIter};
 pub use self::vfs::{
-    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
+    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FAKE_DRIVER, FILE_PERMISSION_READ,
     FILE_PERMISSION_WRITE,
 };
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
 use crate::{alloc_non_linear_pages, free_pages};
 
 use alloc::boxed::Box;
@@ -47,10 +47,10 @@ trait PartitionManager {
         &self,
         partition_info: &PartitionInfo,
         file_info: usize,
-        offset: usize,
-        length: usize,
+        offset: MOffset,
+        length: MSize,
         buffer: VAddress,
-    ) -> Result<usize, ()>;
+    ) -> Result<MSize, ()>;
 
     fn close_file(&self, partition_info: &PartitionInfo, file_info: usize);
 }
@@ -138,8 +138,8 @@ impl FileOperationDriver for FileManager {
         &mut self,
         descriptor: &mut FileDescriptor,
         buffer: VAddress,
-        length: usize,
-    ) -> Result<usize, ()> {
+        length: MSize,
+    ) -> Result<MSize, ()> {
         let p = &self.partition_list[descriptor.get_device_index()];
         let result = p.1.read_file(
             &p.0,
@@ -158,23 +158,23 @@ impl FileOperationDriver for FileManager {
         &mut self,
         _descriptor: &mut FileDescriptor,
         _buffer: VAddress,
-        _length: usize,
-    ) -> Result<usize, ()> {
+        _length: MSize,
+    ) -> Result<MSize, ()> {
         unimplemented!()
     }
 
     fn seek(
         &mut self,
         descriptor: &mut FileDescriptor,
-        offset: usize,
+        offset: MOffset,
         origin: FileSeekOrigin,
-    ) -> Result<usize, ()> {
+    ) -> Result<MOffset, ()> {
         match origin {
             FileSeekOrigin::SeekSet => descriptor.set_position(offset),
             FileSeekOrigin::SeekCur => descriptor.add_position(offset),
             FileSeekOrigin::SeekEnd => {
                 let pos = self.get_file_size(descriptor)?;
-                descriptor.set_position(pos);
+                descriptor.set_position(MOffset::new(pos));
             }
         }
         return Ok(descriptor.get_position());

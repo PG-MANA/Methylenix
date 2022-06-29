@@ -5,7 +5,7 @@
 use super::{PartitionInfo, PartitionManager, PathInfo};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 
 use crate::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
 
@@ -159,10 +159,10 @@ impl PartitionManager for Fat32Info {
         &self,
         partition_info: &PartitionInfo,
         file_info: usize,
-        offset: usize,
-        mut length: usize,
+        offset: MOffset,
+        mut length: MSize,
         buffer: VAddress,
-    ) -> Result<usize, ()> {
+    ) -> Result<MSize, ()> {
         let entry_info = unsafe { &*(file_info as *const Fat32EntryInfo) };
         if (entry_info.attribute
             & (FAT32_ATTRIBUTE_DIRECTORY
@@ -175,11 +175,11 @@ impl PartitionManager for Fat32Info {
         }
         if offset + length > entry_info.file_size as usize {
             if offset >= entry_info.file_size as usize {
-                return Ok(0);
+                return Ok(MSize::new(0));
             }
-            length -= entry_info.file_size as usize - offset;
+            length -= MSize::new(entry_info.file_size as usize) - offset;
         }
-        let length = length;
+        let length = length.to_usize();
 
         macro_rules! next_cluster {
             ($c:expr) => {
@@ -194,8 +194,9 @@ impl PartitionManager for Fat32Info {
         }
 
         let bytes_per_cluster = self.sectors_per_cluster as usize * self.bytes_per_sector as usize;
-        let number_of_clusters_to_skip = offset / bytes_per_cluster;
-        let mut page_buffer_offset = offset - number_of_clusters_to_skip * bytes_per_cluster;
+        let number_of_clusters_to_skip = offset.to_usize() / bytes_per_cluster;
+        let mut page_buffer_offset =
+            offset.to_usize() - number_of_clusters_to_skip * bytes_per_cluster;
         let mut reading_cluster = entry_info.entry_cluster;
         let mut buffer_pointer = 0usize;
 
@@ -268,7 +269,7 @@ impl PartitionManager for Fat32Info {
             }
             reading_cluster = next_cluster!(reading_cluster);
         }
-        return Ok(buffer_pointer);
+        return Ok(MSize::new(buffer_pointer));
     }
 
     fn close_file(&self, _: &PartitionInfo, file_info: usize) {

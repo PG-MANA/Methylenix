@@ -47,6 +47,14 @@ impl UdpConnectionInfo {
     pub fn get_destination_port(&self) -> u16 {
         self.destination_port
     }
+
+    pub fn get_their_port(&self) -> u16 {
+        self.get_sender_port()
+    }
+
+    pub fn get_our_port(&self) -> u16 {
+        self.get_destination_port()
+    }
 }
 
 impl UdpSegment {
