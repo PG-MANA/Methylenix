@@ -279,7 +279,7 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
                 get_cpu_manager_cluster()
                     .arch_depend_data
                     .gic_redistributor_manager,
-                cpu_redistributor,
+                cpu_redistributor
             );
             init_struct!(
                 get_kernel_manager_cluster().arch_depend_data.gic_manager,
