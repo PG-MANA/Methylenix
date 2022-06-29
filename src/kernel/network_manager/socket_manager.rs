@@ -559,7 +559,7 @@ impl SocketManager {
         for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
             if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
                 if e.is_active
-                    && tcp_info.get_status() != tcp::TcpSessionStatus::Listening
+                    && tcp_info.get_status() == tcp::TcpSessionStatus::Opened
                     && tcp_segment_info.get_destination_port() == tcp_info.get_our_port()
                     && tcp_info.get_their_port() == tcp_segment_info.get_sender_port()
                 {
@@ -593,6 +593,19 @@ impl SocketManager {
                     }
                     let _socket_lock = e.lock.lock();
                     drop(_lock);
+                    if e.receive_ring_buffer.get_buffer_size().is_zero() {
+                        let new_buffer_size = MSize::new(DEFAULT_BUFFER_SIZE);
+                        match kmalloc!(new_buffer_size) {
+                            Ok(a) => {
+                                e.receive_ring_buffer.set_new_buffer(a, new_buffer_size);
+                            }
+                            Err(err) => {
+                                drop(_socket_lock);
+                                pr_err!("Failed to allocate memory: {:?}", err);
+                                return Err(NetworkError::MemoryError(err));
+                            }
+                        }
+                    }
                     let result = process_function(tcp_info, &mut e.receive_ring_buffer);
                     if let Err(err) = e.wait_queue.wakeup_all() {
                         pr_err!("Failed to wake up threads: {:?}", err);

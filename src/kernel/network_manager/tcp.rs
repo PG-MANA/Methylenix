@@ -402,6 +402,7 @@ pub(super) fn create_ipv4_tcp_header(
     fin: bool,
     syn: bool,
     ack: bool,
+    psh: bool,
     ipv4_packet_id: u16,
     sender_ipv4_address: u32,
     destination_ipv4_address: u32,
@@ -420,10 +421,13 @@ pub(super) fn create_ipv4_tcp_header(
     if ack {
         tcp_segment.set_ack_active();
     }
+    if psh {
+        tcp_segment.set_psh_active();
+    }
     tcp_segment.set_destination_port(segment_info.get_destination_port());
     tcp_segment.set_sender_port(segment_info.get_sender_port());
-    tcp_segment.set_acknowledgement_number(segment_info.get_sequence_number());
-    tcp_segment.set_sequence_number(segment_info.get_acknowledgement_number());
+    tcp_segment.set_acknowledgement_number(segment_info.get_acknowledgement_number());
+    tcp_segment.set_sequence_number(segment_info.get_sequence_number());
     tcp_segment.set_window_size(segment_info.get_window_size());
 
     tcp_segment.set_checksum_ipv4(
@@ -435,7 +439,7 @@ pub(super) fn create_ipv4_tcp_header(
 
     ipv4::create_default_ipv4_header(
         ipv4_header,
-        TCP_DEFAULT_HEADER_SIZE as usize,
+        TCP_DEFAULT_HEADER_SIZE as usize + data.len(),
         ipv4_packet_id,
         ipv4::get_default_ttl(),
         IPV4_PROTOCOL_TCP,
@@ -464,6 +468,7 @@ pub(super) fn send_ipv4_tcp_header(
         fin,
         syn,
         ack,
+        false,
         ipv4_packet_id,
         sender_ipv4_address,
         destination_ipv4_address,
@@ -494,7 +499,8 @@ pub(super) fn send_tcp_ipv4_data(
     let mut remaining_size = data_size;
 
     while !remaining_size.is_zero() {
-        let send_size = data_size.min(MSize::new(MAX_SEGMENT_SIZE));
+        let send_size = remaining_size.min(MSize::new(MAX_SEGMENT_SIZE));
+        pr_debug!("Send Size: {}", send_size);
         const TCP_SEND_DATA_HEADER_SIZE: MSize =
             MSize::new(core::mem::size_of::<TcpSendDataBufferHeader>());
         const PACKET_HEADER_SIZE: MSize =
@@ -531,7 +537,7 @@ pub(super) fn send_tcp_ipv4_data(
             sender_port: session_info.get_our_port(),
             destination_port: session_info.get_their_port(),
             sequence_number: session_info.next_sequence_number,
-            acknowledgement_number: 0,
+            acknowledgement_number: session_info.last_sent_acknowledge_number,
             window_size: session_info.window_size,
         };
         if let Err(e) = create_ipv4_tcp_header(
@@ -548,7 +554,8 @@ pub(super) fn send_tcp_ipv4_data(
             },
             false,
             false,
-            false,
+            true,
+            true,
             0,
             ipv4_info.get_our_address(),
             ipv4_info.get_their_address(),
@@ -594,7 +601,28 @@ pub(super) fn send_tcp_ipv4_data(
 pub(super) fn ipv4_tcp_ack_handler(
     session_info: &mut TcpSessionInfo,
     segment_info: &TcpSegmentInfo,
-) -> Result<(), NetworkError> {
+) -> Result<bool, NetworkError> {
+    if session_info.get_status() == TcpSessionStatus::HalfOpened {
+        if session_info.next_sequence_number == segment_info.get_acknowledgement_number() {
+            pr_debug!("Opened");
+            session_info.set_status(TcpSessionStatus::Opened);
+            return Ok(true);
+        }
+    } else if session_info.get_status() == TcpSessionStatus::ClosingOppositeClosed {
+        if session_info.next_sequence_number == segment_info.get_acknowledgement_number() {
+            pr_debug!("Closed");
+            session_info.set_status(TcpSessionStatus::Closed);
+            session_info.free_buffer();
+        }
+        return Ok(false);
+    } else if session_info.get_status() == TcpSessionStatus::Closing {
+        if session_info.next_sequence_number == segment_info.get_acknowledgement_number() {
+            pr_debug!("Closed, but opposite still opened");
+            session_info.set_status(TcpSessionStatus::ClosedOppositeOpened);
+            session_info.free_buffer();
+        }
+        return Ok(true);
+    }
     for entry in unsafe {
         session_info
             .send_buffer_list
@@ -607,14 +635,10 @@ pub(super) fn ipv4_tcp_ack_handler(
                 VAddress::new(entry as *const _ as usize),
                 entry.buffer_length
             );
-            return Ok(());
+            return Ok(true);
         }
     }
-    pr_debug!(
-        "Unknown ACK: {:#X}",
-        segment_info.get_acknowledgement_number()
-    );
-    return Ok(());
+    return Ok(true);
 }
 
 pub(super) fn tcp_ipv4_segment_handler(
@@ -684,9 +708,12 @@ pub(super) fn tcp_ipv4_segment_handler(
             our_port: segment_info.get_our_port(),
             their_port: segment_info.get_their_port(),
             window_size: segment_info.get_window_size(),
-            expected_arrival_sequence_number: tcp_segment.get_sequence_number() + 1,
+            expected_arrival_sequence_number: segment_info
+                .get_sequence_number()
+                .overflowing_add(1)
+                .0,
             next_sequence_number: sequence_number.overflowing_add(1).0,
-            last_sent_acknowledge_number: 0,
+            last_sent_acknowledge_number: segment_info.get_sequence_number().overflowing_add(1).0,
             receive_buffer_list: LinkedList::new(),
             send_buffer_list: PtrLinkedList::new(),
         };
@@ -760,9 +787,7 @@ pub(super) fn tcp_ipv4_segment_handler(
                 link_info,
                 InternetType::Ipv4(ipv4_packet_info),
                 &segment_info,
-                |session_info| {
-                    ipv4_tcp_ack_handler(session_info, &segment_info).and_then(|_| Ok(true))
-                },
+                |session_info| ipv4_tcp_ack_handler(session_info, &segment_info),
             )
         {
             pr_err!("Failed to process the ACK: {:?}", err);
@@ -814,12 +839,13 @@ fn ipv4_tcp_fin_handler(
     is_ack_active: bool,
 ) -> Result<bool /* Socket Active */, NetworkError> {
     let mut is_socket_active = true;
-    let mut should_send_ack = false;
+    let mut should_send_ack = true;
 
     match session_info.get_status() {
         TcpSessionStatus::Closed => {
             pr_debug!("Socket Closed");
             is_socket_active = false;
+            should_send_ack = false;
         }
         TcpSessionStatus::Closing => {
             pr_debug!(
@@ -838,11 +864,9 @@ fn ipv4_tcp_fin_handler(
             }
         }
         TcpSessionStatus::HalfOpened => {
-            should_send_ack = true;
             session_info.set_status(TcpSessionStatus::ClosingOppositeClosed);
         }
         TcpSessionStatus::Opened | TcpSessionStatus::OpenOppositeClosed => {
-            should_send_ack = true;
             session_info.set_status(TcpSessionStatus::OpenOppositeClosed);
         }
         TcpSessionStatus::ClosingOppositeClosed | TcpSessionStatus::ClosedOppositeClosing => {
@@ -871,7 +895,7 @@ fn ipv4_tcp_fin_handler(
             &reply_segment_info,
             false,
             false,
-            false,
+            true,
             0,
             ipv4_packet_info.get_destination_address(),
             ipv4_packet_info.get_sender_address(),
@@ -1022,7 +1046,7 @@ pub(super) fn close_tcp_session(
                         &segment_info,
                         true,
                         false,
-                        false,
+                        true,
                         0,
                         v4_info.get_our_address(),
                         v4_info.get_their_address(),
