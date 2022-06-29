@@ -88,6 +88,7 @@ impl SocketManager {
         match kmalloc!(Socket, socket) {
             Ok(s) => {
                 let _lock = self.lock.lock();
+                s.is_active = true;
                 self.active_socket.insert_tail(&mut s.list);
                 drop(_lock);
                 Ok(s)
@@ -103,6 +104,11 @@ impl SocketManager {
         &'static mut self,
         socket: &'static mut Socket,
     ) -> Result<(), NetworkError> {
+        match &mut socket.layer_info.transport {
+            TransportType::Tcp(tcp_info) => tcp_info.set_status(tcp::TcpSessionStatus::Listening),
+            TransportType::Udp(_) => { /* Do nothing */ }
+        }
+        socket.is_active = true;
         let _lock = self.lock.lock();
         self.active_socket.insert_tail(&mut socket.list);
         drop(_lock);

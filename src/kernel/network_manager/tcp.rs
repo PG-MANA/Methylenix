@@ -625,9 +625,10 @@ pub(super) fn tcp_ipv4_segment_handler(
     link_info: LinkType,
     ipv4_packet_info: ipv4::Ipv4ConnectionInfo,
 ) {
-    if segment_size > TCP_DEFAULT_HEADER_SIZE {
+    if segment_size < TCP_DEFAULT_HEADER_SIZE {
         pr_err!("Invalid TCP header size");
         let _ = kfree!(allocated_data_base, data_length);
+        return;
     }
     let tcp_segment = DefaultTcpSegment::from_buffer(unsafe {
         &mut *((allocated_data_base.to_usize() + segment_offset)
