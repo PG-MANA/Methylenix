@@ -29,6 +29,9 @@ const MAX_FRAME_DATA_SIZE: usize = 1500;
 const MAX_FRAME_SIZE: usize = MAX_FRAME_DATA_SIZE + 30 /*+ IPG*/ /*+ 8*/;
 const MAC_ADDRESS_SIZE: usize = 6;
 
+pub const MAC_ADDRESS_BROAD_CAST: MacAddress =
+    MacAddress::new([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+
 #[derive(Clone)]
 pub struct MacAddress([u8; 6]);
 
@@ -133,6 +136,10 @@ impl EthernetFrameInfo {
     pub fn get_device_id(&self) -> usize {
         self.device_id
     }
+
+    pub fn set_frame_type(&mut self, frame_type: u16) {
+        self.frame_type = frame_type;
+    }
 }
 
 impl EthernetDeviceManager {
@@ -199,9 +206,7 @@ impl EthernetDeviceManager {
             v
         } else {
             self.number_of_memory_buffer -= 1;
-            let v = self.memory_buffer[self.number_of_memory_buffer];
-            pr_debug!("Using cached buffer: {}", v.0);
-            v
+            self.memory_buffer[self.number_of_memory_buffer]
         };
         let descriptor = &self.device_list[device_id];
         let result = create_ethernet_frame(

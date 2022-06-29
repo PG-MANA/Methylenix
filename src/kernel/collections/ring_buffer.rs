@@ -52,7 +52,7 @@ impl Ringbuffer {
         } else if self.write_ptr < self.read_ptr {
             MSize::new(self.read_ptr - self.write_ptr + 1)
         } else {
-            MSize::new(self.write_ptr - self.read_ptr)
+            self.size - MSize::new(self.write_ptr - self.read_ptr - 1)
         }
     }
 

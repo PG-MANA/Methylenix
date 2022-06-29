@@ -16,6 +16,7 @@ pub const IPV4_DEFAULT_HEADER_SIZE: usize = IPV4_DEFAULT_IHL as usize * 4;
 pub const ETHERNET_TYPE_IPV4: u16 = 0x0800;
 const MAX_PACKET_SIZE: u16 = u16::MAX;
 pub const IPV4_ADDRESS_ANY: u32 = 0;
+pub const IPV4_BROAD_CAST: u32 = u32::MAX;
 
 #[repr(C)]
 struct DefaultIpv4Packet {

@@ -3,8 +3,8 @@
 //!
 
 use super::{
-    ethernet_device::{EthernetFrameInfo, MacAddress},
-    ipv4::{set_default_ipv4_address, Ipv4ConnectionInfo},
+    ethernet_device::{EthernetFrameInfo, MacAddress, MAC_ADDRESS_BROAD_CAST},
+    ipv4::{set_default_ipv4_address, Ipv4ConnectionInfo, IPV4_ADDRESS_ANY, IPV4_BROAD_CAST},
     udp::UdpConnectionInfo,
     AddressPrinter, InternetType, LinkType, NetworkError, TransportType,
 };
@@ -54,10 +54,7 @@ const DHCP_REQUEST_IP_OFFSET: usize = 0xFE;
 
 const DHCP_TERMINATE: u8 = 0xFF;
 
-const DHCP_DESTINATION_MAC_ADDRESS: [u8; 6] = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
-const DHCP_DESTINATION_IPV4_ADDRESS: u32 = 0xffff_ffff;
-
-const DHCP_PACKET_SIZE: usize = 300;
+const DHCP_PACKET_SIZE: usize = 350;
 
 fn write_byte_into_buffer(buffer: &mut [u8], base: usize, offset: usize, data: u8) {
     buffer[base + offset] = data;
@@ -253,11 +250,8 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
         .network_manager
         .get_socket_manager()
         .create_socket(
-            LinkType::Ethernet(EthernetFrameInfo::new(
-                device_id,
-                MacAddress::new(DHCP_DESTINATION_MAC_ADDRESS),
-            )),
-            InternetType::Ipv4(Ipv4ConnectionInfo::new(0, DHCP_DESTINATION_IPV4_ADDRESS)),
+            LinkType::Ethernet(EthernetFrameInfo::new(device_id, MAC_ADDRESS_BROAD_CAST)),
+            InternetType::Ipv4(Ipv4ConnectionInfo::new(IPV4_ADDRESS_ANY, IPV4_BROAD_CAST)),
             TransportType::Udp(UdpConnectionInfo::new(
                 DHCP_SENDER_PORT,
                 DHCP_DESTINATION_PORT,
@@ -382,7 +376,6 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
     }
 
     let buffer: MaybeUninit<[u8; DHCP_PACKET_SIZE]> = MaybeUninit::uninit();
-
     let result = get_kernel_manager_cluster()
         .network_manager
         .get_socket_manager()

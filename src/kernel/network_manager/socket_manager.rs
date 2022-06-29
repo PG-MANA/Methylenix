@@ -49,10 +49,22 @@ impl SocketManager {
 
     pub(super) fn create_socket(
         &mut self,
-        link_type: LinkType,
+        mut link_type: LinkType,
         internet_type: InternetType,
         transport_type: TransportType,
     ) -> Result<Socket, NetworkError> {
+        match &mut link_type {
+            LinkType::None => {}
+            LinkType::Ethernet(ether) => ether.set_frame_type(match &internet_type {
+                InternetType::None => {
+                    return Err(NetworkError::InvalidSocket);
+                }
+                InternetType::Ipv4(_) => ipv4::ETHERNET_TYPE_IPV4,
+                InternetType::Ipv6(_) => {
+                    unimplemented!()
+                }
+            }),
+        }
         Ok(Socket {
             list: PtrLinkedListNode::new(),
             lock: SpinLockFlag::new(),
@@ -204,9 +216,9 @@ impl SocketManager {
                             )
                         },
                         u.get_sender_port(),
-                        v4.get_sender_address(),
-                        u.get_destination_port(),
-                        v4.get_destination_address(),
+                        v4.get_our_address(),
+                        u.get_their_port(),
+                        v4.get_their_address(),
                         0,
                     )?;
 
@@ -314,10 +326,10 @@ impl SocketManager {
         for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
             if let TransportType::Udp(udp_info) = &e.layer_info.transport {
                 if e.is_active
-                    && udp_info.get_destination_port()
+                    && udp_info.get_our_port()
                         == udp_segment_info.connection_info.get_destination_port()
-                    && (udp_info.get_sender_port() == udp::UDP_PORT_ANY
-                        || udp_info.get_sender_port()
+                    && (udp_info.get_their_port() == udp::UDP_PORT_ANY
+                        || udp_info.get_their_port()
                             == udp_segment_info.connection_info.get_sender_port())
                 {
                     match &e.layer_info.internet {
@@ -325,15 +337,20 @@ impl SocketManager {
                         InternetType::Ipv4(ipv4_info) => {
                             let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else {break;};
 
-                            if ipv4_info.get_sender_address() != ipv4::IPV4_ADDRESS_ANY {
-                                if ipv4_info.get_sender_address()
+                            if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
+                                && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
+                            {
+                                if ipv4_info.get_their_address()
                                     != arrive_ipv4_info.get_sender_address()
                                 {
                                     break;
                                 }
                             }
-                            if ipv4_info.get_destination_address() != ipv4::IPV4_ADDRESS_ANY {
-                                if ipv4_info.get_destination_address()
+                            if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
+                                && arrive_ipv4_info.get_destination_address()
+                                    != ipv4::IPV4_BROAD_CAST
+                            {
+                                if ipv4_info.get_our_address()
                                     != arrive_ipv4_info.get_destination_address()
                                 {
                                     break;
@@ -344,8 +361,8 @@ impl SocketManager {
                             unimplemented!()
                         }
                     }
-                    drop(_lock);
                     let _socket_lock = e.lock.lock();
+                    drop(_lock);
                     let payload_size = MSize::new(udp_segment_info.payload_size);
                     if e.receive_ring_buffer.get_buffer_size().is_zero() {
                         let new_buffer_size = MSize::new(DEFAULT_BUFFER_SIZE);
@@ -365,6 +382,9 @@ impl SocketManager {
                         .write(data_buffer + MSize::new(payload_base), payload_size);
                     if payload_size != written_size {
                         pr_warn!("Overflowed {} Bytes", payload_size - written_size);
+                    }
+                    if let Err(err) = e.wait_queue.wakeup_all() {
+                        pr_err!("Failed to wake up threads: {:?}", err);
                     }
                     drop(_socket_lock);
                     let _ = kfree!(data_buffer, data_length);
@@ -399,15 +419,20 @@ impl SocketManager {
                         InternetType::Ipv4(ipv4_info) => {
                             let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
 
-                            if ipv4_info.get_sender_address() != ipv4::IPV4_ADDRESS_ANY {
-                                if ipv4_info.get_sender_address()
+                            if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
+                                && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
+                            {
+                                if ipv4_info.get_their_address()
                                     != arrive_ipv4_info.get_sender_address()
                                 {
                                     break;
                                 }
                             }
-                            if ipv4_info.get_destination_address() != ipv4::IPV4_ADDRESS_ANY {
-                                if ipv4_info.get_destination_address()
+                            if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
+                                && arrive_ipv4_info.get_destination_address()
+                                    != ipv4::IPV4_BROAD_CAST
+                            {
+                                if ipv4_info.get_our_address()
                                     != arrive_ipv4_info.get_destination_address()
                                 {
                                     break;
@@ -443,6 +468,9 @@ impl SocketManager {
                     let child_socket = child_socket.unwrap();
                     let _socket_lock = e.lock.lock();
                     e.waiting_socket.insert_tail(&mut child_socket.list);
+                    if let Err(err) = e.wait_queue.wakeup_all() {
+                        pr_err!("Failed to wake up threads: {:?}", err);
+                    }
                     drop(_socket_lock);
                     drop(_lock);
                     return Ok(());
@@ -474,12 +502,24 @@ impl SocketManager {
                         InternetType::None => { /* Check: OK */ }
                         InternetType::Ipv4(ipv4_info) => {
                             let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
-                            if ipv4_info.get_sender_address()
-                                != arrive_ipv4_info.get_sender_address()
-                                || ipv4_info.get_destination_address()
-                                    != arrive_ipv4_info.get_destination_address()
+                            if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
+                                && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
                             {
-                                break;
+                                if ipv4_info.get_their_address()
+                                    != arrive_ipv4_info.get_sender_address()
+                                {
+                                    break;
+                                }
+                            }
+                            if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
+                                && arrive_ipv4_info.get_destination_address()
+                                    != ipv4::IPV4_BROAD_CAST
+                            {
+                                if ipv4_info.get_our_address()
+                                    != arrive_ipv4_info.get_destination_address()
+                                {
+                                    break;
+                                }
                             }
                         }
                         InternetType::Ipv6(_) => {
@@ -487,10 +527,10 @@ impl SocketManager {
                         }
                     }
                     let _socket_lock = e.lock.lock();
+                    drop(_lock);
                     let result =
                         update_function(tcp_info).and_then(|active| Ok(e.is_active = active));
                     drop(_socket_lock);
-                    drop(_lock);
                     return result;
                 }
             }
@@ -521,12 +561,24 @@ impl SocketManager {
                         InternetType::None => { /* Check: OK */ }
                         InternetType::Ipv4(ipv4_info) => {
                             let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
-                            if ipv4_info.get_sender_address()
-                                != arrive_ipv4_info.get_sender_address()
-                                || ipv4_info.get_destination_address()
-                                    != arrive_ipv4_info.get_destination_address()
+                            if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
+                                && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
                             {
-                                break;
+                                if ipv4_info.get_their_address()
+                                    != arrive_ipv4_info.get_sender_address()
+                                {
+                                    break;
+                                }
+                            }
+                            if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
+                                && arrive_ipv4_info.get_destination_address()
+                                    != ipv4::IPV4_BROAD_CAST
+                            {
+                                if ipv4_info.get_our_address()
+                                    != arrive_ipv4_info.get_destination_address()
+                                {
+                                    break;
+                                }
                             }
                         }
                         InternetType::Ipv6(_) => {
@@ -534,9 +586,13 @@ impl SocketManager {
                         }
                     }
                     let _socket_lock = e.lock.lock();
-                    let result = process_function(tcp_info, &mut e.receive_ring_buffer);
-                    drop(_socket_lock);
                     drop(_lock);
+                    let result = process_function(tcp_info, &mut e.receive_ring_buffer);
+                    if let Err(err) = e.wait_queue.wakeup_all() {
+                        pr_err!("Failed to wake up threads: {:?}", err);
+                    }
+                    drop(_socket_lock);
+
                     return result;
                 }
             }
