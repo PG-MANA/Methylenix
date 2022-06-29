@@ -775,11 +775,6 @@ pub(super) fn tcp_ipv4_segment_handler(
         let _ = kfree!(allocated_data_base, data_length);
     } else if tcp_segment.is_ack_active() && segment_size == tcp_segment.get_header_length() {
         /* ACK Only */
-        pr_debug!(
-            "TCP ACK: {{Seq: {:#X}, ACK: {:#X}}}",
-            tcp_segment.get_sequence_number(),
-            tcp_segment.get_acknowledgement_number()
-        );
         if let Err(err) = get_kernel_manager_cluster()
             .network_manager
             .get_socket_manager()
