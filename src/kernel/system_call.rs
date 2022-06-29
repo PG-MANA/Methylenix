@@ -301,13 +301,13 @@ pub fn system_call_handler(context: &mut ContextData) {
             let file = file.unwrap();
             let sock_addr_address = context.get_system_call_arguments(2).unwrap();
             let sock_addr_size = context.get_system_call_arguments(3).unwrap();
-            if sock_addr_size as usize != core::mem::size_of::<network::SockAddr>() {
+            if sock_addr_size as usize != core::mem::size_of::<socket_system_call::SockAddr>() {
                 pr_debug!("Unsupported the size of SockAddr: {sock_addr_size}");
                 context.set_system_call_return_value(u64::MAX);
                 return;
             }
             if let Err(err) = socket_system_call::bind_socket(&mut file.lock().unwrap(), unsafe {
-                &*(sock_addr_address as usize as *const network::SockAddr)
+                &*(sock_addr_address as usize as *const socket_system_call::SockAddr)
             }) {
                 pr_err!("Failed to bind socket: {:?}", err);
                 context.set_system_call_return_value(u64::MAX);
@@ -351,7 +351,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
             //let sock_addr_address = context.get_system_call_arguments(2).unwrap();
             //let sock_addr_size_address = context.get_system_call_arguments(3).unwrap();
-            /*if sock_addr_size as usize != core::mem::size_of::<network::SockAddr>() {
+            /*if sock_addr_size as usize != core::mem::size_of::<socket_system_call::SockAddr>() {
                 pr_debug!("Unsupported the size of SockAddr: {sock_addr_size}");
                 context.set_system_call_return_value(u64::MAX);
                 return;
@@ -363,7 +363,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                 context.set_system_call_return_value(u64::MAX);
                 return;
             }
-            let (file, sock_addr) = result.unwrap();
+            let (file, _sock_addr) = result.unwrap();
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
             let fd = process.add_file(file);
             /*let _ = write_data_into_user(
@@ -555,10 +555,16 @@ fn check_user_address(
     Ok(VAddress::new(user_address))
 }
 
-fn read_data_from_user(user_address: VAddress, size: MSize, buffer: VAddress) -> Result<(), ()> {
+#[allow(dead_code)]
+fn read_data_from_user(_user_address: VAddress, _size: MSize, _buffer: VAddress) -> Result<(), ()> {
     unimplemented!()
 }
 
-fn write_data_into_user(user_address: VAddress, size: MSize, buffer: VAddress) -> Result<(), ()> {
+#[allow(dead_code)]
+fn write_data_into_user(
+    _user_address: VAddress,
+    _size: MSize,
+    _buffer: VAddress,
+) -> Result<(), ()> {
     unimplemented!()
 }

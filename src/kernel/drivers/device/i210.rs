@@ -8,8 +8,9 @@ use crate::kernel::drivers::pci::{
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::*;
 use crate::kernel::network_manager::ethernet_device::{
-    EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo, TxEntry,
+    EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo, MacAddress, TxEntry,
 };
+use crate::kernel::network_manager::NetworkError;
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
@@ -331,7 +332,7 @@ impl PciDeviceDriver for I210Manager {
             }
         };
 
-        let descriptor = EthernetDeviceDescriptor::new(mac_address, manager);
+        let descriptor = EthernetDeviceDescriptor::new(MacAddress::new(mac_address), manager);
         manager.device_id = get_kernel_manager_cluster()
             .network_manager
             .add_ethernet_device(descriptor);
@@ -353,7 +354,11 @@ impl PciDeviceDriver for I210Manager {
 }
 
 impl EthernetDeviceDriver for I210Manager {
-    fn send(&mut self, _info: &EthernetDeviceInfo, entry: &mut TxEntry) -> Result<MSize, ()> {
+    fn send(
+        &mut self,
+        _info: &EthernetDeviceInfo,
+        entry: &mut TxEntry,
+    ) -> Result<MSize, NetworkError> {
         let n = self.transfer_data_legacy(
             entry.get_physical_buffer(),
             entry.get_length(),
@@ -456,7 +461,7 @@ impl I210Manager {
         buffer: PAddress,
         length: MSize,
         id: u32,
-    ) -> Result<usize, ()> {
+    ) -> Result<usize, NetworkError> {
         const CMD_EOP: u64 = 1 << 24;
         const CMD_RS: u64 = 1 << 27;
         let mut remaining_length = length.to_usize();

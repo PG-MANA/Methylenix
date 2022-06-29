@@ -16,18 +16,23 @@ pub const FILE_PERMISSION_WRITE: u8 = 1 << 1;
 
 #[repr(transparent)]
 struct FakeDriver {}
-pub static mut FAKE_DRIVER: FakeDriver = FakeDriver {};
+static mut FAKE_DRIVER: FakeDriver = FakeDriver {};
 
 impl FileOperationDriver for FakeDriver {
-    fn read(&mut self, _: &mut FileDescriptor, _: VAddress, _: usize) -> Result<usize, ()> {
+    fn read(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, ()> {
         Err(())
     }
 
-    fn write(&mut self, _: &mut FileDescriptor, _: VAddress, _: usize) -> Result<usize, ()> {
+    fn write(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, ()> {
         Err(())
     }
 
-    fn seek(&mut self, _: &mut FileDescriptor, _: usize, _: FileSeekOrigin) -> Result<usize, ()> {
+    fn seek(
+        &mut self,
+        _: &mut FileDescriptor,
+        _: MOffset,
+        _: FileSeekOrigin,
+    ) -> Result<MOffset, ()> {
         Err(())
     }
 
@@ -118,7 +123,7 @@ impl<'a> File<'a> {
         self.descriptor.permission == 0
             && self.descriptor.data == 0
             && self.descriptor.device_index == 0
-            && self.descriptor.position == 0
+            && self.descriptor.position.is_zero()
     }
 
     pub const fn is_readable(&self) -> bool {

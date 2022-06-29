@@ -331,10 +331,7 @@ pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -
     let mut acpi_manager = AcpiManager::new();
     let mut device_manager = AcpiDeviceManager::new();
     let set_manger = |a: AcpiManager, d: AcpiDeviceManager| {
-        init_struct!(
-            &mut get_kernel_manager_cluster().acpi_manager,
-            Mutex::new(a)
-        );
+        init_struct!(get_kernel_manager_cluster().acpi_manager, Mutex::new(a));
         init_struct!(get_kernel_manager_cluster().acpi_device_manager, d);
     };
 
@@ -360,7 +357,7 @@ pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -
         return false;
     }
     if let Some(e) = acpi_manager.create_acpi_event_manager() {
-        init_struct!(&mut get_kernel_manager_cluster().acpi_event_manager, e);
+        init_struct!(get_kernel_manager_cluster().acpi_event_manager, e);
     } else {
         pr_err!("Failed to initialize ACPI Event Manager");
         set_manger(acpi_manager, device_manager);
@@ -386,7 +383,7 @@ pub fn init_dtb(boot_information: &BootInformation) -> bool {
     }
     if dtb_address.is_none() {
         init_struct!(
-            &mut get_kernel_manager_cluster().arch_depend_data.dtb_manager,
+            get_kernel_manager_cluster().arch_depend_data.dtb_manager,
             dtb_manager
         );
         return false;
@@ -487,7 +484,7 @@ pub fn init_pci_later() -> bool {
 
 pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: bool) {
     init_struct!(
-        &mut get_cpu_manager_cluster().local_timer_manager,
+        get_cpu_manager_cluster().local_timer_manager,
         LocalTimerManager::new()
     );
     init_struct!(
@@ -630,7 +627,7 @@ pub fn init_task(main_process: fn() -> !, idle_process: fn() -> !) {
 
     task_manager.init(context_manager, main_context, idle_context, &mut run_queue);
 
-    init_struct!(&mut get_cpu_manager_cluster().run_queue, run_queue);
+    init_struct!(get_cpu_manager_cluster().run_queue, run_queue);
     init_struct!(get_kernel_manager_cluster().task_manager, task_manager);
 }
 

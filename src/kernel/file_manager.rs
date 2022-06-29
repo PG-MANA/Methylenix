@@ -10,7 +10,7 @@ mod vfs;
 
 pub use self::path_info::{PathInfo, PathInfoIter};
 pub use self::vfs::{
-    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FAKE_DRIVER, FILE_PERMISSION_READ,
+    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
     FILE_PERMISSION_WRITE,
 };
 

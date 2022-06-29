@@ -173,8 +173,8 @@ impl PartitionManager for Fat32Info {
             pr_err!("Invalid File");
             return Err(());
         }
-        if offset + length > entry_info.file_size as usize {
-            if offset >= entry_info.file_size as usize {
+        if offset + length > MSize::new(entry_info.file_size as usize) {
+            if offset >= MSize::new(entry_info.file_size as usize) {
                 return Ok(MSize::new(0));
             }
             length -= MSize::new(entry_info.file_size as usize) - offset;

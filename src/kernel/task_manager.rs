@@ -22,7 +22,7 @@ use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
 use crate::kernel::memory_manager::{MemoryError, MemoryManager};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;

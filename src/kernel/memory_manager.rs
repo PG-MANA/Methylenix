@@ -563,8 +563,9 @@ macro_rules! kmalloc {
                 core::mem::size_of::<$t>(),
             ))
             .and_then(|addr| {
+                use $crate::kernel::memory_manager::data_type::Address;
                 let o = unsafe { &mut *(addr.to_usize() as *mut $t) };
-                init_struct!(o, $initial_value);
+                init_struct!(*o, $initial_value);
                 Ok(o)
             })
     };

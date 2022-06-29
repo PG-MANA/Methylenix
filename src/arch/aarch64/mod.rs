@@ -177,6 +177,8 @@ fn main_process() -> ! {
     init_block_devices_and_file_system_later();
     init_network_manager_early();
 
+    let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
+
     /* Test */
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
         ("OSTYPE", crate::OS_NAME),

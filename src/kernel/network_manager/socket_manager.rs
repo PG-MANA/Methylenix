@@ -13,8 +13,6 @@ use crate::kernel::task_manager::wait_queue::WaitQueue;
 
 use crate::{kfree, kmalloc};
 
-use core::ptr::copy_nonoverlapping;
-
 pub mod socket_system_call;
 
 const DEFAULT_BUFFER_SIZE: usize = 4096;
@@ -22,7 +20,6 @@ const DEFAULT_BUFFER_SIZE: usize = 4096;
 pub struct SocketManager {
     lock: IrqSaveSpinLockFlag,
     active_socket: PtrLinkedList<Socket>,
-    listening_socket: PtrLinkedList<SocketInfo>,
 }
 
 struct SocketLayerInfo {
@@ -47,11 +44,10 @@ impl SocketManager {
         Self {
             lock: IrqSaveSpinLockFlag::new(),
             active_socket: PtrLinkedList::new(),
-            listening_socket: PtrLinkedList::new(),
         }
     }
 
-    pub fn create_socket(
+    pub(super) fn create_socket(
         &mut self,
         link_type: LinkType,
         internet_type: InternetType,
@@ -215,7 +211,7 @@ impl SocketManager {
                     )?;
 
                     unsafe {
-                        copy_nonoverlapping(
+                        core::ptr::copy_nonoverlapping(
                             buffer_address.to_usize() as *const u8,
                             (send_buffer.to_usize() + header_buffer.len()) as *mut u8,
                             buffer_size.to_usize(),
@@ -305,7 +301,7 @@ impl SocketManager {
 
     /* Data Recieve Handlers */
 
-    pub fn udp_segment_handler(
+    pub(super) fn udp_segment_handler(
         &mut self,
         _link_info: LinkType,
         transport_info: InternetType,
@@ -315,7 +311,7 @@ impl SocketManager {
         payload_base: usize,
     ) {
         let _lock = self.lock.lock();
-        for e in unsafe { self.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
+        for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
             if let TransportType::Udp(udp_info) = &e.layer_info.transport {
                 if e.is_active
                     && udp_info.get_destination_port()
@@ -382,7 +378,7 @@ impl SocketManager {
     }
 
     /* TCP Port Open Handler */
-    pub fn tcp_port_open_handler(
+    pub(super) fn tcp_port_open_handler(
         &mut self,
         link_info: LinkType,
         internet_info: InternetType,
@@ -390,7 +386,7 @@ impl SocketManager {
         new_session_info: tcp::TcpSessionInfo,
     ) -> Result<(), NetworkError> {
         let _lock = self.lock.lock();
-        for e in unsafe { self.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
+        for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
             if let TransportType::Tcp(tcp_info) = &e.layer_info.transport {
                 if e.is_active
                     && tcp_info.get_status() == tcp::TcpSessionStatus::Listening
@@ -437,6 +433,7 @@ impl SocketManager {
                             send_ring_buffer: Ringbuffer::new(),
                             receive_ring_buffer: Ringbuffer::new(),
                             waiting_socket: PtrLinkedList::new(),
+                            is_active: true,
                         }
                     );
                     if let Err(err) = child_socket {
@@ -456,17 +453,18 @@ impl SocketManager {
         return Err(NetworkError::InvalidAddress);
     }
 
-    pub fn tcp_update_status<F>(
+    pub(super) fn tcp_update_status<F>(
         &mut self,
         _link_info: LinkType,
         internet_info: InternetType,
+        tcp_segment_info: &tcp::TcpSegmentInfo,
         update_function: F,
     ) -> Result<(), NetworkError>
     where
         F: FnOnce(&mut tcp::TcpSessionInfo) -> Result<bool /* Active */, NetworkError>,
     {
         let _lock = self.lock.lock();
-        for e in unsafe { self.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
+        for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
             if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
                 if e.is_active
                     && tcp_segment_info.get_destination_port() == tcp_info.get_our_port()
@@ -501,19 +499,21 @@ impl SocketManager {
         return Err(NetworkError::InvalidAddress);
     }
 
-    pub fn tcp_data_receive_handler<F>(
+    pub(super) fn tcp_data_receive_handler<F>(
         &mut self,
         _link_info: LinkType,
         internet_info: InternetType,
+        tcp_segment_info: &tcp::TcpSegmentInfo,
         process_function: F,
     ) -> Result<(), NetworkError>
     where
         F: FnOnce(&mut tcp::TcpSessionInfo, &mut Ringbuffer) -> Result<(), NetworkError>,
     {
         let _lock = self.lock.lock();
-        for e in unsafe { self.active_socket.iter_mut(offset_of!(SocketInfo, list)) } {
+        for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
             if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
                 if e.is_active
+                    && tcp_info.get_status() != tcp::TcpSessionStatus::Listening
                     && tcp_segment_info.get_destination_port() == tcp_info.get_our_port()
                     && tcp_info.get_their_port() == tcp_segment_info.get_sender_port()
                 {

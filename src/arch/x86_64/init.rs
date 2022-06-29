@@ -77,8 +77,8 @@ pub fn init_task(
 
     task_manager.init(context_manager, main_context, idle_context, &mut run_queue);
 
-    init_struct!(&mut get_cpu_manager_cluster().run_queue, run_queue);
-    init_struct!(&mut get_kernel_manager_cluster().task_manager, task_manager);
+    init_struct!(get_cpu_manager_cluster().run_queue, run_queue);
+    init_struct!(get_kernel_manager_cluster().task_manager, task_manager);
 }
 
 /// Init application processor's TaskManager
@@ -130,11 +130,8 @@ pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
     let mut acpi_manager = AcpiManager::new();
     let mut device_manager = AcpiDeviceManager::new();
     let set_manger = |a: AcpiManager, d: AcpiDeviceManager| {
-        init_struct!(
-            &mut get_kernel_manager_cluster().acpi_manager,
-            Mutex::new(a)
-        );
-        init_struct!(&mut get_kernel_manager_cluster().acpi_device_manager, d);
+        init_struct!(get_kernel_manager_cluster().acpi_manager, Mutex::new(a));
+        init_struct!(get_kernel_manager_cluster().acpi_device_manager, d);
     };
 
     if !acpi_manager.init(rsdp_ptr, &mut device_manager) {

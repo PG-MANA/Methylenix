@@ -12,6 +12,7 @@ pub mod socket_manager;
 pub mod tcp;
 pub mod udp;
 
+#[derive(Clone)]
 enum LinkType {
     None,
     Ethernet(ethernet_device::EthernetFrameInfo),
@@ -30,7 +31,7 @@ enum TransportType {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
-enum NetworkError {
+pub enum NetworkError {
     InvalidDevice,
     DataSizeError,
     InvalidSocket,

@@ -2,7 +2,7 @@
 //! UDP
 //!
 
-use super::{ipv4, InternetType, LinkType};
+use super::{ipv4, InternetType, LinkType, NetworkError};
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
@@ -40,19 +40,19 @@ impl UdpConnectionInfo {
         }
     }
 
-    pub fn get_sender_port(&self) -> u16 {
+    pub const fn get_sender_port(&self) -> u16 {
         self.sender_port
     }
 
-    pub fn get_destination_port(&self) -> u16 {
+    pub const fn get_destination_port(&self) -> u16 {
         self.destination_port
     }
 
-    pub fn get_their_port(&self) -> u16 {
+    pub const fn get_their_port(&self) -> u16 {
         self.get_sender_port()
     }
 
-    pub fn get_our_port(&self) -> u16 {
+    pub const fn get_our_port(&self) -> u16 {
         self.get_destination_port()
     }
 }
@@ -86,6 +86,10 @@ impl UdpSegment {
         u16::from_be(self.destination_port)
     }
 
+    pub fn set_destination_port(&mut self, port: u16) {
+        self.destination_port = port.to_be();
+    }
+
     pub const fn get_segment_length(&self) -> u16 {
         u16::from_be(self.segment_length)
     }
@@ -94,6 +98,7 @@ impl UdpSegment {
         self.segment_length = length.to_be();
     }
 
+    #[allow(dead_code)]
     pub const fn get_checksum(&self) -> u16 {
         u16::from_be(self.checksum)
     }
@@ -112,9 +117,9 @@ pub fn create_ipv4_udp_header(
     destination_port: u16,
     destination_ipv4_address: u32,
     ipv4_packet_id: u16,
-) -> Result<(), ()> {
+) -> Result<(), NetworkError> {
     if (data.len() + UDP_HEADER_SIZE) > u16::MAX as usize {
-        return Err(());
+        return Err(NetworkError::DataSizeError);
     }
     *buffer = [0u8; UDP_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE];
     let (ipv4_header, udp_header) = buffer.split_at_mut(ipv4::IPV4_DEFAULT_HEADER_SIZE);
@@ -126,7 +131,7 @@ pub fn create_ipv4_udp_header(
 
     ipv4::create_default_ipv4_header(
         ipv4_header,
-        udp_header.get_packet_length() as usize,
+        udp_header.get_segment_length() as usize,
         ipv4_packet_id,
         ipv4::get_default_ttl(),
         IPV4_PROTOCOL_UDP,
@@ -136,7 +141,7 @@ pub fn create_ipv4_udp_header(
     return Ok(());
 }
 
-pub fn udp_ipv4_segment_handler(
+pub(super) fn udp_ipv4_segment_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     segment_offset: usize,
@@ -156,7 +161,7 @@ pub fn udp_ipv4_segment_handler(
         pr_err!(
             "Invalid UDP packet size: Expected {:#X} bytes, but Actually {:#X} bytes",
             segment_size,
-            udp_packet.get_segment_length()
+            udp_segment.get_segment_length()
         );
         let _ = kfree!(allocated_data_base, data_length);
         return;

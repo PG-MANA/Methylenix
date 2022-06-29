@@ -3,7 +3,7 @@
 //!
 //!
 
-use super::{arp, ipv4, LinkType, NetworkError};
+use super::{ipv4, LinkType, NetworkError};
 
 use crate::arch::target_arch::paging::{PAGE_SIZE, PAGE_SIZE_USIZE};
 
@@ -33,11 +33,14 @@ const MAC_ADDRESS_SIZE: usize = 6;
 pub struct MacAddress([u8; 6]);
 
 impl MacAddress {
-    pub fn new(inner: [u8; 6]) -> Self {
+    pub const fn new(inner: [u8; 6]) -> Self {
         Self(inner)
     }
-    pub fn inner(&self) -> &[u8; 6] {
+    pub const fn inner(&self) -> &[u8; 6] {
         &self.0
+    }
+    pub const fn len(&self) -> usize {
+        self.0.len()
     }
 }
 

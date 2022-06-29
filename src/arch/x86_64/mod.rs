@@ -184,7 +184,7 @@ fn main_process() -> ! {
 
     init_block_devices_and_file_system_later();
 
-    crate::kernel::network_manager::dhcp::get_ipv4_address(0);
+    let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
 
     /* Test */
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [

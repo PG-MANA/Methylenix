@@ -69,79 +69,79 @@ static mut DEFAULT_IPV4_ADDRESS: Vec<u32> = Vec::new();
 
 #[allow(dead_code)]
 impl DefaultIpv4Packet {
-    pub fn from_buffer(buffer: &mut [u8]) -> &mut Self {
+    pub(super) fn from_buffer(buffer: &mut [u8]) -> &mut Self {
         assert!(buffer.len() >= IPV4_DEFAULT_HEADER_SIZE);
         unsafe { &mut *(buffer.as_mut_ptr() as usize as *mut Self) }
     }
 
     #[cfg(target_endian = "big")]
-    pub fn set_version_and_header_length(&mut self) {
+    pub(super) fn set_version_and_header_length(&mut self) {
         self.version_and_length = (IPV4_DEFAULT_IHL << 4) | IPV4_VERSION;
     }
 
     #[cfg(target_endian = "little")]
-    pub fn set_version_and_header_length(&mut self) {
+    pub(super) fn set_version_and_header_length(&mut self) {
         self.version_and_length = (IPV4_VERSION << 4) | IPV4_DEFAULT_IHL;
     }
 
     #[cfg(target_endian = "big")]
-    pub const fn get_version(&self) -> u8 {
+    pub(super) const fn get_version(&self) -> u8 {
         self.version_and_length & 0xf
     }
 
     #[cfg(target_endian = "little")]
-    pub const fn get_version(&self) -> u8 {
+    pub(super) const fn get_version(&self) -> u8 {
         self.version_and_length >> 4
     }
 
     #[cfg(target_endian = "big")]
-    pub const fn get_header_length(&self) -> usize {
+    pub(super) const fn get_header_length(&self) -> usize {
         (self.version_and_length >> 4) as usize * 4
     }
 
     #[cfg(target_endian = "little")]
-    pub const fn get_header_length(&self) -> usize {
+    pub(super) const fn get_header_length(&self) -> usize {
         (self.version_and_length & 0xf) as usize * 4
     }
 
-    pub const fn get_type_of_service(&self) -> u8 {
+    pub(super) const fn get_type_of_service(&self) -> u8 {
         self.type_of_service
     }
 
-    pub fn set_type_of_service(&mut self, tos: u8) {
+    pub(super) fn set_type_of_service(&mut self, tos: u8) {
         self.type_of_service = tos;
     }
 
-    pub const fn get_packet_length(&self) -> u16 {
+    pub(super) const fn get_packet_length(&self) -> u16 {
         u16::from_be(self.length)
     }
 
-    pub fn set_packet_length(&mut self, length: u16) {
+    pub(super) fn set_packet_length(&mut self, length: u16) {
         self.length = length.to_be();
     }
 
-    pub const fn get_id(&self) -> u16 {
+    pub(super) const fn get_id(&self) -> u16 {
         u16::from_be(self.id)
     }
 
-    pub fn set_id(&mut self, id: u16) {
+    pub(super) fn set_id(&mut self, id: u16) {
         self.id = id.to_be();
     }
 
-    pub const fn is_more_packet_flag_on(&self) -> bool {
+    pub(super) const fn is_more_packet_flag_on(&self) -> bool {
         (u16::from_be(self.fragment_offset) & 0x2000) != 0
     }
 
-    pub fn clear_flag_and_fragment_offset(&mut self) {
+    pub(super) fn clear_flag_and_fragment_offset(&mut self) {
         self.fragment_offset = 0;
     }
 
-    pub const fn get_fragment_offset(&self) -> u16 {
+    pub(super) const fn get_fragment_offset(&self) -> u16 {
         (u16::from_be(self.fragment_offset) & 0x1fff) << 3
     }
 
     #[allow(dead_code)]
-    pub fn set_fragment_offset(&mut self, fragment_offset: u16) {
+    pub(super) fn set_fragment_offset(&mut self, fragment_offset: u16) {
         assert_eq!(fragment_offset & 0b111, 0);
         assert!((fragment_offset >> 3) <= 0x1fff);
         self.fragment_offset = ((u16::from_be(self.fragment_offset) & !0x1fff)
@@ -149,27 +149,27 @@ impl DefaultIpv4Packet {
             .to_be();
     }
 
-    pub const fn get_ttl(&self) -> u8 {
+    pub(super) const fn get_ttl(&self) -> u8 {
         self.ttl
     }
 
-    pub fn set_ttl(&mut self, ttl: u8) {
+    pub(super) fn set_ttl(&mut self, ttl: u8) {
         self.ttl = ttl;
     }
 
-    pub const fn get_protocol(&self) -> u8 {
+    pub(super) const fn get_protocol(&self) -> u8 {
         self.protocol
     }
 
-    pub fn set_protocol(&mut self, protocol: u8) {
+    pub(super) fn set_protocol(&mut self, protocol: u8) {
         self.protocol = protocol;
     }
 
-    pub const fn get_checksum(&self) -> u16 {
+    pub(super) const fn get_checksum(&self) -> u16 {
         u16::from_be(self.checksum)
     }
 
-    pub fn set_checksum(&mut self) {
+    pub(super) fn set_checksum(&mut self) {
         self.checksum = 0;
         let mut checksum: u16 = 0;
         let header_buffer =
@@ -184,24 +184,24 @@ impl DefaultIpv4Packet {
         self.checksum = (!checksum).to_be();
     }
 
-    pub const fn get_sender_ip_address(&self) -> u32 {
+    pub(super) const fn get_sender_ip_address(&self) -> u32 {
         u32::from_be(self.sender_ip_address)
     }
 
-    pub fn set_sender_ip_address(&mut self, address: u32) {
+    pub(super) fn set_sender_ip_address(&mut self, address: u32) {
         self.sender_ip_address = address.to_be();
     }
 
-    pub const fn get_destination_ip_address(&self) -> u32 {
+    pub(super) const fn get_destination_ip_address(&self) -> u32 {
         u32::from_be(self.destination_ip_address)
     }
 
-    pub fn set_destination_ip_address(&mut self, address: u32) {
+    pub(super) fn set_destination_ip_address(&mut self, address: u32) {
         self.destination_ip_address = address.to_be();
     }
 }
 
-pub fn create_default_ipv4_header(
+pub(super) fn create_default_ipv4_header(
     header_buffer: &mut [u8],
     data_size: usize,
     id: u16,
@@ -233,7 +233,7 @@ pub fn get_default_ttl() -> u8 {
     128
 }
 
-pub fn ipv4_packet_handler(
+pub(super) fn ipv4_packet_handler(
     allocated_data_base: VAddress,
     data_length: MSize,
     packet_offset: usize,
@@ -276,7 +276,7 @@ pub fn ipv4_packet_handler(
             link_info,
             ipv4_packet_info,
         ),
-        tcp::IPV4_PROTOCOL_TCP => tcp::tcp_ipv4_packet_handler(
+        tcp::IPV4_PROTOCOL_TCP => tcp::tcp_ipv4_segment_handler(
             allocated_data_base,
             data_length,
             packet_offset + header_length,
