@@ -480,30 +480,18 @@ impl PhysicalMemoryManager {
         address: PAddress,
         size: MSize,
         align_order: MOrder,
-    ) -> (PAddress /* address */, MSize /* size */) {
+    ) -> (PAddress, MSize) {
         if address.is_zero() {
-            (PAddress::new(0), size)
+            return (PAddress::new(0), size);
+        }
+        let align_size = align_order.to_offset().to_usize();
+        let mask = !(align_size - 1);
+        let aligned_address = PAddress::new(((address - MSize::new(1)) & mask) + align_size);
+        assert!(aligned_address >= address);
+        if size >= (aligned_address - address) {
+            (aligned_address, size - (aligned_address - address))
         } else {
-            /* THINKING: Better algorithm */
-            let align_size = align_order.to_offset().to_usize();
-            let mask = !(align_size - 1);
-            let mut aligned_address = ((address.to_usize() - 1) & mask) + align_size;
-            let mut aligned_available_size = if aligned_address >= address.to_usize() {
-                size.to_usize() - (aligned_address - address.to_usize())
-            } else {
-                size.to_usize() + (address.to_usize() - aligned_address)
-            };
-            while aligned_address < address.to_usize() {
-                if aligned_available_size < align_size {
-                    return (PAddress::new(aligned_address), MSize::new(0));
-                }
-                aligned_address += align_size;
-                aligned_available_size -= align_size;
-            }
-            (
-                PAddress::new(aligned_address),
-                MSize::new(aligned_available_size),
-            )
+            (aligned_address, MSize::new(0))
         }
     }
 
