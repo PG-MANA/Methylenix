@@ -281,10 +281,15 @@ impl PhysicalMemoryManager {
             }
             let new_entry = self.create_memory_entry()?;
             new_entry.set_range(start_address, end_address);
-            if entry.is_first_entry() && new_entry.get_end_address() < entry.get_start_address() {
-                self.first_entry = new_entry as *mut _;
-                new_entry.unset_prev_entry();
-                new_entry.chain_after_me(entry);
+            if new_entry.get_end_address() < entry.get_start_address() {
+                if let Some(prev_entry) = entry.get_prev_entry() {
+                    assert!(prev_entry.get_end_address() < new_entry.get_start_address());
+                    prev_entry.chain_after_me(new_entry);
+                    new_entry.chain_after_me(entry);
+                } else {
+                    self.first_entry = new_entry as *mut _;
+                    new_entry.chain_after_me(entry);
+                }
             } else {
                 next.set_prev_entry(new_entry);
                 new_entry.set_next_entry(next);
@@ -306,8 +311,17 @@ impl PhysicalMemoryManager {
             }
             let new_entry = self.create_memory_entry()?;
             new_entry.set_range(start_address, end_address);
-            new_entry.unset_next_entry();
-            entry.chain_after_me(new_entry);
+            if entry.get_end_address() < new_entry.get_start_address() {
+                entry.chain_after_me(new_entry);
+            } else {
+                if let Some(prev_entry) = entry.get_prev_entry() {
+                    assert!(prev_entry.get_end_address() < entry.get_start_address());
+                    prev_entry.chain_after_me(new_entry);
+                } else {
+                    self.first_entry = new_entry as *mut _;
+                }
+                new_entry.chain_after_me(entry);
+            }
             self.free_memory_size += size;
             self.chain_entry_to_free_list(entry, Some(old_size));
             self.chain_entry_to_free_list(new_entry, None);
