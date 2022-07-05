@@ -263,12 +263,11 @@ impl SocketManager {
     }
 
     pub fn close_socket(&mut self, socket: &'static mut Socket) -> Result<(), NetworkError> {
-        let _lock = self.lock.lock();
         self._close_socket(socket)
     }
 
     fn _close_socket(&mut self, socket: &mut Socket) -> Result<(), NetworkError> {
-        assert!(self.lock.is_locked());
+        //assert!(self.lock.is_locked());
         let _socket_lock = socket.lock.lock();
         if !socket.receive_ring_buffer.get_buffer_size().is_zero() {
             let _ = kfree!(
@@ -302,11 +301,11 @@ impl SocketManager {
                 .take_first_entry(offset_of!(Socket, list))
         } {
             let _child_socket_lock = child_socket.lock.lock();
-            self._close_socket(child_socket)?;
             if child_socket.is_active {
-                self.active_socket.insert_tail(&mut child_socket.list);
                 drop(_child_socket_lock);
+                /* child_socket will be closed by the owner */
             } else {
+                self._close_socket(child_socket)?;
                 drop(_child_socket_lock);
                 let _ = kfree!(child_socket);
             }
@@ -367,8 +366,8 @@ impl SocketManager {
                             unimplemented!()
                         }
                     }
-                    let _socket_lock = e.lock.lock();
                     drop(_lock);
+                    let _socket_lock = e.lock.lock();
                     let payload_size = MSize::new(udp_segment_info.payload_size);
                     if e.receive_ring_buffer.get_buffer_size().is_zero() {
                         let new_buffer_size = MSize::new(DEFAULT_BUFFER_SIZE);
@@ -449,6 +448,7 @@ impl SocketManager {
                             unimplemented!()
                         }
                     }
+                    drop(_lock);
 
                     let child_socket = kmalloc!(
                         Socket,
@@ -478,7 +478,6 @@ impl SocketManager {
                         pr_err!("Failed to wake up threads: {:?}", err);
                     }
                     drop(_socket_lock);
-                    drop(_lock);
                     return Ok(());
                 }
             }
@@ -532,10 +531,11 @@ impl SocketManager {
                             unimplemented!()
                         }
                     }
-                    let _socket_lock = e.lock.lock();
                     drop(_lock);
+                    let _socket_lock = e.lock.lock();
                     let result =
                         update_function(tcp_info).and_then(|active| Ok(e.is_active = active));
+                    let _ = e.wait_queue.wakeup_all();
                     drop(_socket_lock);
                     return result;
                 }
@@ -591,8 +591,8 @@ impl SocketManager {
                             unimplemented!()
                         }
                     }
-                    let _socket_lock = e.lock.lock();
                     drop(_lock);
+                    let _socket_lock = e.lock.lock();
                     if e.receive_ring_buffer.get_buffer_size().is_zero() {
                         let new_buffer_size = MSize::new(DEFAULT_BUFFER_SIZE);
                         match kmalloc!(new_buffer_size) {
