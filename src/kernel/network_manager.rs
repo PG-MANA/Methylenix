@@ -83,6 +83,9 @@ impl NetworkManager {
             ethernet_device::EthernetDeviceManager::new()
         );
         init_struct!(self.socket_manager, socket_manager::SocketManager::new());
+        self.ethernet_manager
+            .init()
+            .expect("Failed to setup the ethernet manager");
     }
 
     pub fn add_ethernet_device(

@@ -354,17 +354,12 @@ impl PciDeviceDriver for I210Manager {
 }
 
 impl EthernetDeviceDriver for I210Manager {
-    fn send(
-        &mut self,
-        _info: &EthernetDeviceInfo,
-        entry: &mut TxEntry,
-    ) -> Result<MSize, NetworkError> {
-        let n = self.transfer_data_legacy(
+    fn send(&mut self, _info: &EthernetDeviceInfo, entry: TxEntry) -> Result<MSize, NetworkError> {
+        self.transfer_data_legacy(
             entry.get_physical_buffer(),
             entry.get_length(),
             entry.get_id(),
         )?;
-        entry.set_number_of_frame(n);
         return Ok(entry.get_length());
     }
 }
@@ -466,7 +461,6 @@ impl I210Manager {
         const CMD_RS: u64 = 1 << 27;
         let mut remaining_length = length.to_usize();
         let mut number_of_descriptors = 0;
-        let _lock = self.transfer_ring_lock.lock();
         while remaining_length > 0 {
             let transfer_length = if remaining_length > u16::MAX as usize {
                 u16::MAX as usize
@@ -481,6 +475,21 @@ impl I210Manager {
             command |= CMD_RS;
             let descriptor: [u64; 2] = [buffer.to_usize() as u64, command];
 
+            let _lock = {
+                let mut lock = self.transfer_ring_lock.lock();
+                let mut transfer_head = self.transfer_head;
+                while Self::get_next_transfer_pointer(self.transfer_tail) == transfer_head {
+                    drop(lock);
+                    // TODO: improve...
+                    while unsafe { core::ptr::read_volatile(&self.transfer_head) } == transfer_head
+                    {
+                        core::hint::spin_loop();
+                    }
+                    lock = self.transfer_ring_lock.lock();
+                    transfer_head = unsafe { core::ptr::read_volatile(&self.transfer_head) };
+                }
+                lock
+            };
             unsafe {
                 *((self.transfer_ring_buffer.to_usize()
                     + ((self.transfer_tail as usize) * (2 * core::mem::size_of::<u64>())))
@@ -490,15 +499,12 @@ impl I210Manager {
                         + core::mem::size_of::<u64>())) as *mut u64) = descriptor[1];
             }
             self.transfer_ids[self.transfer_tail as usize] = id;
-            self.transfer_tail += 1;
-            if self.transfer_tail == Self::NUM_OF_TX_DESC as u32 {
-                self.transfer_tail = 0;
-            }
+            self.transfer_tail = Self::get_next_transfer_pointer(self.transfer_tail);
             write_mmio(self.base_address, Self::TDT_OFFSET, self.transfer_tail);
+            drop(_lock);
             remaining_length -= transfer_length;
             number_of_descriptors += 1;
         }
-        drop(_lock);
         return Ok(number_of_descriptors);
     }
 
@@ -567,11 +573,17 @@ impl I210Manager {
                     .network_manager
                     .update_ethernet_transmit_status(self.device_id, id, done != 0);
                 transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] = 0;
-                self.transfer_head += 1;
-                if self.transfer_head == Self::NUM_OF_TX_DESC as u32 {
-                    self.transfer_head = 0;
-                }
+                self.transfer_head = Self::get_next_transfer_pointer(self.transfer_head);
             }
+        }
+    }
+
+    fn get_next_transfer_pointer(current: u32) -> u32 {
+        let next = current + 1;
+        if next == Self::NUM_OF_TX_DESC as u32 {
+            0
+        } else {
+            next
         }
     }
 }
