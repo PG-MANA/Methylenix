@@ -105,7 +105,7 @@ pub fn init_task_ap(idle_task: fn() -> !) {
 pub fn init_work_queue() {
     get_cpu_manager_cluster()
         .work_queue
-        .init(&mut get_kernel_manager_cluster().task_manager);
+        .init_cpu_work_queue(&mut get_kernel_manager_cluster().task_manager);
 }
 
 /// Init InterruptManager
