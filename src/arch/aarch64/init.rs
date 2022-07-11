@@ -296,7 +296,7 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
 pub fn init_work_queue() {
     get_cpu_manager_cluster()
         .work_queue
-        .init(&mut get_kernel_manager_cluster().task_manager);
+        .init_cpu_work_queue(&mut get_kernel_manager_cluster().task_manager);
 }
 
 /// Init SerialPort

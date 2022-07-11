@@ -279,6 +279,31 @@ impl TaskManager {
         return Ok(forked_thread);
     }
 
+    /// Fork current thread and create new thread with an argument
+    ///
+    /// This function forks current thread and adds into RunQueue if needed.
+    /// This function assumes RunQueue::running_thread.is_some() == TRUE.
+    pub fn create_kernel_thread_with_argument(
+        &mut self,
+        entry_address: fn(argument: usize) -> !,
+        stack_size: Option<MSize>,
+        kernel_priority: u8,
+        argument: usize,
+    ) -> Result<&'static mut ThreadEntry, TaskError> {
+        let thread = self.create_kernel_thread(
+            unsafe { core::mem::transmute::<fn(usize) -> !, fn() -> !>(entry_address) },
+            stack_size,
+            kernel_priority,
+            false,
+        )?;
+        let _thread_lock = thread.lock.lock();
+        thread
+            .get_context()
+            .set_function_call_arguments(&[argument as u64]);
+        drop(_thread_lock);
+        return Ok(thread);
+    }
+
     pub fn create_user_process(
         &mut self,
         parent_process: *mut ProcessEntry,
