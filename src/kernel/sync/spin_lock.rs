@@ -96,7 +96,7 @@ impl SpinLockFlag {
             }
             let mut count = 0usize;
             while self.flag.load(Ordering::Relaxed) {
-                if count > 0x10000000 {
+                if count > 0x100000000 {
                     pr_warn!("May be dead lock: Caller: {:?}", Location::caller());
                     count = 0;
                 }
@@ -166,7 +166,7 @@ impl IrqSaveSpinLockFlag {
             }
             let mut count = 0usize;
             while self.flag.load(Ordering::Relaxed) {
-                if count > 0x10000000 {
+                if count > 0x100000000 {
                     pr_warn!("May be dead lock: Caller: {:?}", Location::caller());
                     count = 0;
                 }
