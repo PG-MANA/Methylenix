@@ -32,7 +32,7 @@ struct TcpSendDataBufferHeader {
     list: PtrLinkedListNode<Self>,
     buffer_length: MSize, /* Including this header */
     sequence_number: u32,
-    _padding: u32,
+    payload_size: u32,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -54,6 +54,7 @@ pub struct TcpSessionInfo {
     our_port: u16,
     their_port: u16,
     window_size: u16,
+    available_window_size: u16,
     expected_arrival_sequence_number: u32,
     next_sequence_number: u32,
     last_sent_acknowledge_number: u32,
@@ -68,6 +69,7 @@ impl TcpSessionInfo {
             our_port,
             their_port,
             window_size: 0,
+            available_window_size: 0,
             expected_arrival_sequence_number: 0,
             next_sequence_number: 0,
             last_sent_acknowledge_number: 0,
@@ -485,8 +487,8 @@ pub(super) fn send_ipv4_tcp_header(
 
 pub(super) fn send_tcp_ipv4_data(
     session_info: &mut TcpSessionInfo,
-    data_address: VAddress,
-    data_size: MSize,
+    data_address: &mut VAddress,
+    data_size: &mut MSize,
     ipv4_info: &ipv4::Ipv4ConnectionInfo,
     link_info: &LinkType,
 ) -> Result<(), NetworkError> {
@@ -496,11 +498,11 @@ pub(super) fn send_tcp_ipv4_data(
         pr_err!("Invalid Socket: {:?}", session_info.get_status());
         return Err(NetworkError::InvalidSocket);
     }
-    let mut remaining_size = data_size;
 
-    while !remaining_size.is_zero() {
-        let send_size = remaining_size.min(MSize::new(MAX_SEGMENT_SIZE));
-        pr_debug!("Send Size: {}", send_size);
+    while !data_size.is_zero() && session_info.available_window_size > 0 {
+        let send_size = (*data_size)
+            .min(MSize::new(session_info.available_window_size as usize))
+            .min(MSize::new(MAX_SEGMENT_SIZE));
         const TCP_SEND_DATA_HEADER_SIZE: MSize =
             MSize::new(core::mem::size_of::<TcpSendDataBufferHeader>());
         const PACKET_HEADER_SIZE: MSize =
@@ -522,13 +524,13 @@ pub(super) fn send_tcp_ipv4_data(
                 list: PtrLinkedListNode::new(),
                 buffer_length: allocate_size,
                 sequence_number: session_info.next_sequence_number,
-                _padding: 0
+                payload_size: send_size.to_usize() as u32
             }
         );
         let payload_base = tcp_send_data_entry + TCP_SEND_DATA_HEADER_SIZE + PACKET_HEADER_SIZE;
         unsafe {
             copy_nonoverlapping(
-                (data_address + (data_size - remaining_size)).to_usize() as *const u8,
+                data_address.to_usize() as *const u8,
                 payload_base.to_usize() as *mut u8,
                 send_size.to_usize(),
             )
@@ -593,7 +595,9 @@ pub(super) fn send_tcp_ipv4_data(
             .overflowing_add(send_size.to_usize() as u32)
             .0;
         session_info.send_buffer_list.insert_tail(&mut header.list);
-        remaining_size -= send_size;
+        *data_size -= send_size;
+        *data_address += send_size;
+        session_info.available_window_size -= send_size.to_usize() as u16;
     }
     return Ok(());
 }
@@ -604,38 +608,71 @@ pub(super) fn ipv4_tcp_ack_handler(
 ) -> Result<bool, NetworkError> {
     if session_info.get_status() == TcpSessionStatus::HalfOpened {
         if session_info.next_sequence_number == segment_info.get_acknowledgement_number() {
-            pr_debug!("Opened");
             session_info.set_status(TcpSessionStatus::Opened);
             return Ok(true);
         }
     } else if session_info.get_status() == TcpSessionStatus::ClosingOppositeClosed {
         if session_info.next_sequence_number == segment_info.get_acknowledgement_number() {
-            pr_debug!("Closed");
             session_info.set_status(TcpSessionStatus::Closed);
             session_info.free_buffer();
         }
         return Ok(false);
     } else if session_info.get_status() == TcpSessionStatus::Closing {
         if session_info.next_sequence_number == segment_info.get_acknowledgement_number() {
-            pr_debug!("Closed, but opposite still opened");
             session_info.set_status(TcpSessionStatus::ClosedOppositeOpened);
             session_info.free_buffer();
         }
         return Ok(true);
     }
-    for entry in unsafe {
+    if let Some(first_entry) = unsafe {
         session_info
             .send_buffer_list
-            .iter_mut(offset_of!(TcpSendDataBufferHeader, list))
+            .get_first_entry_mut(offset_of!(TcpSendDataBufferHeader, list))
     } {
-        if segment_info.get_acknowledgement_number() == entry.sequence_number {
-            pr_debug!("Ack: {:#X}", segment_info.get_acknowledgement_number());
-            session_info.send_buffer_list.remove(&mut entry.list);
+        let expected_ack = first_entry
+            .sequence_number
+            .overflowing_add(first_entry.payload_size)
+            .0;
+
+        if segment_info.get_acknowledgement_number() == expected_ack {
+            session_info.available_window_size += first_entry.payload_size as u16;
+            if session_info.available_window_size > session_info.window_size {
+                session_info.available_window_size = session_info.window_size;
+            }
+
+            session_info.send_buffer_list.remove(&mut first_entry.list);
             let _ = kfree!(
-                VAddress::new(entry as *const _ as usize),
-                entry.buffer_length
+                VAddress::new(first_entry as *const _ as usize),
+                first_entry.buffer_length
             );
             return Ok(true);
+        } else {
+            pr_debug!(
+                "Expected ACK: {:#X}, but actually: {:#X}",
+                expected_ack,
+                segment_info.get_acknowledgement_number()
+            );
+
+            for entry in unsafe {
+                session_info
+                    .send_buffer_list
+                    .iter_mut(offset_of!(TcpSendDataBufferHeader, list))
+            } {
+                let expected_ack = entry.sequence_number.overflowing_add(entry.payload_size).0;
+                if segment_info.get_acknowledgement_number() == expected_ack {
+                    session_info.available_window_size += first_entry.payload_size as u16;
+                    if session_info.available_window_size > session_info.window_size {
+                        session_info.available_window_size = session_info.window_size;
+                    }
+
+                    session_info.send_buffer_list.remove(&mut entry.list);
+                    let _ = kfree!(
+                        VAddress::new(entry as *const _ as usize),
+                        entry.buffer_length
+                    );
+                    return Ok(true);
+                }
+            }
         }
     }
     return Ok(true);
@@ -708,6 +745,7 @@ pub(super) fn tcp_ipv4_segment_handler(
             our_port: segment_info.get_our_port(),
             their_port: segment_info.get_their_port(),
             window_size: segment_info.get_window_size(),
+            available_window_size: segment_info.get_window_size(),
             expected_arrival_sequence_number: segment_info
                 .get_sequence_number()
                 .overflowing_add(1)
@@ -838,16 +876,10 @@ fn ipv4_tcp_fin_handler(
 
     match session_info.get_status() {
         TcpSessionStatus::Closed => {
-            pr_debug!("Socket Closed");
             is_socket_active = false;
             should_send_ack = false;
         }
         TcpSessionStatus::Closing => {
-            pr_debug!(
-                "Arrived Ack: {:#X}, Expected Ack: {:#X}",
-                segment_info.get_acknowledgement_number(),
-                session_info.next_sequence_number
-            );
             if is_ack_active {
                 if segment_info.get_acknowledgement_number() == session_info.next_sequence_number {
                     session_info.set_status(TcpSessionStatus::ClosedOppositeClosing);
@@ -868,11 +900,10 @@ fn ipv4_tcp_fin_handler(
             /* Resend ACK */
         }
         TcpSessionStatus::ClosedOppositeOpened => {
-            pr_debug!("Opposite closing");
             session_info.set_status(TcpSessionStatus::ClosedOppositeClosing);
         }
         TcpSessionStatus::Listening => {
-            pr_err!("Closing listening socket is invalid!");
+            pr_err!("Closing the listening socket is invalid!");
             return Err(NetworkError::InvalidSocket);
         }
     }

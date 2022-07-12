@@ -477,10 +477,25 @@ impl I210Manager {
 
             let _lock = {
                 let mut lock = self.transfer_ring_lock.lock();
+                /* TODO: Inspect the reason */
+                let device_transfer_head = read_mmio::<u32>(self.base_address, Self::TDH_OFFSET);
+                if self.transfer_head == Self::get_next_transfer_pointer(device_transfer_head) {
+                    pr_warn!(
+                        "Temporary Fix: self.transfer_head: {:#X} => {:#X}",
+                        self.transfer_head,
+                        device_transfer_head
+                    );
+                    self.transfer_head = device_transfer_head;
+                }
                 let mut transfer_head = self.transfer_head;
                 while Self::get_next_transfer_pointer(self.transfer_tail) == transfer_head {
                     drop(lock);
                     // TODO: improve...
+                    pr_warn!(
+                        "Entered the spin loop: Current: {{head: {:#X}, tail: {:#X}}}",
+                        self.transfer_head,
+                        self.transfer_tail
+                    );
                     while unsafe { core::ptr::read_volatile(&self.transfer_head) } == transfer_head
                     {
                         core::hint::spin_loop();
@@ -554,27 +569,32 @@ impl I210Manager {
         }
         if (icr & Self::ICR_TX_FINISHED) != 0 {
             let _lock = self.transfer_ring_lock.lock();
-            let transfer_ring_buffer = unsafe {
+            let tx_ring_buffer = unsafe {
                 &mut *(self.transfer_ring_buffer.to_usize()
                     as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE
                         / core::mem::size_of::<u64>()])
             };
 
-            while ((transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] >> 24) & (1 << 3)/* CMD::RS */)
-                != 0
+            while (((tx_ring_buffer[2 * (self.transfer_head as usize) + 1] >> 32) & 0b1111) != 0)
+                && (read_mmio::<u32>(self.base_address, Self::TDH_OFFSET) != self.transfer_head)
+                && (self.transfer_tail != self.transfer_head)
             {
                 //let cmd = ((receive_ring_buffer[2 * self.transfer_head + 1] >> 24) & 0xff) as u8;
                 let id = self.transfer_ids[self.transfer_head as usize];
-                let done = transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] & (1 << 32);
+                let done = tx_ring_buffer[2 * (self.transfer_head as usize) + 1] & (1 << 32);
                 if done == 0 {
                     pr_err!("Failed to transmit frame: id:{id}");
                 }
                 get_kernel_manager_cluster()
                     .network_manager
                     .update_ethernet_transmit_status(self.device_id, id, done != 0);
-                transfer_ring_buffer[2 * (self.transfer_head as usize) + 1] = 0;
+                tx_ring_buffer[2 * (self.transfer_head as usize) + 1] = 0;
                 self.transfer_head = Self::get_next_transfer_pointer(self.transfer_head);
             }
+            assert_ne!(
+                Self::get_next_transfer_pointer(self.transfer_tail),
+                self.transfer_head
+            );
         }
     }
 

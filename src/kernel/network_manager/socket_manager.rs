@@ -173,21 +173,33 @@ impl SocketManager {
         buffer_address: VAddress,
         buffer_size: MSize,
     ) -> Result<MSize, NetworkError> {
-        let _lock = socket.lock.lock();
+        let mut _lock = socket.lock.lock();
         match &mut socket.layer_info.transport {
             TransportType::Tcp(session_info) => match &socket.layer_info.internet {
                 InternetType::None => {
                     return Err(NetworkError::InvalidSocket);
                 }
                 InternetType::Ipv4(v4) => {
-                    return tcp::send_tcp_ipv4_data(
-                        session_info,
-                        buffer_address,
-                        buffer_size,
-                        v4,
-                        &socket.layer_info.link,
-                    )
-                    .and_then(|_| Ok(buffer_size))
+                    let mut current_buffer_address = buffer_address;
+                    let mut remaining_size = buffer_size;
+                    loop {
+                        tcp::send_tcp_ipv4_data(
+                            session_info,
+                            &mut current_buffer_address,
+                            &mut remaining_size,
+                            v4,
+                            &socket.layer_info.link,
+                        )?;
+                        if remaining_size.is_zero() {
+                            drop(_lock);
+                            return Ok(buffer_size);
+                        } else {
+                            drop(_lock);
+                            pr_debug!("{} Bytes remains", remaining_size);
+                            let _ = socket.wait_queue.add_current_thread();
+                            _lock = socket.lock.lock()
+                        }
+                    }
                 }
                 InternetType::Ipv6(_) => {
                     unimplemented!();
@@ -316,8 +328,9 @@ impl SocketManager {
         return Ok(());
     }
 
-    /* Data Recieve Handlers */
+    /* Data Receive Handlers */
 
+    /* UDP Data Receive Handler */
     pub(super) fn udp_segment_handler(
         &mut self,
         _link_info: LinkType,
