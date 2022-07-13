@@ -378,10 +378,10 @@ impl I210Manager {
 
     const REGISTER_MAP_SIZE: usize = 128 * 1024;
 
-    const TX_DESC_SIZE: usize = 128;
-    const NUM_OF_TX_DESC: usize = 32;
-    const RX_DESC_SIZE: usize = 128;
-    const NUM_OF_RX_DESC: usize = 32;
+    const TX_DESC_SIZE: usize = 16;
+    const NUM_OF_TX_DESC: usize = 256;
+    const RX_DESC_SIZE: usize = 16;
+    const NUM_OF_RX_DESC: usize = 256;
 
     const CTRL_OFFSET: usize = 0x0000;
     const CTRL_FD: u32 = 1;
