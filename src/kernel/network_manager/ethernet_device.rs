@@ -207,12 +207,15 @@ impl EthernetDeviceManager {
         }
         let buffer = {
             use core::ptr::read_volatile;
-            while unsafe { read_volatile(&self.number_of_memory_buffer) } == 0 {
+            /*while unsafe { read_volatile(&self.number_of_memory_buffer) } == 0 {
                 drop(_lock);
                 while unsafe { read_volatile(&self.number_of_memory_buffer) } == 0 {
                     core::hint::spin_loop();
                 }
                 _lock = self.lock.lock();
+            }*/
+            if unsafe { read_volatile(&self.number_of_memory_buffer) } == 0 {
+                return Err(NetworkError::OutOfBuffer);
             }
             self.number_of_memory_buffer -= 1;
             self.memory_buffer[self.number_of_memory_buffer]

@@ -584,6 +584,11 @@ pub(super) fn send_tcp_ipv4_data(
                         )
                     })
                 {
+                    if err == NetworkError::OutOfBuffer {
+                        pr_debug!("Out Of buffer");
+                        let _ = kfree!(tcp_send_data_entry, allocate_size);
+                        return Ok(());
+                    }
                     pr_err!("Failed to send data: {:?}", err);
                     let _ = kfree!(tcp_send_data_entry, allocate_size);
                     return Err(err);

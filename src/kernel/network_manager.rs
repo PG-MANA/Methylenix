@@ -39,6 +39,7 @@ pub enum NetworkError {
     InternalError,
     MemoryError(MemoryError),
     DataOverflowed,
+    OutOfBuffer,
 }
 
 struct AddressPrinter<'a> {
