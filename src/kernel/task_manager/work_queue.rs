@@ -5,7 +5,7 @@
 //! The structure may be changed.
 //! Work Queue will be in per-cpu structure, therefore this uses disabling interrupt as a lock.
 
-use super::{TaskManager, TaskStatus, ThreadEntry};
+use super::{TaskError, TaskManager, TaskStatus, ThreadEntry};
 
 use crate::arch::target_arch::interrupt::InterruptManager;
 
@@ -78,8 +78,8 @@ impl WorkQueue {
         self.daemon_thread = thread as *mut _;
     }
 
-    pub fn add_work(&mut self, w: WorkList) -> Result<(), ()> {
-        /* This will be called in the interrupt */
+    pub fn add_work(&mut self, w: WorkList) -> Result<(), TaskError> {
+        /* This will be called in the interrupt handler */
         let irq = InterruptManager::save_and_disable_local_irq();
 
         let work = match self.work_pool.alloc() {
@@ -88,9 +88,9 @@ impl WorkQueue {
                 work.list = PtrLinkedListNode::new();
                 work
             }
-            Err(e) => {
-                pr_err!("Failed to allocate a WorkList: {:?}", e);
-                return Err(());
+            Err(err) => {
+                pr_err!("Failed to allocate a WorkList: {:?}", err);
+                return Err(TaskError::MemoryError(err));
             }
         };
 
@@ -99,8 +99,11 @@ impl WorkQueue {
         let _worker_thread_lock = worker_thread.lock.lock();
         if worker_thread.get_task_status() != TaskStatus::Running {
             let run_queue = &mut get_cpu_manager_cluster().run_queue;
-            if let Err(e) = run_queue.add_thread(worker_thread) {
-                pr_err!("Failed to add worker_thread into RunQueue: {:?}", e);
+            if let Err(err) = run_queue.add_thread(worker_thread) {
+                pr_err!("Failed to add worker_thread into RunQueue: {:?}", err);
+                drop(_worker_thread_lock);
+                InterruptManager::restore_local_irq(irq);
+                return Err(err);
             }
         }
         drop(_worker_thread_lock);
