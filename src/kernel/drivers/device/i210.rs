@@ -534,19 +534,19 @@ impl I210Manager {
                     as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
                         / core::mem::size_of::<u64>()])
             };
-            let mut processed = false;
-            let receive_head = read_mmio::<u32>(self.base_address, Self::RDH_OFFSET);
-            while ((rx_ring_buffer[2 * self.receive_tail as usize + 1] >> 32) & 0x01) != 0
-                && (self.receive_tail != receive_head)
+
+            let device_receive_head = read_mmio::<u32>(self.base_address, Self::RDH_OFFSET);
+            while ((rx_ring_buffer[2 * (self.receive_tail as usize) + 1] >> 32) & 0x01) != 0
+                && (self.receive_tail != device_receive_head)
             {
-                processed = true;
-                let length = rx_ring_buffer[2 * self.receive_tail as usize + 1] & ((1 << 16) - 1);
+                let length = rx_ring_buffer[2 * (self.receive_tail as usize) + 1] & ((1 << 16) - 1);
                 if length > 0 {
                     let buffer = kmalloc!(MSize::new(length as usize));
                     if let Ok(buffer) = buffer {
                         unsafe {
                             core::ptr::copy_nonoverlapping(
-                                (self.receive_buffer.to_usize() + 2048 * self.receive_tail as usize)
+                                (self.receive_buffer.to_usize()
+                                    + 2048 * (self.receive_tail as usize))
                                     as *const u8,
                                 buffer.to_usize() as *mut u8,
                                 length as usize,
@@ -564,7 +564,7 @@ impl I210Manager {
                         pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
                     }
                 }
-                rx_ring_buffer[2 * self.receive_tail as usize + 1] = 0;
+                rx_ring_buffer[2 * (self.receive_tail as usize) + 1] = 0;
                 write_mmio(self.base_address, Self::RDT_OFFSET, self.receive_tail);
                 self.receive_tail = Self::get_next_receive_pointer(self.receive_tail);
             }
@@ -577,8 +577,9 @@ impl I210Manager {
                         / core::mem::size_of::<u64>()])
             };
 
+            let device_transfer_head = read_mmio::<u32>(self.base_address, Self::TDH_OFFSET);
             while (((tx_ring_buffer[2 * (self.transfer_head as usize) + 1] >> 32) & 0b1111) != 0)
-                && (read_mmio::<u32>(self.base_address, Self::TDH_OFFSET) != self.transfer_head)
+                && (device_transfer_head != self.transfer_head)
                 && (self.transfer_tail != self.transfer_head)
             {
                 //let cmd = ((receive_ring_buffer[2 * self.transfer_head + 1] >> 24) & 0xff) as u8;

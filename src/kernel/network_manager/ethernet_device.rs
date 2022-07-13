@@ -325,7 +325,6 @@ impl EthernetDeviceManager {
         allocated_data: VAddress,
         length: MSize,
     ) {
-        pr_debug!("Received a frame");
         let rx_entry = match kmalloc!(
             RxEntry,
             RxEntry {

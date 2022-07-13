@@ -195,7 +195,6 @@ impl SocketManager {
                             return Ok(buffer_size);
                         } else {
                             drop(_lock);
-                            pr_debug!("{} Bytes remains", remaining_size);
                             let _ = socket.wait_queue.add_current_thread();
                             _lock = socket.lock.lock()
                         }
