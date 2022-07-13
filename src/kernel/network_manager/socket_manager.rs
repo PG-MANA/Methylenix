@@ -8,7 +8,7 @@ use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNo
 use crate::kernel::collections::ring_buffer::Ringbuffer;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
-use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::task_manager::wait_queue::WaitQueue;
 
 use crate::{kfree, kmalloc};
@@ -18,7 +18,7 @@ pub mod socket_system_call;
 const DEFAULT_BUFFER_SIZE: usize = 4096;
 
 pub struct SocketManager {
-    lock: IrqSaveSpinLockFlag,
+    lock: SpinLockFlag,
     active_socket: PtrLinkedList<Socket>,
 }
 
@@ -42,7 +42,7 @@ pub struct Socket {
 impl SocketManager {
     pub fn new() -> Self {
         Self {
-            lock: IrqSaveSpinLockFlag::new(),
+            lock: SpinLockFlag::new(),
             active_socket: PtrLinkedList::new(),
         }
     }
