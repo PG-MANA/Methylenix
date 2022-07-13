@@ -529,22 +529,25 @@ impl I210Manager {
 
         if (icr & Self::ICR_RX_FINISHED) != 0 {
             let _lock = self.receive_ring_lock.lock();
-            let receive_ring_buffer = unsafe {
+            let rx_ring_buffer = unsafe {
                 &mut *(self.receive_ring_buffer.to_usize()
                     as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
                         / core::mem::size_of::<u64>()])
             };
-            let mut cursor = self.receive_tail as usize;
-            while ((receive_ring_buffer[2 * cursor + 1] >> 32) & 0x01) != 0 {
-                let length = receive_ring_buffer[2 * cursor + 1] & ((1 << 16) - 1);
-                //let end_of_packets = ((receive_ring_buffer[2 * cursor + 1] >> 33) & 0x01) != 0;
-                //pr_debug!("{cursor}: {length}(Is last: {end_of_packets})");
+            let mut processed = false;
+            let receive_head = read_mmio::<u32>(self.base_address, Self::RDH_OFFSET);
+            while ((rx_ring_buffer[2 * self.receive_tail as usize + 1] >> 32) & 0x01) != 0
+                && (self.receive_tail != receive_head)
+            {
+                processed = true;
+                let length = rx_ring_buffer[2 * self.receive_tail as usize + 1] & ((1 << 16) - 1);
                 if length > 0 {
                     let buffer = kmalloc!(MSize::new(length as usize));
                     if let Ok(buffer) = buffer {
                         unsafe {
                             core::ptr::copy_nonoverlapping(
-                                (self.receive_buffer.to_usize() + 2048 * cursor) as *const u8,
+                                (self.receive_buffer.to_usize() + 2048 * self.receive_tail as usize)
+                                    as *const u8,
                                 buffer.to_usize() as *mut u8,
                                 length as usize,
                             )
@@ -561,11 +564,10 @@ impl I210Manager {
                         pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
                     }
                 }
-                receive_ring_buffer[2 * cursor + 1] = 0;
-                write_mmio(self.base_address, Self::RDT_OFFSET, cursor as u32);
-                cursor = (cursor + 1) & (Self::NUM_OF_RX_DESC - 1);
+                rx_ring_buffer[2 * self.receive_tail as usize + 1] = 0;
+                write_mmio(self.base_address, Self::RDT_OFFSET, self.receive_tail);
+                self.receive_tail = Self::get_next_receive_pointer(self.receive_tail);
             }
-            self.receive_tail = cursor as u32;
         }
         if (icr & Self::ICR_TX_FINISHED) != 0 {
             let _lock = self.transfer_ring_lock.lock();
@@ -601,6 +603,15 @@ impl I210Manager {
     fn get_next_transfer_pointer(current: u32) -> u32 {
         let next = current + 1;
         if next == Self::NUM_OF_TX_DESC as u32 {
+            0
+        } else {
+            next
+        }
+    }
+
+    fn get_next_receive_pointer(current: u32) -> u32 {
+        let next = current + 1;
+        if next == Self::NUM_OF_RX_DESC as u32 {
             0
         } else {
             next
