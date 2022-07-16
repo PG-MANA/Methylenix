@@ -320,7 +320,7 @@ impl PciDeviceDriver for I210Manager {
                 transfer_head: 0,
                 transfer_ring_lock: IrqSaveSpinLockFlag::new(),
                 receive_ring_buffer: rx_ring_buffer_virtual_address,
-                receive_tail: 0,
+                receive_tail: (Self::NUM_OF_RX_DESC - 1) as u32,
                 receive_ring_lock: IrqSaveSpinLockFlag::new(),
                 receive_buffer,
             }
@@ -346,7 +346,7 @@ impl PciDeviceDriver for I210Manager {
             write_mmio(
                 controller_base_address,
                 Self::IMS_OFFSET,
-                (1u32 << 7) | (1u32 << 0) | (1u32 << 1/* For compatibility */),
+                Self::ICR_RX_FINISHED | Self::ICR_TX_FINISHED,
             );
         }
         return Ok(());
@@ -535,18 +535,19 @@ impl I210Manager {
                         / core::mem::size_of::<u64>()])
             };
 
-            let device_receive_head = read_mmio::<u32>(self.base_address, Self::RDH_OFFSET);
-            while ((rx_ring_buffer[2 * (self.receive_tail as usize) + 1] >> 32) & 0x01) != 0
-                && (self.receive_tail != device_receive_head)
+            let mut receive_descriptor = Self::get_next_receive_pointer(self.receive_tail);
+            while receive_descriptor != read_mmio::<u32>(self.base_address, Self::RDH_OFFSET)
+                && ((rx_ring_buffer[2 * (receive_descriptor as usize) + 1] >> 32) & 0x01) != 0
             {
-                let length = rx_ring_buffer[2 * (self.receive_tail as usize) + 1] & ((1 << 16) - 1);
+                let length =
+                    rx_ring_buffer[2 * (receive_descriptor as usize) + 1] & ((1 << 16) - 1);
                 if length > 0 {
                     let buffer = kmalloc!(MSize::new(length as usize));
                     if let Ok(buffer) = buffer {
                         unsafe {
                             core::ptr::copy_nonoverlapping(
                                 (self.receive_buffer.to_usize()
-                                    + 2048 * (self.receive_tail as usize))
+                                    + 2048 * (receive_descriptor as usize))
                                     as *const u8,
                                 buffer.to_usize() as *mut u8,
                                 length as usize,
@@ -564,9 +565,26 @@ impl I210Manager {
                         pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
                     }
                 }
-                rx_ring_buffer[2 * (self.receive_tail as usize) + 1] = 0;
-                write_mmio(self.base_address, Self::RDT_OFFSET, self.receive_tail);
-                self.receive_tail = Self::get_next_receive_pointer(self.receive_tail);
+                rx_ring_buffer[2 * (receive_descriptor as usize) + 1] = 0;
+                write_mmio(self.base_address, Self::RDT_OFFSET, receive_descriptor);
+                self.receive_tail = receive_descriptor;
+                receive_descriptor = Self::get_next_receive_pointer(receive_descriptor);
+            }
+            assert_eq!(
+                self.receive_tail,
+                read_mmio::<u32>(self.base_address, Self::RDT_OFFSET)
+            );
+
+            if Self::get_next_receive_pointer(self.receive_tail)
+                != read_mmio::<u32>(self.base_address, Self::RDH_OFFSET)
+            {
+                pr_debug!(
+                    "Tail: {:#X}, Head: {:#X}(Entry: {:#X} )",
+                    self.receive_tail,
+                    read_mmio::<u32>(self.base_address, Self::RDH_OFFSET),
+                    rx_ring_buffer
+                        [2 * (read_mmio::<u32>(self.base_address, Self::RDH_OFFSET) as usize) + 1]
+                );
             }
         }
         if (icr & Self::ICR_TX_FINISHED) != 0 {
