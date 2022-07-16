@@ -29,6 +29,7 @@ use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::dtb::DtbManager;
 use crate::kernel::file_manager::elf::ELF_MACHINE_AA64;
 use crate::kernel::graphic_manager::{font::FontType, GraphicManager};
+use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
 use crate::kernel::tty::TtyManager;

@@ -18,18 +18,21 @@ use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
+
 use crate::kernel::application_loader;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 use crate::kernel::drivers::{acpi::table::bgrt::BgrtManager, acpi::AcpiManager};
 use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64;
 use crate::kernel::graphic_manager::GraphicManager;
+use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
 };
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
+
 use crate::{io_remap, mremap};
 
 use core::mem;

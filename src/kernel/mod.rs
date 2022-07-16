@@ -25,6 +25,7 @@ pub mod block_device;
 pub mod drivers;
 pub mod file_manager;
 pub mod graphic_manager;
+pub mod initialization;
 pub mod manager_cluster;
 pub mod memory_manager;
 pub mod network_manager;
