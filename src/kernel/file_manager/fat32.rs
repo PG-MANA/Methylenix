@@ -5,7 +5,7 @@
 use super::{PartitionInfo, PartitionManager, PathInfo};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 
 use crate::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
 
@@ -136,7 +136,11 @@ impl PartitionManager for Fat32Info {
                     entry_info = entry;
                 }
                 Err(_) => {
-                    pr_debug!("Failed to search: {}(In {})", file_name.as_str(), e);
+                    pr_debug!(
+                        "Failed to search: {}(Failed to search: {})",
+                        file_name.as_str(),
+                        e
+                    );
                     return Err(());
                 }
             }
@@ -155,10 +159,10 @@ impl PartitionManager for Fat32Info {
         &self,
         partition_info: &PartitionInfo,
         file_info: usize,
-        offset: usize,
-        mut length: usize,
+        offset: MOffset,
+        mut length: MSize,
         buffer: VAddress,
-    ) -> Result<usize, ()> {
+    ) -> Result<MSize, ()> {
         let entry_info = unsafe { &*(file_info as *const Fat32EntryInfo) };
         if (entry_info.attribute
             & (FAT32_ATTRIBUTE_DIRECTORY
@@ -169,13 +173,13 @@ impl PartitionManager for Fat32Info {
             pr_err!("Invalid File");
             return Err(());
         }
-        if offset + length > entry_info.file_size as usize {
-            if offset >= entry_info.file_size as usize {
-                return Ok(0);
+        if offset + length > MSize::new(entry_info.file_size as usize) {
+            if offset >= MSize::new(entry_info.file_size as usize) {
+                return Ok(MSize::new(0));
             }
-            length -= entry_info.file_size as usize - offset;
+            length -= MSize::new(entry_info.file_size as usize) - offset;
         }
-        let length = length;
+        let length = length.to_usize();
 
         macro_rules! next_cluster {
             ($c:expr) => {
@@ -190,8 +194,9 @@ impl PartitionManager for Fat32Info {
         }
 
         let bytes_per_cluster = self.sectors_per_cluster as usize * self.bytes_per_sector as usize;
-        let number_of_clusters_to_skip = offset / bytes_per_cluster;
-        let mut page_buffer_offset = offset - number_of_clusters_to_skip * bytes_per_cluster;
+        let number_of_clusters_to_skip = offset.to_usize() / bytes_per_cluster;
+        let mut page_buffer_offset =
+            offset.to_usize() - number_of_clusters_to_skip * bytes_per_cluster;
         let mut reading_cluster = entry_info.entry_cluster;
         let mut buffer_pointer = 0usize;
 
@@ -264,7 +269,7 @@ impl PartitionManager for Fat32Info {
             }
             reading_cluster = next_cluster!(reading_cluster);
         }
-        return Ok(buffer_pointer);
+        return Ok(MSize::new(buffer_pointer));
     }
 
     fn close_file(&self, _: &PartitionInfo, file_info: usize) {
@@ -346,7 +351,25 @@ impl Fat32Info {
                     ((u16::from_le(unsafe { *((entry_base + 20) as *const u16) }) as u32) << 16)
                         | u16::from_le(unsafe { *((entry_base + 26) as *const u16) }) as u32;
 
-                if entry_name_ascii == target_entry_name {
+                let compare_str = |entry_name: &str, target_name: &str| -> bool {
+                    if !target_name.is_ascii() {
+                        false
+                    } else if target_name.len() != entry_name.len() {
+                        false
+                    } else {
+                        for (a, b) in entry_name
+                            .as_bytes()
+                            .iter()
+                            .zip(target_name.as_bytes().iter())
+                        {
+                            if a.to_ascii_uppercase() != b.to_ascii_uppercase() {
+                                return false;
+                            }
+                        }
+                        true
+                    }
+                };
+                if compare_str(entry_name_ascii, target_entry_name) {
                     let _ = free_pages!(directory_list_data);
                     return Ok(Fat32EntryInfo {
                         entry_cluster,

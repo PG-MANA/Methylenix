@@ -5,6 +5,7 @@
 #![feature(const_maybe_uninit_uninit_array)]
 #![feature(format_args_nl)]
 #![feature(naked_functions)]
+#![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(panic_info_message)]
 

@@ -168,6 +168,7 @@ fn main_process() -> ! {
     draw_boot_logo();
 
     init_block_devices_and_file_system_early();
+    init_network_manager_early();
 
     if init_pci_early() {
         if !init_acpi_later() {
@@ -182,6 +183,8 @@ fn main_process() -> ! {
     }
 
     init_block_devices_and_file_system_later();
+
+    let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
 
     /* Test */
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [

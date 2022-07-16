@@ -22,7 +22,7 @@ use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
 use crate::kernel::memory_manager::{MemoryError, MemoryManager};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
@@ -80,6 +80,8 @@ impl From<MemoryError> for TaskError {
 }
 
 impl TaskManager {
+    pub const FLAG_LOCAL_THREAD: u8 = 1;
+
     pub const fn new() -> Self {
         Self {
             lock: IrqSaveSpinLockFlag::new(),
@@ -152,9 +154,7 @@ impl TaskManager {
             .add_thread(main_thread)
             .expect("Cannot add main thread to RunQueue");
         drop(_main_thread_lock);
-        run_queue
-            .add_thread(idle_thread)
-            .expect("Cannot add idle thread to RunQueue");
+        run_queue.set_idle_thread(idle_thread);
         drop(_idle_thread_lock);
         self.kernel_process = kernel_process;
         self.idle_thread = idle_thread;
@@ -177,9 +177,7 @@ impl TaskManager {
             )
             .expect("Cannot fork idle thread");
         let _lock = forked_thread.lock.lock();
-        run_queue
-            .add_thread(forked_thread)
-            .expect("Cannot init ap's idle thread");
+        run_queue.set_idle_thread(forked_thread);
         drop(_lock);
         return;
     }
@@ -222,6 +220,7 @@ impl TaskManager {
         entry_address: fn() -> !,
         stack_size: Option<MSize>,
         kernel_priority: u8,
+        flag: u8,
     ) -> Result<&'static mut ThreadEntry, TaskError> {
         let _lock = self.lock.lock();
         let result = try {
@@ -232,6 +231,9 @@ impl TaskManager {
             forked_thread
                 .set_priority_level(KernelSchedulingClass::get_custom_priority(kernel_priority));
             forked_thread.set_task_status(TaskStatus::New);
+            if (flag & Self::FLAG_LOCAL_THREAD) != 0 {
+                forked_thread.set_local_thread();
+            }
             forked_thread
         };
 
@@ -480,21 +482,23 @@ impl TaskManager {
         let current_cpu_load = get_cpu_manager_cluster()
             .run_queue
             .get_number_of_running_threads();
-        for cpu in unsafe {
-            get_kernel_manager_cluster()
-                .cpu_list
-                .iter_mut(offset_of!(CpuManagerCluster, list))
-        } {
-            let load = cpu.run_queue.get_number_of_running_threads();
-            if load < current_cpu_load {
-                let should_interrupt_cpu = cpu.run_queue.assign_thread(thread)?;
-                drop(_thread_lock);
-                if should_interrupt_cpu {
-                    get_cpu_manager_cluster()
-                        .interrupt_manager
-                        .send_reschedule_ipi(cpu.cpu_id);
+        if !thread.is_local_thread() {
+            for cpu in unsafe {
+                get_kernel_manager_cluster()
+                    .cpu_list
+                    .iter_mut(offset_of!(CpuManagerCluster, list))
+            } {
+                let load = cpu.run_queue.get_number_of_running_threads();
+                if load < current_cpu_load {
+                    let should_interrupt_cpu = cpu.run_queue.assign_thread(thread)?;
+                    drop(_thread_lock);
+                    if should_interrupt_cpu {
+                        get_cpu_manager_cluster()
+                            .interrupt_manager
+                            .send_reschedule_ipi(cpu.cpu_id);
+                    }
+                    return Ok(());
                 }
-                return Ok(());
             }
         }
 
