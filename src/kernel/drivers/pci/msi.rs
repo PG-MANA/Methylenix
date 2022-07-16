@@ -110,7 +110,7 @@ pub fn setup_msi_x(
         .pci_manager
         .read_data(pci_dev, 0x34, 1)?;
     pr_debug!("Capability: {:#X}", capability);
-    let mut msi_x_capability = if capability == 0 { 0x80}else{capability};
+    let mut msi_x_capability = if capability == 0 { 0x80 } else { capability };
     let mut message_control: u32;
     loop {
         message_control =
@@ -118,7 +118,7 @@ pub fn setup_msi_x(
                 .pci_manager
                 .read_data(pci_dev, msi_x_capability, 4)?;
 
-        if (message_control & 0xff) == 0x0B {
+        if (message_control & 0xff) == 0x11 {
             break;
         }
         msi_x_capability = (message_control >> 8) & (u8::MAX as u32);
@@ -134,7 +134,7 @@ pub fn setup_msi_x(
             .read_data(pci_dev, msi_x_capability + 0x04, 4)?;
     let bir = table_offset & 0b111;
     let table_offset = table_offset & !0b111;
-    pr_debug!("BIR: {bir}");
+    pr_debug!("BIR: {bir}, Table Offset: {:#X}", table_offset);
 
     let msi_x_table_address = get_kernel_manager_cluster()
         .pci_manager
@@ -160,7 +160,7 @@ pub fn setup_msi_x(
 
     let msi_x_table_address = match io_remap!(
         PAddress::new(msi_x_table_address),
-        MSize::new((number_of_entries as usize) << 4),
+        MSize::new(table_offset as usize + ((number_of_entries as usize) << 4)).page_align_up(),
         MemoryPermissionFlags::data()
     ) {
         Ok(a) => a,
@@ -169,7 +169,7 @@ pub fn setup_msi_x(
             return Err(());
         }
     };
-    let msi_x_target_address = msi_x_table_address.to_usize() + ((table_offset as usize) << 4);
+    let msi_x_target_address = msi_x_table_address.to_usize() + table_offset as usize;
 
     unsafe {
         *(msi_x_target_address as *mut u32) = (info.message_address & u32::MAX as u64) as u32;

@@ -13,7 +13,7 @@ use crate::kernel::file_manager::{
 };
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+    Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
 };
 use crate::kernel::memory_manager::MemoryManager;
 use crate::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
@@ -46,7 +46,7 @@ pub fn load_and_execute(
             return Err(());
         }
     };
-    if let Err(e) = file_descriptor.read(head_data, head_read_size.to_usize()) {
+    if let Err(e) = file_descriptor.read(head_data, head_read_size) {
         pr_err!("Failed to read data: {:?}", e);
         let _ = file_descriptor.close();
         let _ = kfree!(head_data, head_read_size);
@@ -146,7 +146,7 @@ pub fn load_and_execute(
                 };
                 if program_header.get_file_size() > 0 {
                     if let Err(e) = file_descriptor.seek(
-                        program_header.get_file_offset() as usize,
+                        MOffset::new(program_header.get_file_offset() as usize),
                         FileSeekOrigin::SeekSet,
                     ) {
                         pr_err!("Failed to seek: {:?}", e);
@@ -155,7 +155,7 @@ pub fn load_and_execute(
                     }
                     if let Err(e) = file_descriptor.read(
                         allocated_memory + align_offset,
-                        program_header.get_file_size() as usize,
+                        MSize::new(program_header.get_file_size() as usize),
                     ) {
                         pr_err!("Failed to read data: {:?}", e);
                         let _ = free_pages!(allocated_memory);

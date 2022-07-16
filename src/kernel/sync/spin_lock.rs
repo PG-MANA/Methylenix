@@ -7,6 +7,7 @@ use crate::arch::target_arch::interrupt::{InterruptManager, StoredIrqData};
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 use core::ops::{Deref, DerefMut};
+use core::panic::Location;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug)]
@@ -87,13 +88,20 @@ impl SpinLockFlag {
         }
     }
 
+    #[track_caller]
     pub fn lock(&self) -> SpinLockFlagHolder {
         loop {
             if let Ok(s) = self.try_lock_weak() {
                 return s;
             }
+            let mut count = 0usize;
             while self.flag.load(Ordering::Relaxed) {
+                if count > 0x100000000 {
+                    pr_warn!("May be dead lock: Caller: {:?}", Location::caller());
+                    count = 0;
+                }
                 core::hint::spin_loop();
+                count += 1;
             }
         }
     }
@@ -120,7 +128,7 @@ impl IrqSaveSpinLockFlag {
         let irq = InterruptManager::save_and_disable_local_irq();
         if self
             .flag
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
             Ok(IrqSaveSpinLockFlagHolder {
@@ -137,7 +145,7 @@ impl IrqSaveSpinLockFlag {
         let irq = InterruptManager::save_and_disable_local_irq();
         if self
             .flag
-            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
             Ok(IrqSaveSpinLockFlagHolder {
@@ -150,13 +158,20 @@ impl IrqSaveSpinLockFlag {
         }
     }
 
+    #[track_caller]
     pub fn lock(&self) -> IrqSaveSpinLockFlagHolder {
         loop {
             if let Ok(s) = self.try_lock_weak() {
                 return s;
             }
+            let mut count = 0usize;
             while self.flag.load(Ordering::Relaxed) {
+                if count > 0x100000000 {
+                    pr_warn!("May be dead lock: Caller: {:?}", Location::caller());
+                    count = 0;
+                }
                 core::hint::spin_loop();
+                count += 1;
             }
         }
     }

@@ -344,7 +344,8 @@ impl MemoryManager {
         /* TODO: check physical_address is not allocatble */
         let option = option.unwrap_or(MemoryOptionFlags::KERNEL)
             | MemoryOptionFlags::IO_MAP
-            | MemoryOptionFlags::DEVICE_MEMORY;
+            | MemoryOptionFlags::DEVICE_MEMORY
+            | MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS;
         let virtual_address = self.virtual_memory_manager.map_address(
             aligned_physical_address,
             None,
@@ -562,8 +563,9 @@ macro_rules! kmalloc {
                 core::mem::size_of::<$t>(),
             ))
             .and_then(|addr| {
+                use $crate::kernel::memory_manager::data_type::Address;
                 let o = unsafe { &mut *(addr.to_usize() as *mut $t) };
-                core::mem::forget(core::mem::replace(o, $initial_value));
+                init_struct!(*o, $initial_value);
                 Ok(o)
             })
     };

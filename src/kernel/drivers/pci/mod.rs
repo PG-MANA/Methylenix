@@ -14,12 +14,13 @@ use crate::kernel::drivers::device::lpc::LpcManager;
 use crate::kernel::drivers::device::nvme::NvmeManager;
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 
+use crate::kernel::drivers::device::i210::I210Manager;
 use alloc::vec::Vec;
 
 pub trait PciDeviceDriver {
     const BASE_CLASS_CODE: u8;
     const SUB_CLASS_CODE: u8;
-    fn setup_device(pci_dev: &PciDevice, class_code: ClassCode);
+    fn setup_device(pci_dev: &PciDevice, class_code: ClassCode) -> Result<(), ()>;
 }
 
 enum PciAccessType {
@@ -216,11 +217,15 @@ impl PciManager {
             if class_code.base == LpcManager::BASE_CLASS_CODE
                 && class_code.sub == LpcManager::SUB_CLASS_CODE
             {
-                LpcManager::setup_device(e, class_code);
+                let _ = LpcManager::setup_device(e, class_code);
             } else if class_code.base == NvmeManager::BASE_CLASS_CODE
                 && class_code.sub == NvmeManager::SUB_CLASS_CODE
             {
-                NvmeManager::setup_device(e, class_code);
+                let _ = NvmeManager::setup_device(e, class_code);
+            } else if class_code.base == I210Manager::BASE_CLASS_CODE
+                && class_code.sub == I210Manager::SUB_CLASS_CODE
+            {
+                let _ = I210Manager::setup_device(e, class_code);
             } else {
                 setup_arch_depend_devices(e, class_code);
             }

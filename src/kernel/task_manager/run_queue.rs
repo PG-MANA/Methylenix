@@ -39,6 +39,8 @@ impl RunList {
 pub struct RunQueue {
     lock: SpinLockFlag,
     run_list: PtrLinkedList<RunList>,
+    expired_list: PtrLinkedList<RunList>,
+    idle_thread: *mut ThreadEntry,
     running_thread: Option<*mut ThreadEntry>,
     run_list_allocator: LocalSlabAllocator<RunList>,
     should_recheck_priority: bool,
@@ -51,6 +53,8 @@ impl RunQueue {
         Self {
             lock: SpinLockFlag::new(),
             run_list: PtrLinkedList::new(),
+            expired_list: PtrLinkedList::new(),
+            idle_thread: core::ptr::null_mut(),
             running_thread: None,
             run_list_allocator: LocalSlabAllocator::new(0),
             should_recheck_priority: false,
@@ -63,11 +67,18 @@ impl RunQueue {
         self.run_list_allocator.init()
     }
 
+    pub fn set_idle_thread(&mut self, idle_thread: &mut ThreadEntry) {
+        self.idle_thread = idle_thread;
+        idle_thread.run_list = PtrLinkedListNode::new();
+        idle_thread.set_task_status(TaskStatus::Running);
+        self.number_of_threads += 1;
+    }
+
     pub fn start(&mut self) -> ! {
         let _irq = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
         let thread = Self::get_highest_priority_thread(&mut self.run_list)
-            .expect("There is no thread to start.");
+            .unwrap_or(unsafe { &mut *self.idle_thread });
 
         thread.set_task_status(TaskStatus::Running);
         self.running_thread = Some(thread);
@@ -124,7 +135,6 @@ impl RunQueue {
         for list in unsafe { self.run_list.iter_mut(offset_of!(RunList, chain)) } {
             if list.priority_level == priority {
                 list.thread_list.remove(&mut thread.run_list);
-                self.number_of_threads -= 1;
                 return Ok(());
             }
         }
@@ -149,6 +159,7 @@ impl RunQueue {
                 Err(TaskError::InvalidThreadEntry)?;
             }
             self.remove_target_thread(thread)?;
+            self.number_of_threads -= 1;
         };
         drop(_lock);
         InterruptManager::restore_local_irq(irq);
@@ -169,18 +180,12 @@ impl RunQueue {
         interrupt_flag: Option<StoredIrqData>,
         task_status: TaskStatus,
     ) -> Result<(), TaskError> {
-        assert!(!unsafe { &mut *self.running_thread.unwrap() }
-            .lock
-            .is_locked());
-        assert_ne!(task_status, TaskStatus::Running);
-
         let irq = interrupt_flag.unwrap_or_else(|| InterruptManager::save_and_disable_local_irq());
         let lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let _running_thread_lock = running_thread.lock.lock();
         running_thread.set_task_status(task_status);
-        drop(_running_thread_lock);
-        self._schedule(None, Some(irq), Some(lock));
+        self._schedule(None, Some(irq), Some(lock), Some(_running_thread_lock));
         return Ok(());
     }
 
@@ -222,13 +227,21 @@ impl RunQueue {
         return result;
     }
 
-    fn _add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+    fn _add_thread(
+        &mut self,
+        thread: &mut ThreadEntry,
+        is_expired_list: bool,
+    ) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());
         let priority = thread.get_priority_level();
-        if let Some(mut list) = unsafe {
-            self.run_list
-                .get_first_entry_mut(offset_of!(RunList, chain))
-        } {
+        let target_list = if is_expired_list {
+            &mut self.expired_list
+        } else {
+            &mut self.run_list
+        };
+        if let Some(mut list) =
+            unsafe { target_list.get_first_entry_mut(offset_of!(RunList, chain)) }
+        {
             loop {
                 if list.priority_level == priority {
                     if let Some(last_entry) = unsafe {
@@ -248,8 +261,7 @@ impl RunQueue {
                 if list.priority_level > priority {
                     let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
                     run_list.thread_list.insert_head(&mut thread.run_list);
-                    self.run_list
-                        .insert_before(&mut list.chain, &mut run_list.chain);
+                    target_list.insert_before(&mut list.chain, &mut run_list.chain);
                     break;
                 }
                 if let Some(next) = unsafe { list.chain.get_next_mut(offset_of!(RunList, chain)) } {
@@ -257,29 +269,34 @@ impl RunQueue {
                 } else {
                     let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
                     run_list.thread_list.insert_head(&mut thread.run_list);
-                    self.run_list.insert_tail(&mut run_list.chain);
+                    target_list.insert_tail(&mut run_list.chain);
                     break;
                 }
             }
         } else {
             let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
             run_list.thread_list.insert_head(&mut thread.run_list);
-            self.run_list.insert_head(&mut run_list.chain);
+            target_list.insert_head(&mut run_list.chain);
         }
-        thread.set_task_status(TaskStatus::Running);
-        if self
-            .running_thread
-            .and_then(|r| Some(thread.get_priority_level() > unsafe { &*r }.get_priority_level()))
-            .unwrap_or(false)
-        {
-            self.should_recheck_priority = true;
-            self.should_reschedule = true;
+
+        if !is_expired_list {
+            thread.set_task_status(TaskStatus::Running);
+            if self
+                .running_thread
+                .and_then(|r| {
+                    Some(thread.get_priority_level() > unsafe { &*r }.get_priority_level())
+                })
+                .unwrap_or(false)
+            {
+                self.should_recheck_priority = true;
+                self.should_reschedule = true;
+            }
+            self.number_of_threads += 1;
+            thread.set_time_slice(
+                self.number_of_threads,
+                GlobalTimerManager::TIMER_INTERVAL_MS,
+            );
         }
-        self.number_of_threads += 1;
-        thread.set_time_slice(
-            self.number_of_threads,
-            GlobalTimerManager::TIMER_INTERVAL_MS,
-        );
         return Ok(());
     }
 
@@ -292,7 +309,7 @@ impl RunQueue {
         assert!(thread.lock.is_locked());
         let irq = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
-        let result = self._add_thread(thread);
+        let result = self._add_thread(thread, false);
         drop(_lock);
         InterruptManager::restore_local_irq(irq);
         return result;
@@ -306,10 +323,9 @@ impl RunQueue {
     /// `thread` must be locked.
     pub fn assign_thread(&mut self, thread: &mut ThreadEntry) -> Result<bool, TaskError> {
         assert!(thread.lock.is_locked());
-        let _lock = self.lock.lock();
-        /* To avoid task switch holding other cpu's run_queue_lock */
         let irq = InterruptManager::save_and_disable_local_irq();
-        self._add_thread(thread)?;
+        let _lock = self.lock.lock(); /* To avoid task switch holding other cpu's run_queue_lock */
+        self._add_thread(thread, false)?;
         let thread_priority = thread.get_priority_level();
         let should_reschedule =
             if let Some(running_thread) = self.running_thread.and_then(|r| Some(unsafe { &*r })) {
@@ -347,11 +363,17 @@ impl RunQueue {
         self.should_reschedule
     }
 
+    fn set_thread_to_expired_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+        assert!(self.lock.is_locked());
+        self._add_thread(thread, true)
+    }
+
     fn _schedule(
         &mut self,
         current_context: Option<&ContextData>,
         interrupt_flag: Option<StoredIrqData>,
         lock: Option<SpinLockFlagHolder>,
+        running_thread_lock: Option<SpinLockFlagHolder>,
     ) {
         let interrupt_flag =
             interrupt_flag.unwrap_or_else(|| InterruptManager::save_and_disable_local_irq());
@@ -369,49 +391,71 @@ impl RunQueue {
                 }
             };
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
-        let _running_thread_lock = running_thread.lock.lock();
-        let next_thread = if running_thread.get_task_status() != TaskStatus::Running {
-            if let Some(next_thread) = unsafe {
-                running_thread
-                    .run_list
-                    .get_next_mut(offset_of!(ThreadEntry, run_list))
-            } {
-                let _next_thread_lock = next_thread.lock.lock();
-                let _prev_lock = get_prev_thread_lock(running_thread);
-                self.remove_target_thread(running_thread)
-                    .expect("Cannot remove running thread from RunList");
-                if self.should_recheck_priority {
-                    self.should_recheck_priority = false;
-                    Self::get_highest_priority_thread(&mut self.run_list).unwrap_or(next_thread)
+        let _running_thread_lock =
+            running_thread_lock.unwrap_or_else(|| running_thread.lock.lock());
+
+        macro_rules! get_next_thread {
+            () => {
+                if let Some(t) = Self::get_highest_priority_thread(&mut self.run_list) {
+                    t
                 } else {
-                    next_thread
+                    core::mem::swap(&mut self.run_list, &mut self.expired_list);
+                    if let Some(t) = Self::get_highest_priority_thread(&mut self.run_list) {
+                        t
+                    } else {
+                        unsafe { &mut *self.idle_thread }
+                    }
                 }
-            } else {
-                let _prev_lock = get_prev_thread_lock(running_thread);
-                self.remove_target_thread(running_thread)
-                    .expect("Cannot remove running thread from RunList");
-                Self::get_highest_priority_thread(&mut self.run_list)
-                    .expect("Cannot get thread to run")
+            };
+        }
+        let next_thread = if let Some(next_thread) = unsafe {
+            running_thread
+                .run_list
+                .get_next_mut(offset_of!(ThreadEntry, run_list))
+        } {
+            assert_ne!(running_thread as *mut _, self.idle_thread);
+
+            let _next_thread_lock = next_thread.lock.lock();
+            let _prev_lock = get_prev_thread_lock(running_thread);
+            self.remove_target_thread(running_thread)
+                .expect("Cannot remove running thread from RunList");
+
+            if running_thread.get_task_status() == TaskStatus::Running {
+                running_thread.set_time_slice(
+                    self.number_of_threads,
+                    GlobalTimerManager::TIMER_INTERVAL_MS,
+                );
+                self.set_thread_to_expired_thread(running_thread)
+                    .expect("Failed to add running thread to expired list");
             }
-        } else {
-            running_thread.set_time_slice(
-                self.number_of_threads,
-                GlobalTimerManager::TIMER_INTERVAL_MS,
-            );
+
             if self.should_recheck_priority {
                 self.should_recheck_priority = false;
-                Self::get_highest_priority_thread(&mut self.run_list)
-                    .expect("Cannot get thread to run")
-            } else if let Some(next_thread) = unsafe {
-                running_thread
-                    .run_list
-                    .get_next_mut(offset_of!(ThreadEntry, run_list))
-            } {
-                next_thread
+                Self::get_highest_priority_thread(&mut self.run_list).unwrap_or(next_thread)
             } else {
-                Self::get_highest_priority_thread(&mut self.run_list)
-                    .expect("Cannot get thread to run")
+                next_thread
             }
+        } else {
+            if running_thread as *mut _ == self.idle_thread {
+                running_thread.set_time_slice(
+                    self.number_of_threads,
+                    GlobalTimerManager::TIMER_INTERVAL_MS,
+                );
+            } else {
+                let _prev_lock = get_prev_thread_lock(running_thread);
+                self.remove_target_thread(running_thread)
+                    .expect("Cannot remove running thread from RunList");
+
+                if running_thread.get_task_status() == TaskStatus::Running {
+                    running_thread.set_time_slice(
+                        self.number_of_threads,
+                        GlobalTimerManager::TIMER_INTERVAL_MS,
+                    );
+                    self.set_thread_to_expired_thread(running_thread)
+                        .expect("Failed to add running thread to expired list");
+                }
+            }
+            get_next_thread!()
         };
 
         let running_thread_p_id = running_thread.get_process().get_pid();
@@ -475,6 +519,6 @@ impl RunQueue {
     /// This function checks current running thread and if it has to change task, this will call switch_to_next_thread.
     /// This function can be called in the interruptable status.([Self::lock] must be unlocked.)
     pub fn schedule(&mut self, current_context: Option<&ContextData>) {
-        self._schedule(current_context, None, None)
+        self._schedule(current_context, None, None, None)
     }
 }

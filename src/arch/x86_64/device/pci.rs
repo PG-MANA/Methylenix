@@ -119,6 +119,6 @@ pub fn setup_arch_depend_devices(pci_dev: &PciDevice, class_code: ClassCode) {
     if class_code.base == SmbusManager::BASE_CLASS_CODE
         && class_code.sub == SmbusManager::SUB_CLASS_CODE
     {
-        SmbusManager::setup_device(pci_dev, class_code);
+        let _ = SmbusManager::setup_device(pci_dev, class_code);
     }
 }

@@ -14,7 +14,7 @@ impl PciDeviceDriver for SmbusManager {
     const BASE_CLASS_CODE: u8 = 0x0C;
     const SUB_CLASS_CODE: u8 = 0x05;
 
-    fn setup_device(pci_dev: &PciDevice, _class_code: ClassCode) {
+    fn setup_device(pci_dev: &PciDevice, _class_code: ClassCode) -> Result<(), ()> {
         let pci_manager = &get_kernel_manager_cluster().pci_manager;
         macro_rules! read_pci {
             ($offset:expr, $size:expr) => {
@@ -22,7 +22,7 @@ impl PciDeviceDriver for SmbusManager {
                     Ok(d) => d,
                     Err(e) => {
                         pr_err!("Failed to read PCI configuration space: {:?},", e);
-                        return;
+                        return Err(());
                     }
                 }
             };
@@ -31,7 +31,7 @@ impl PciDeviceDriver for SmbusManager {
             ($offset:expr, $data:expr) => {
                 if let Err(e) = pci_manager.write_data(pci_dev, $offset, $data) {
                     pr_err!("Failed to read PCI configuration space: {:?},", e);
-                    return;
+                    return Err(());
                 }
             };
         }
@@ -43,7 +43,7 @@ impl PciDeviceDriver for SmbusManager {
         let smbus_base_address = read_pci!(Self::SMB_BASE, 4);
         if (smbus_base_address & 0b1) == 0 {
             pr_err!("Invalid base address.");
-            return;
+            return Err(());
         }
         let smbus_base_address = ((smbus_base_address & !0b1) & 0xFFFF) as u16;
         pr_debug!("SMBus Base Address: {:#X}", smbus_base_address);
@@ -51,7 +51,7 @@ impl PciDeviceDriver for SmbusManager {
         let interrupt_pin = read_pci!(Self::INT_PIN, 1) as u8;
         if interrupt_pin == 0 || interrupt_pin > 5 {
             pr_err!("SMBus interrupt is disabled.");
-            return;
+            return Err(());
         }
         let int_pin = interrupt_pin - 1;
         pr_debug!("SMBus Interrupt Pin: INT{}#", (int_pin + b'A') as char);
@@ -62,7 +62,7 @@ impl PciDeviceDriver for SmbusManager {
             .search_interrupt_information_with_evaluation_aml(pci_dev.bus, pci_dev.device, int_pin);
         if resource_data.is_none() {
             pr_err!("Cannot detect irq.");
-            return;
+            return Err(());
         }
         let irq = match resource_data.unwrap() {
             ResourceData::Irq(i) => i,
@@ -74,7 +74,7 @@ impl PciDeviceDriver for SmbusManager {
             .set_device_interrupt_function(smbus_handler, Some(irq), None, 0, false)
         {
             pr_err!("Failed to setup interrupt: {:?}", e);
-            return;
+            return Err(());
         }
 
         /* Clear Interrupt Disable and enable I/O Space */
@@ -115,6 +115,7 @@ impl PciDeviceDriver for SmbusManager {
                 Self::SMBUS_INTERRUPT,
             );
         }
+        return Ok(());
     }
 }
 

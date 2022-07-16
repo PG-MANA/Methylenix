@@ -142,6 +142,36 @@ impl ContextData {
         return forked_data;
     }
 
+    pub fn set_function_call_arguments(&mut self, arguments: &[u64]) {
+        if arguments.len() > 0 {
+            self.registers.x0 = arguments[0] as u64;
+        }
+        if arguments.len() > 1 {
+            self.registers.x1 = arguments[1] as u64;
+        }
+        if arguments.len() > 2 {
+            self.registers.x2 = arguments[2] as u64;
+        }
+        if arguments.len() > 3 {
+            self.registers.x3 = arguments[3] as u64;
+        }
+        if arguments.len() > 4 {
+            self.registers.x4 = arguments[4] as u64;
+        }
+        if arguments.len() > 5 {
+            self.registers.x5 = arguments[5] as u64;
+        }
+        if arguments.len() > 6 {
+            self.registers.x6 = arguments[6] as u64;
+        }
+        if arguments.len() > 7 {
+            self.registers.x7 = arguments[7] as u64;
+        }
+        if arguments.len() > 8 {
+            pr_err!("Too many arguments.");
+        }
+    }
+
     pub fn get_system_call_arguments(&self, index: usize) -> Option<u64> {
         if index > 8 {
             None

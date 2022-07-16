@@ -74,10 +74,7 @@ pub fn setup_cpu_manager_cluster(
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
 
     unsafe { cpu::set_cpu_base_address(cpu_manager as *const _ as u64) };
-    mem::forget(mem::replace(
-        &mut cpu_manager.list,
-        PtrLinkedListNode::new(),
-    ));
+    init_struct!(cpu_manager.list, PtrLinkedListNode::new());
     get_kernel_manager_cluster()
         .cpu_list
         .insert_tail(&mut cpu_manager.list);
@@ -143,10 +140,10 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
         DIRECT_MAP_BASE_ADDRESS + get_direct_map_max_size(),
         &mut physical_memory_manager,
     );
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().system_memory_manager,
-        SystemMemoryManager::new(physical_memory_manager),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().system_memory_manager,
+        SystemMemoryManager::new(physical_memory_manager)
+    );
     get_kernel_manager_cluster()
         .system_memory_manager
         .init_pools(&mut virtual_memory_manager);
@@ -194,10 +191,10 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     }
 
     /* Set up Memory Manager */
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().kernel_memory_manager,
-        MemoryManager::new(virtual_memory_manager),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().kernel_memory_manager,
+        MemoryManager::new(virtual_memory_manager)
+    );
 
     /* Adjust Memory Pointer */
     boot_information.memory_info.efi_memory_map_address = physical_address_to_direct_map(
@@ -237,10 +234,10 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
 
 /// Init InterruptManager
 pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
-    mem::forget(mem::replace(
-        &mut get_cpu_manager_cluster().interrupt_manager,
-        InterruptManager::new(),
-    ));
+    init_struct!(
+        get_cpu_manager_cluster().interrupt_manager,
+        InterruptManager::new()
+    );
     get_cpu_manager_cluster().interrupt_manager.init();
 
     if acpi_available {
@@ -253,16 +250,16 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
             let cpu_redistributor = gic_manager
                 .init_redistributor()
                 .expect("Failed to init GIC Redistributor");
-            mem::forget(mem::replace(
-                &mut get_cpu_manager_cluster()
+            init_struct!(
+                get_cpu_manager_cluster()
                     .arch_depend_data
                     .gic_redistributor_manager,
-                cpu_redistributor,
-            ));
-            mem::forget(mem::replace(
-                &mut get_kernel_manager_cluster().arch_depend_data.gic_manager,
-                gic_manager,
-            ));
+                cpu_redistributor
+            );
+            init_struct!(
+                get_kernel_manager_cluster().arch_depend_data.gic_manager,
+                gic_manager
+            );
             get_cpu_manager_cluster().interrupt_manager.init_ipi();
             return;
         }
@@ -278,16 +275,16 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
             let cpu_redistributor = gic_manager
                 .init_redistributor()
                 .expect("Failed to init GIC Redistributor");
-            mem::forget(mem::replace(
-                &mut get_cpu_manager_cluster()
+            init_struct!(
+                get_cpu_manager_cluster()
                     .arch_depend_data
                     .gic_redistributor_manager,
-                cpu_redistributor,
-            ));
-            mem::forget(mem::replace(
-                &mut get_kernel_manager_cluster().arch_depend_data.gic_manager,
-                gic_manager,
-            ));
+                cpu_redistributor
+            );
+            init_struct!(
+                get_kernel_manager_cluster().arch_depend_data.gic_manager,
+                gic_manager
+            );
             get_cpu_manager_cluster().interrupt_manager.init_ipi();
             return;
         }
@@ -299,7 +296,7 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
 pub fn init_work_queue() {
     get_cpu_manager_cluster()
         .work_queue
-        .init(&mut get_kernel_manager_cluster().task_manager);
+        .init_cpu_work_queue(&mut get_kernel_manager_cluster().task_manager);
 }
 
 /// Init SerialPort
@@ -334,14 +331,8 @@ pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -
     let mut acpi_manager = AcpiManager::new();
     let mut device_manager = AcpiDeviceManager::new();
     let set_manger = |a: AcpiManager, d: AcpiDeviceManager| {
-        mem::forget(mem::replace(
-            &mut get_kernel_manager_cluster().acpi_manager,
-            Mutex::new(a),
-        ));
-        mem::forget(mem::replace(
-            &mut get_kernel_manager_cluster().acpi_device_manager,
-            d,
-        ));
+        init_struct!(get_kernel_manager_cluster().acpi_manager, Mutex::new(a));
+        init_struct!(get_kernel_manager_cluster().acpi_device_manager, d);
     };
 
     let mut rsdp_address: Option<usize> = None;
@@ -366,10 +357,7 @@ pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -
         return false;
     }
     if let Some(e) = acpi_manager.create_acpi_event_manager() {
-        mem::forget(mem::replace(
-            &mut get_kernel_manager_cluster().acpi_event_manager,
-            e,
-        ));
+        init_struct!(get_kernel_manager_cluster().acpi_event_manager, e);
     } else {
         pr_err!("Failed to initialize ACPI Event Manager");
         set_manger(acpi_manager, device_manager);
@@ -394,25 +382,25 @@ pub fn init_dtb(boot_information: &BootInformation) -> bool {
         }
     }
     if dtb_address.is_none() {
-        mem::forget(mem::replace(
-            &mut get_kernel_manager_cluster().arch_depend_data.dtb_manager,
-            dtb_manager,
-        ));
+        init_struct!(
+            get_kernel_manager_cluster().arch_depend_data.dtb_manager,
+            dtb_manager
+        );
         return false;
     }
 
     if !dtb_manager.init(PAddress::new(dtb_address.unwrap())) {
         pr_warn!("Failed to initialize DTB.");
-        mem::forget(mem::replace(
-            &mut get_kernel_manager_cluster().arch_depend_data.dtb_manager,
-            dtb_manager,
-        ));
+        init_struct!(
+            get_kernel_manager_cluster().arch_depend_data.dtb_manager,
+            dtb_manager
+        );
         return false;
     }
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().arch_depend_data.dtb_manager,
-        dtb_manager,
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().arch_depend_data.dtb_manager,
+        dtb_manager
+    );
     return true;
 }
 
@@ -480,10 +468,7 @@ pub fn init_pci_early() -> bool {
     } else {
         unimplemented!()
     }
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().pci_manager,
-        pci_manager,
-    ));
+    init_struct!(get_kernel_manager_cluster().pci_manager, pci_manager);
     if let Err(e) = get_kernel_manager_cluster().pci_manager.build_device_tree() {
         pr_err!("Failed to build PCI device tree: {:?}", e);
         return false;
@@ -498,18 +483,18 @@ pub fn init_pci_later() -> bool {
 }
 
 pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: bool) {
-    mem::forget(mem::replace(
-        &mut get_cpu_manager_cluster().local_timer_manager,
-        LocalTimerManager::new(),
-    ));
-    mem::forget(mem::replace(
-        &mut get_cpu_manager_cluster().arch_depend_data.generic_timer,
-        GenericTimer::new(),
-    ));
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().arch_depend_data.system_counter,
-        SystemCounter::new(),
-    ));
+    init_struct!(
+        get_cpu_manager_cluster().local_timer_manager,
+        LocalTimerManager::new()
+    );
+    init_struct!(
+        get_cpu_manager_cluster().arch_depend_data.generic_timer,
+        GenericTimer::new()
+    );
+    init_struct!(
+        get_kernel_manager_cluster().arch_depend_data.system_counter,
+        SystemCounter::new()
+    );
 
     let generic_timer = &mut get_cpu_manager_cluster().arch_depend_data.generic_timer;
     let system_counter = &mut get_kernel_manager_cluster().arch_depend_data.system_counter;
@@ -595,14 +580,14 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
 }
 
 fn init_local_timer_ap() {
-    mem::forget(mem::replace(
-        &mut get_cpu_manager_cluster().local_timer_manager,
-        LocalTimerManager::new(),
-    ));
-    mem::forget(mem::replace(
-        &mut get_cpu_manager_cluster().arch_depend_data.generic_timer,
-        GenericTimer::new(),
-    ));
+    init_struct!(
+        get_cpu_manager_cluster().local_timer_manager,
+        LocalTimerManager::new()
+    );
+    init_struct!(
+        get_cpu_manager_cluster().arch_depend_data.generic_timer,
+        GenericTimer::new()
+    );
     get_cpu_manager_cluster()
         .arch_depend_data
         .generic_timer
@@ -615,10 +600,10 @@ fn init_local_timer_ap() {
 }
 
 pub fn init_global_timer() {
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().global_timer_manager,
-        GlobalTimerManager::new(),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().global_timer_manager,
+        GlobalTimerManager::new()
+    );
 }
 
 /// Init TaskManager
@@ -642,14 +627,8 @@ pub fn init_task(main_process: fn() -> !, idle_process: fn() -> !) {
 
     task_manager.init(context_manager, main_context, idle_context, &mut run_queue);
 
-    mem::forget(mem::replace(
-        &mut get_cpu_manager_cluster().run_queue,
-        run_queue,
-    ));
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().task_manager,
-        task_manager,
-    ));
+    init_struct!(get_cpu_manager_cluster().run_queue, run_queue);
+    init_struct!(get_kernel_manager_cluster().task_manager, task_manager);
 }
 
 /// Init application processor's TaskManager
@@ -670,14 +649,21 @@ pub fn init_task_ap(idle_task: fn() -> !) {
 ///
 /// This function must be called before calling device scan functions.
 pub fn init_block_devices_and_file_system_early() {
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().block_device_manager,
-        BlockDeviceManager::new(),
-    ));
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().file_manager,
-        FileManager::new(),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().block_device_manager,
+        BlockDeviceManager::new()
+    );
+    init_struct!(
+        get_kernel_manager_cluster().file_manager,
+        FileManager::new()
+    );
+}
+
+/// Initialize Network Manager
+///
+/// This function must be called before calling device scan functions.
+pub fn init_network_manager_early() {
+    get_kernel_manager_cluster().network_manager.init();
 }
 
 /// Search partitions and try to mount them
@@ -832,10 +818,7 @@ pub extern "C" fn ap_boot_main() -> ! {
     memory_allocator
         .init()
         .expect("Failed to init MemoryAllocator");
-    mem::forget(mem::replace(
-        &mut cpu_manager.memory_allocator,
-        memory_allocator,
-    ));
+    init_struct!(cpu_manager.memory_allocator, memory_allocator);
 
     /* Setup InterruptManager(including LocalApicManager) */
     let mut interrupt_manager = InterruptManager::new();
@@ -845,17 +828,14 @@ pub extern "C" fn ap_boot_main() -> ! {
         .gic_manager
         .init_redistributor()
         .expect("Failed to init GIC Redistributor");
-    mem::forget(mem::replace(
-        &mut get_cpu_manager_cluster()
+    init_struct!(
+        get_cpu_manager_cluster()
             .arch_depend_data
             .gic_redistributor_manager,
-        cpu_redistributor,
-    ));
+        cpu_redistributor
+    );
     interrupt_manager.init_ipi();
-    mem::forget(mem::replace(
-        &mut cpu_manager.interrupt_manager,
-        interrupt_manager,
-    ));
+    init_struct!(cpu_manager.interrupt_manager, interrupt_manager);
 
     init_local_timer_ap();
     init_task_ap(ap_idle);

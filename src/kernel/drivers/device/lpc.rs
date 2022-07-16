@@ -11,25 +11,27 @@ impl PciDeviceDriver for LpcManager {
     const BASE_CLASS_CODE: u8 = 0x06;
     const SUB_CLASS_CODE: u8 = 0x01;
 
-    fn setup_device(pci_dev: &PciDevice, _class_code: ClassCode) {
+    fn setup_device(pci_dev: &PciDevice, _class_code: ClassCode) -> Result<(), ()> {
         let pci_manager = &get_kernel_manager_cluster().pci_manager;
-        let enable_bit = |offset: u32, bit: u32| {
+        let enable_bit = |offset: u32, bit: u32| -> Result<(), ()> {
             let original_data = match pci_manager.read_data(pci_dev, offset, 4) {
                 Ok(d) => d,
                 Err(e) => {
                     pr_err!("Failed to get the original data: {:?}", e);
-                    return;
+                    return Err(());
                 }
             };
             if let Err(e) = pci_manager.write_data(pci_dev, offset, original_data | bit) {
                 pr_err!("Failed to enable bit: {:?}", e);
-                return;
+                return Err(());
             }
+            return Ok(());
         };
-        enable_bit(Self::ACPI_CONTROL, Self::ACPI_ENABLE);
-        enable_bit(Self::GPIO_CONTROL, Self::GPIO_ENABLE);
+        enable_bit(Self::ACPI_CONTROL, Self::ACPI_ENABLE)?;
+        enable_bit(Self::GPIO_CONTROL, Self::GPIO_ENABLE)?;
         /* Enable(62h and 66h) Micro controller in LPC_EN */
-        enable_bit(Self::LPC_I, Self::MC_LPC_EN << 16);
+        enable_bit(Self::LPC_I, Self::MC_LPC_EN << 16)?;
+        return Ok(());
     }
 }
 
