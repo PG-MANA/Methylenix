@@ -6,29 +6,26 @@
 
 pub mod multiboot;
 
-use crate::arch::target_arch::context::{
-    memory_layout::physical_address_to_direct_map, ContextManager,
+use crate::arch::target_arch::{
+    context::{memory_layout::physical_address_to_direct_map, ContextManager},
+    device::{cpu, io_apic::IoApicManager, local_apic_timer::LocalApicTimer, pic, pit::PitManager},
+    interrupt::{idt::GateDescriptor, InterruptIndex, InterruptManager},
+    paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
-use crate::arch::target_arch::device::io_apic::IoApicManager;
-use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
-use crate::arch::target_arch::device::pit::PitManager;
-use crate::arch::target_arch::device::{cpu, pic};
-use crate::arch::target_arch::interrupt::{idt::GateDescriptor, InterruptIndex, InterruptManager};
-use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 
-use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
-use crate::kernel::drivers::acpi::table::madt::MadtManager;
-use crate::kernel::initialization::{init_task_ap, init_work_queue};
-use crate::kernel::manager_cluster::{
-    get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
+use crate::kernel::{
+    collections::ptr_linked_list::PtrLinkedListNode,
+    drivers::acpi::table::madt::MadtManager,
+    initialization::{init_task_ap, init_work_queue},
+    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster},
+    memory_manager::{
+        data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
+        memory_allocator::MemoryAllocator,
+    },
+    sync::spin_lock::Mutex,
+    task_manager::{run_queue::RunQueue, TaskManager},
+    timer_manager::{LocalTimerManager, Timer},
 };
-use crate::kernel::memory_manager::{
-    data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
-    memory_allocator::MemoryAllocator,
-};
-use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::task_manager::{run_queue::RunQueue, TaskManager};
-use crate::kernel::timer_manager::{LocalTimerManager, Timer};
 
 use core::sync::atomic::AtomicBool;
 
@@ -38,8 +35,6 @@ static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; P
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// Init TaskManager
-///
-///
 pub fn init_task(
     system_cs: u16,
     user_cs: u16,

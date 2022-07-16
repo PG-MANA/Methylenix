@@ -15,13 +15,13 @@ use crate::arch::target_arch::{
         generic_timer::{GenericTimer, SystemCounter},
     },
     interrupt::{gic::GicManager, InterruptManager},
-    paging::{PAGE_MASK, PAGE_SIZE_USIZE},
+    paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
 use crate::kernel::{
-    acpi::{device::AcpiDeviceManager, table::gtdt::GtdtManager, AcpiManager},
     collections::ptr_linked_list::PtrLinkedListNode,
     drivers::{
+        acpi::{device::AcpiDeviceManager, table::gtdt::GtdtManager, AcpiManager},
         dtb::DtbManager,
         efi::{
             memory_map::{EfiMemoryDescriptor, EfiMemoryType},

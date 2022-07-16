@@ -5,12 +5,19 @@
 //!
 
 use crate::arch::target_arch::device::pci::ArchDependPciManager;
-use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
-use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
-use crate::kernel::drivers::acpi::AcpiManager;
-use crate::kernel::drivers::pci::PciManager;
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::task_manager::run_queue::RunQueue;
+
+use crate::kernel::{
+    block_device::BlockDeviceManager,
+    drivers::{
+        acpi::{device::AcpiDeviceManager, table::mcfg::McfgManager, AcpiManager},
+        pci::PciManager,
+    },
+    file_manager::FileManager,
+    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
+    sync::spin_lock::Mutex,
+    task_manager::run_queue::RunQueue,
+    timer_manager::GlobalTimerManager,
+};
 
 /// Init application processor's TaskManager
 ///
@@ -75,7 +82,7 @@ pub fn init_acpi_later() -> bool {
         pr_err!("Cannot setup ACPI AML Interpreter.");
         return false;
     }
-    if !super::device::acpi::setup_interrupt(&acpi_manager) {
+    if !crate::arch::target_arch::device::acpi::setup_interrupt(&acpi_manager) {
         pr_err!("Cannot setup ACPI interrupt.");
         return false;
     }
