@@ -23,10 +23,9 @@ use self::device::serial_port::SerialPortManager;
 use self::init::*;
 use self::interrupt::gic::{GicManager, GicRedistributorManager};
 
-use crate::kernel::application_loader;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::dtb::DtbManager;
-use crate::kernel::file_manager::elf::ELF_MACHINE_AA64;
+pub use crate::kernel::file_manager::elf::ELF_MACHINE_AA64 as ELF_MACHINE_DEFAULT;
 use crate::kernel::graphic_manager::{font::FontType, GraphicManager};
 use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
@@ -44,6 +43,7 @@ pub struct ArchDependedCpuManagerCluster {
     gic_redistributor_manager: GicRedistributorManager,
 }
 
+pub const TARGET_ARCH_NAME: &str = "aarch64";
 const KERNEL_INITIAL_STACK_SIZE: usize = 0x40000;
 static mut KERNEL_INITIAL_STACK: [u8; KERNEL_INITIAL_STACK_SIZE] = [0; KERNEL_INITIAL_STACK_SIZE];
 
@@ -124,7 +124,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     init_global_timer();
 
     /* Init the task management system */
-    init_task(main_process, idle);
+    init_task(main_arch_depend_initialization_process, idle);
 
     /* Setup work queue system */
     init_work_queue();
@@ -137,7 +137,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     /* Never return to here */
 }
 
-fn main_process() -> ! {
+fn main_arch_depend_initialization_process() -> ! {
     /* Interrupt is enabled */
 
     /* Start Timer*/
@@ -153,41 +153,6 @@ fn main_process() -> ! {
         pr_err!("Failed to setup interrupt of SerialPort");
     }
 
-    pr_info!("All initializations are done!");
-
-    draw_boot_logo();
-
-    init_block_devices_and_file_system_early();
-
-    if init_pci_early() {
-        if !init_acpi_later() {
-            pr_err!("Cannot init ACPI devices.");
-        }
-    } else {
-        pr_err!("Cannot init PCI Manager.");
-    }
-
-    if !init_pci_later() {
-        pr_err!("Cannot init PCI devices.");
-    }
-
-    init_block_devices_and_file_system_later();
-    init_network_manager_early();
-
-    let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
-
-    /* Test */
-    const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
-        ("OSTYPE", crate::OS_NAME),
-        ("OSVERSION", crate::OS_VERSION),
-        ("TARGET", "AArch64"),
-    ];
-    let _ = application_loader::load_and_execute(
-        "/EFI/BOOT/APP",
-        &["Arg1", "Arg2", "Arg3"],
-        &ENVIRONMENT_VARIABLES,
-        ELF_MACHINE_AA64,
-    );
-
-    idle()
+    pr_info!("All arch-depend initializations are done!");
+    main_initialization_process()
 }

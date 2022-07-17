@@ -4,9 +4,13 @@
 //! This module contains initialization functions which is not depend on arch.
 //!
 
-use crate::arch::target_arch::device::{cpu, pci::ArchDependPciManager};
+use crate::arch::target_arch::{
+    device::{cpu, pci::ArchDependPciManager},
+    ELF_MACHINE_DEFAULT,
+};
 
 use crate::kernel::{
+    application_loader,
     block_device::BlockDeviceManager,
     drivers::{
         acpi::{
@@ -321,4 +325,45 @@ pub fn idle() -> ! {
             cpu::idle();
         }
     }
+}
+
+/// Main process called after finishing arch-depend initializations
+pub fn main_initialization_process() -> ! {
+    pr_info!("Entered main initialization process");
+
+    draw_boot_logo();
+
+    init_block_devices_and_file_system_early();
+    init_network_manager_early();
+
+    if init_pci_early() {
+        if !init_acpi_later() {
+            pr_err!("Cannot init ACPI devices.");
+        }
+    } else {
+        pr_err!("Cannot init PCI Manager.");
+    }
+
+    if !init_pci_later() {
+        pr_err!("Cannot init PCI devices.");
+    }
+
+    init_block_devices_and_file_system_later();
+
+    let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
+
+    /* Test */
+    const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
+        ("OSTYPE", crate::OS_NAME),
+        ("OSVERSION", crate::OS_VERSION),
+        ("TARGET", crate::arch::target_arch::TARGET_ARCH_NAME),
+    ];
+    let _ = application_loader::load_and_execute(
+        "/OS/FILES/APP",
+        &["Arg1", "Arg2", "Arg3"],
+        &ENVIRONMENT_VARIABLES,
+        ELF_MACHINE_DEFAULT,
+    );
+
+    idle()
 }

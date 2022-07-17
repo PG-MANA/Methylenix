@@ -19,11 +19,10 @@ use self::device::serial_port::SerialPortManager;
 use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::init::*;
 
-use crate::kernel::application_loader;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
-use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64;
+pub use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64 as ELF_MACHINE_DEFAULT;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
@@ -39,6 +38,8 @@ pub struct ArchDependedCpuManagerCluster {
 pub struct ArchDependedKernelManagerCluster {
     pub io_apic_manager: Mutex<IoApicManager>,
 }
+
+pub const TARGET_ARCH_NAME: &str = "x86_64";
 
 #[no_mangle]
 pub extern "C" fn multiboot_main(
@@ -128,7 +129,13 @@ pub extern "C" fn multiboot_main(
     init_global_timer();
 
     /* Init the task management system */
-    init_task(kernel_cs, user_cs, user_ss, main_process, idle);
+    init_task(
+        kernel_cs,
+        user_cs,
+        user_ss,
+        main_arch_depend_initialization_process,
+        idle,
+    );
 
     /* Setup work queue system */
     init_work_queue();
@@ -145,7 +152,7 @@ pub fn general_protection_exception_handler(e_code: usize) -> ! {
     panic!("General Protection Exception \nError Code:0x{:X}", e_code);
 }
 
-fn main_process() -> ! {
+fn main_arch_depend_initialization_process() -> ! {
     /* Interrupt is enabled */
 
     get_cpu_manager_cluster()
@@ -156,43 +163,9 @@ fn main_process() -> ! {
                 .interrupt_manager
                 .get_local_apic_manager(),
         );
-    pr_info!("All initializations are done!");
 
-    draw_boot_logo();
-
-    init_block_devices_and_file_system_early();
-    init_network_manager_early();
-
-    if init_pci_early() {
-        if !init_acpi_later() {
-            pr_err!("Cannot init ACPI devices.");
-        }
-    } else {
-        pr_err!("Cannot init PCI Manager.");
-    }
-
-    if !init_pci_later() {
-        pr_err!("Cannot init PCI devices.");
-    }
-
-    init_block_devices_and_file_system_later();
-
-    let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
-
-    /* Test */
-    const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
-        ("OSTYPE", crate::OS_NAME),
-        ("OSVERSION", crate::OS_VERSION),
-        ("TARGET", "x86_64"),
-    ];
-    let _ = application_loader::load_and_execute(
-        "/OS/FILES/APP",
-        &["Arg1", "Arg2", "Arg3"],
-        &ENVIRONMENT_VARIABLES,
-        ELF_MACHINE_AMD64,
-    );
-
-    idle()
+    pr_info!("All arch-depend initializations are done!");
+    main_initialization_process()
 }
 
 #[no_mangle]
