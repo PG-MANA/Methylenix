@@ -1,8 +1,9 @@
 //!
-//! Initialization Functions
+//! The arch-depended functions for initialization
 //!
 //! This module including init codes for device, memory, and task system.
 //! This module is called by boot function.
+//!
 
 pub mod multiboot;
 
@@ -16,7 +17,7 @@ use crate::arch::target_arch::{
 use crate::kernel::{
     collections::ptr_linked_list::PtrLinkedListNode,
     drivers::acpi::table::madt::MadtManager,
-    initialization::{init_task_ap, init_work_queue},
+    initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster},
     memory_manager::{
         data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
@@ -395,5 +396,5 @@ fn ap_idle() -> ! {
                 .interrupt_manager
                 .get_local_apic_manager(),
         );
-    super::idle();
+    idle()
 }

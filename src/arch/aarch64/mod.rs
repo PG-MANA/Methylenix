@@ -1,5 +1,7 @@
 //!
-//! AArch64 Arch Depend Modules
+//! AArch64 Boot Entry
+//!
+//! Boot entry codes
 //!
 
 mod boot_info;
@@ -12,7 +14,7 @@ pub mod device {
     pub mod serial_port;
     pub mod text;
 }
-mod init;
+mod initialization;
 pub mod interrupt;
 pub mod paging;
 pub mod system_call;
@@ -20,7 +22,7 @@ pub mod system_call;
 use self::boot_info::BootInformation;
 use self::device::generic_timer::{GenericTimer, SystemCounter};
 use self::device::serial_port::SerialPortManager;
-use self::init::*;
+use self::initialization::*;
 use self::interrupt::gic::{GicManager, GicRedistributorManager};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;

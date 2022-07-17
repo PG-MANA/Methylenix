@@ -1,5 +1,8 @@
 //!
-//! Initialization Functions
+//! The arch-depended functions for initialization
+//!
+//! This module including init codes for device, memory, and task system.
+//! This module is called by boot function.
 //!
 
 use crate::arch::target_arch::{
@@ -29,7 +32,7 @@ use crate::kernel::{
         },
     },
     file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD},
-    initialization::{init_task_ap, init_work_queue},
+    initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster},
     memory_manager::{
         data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
@@ -291,7 +294,7 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
 
 /// Init SerialPort
 ///
-///
+/// This function does not enable the interrupt.
 pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
     if acpi_available {
         if get_kernel_manager_cluster()
@@ -512,8 +515,6 @@ fn init_local_timer_ap() {
 }
 
 /// Init TaskManager
-///
-///
 pub fn init_task(main_process: fn() -> !, idle_process: fn() -> !) {
     let mut context_manager = ContextManager::new();
     let mut run_queue = RunQueue::new();
@@ -706,5 +707,5 @@ fn ap_idle() -> ! {
         .arch_depend_data
         .generic_timer
         .start_interrupt();
-    super::idle()
+    idle()
 }

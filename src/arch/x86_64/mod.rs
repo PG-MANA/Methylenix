@@ -2,13 +2,14 @@
 //! x86_64 Boot Entry
 //!
 //! Boot entry code from assembly.
+//!
 
 #[macro_use]
 pub mod interrupt;
 pub mod boot;
 pub mod context;
 pub mod device;
-mod init;
+mod initialization;
 pub mod paging;
 pub mod system_call;
 
@@ -16,8 +17,8 @@ use self::device::cpu;
 use self::device::io_apic::IoApicManager;
 use self::device::local_apic_timer::LocalApicTimer;
 use self::device::serial_port::SerialPortManager;
-use self::init::multiboot::{init_graphic, init_memory_by_multiboot_information};
-use self::init::*;
+use self::initialization::multiboot::{init_graphic, init_memory_by_multiboot_information};
+use self::initialization::*;
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
