@@ -61,28 +61,28 @@ impl ThreadEntry {
         scheduling_class: SchedulingClass,
         context_data: ContextData,
     ) {
-        core::mem::forget(core::mem::replace(
-            self,
+        init_struct!(
+            *self,
             Self::new(
                 NonNull::new(process).unwrap(),
                 context_data,
                 scheduling_class,
-            ),
-        ));
+            )
+        );
         self.priority_level = priority_level;
         self.scheduling_class = scheduling_class;
     }
 
     pub fn fork_data(&mut self, original_thread: &Self, context_data: ContextData) {
         assert!(original_thread.lock.is_locked());
-        core::mem::forget(core::mem::replace(
-            self,
+        init_struct!(
+            *self,
             Self::new(
                 original_thread.process,
                 context_data,
                 original_thread.scheduling_class,
-            ),
-        ));
+            )
+        );
         self.status = TaskStatus::New;
         self.priority_level = original_thread.priority_level;
     }

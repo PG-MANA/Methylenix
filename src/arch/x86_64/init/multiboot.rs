@@ -163,10 +163,10 @@ pub fn init_memory_by_multiboot_information(
         PAddress::new(max_available_address),
         &mut physical_memory_manager,
     );
-    core::mem::forget(core::mem::replace(
-        &mut get_kernel_manager_cluster().system_memory_manager,
-        SystemMemoryManager::new(physical_memory_manager),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().system_memory_manager,
+        SystemMemoryManager::new(physical_memory_manager)
+    );
     get_kernel_manager_cluster()
         .system_memory_manager
         .init_pools(&mut virtual_memory_manager);
@@ -231,10 +231,10 @@ pub fn init_memory_by_multiboot_information(
         .expect("Cannot map multiboot information");
 
     /* Set up Memory Manager */
-    core::mem::forget(core::mem::replace(
-        &mut get_kernel_manager_cluster().kernel_memory_manager,
-        MemoryManager::new(virtual_memory_manager),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().kernel_memory_manager,
+        MemoryManager::new(virtual_memory_manager)
+    );
     /* Apply paging */
     get_kernel_manager_cluster()
         .kernel_memory_manager

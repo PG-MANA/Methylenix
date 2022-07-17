@@ -70,7 +70,7 @@ impl ProcessEntry {
         memory_manager: *mut MemoryManager,
         privilege_level: u8,
     ) {
-        core::mem::forget(core::mem::replace(self, Self::new()));
+        init_struct!(*self, Self::new());
         self.parent = parent;
         self.process_id = p_id;
         self.privilege_level = privilege_level;

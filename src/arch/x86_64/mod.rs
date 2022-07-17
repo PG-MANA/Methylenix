@@ -21,21 +21,15 @@ use self::init::*;
 
 use crate::kernel::application_loader;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
+use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
-use crate::kernel::drivers::{acpi::table::bgrt::BgrtManager, acpi::AcpiManager};
 use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64;
 use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
-};
+use crate::kernel::memory_manager::data_type::VAddress;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::tty::TtyManager;
-
-use crate::{io_remap, mremap};
-
-use core::mem;
 
 pub struct ArchDependedCpuManagerCluster {
     pub local_apic_timer: LocalApicTimer,
@@ -60,36 +54,33 @@ pub extern "C" fn multiboot_main(
     }
 
     /* Set SerialPortManager(send only) for early debug */
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().serial_port_manager,
-        SerialPortManager::new(0x3F8 /* COM1 */),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new(0x3F8 /* COM1 */)
+    );
 
     /* Load the multiboot information */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
     /* Setup BSP CPU Manager Cluster */
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().cpu_list,
-        PtrLinkedList::new(),
-    ));
+    init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
     setup_cpu_manager_cluster(Some(VAddress::new(
         &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
     )));
 
     /* Init Graphic & TTY (for panic!) */
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().graphic_manager,
-        GraphicManager::new(),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().graphic_manager,
+        GraphicManager::new()
+    );
     get_kernel_manager_cluster()
         .graphic_manager
         .init_by_multiboot_information(&multiboot_information.framebuffer_info);
     get_kernel_manager_cluster().graphic_manager.clear_screen();
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().kernel_tty_manager,
-        TtyManager::new(),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().kernel_tty_manager,
+        TtyManager::new()
+    );
     get_kernel_manager_cluster()
         .kernel_tty_manager
         .open(&get_kernel_manager_cluster().graphic_manager);
@@ -167,7 +158,6 @@ fn main_process() -> ! {
         );
     pr_info!("All initializations are done!");
 
-    /* Draw boot logo */
     draw_boot_logo();
 
     init_block_devices_and_file_system_early();
@@ -205,131 +195,6 @@ fn main_process() -> ! {
     idle()
 }
 
-fn idle() -> ! {
-    loop {
-        unsafe {
-            cpu::idle();
-        }
-    }
-}
-
-fn draw_boot_logo() {
-    let free_mapped_address = |address: usize| {
-        if let Err(e) = get_kernel_manager_cluster()
-            .kernel_memory_manager
-            .free(VAddress::new(address))
-        {
-            pr_err!("Freeing the bitmap data of BGRT was failed: {:?}", e);
-        }
-    };
-    let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
-
-    let bgrt_manager = acpi_manager
-        .get_table_manager()
-        .get_table_manager::<BgrtManager>();
-    drop(acpi_manager);
-    if bgrt_manager.is_none() {
-        pr_info!("ACPI does not have the BGRT information.");
-        return;
-    }
-    let bgrt_manager = bgrt_manager.unwrap();
-    let boot_logo_physical_address = bgrt_manager.get_bitmap_physical_address();
-    let boot_logo_offset = bgrt_manager.get_image_offset();
-    if boot_logo_physical_address.is_none() {
-        pr_info!("Boot Logo is compressed.");
-        return;
-    }
-    drop(bgrt_manager);
-
-    let original_map_size = MSize::from(54);
-    let result = io_remap!(
-        boot_logo_physical_address.unwrap(),
-        original_map_size,
-        MemoryPermissionFlags::rodata(),
-        MemoryOptionFlags::PRE_RESERVED
-    );
-    if result.is_err() {
-        pr_err!(
-            "Mapping the bitmap data of BGRT failed Err:{:?}",
-            result.err()
-        );
-        return;
-    }
-
-    let boot_logo_address = result.unwrap().to_usize();
-    pr_info!(
-        "BGRT: {:#X} is mapped at {:#X}",
-        boot_logo_physical_address.unwrap().to_usize(),
-        boot_logo_address
-    );
-    drop(boot_logo_physical_address);
-
-    if unsafe { *((boot_logo_address + 30) as *const u32) } != 0 {
-        pr_info!("Boot logo is compressed");
-        free_mapped_address(boot_logo_address);
-        return;
-    }
-    let file_offset = unsafe { *((boot_logo_address + 10) as *const u32) };
-    let bitmap_width = unsafe { *((boot_logo_address + 18) as *const u32) };
-    let bitmap_height = unsafe { *((boot_logo_address + 22) as *const u32) };
-    let bitmap_color_depth = unsafe { *((boot_logo_address + 28) as *const u16) };
-    let aligned_bitmap_width =
-        ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
-
-    let result = mremap!(
-        boot_logo_address.into(),
-        original_map_size,
-        MSize::new(
-            (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))
-                + file_offset as usize
-        )
-    );
-    if result.is_err() {
-        pr_err!(
-            "Mapping the bitmap data of BGRT was failed:{:?}",
-            result.err()
-        );
-        free_mapped_address(boot_logo_address);
-        return;
-    }
-
-    if boot_logo_address != result.unwrap().to_usize() {
-        pr_info!(
-            "BGRT: {:#X} is remapped at {:#X}",
-            boot_logo_address,
-            result.unwrap().to_usize(),
-        );
-    }
-    let boot_logo_address = result.unwrap();
-
-    /* Adjust offset if it overflows from frame buffer. */
-    let buffer_size = get_kernel_manager_cluster()
-        .graphic_manager
-        .get_frame_buffer_size();
-    let boot_logo_offset = boot_logo_offset;
-    let offset_x = if boot_logo_offset.0 + bitmap_width as usize > buffer_size.0 {
-        (buffer_size.0 - bitmap_width as usize) / 2
-    } else {
-        boot_logo_offset.0
-    };
-    let offset_y = if boot_logo_offset.1 + bitmap_height as usize > buffer_size.1 {
-        (buffer_size.1 - bitmap_height as usize) / 2
-    } else {
-        boot_logo_offset.1
-    };
-
-    get_kernel_manager_cluster().graphic_manager.write_bitmap(
-        (boot_logo_address + MSize::new(file_offset as usize)).to_usize(),
-        bitmap_color_depth as u8,
-        bitmap_width as usize,
-        bitmap_height as usize,
-        offset_x,
-        offset_y,
-    );
-
-    free_mapped_address(boot_logo_address.to_usize());
-}
-
 #[no_mangle]
 pub extern "C" fn directboot_main(
     _info_address: usize,      /* DirectBoot Start Information */
@@ -337,10 +202,10 @@ pub extern "C" fn directboot_main(
     _user_code_segment: u16,
     _user_data_segment: u16,
 ) -> ! {
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().serial_port_manager,
-        SerialPortManager::new(0x3F8 /* COM1 */),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new(0x3F8 /* COM1 */)
+    );
     get_kernel_manager_cluster()
         .serial_port_manager
         .send_str("Booted from DirectBoot\n");

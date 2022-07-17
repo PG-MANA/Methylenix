@@ -876,10 +876,7 @@ impl VirtualMemoryManager {
         }
         let user_vm_map_entry = user_vm_map_entry.unwrap();
 
-        core::mem::forget(core::mem::replace(
-            shared_vm_object,
-            VirtualMemoryObject::new(),
-        ));
+        init_struct!(*shared_vm_object, VirtualMemoryObject::new());
         core::mem::swap(shared_vm_object, original_vm_object);
 
         original_vm_object.set_shared_object(shared_vm_object);

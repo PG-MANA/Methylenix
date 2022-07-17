@@ -18,7 +18,6 @@ pub mod paging;
 pub mod system_call;
 
 use self::boot_info::BootInformation;
-use self::device::cpu;
 use self::device::generic_timer::{GenericTimer, SystemCounter};
 use self::device::serial_port::SerialPortManager;
 use self::init::*;
@@ -33,8 +32,6 @@ use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
 use crate::kernel::tty::TtyManager;
-
-use core::mem;
 
 pub struct ArchDependedKernelManagerCluster {
     dtb_manager: DtbManager,
@@ -55,24 +52,21 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     let boot_information = unsafe { &*boot_information };
 
     /* Initialize Kernel TTY (Early) */
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().kernel_tty_manager,
-        TtyManager::new(),
-    ));
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().graphic_manager,
-        GraphicManager::new(),
-    ));
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().serial_port_manager,
-        SerialPortManager::new(),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().kernel_tty_manager,
+        TtyManager::new()
+    );
+    init_struct!(
+        get_kernel_manager_cluster().graphic_manager,
+        GraphicManager::new()
+    );
+    init_struct!(
+        get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new()
+    );
 
     /* Setup BSP cpu manager */
-    mem::forget(mem::replace(
-        &mut get_kernel_manager_cluster().cpu_list,
-        PtrLinkedList::new(),
-    ));
+    init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
     setup_cpu_manager_cluster(Some(VAddress::new(
         &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
     )));
@@ -161,6 +155,8 @@ fn main_process() -> ! {
 
     pr_info!("All initializations are done!");
 
+    draw_boot_logo();
+
     init_block_devices_and_file_system_early();
 
     if init_pci_early() {
@@ -194,12 +190,4 @@ fn main_process() -> ! {
     );
 
     idle()
-}
-
-fn idle() -> ! {
-    loop {
-        unsafe {
-            cpu::idle();
-        }
-    }
 }
