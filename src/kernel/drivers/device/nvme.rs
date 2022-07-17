@@ -5,7 +5,9 @@
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE_USIZE};
 
-use crate::kernel::block_device::{BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceInfo};
+use crate::kernel::block_device::{
+    BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceError, BlockDeviceInfo,
+};
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::drivers::pci::{
     msi::setup_msi_or_msi_x, ClassCode, PciDevice, PciDeviceDriver, PciManager,
@@ -561,7 +563,7 @@ impl BlockDeviceDriver for NvmeManager {
         buffer: VAddress,
         base_lba: u64,
         number_of_blocks: u64,
-    ) -> Result<(), ()> {
+    ) -> Result<(), BlockDeviceError> {
         self._read_data_lba(
             0x01,
             info.device_id as u32,
@@ -969,14 +971,14 @@ impl NvmeManager {
         buffer: VAddress,
         base_lba: u64,
         number_of_blocks: u64,
-    ) -> Result<(), ()> {
+    ) -> Result<(), BlockDeviceError> {
         if number_of_blocks == 0 {
             pr_err!("Size is zero");
-            return Err(());
+            return Err(BlockDeviceError::InvalidOperation);
         }
         if (buffer & !PAGE_MASK) != 0 {
             pr_err!("Buffer is not page aligned.");
-            return Err(());
+            return Err(BlockDeviceError::InvalidBuffer);
         }
 
         if name_space_list_index as usize > self.namespace_list.len() {
@@ -984,7 +986,7 @@ impl NvmeManager {
                 "Invalid name_space_list's index: {:#X}",
                 name_space_list_index
             );
-            return Err(());
+            return Err(BlockDeviceError::InvalidDevice);
         }
         let name_space = &self.namespace_list[name_space_list_index as usize];
         if (base_lba + (number_of_blocks << name_space.lba_block_size_exp))
@@ -995,7 +997,7 @@ impl NvmeManager {
                 base_lba,
                 number_of_blocks
             );
-            return Err(());
+            return Err(BlockDeviceError::InvalidOperation);
         }
 
         let mut command = [0u32; 16];
@@ -1015,12 +1017,12 @@ impl NvmeManager {
                     MIndex::new(num_of_pages),
                     &mut list,
                 );
-            if let Err(e) = result {
-                pr_err!("Failed to get physical address list: {:?}", e);
-                return Err(());
+            if let Err(err) = result {
+                pr_err!("Failed to get physical address list: {:?}", err);
+                return Err(BlockDeviceError::MemoryError(err));
             } else if result.unwrap() < num_of_pages {
                 pr_err!("buffer is smaller than read size.");
-                return Err(());
+                return Err(BlockDeviceError::InvalidBuffer);
             }
 
             *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[6]) }) =
@@ -1036,9 +1038,9 @@ impl NvmeManager {
                 MemoryOptionFlags::DEVICE_MEMORY
             ) {
                 Ok(a) => a,
-                Err(e) => {
-                    pr_err!("Failed to alloc memory for the  PRP List: {:?}", e);
-                    return Err(());
+                Err(err) => {
+                    pr_err!("Failed to alloc memory for the  PRP List: {:?}", err);
+                    return Err(BlockDeviceError::MemoryError(err));
                 }
             };
             let list = unsafe {
@@ -1053,9 +1055,9 @@ impl NvmeManager {
                     MSize::new(read_size).page_align_up().to_index(),
                     list,
                 );
-            if let Err(e) = result {
-                pr_err!("Failed to get physical address list: {:?}", e);
-                return Err(());
+            if let Err(err) = result {
+                pr_err!("Failed to get physical address list: {:?}", err);
+                return Err(BlockDeviceError::MemoryError(err));
             } else if (result.unwrap() << PAGE_SHIFT) < read_size {
                 pr_err!(
                     "Expected {:#X} bytes for buffer, but its size is {:#X} bytes",
@@ -1063,7 +1065,7 @@ impl NvmeManager {
                     result.unwrap() << PAGE_SHIFT
                 );
                 let _ = free_pages!(v);
-                return Err(());
+                return Err(BlockDeviceError::InvalidBuffer);
             }
             let prp1 = (list[0].to_usize() as u64).to_le();
             for i in 0..(result.unwrap() - 1) {
@@ -1081,9 +1083,9 @@ impl NvmeManager {
         command[11] = (base_lba >> 32) as u32; /* LBA[32:63] */
         command[12] = (number_of_blocks - 1) as u32; /* [0:15]: Number of Logical Blocks */
         let result = self.submit_command_and_wait(queue_id, command);
-        if let Err(e) = result {
-            pr_err!("Failed to execute the command: {:?}", e);
-            return Err(());
+        if result.is_err() {
+            pr_err!("Failed to execute the command");
+            return Err(BlockDeviceError::DeviceError);
         }
 
         let result = result.unwrap();
@@ -1096,7 +1098,7 @@ impl NvmeManager {
             if let Some(v) = pre_list_virtual_address {
                 let _ = free_pages!(v);
             }
-            return Err(());
+            return Err(BlockDeviceError::DeviceError);
         }
         if let Some(v) = pre_list_virtual_address {
             let _ = free_pages!(v);

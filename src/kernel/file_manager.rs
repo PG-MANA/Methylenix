@@ -14,8 +14,10 @@ pub use self::vfs::{
     FILE_PERMISSION_WRITE,
 };
 
+use crate::kernel::block_device::BlockDeviceError;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
+use crate::kernel::memory_manager::MemoryError;
 use crate::{alloc_non_linear_pages, free_pages};
 
 use alloc::boxed::Box;
@@ -34,14 +36,45 @@ struct PartitionInfo {
     lba_block_size: u64,
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum FileError {
+    MemoryError(MemoryError),
+    BadSignature,
+    FileNotFound,
+    InvalidFile,
+    OperationNotPermitted,
+    OperationNotSupported,
+    DeviceError,
+}
+
+impl From<MemoryError> for FileError {
+    fn from(m: MemoryError) -> Self {
+        Self::MemoryError(m)
+    }
+}
+
+impl From<BlockDeviceError> for FileError {
+    fn from(b: BlockDeviceError) -> Self {
+        if let BlockDeviceError::MemoryError(m) = b {
+            Self::MemoryError(m)
+        } else {
+            Self::DeviceError
+        }
+    }
+}
+
 trait PartitionManager {
     fn search_file(
         &self,
         partition_info: &PartitionInfo,
         file_name: &PathInfo,
-    ) -> Result<usize, ()>;
+    ) -> Result<usize, FileError>;
 
-    fn get_file_size(&self, partition_info: &PartitionInfo, file_info: usize) -> Result<usize, ()>;
+    fn get_file_size(
+        &self,
+        partition_info: &PartitionInfo,
+        file_info: usize,
+    ) -> Result<usize, FileError>;
 
     fn read_file(
         &self,
@@ -50,7 +83,7 @@ trait PartitionManager {
         offset: MOffset,
         length: MSize,
         buffer: VAddress,
-    ) -> Result<MSize, ()>;
+    ) -> Result<MSize, FileError>;
 
     fn close_file(&self, partition_info: &PartitionInfo, file_info: usize);
 }
@@ -102,7 +135,9 @@ impl FileManager {
             Ok(f) => {
                 self.partition_list.push((partition_info, Box::new(f)));
             }
-            Err(_) => {}
+            Err(err) => {
+                pr_err!("Failed to detect the file system: {:?}", err)
+            }
         }
         let _ = free_pages!(first_block_data);
         return;
@@ -112,12 +147,12 @@ impl FileManager {
         self.partition_list.len()
     }
 
-    fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<usize, ()> {
+    fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<usize, FileError> {
         let p = &self.partition_list[descriptor.get_device_index()];
         p.1.get_file_size(&p.0, descriptor.get_data())
     }
 
-    pub fn file_open(&mut self, file_name: &PathInfo, permission: u8) -> Result<File, ()> {
+    pub fn file_open(&mut self, file_name: &PathInfo, permission: u8) -> Result<File, FileError> {
         for (index, e) in self.partition_list.iter().enumerate() {
             match e.1.search_file(&e.0, file_name) {
                 Ok(data) => {
@@ -126,10 +161,11 @@ impl FileManager {
                         self,
                     ));
                 }
-                Err(_) => { /* continue */ }
+                Err(FileError::FileNotFound) => { /* Continue */ }
+                Err(e) => Err(e)?,
             }
         }
-        return Err(());
+        return Err(FileError::FileNotFound);
     }
 }
 
@@ -139,7 +175,7 @@ impl FileOperationDriver for FileManager {
         descriptor: &mut FileDescriptor,
         buffer: VAddress,
         length: MSize,
-    ) -> Result<MSize, ()> {
+    ) -> Result<MSize, FileError> {
         let p = &self.partition_list[descriptor.get_device_index()];
         let result = p.1.read_file(
             &p.0,
@@ -159,8 +195,8 @@ impl FileOperationDriver for FileManager {
         _descriptor: &mut FileDescriptor,
         _buffer: VAddress,
         _length: MSize,
-    ) -> Result<MSize, ()> {
-        unimplemented!()
+    ) -> Result<MSize, FileError> {
+        Err(FileError::OperationNotSupported)
     }
 
     fn seek(
@@ -168,7 +204,7 @@ impl FileOperationDriver for FileManager {
         descriptor: &mut FileDescriptor,
         offset: MOffset,
         origin: FileSeekOrigin,
-    ) -> Result<MOffset, ()> {
+    ) -> Result<MOffset, FileError> {
         match origin {
             FileSeekOrigin::SeekSet => descriptor.set_position(offset),
             FileSeekOrigin::SeekCur => descriptor.add_position(offset),

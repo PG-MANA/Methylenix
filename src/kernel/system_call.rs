@@ -485,6 +485,10 @@ fn system_call_write(file: &mut File, data: usize, len: usize) -> Result<usize, 
     }
     file.write(VAddress::new(data), MSize::new(len))
         .and_then(|s| Ok(s.to_usize()))
+        .or_else(|err| {
+            pr_err!("Failed to write: {:?}", err);
+            Err(())
+        })
 }
 
 fn system_call_memory_map(

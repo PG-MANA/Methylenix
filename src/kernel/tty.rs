@@ -3,7 +3,9 @@
 //!
 
 use crate::kernel::collections::fifo::Fifo;
-use crate::kernel::file_manager::{File, FileDescriptor, FileOperationDriver, FileSeekOrigin};
+use crate::kernel::file_manager::{
+    File, FileDescriptor, FileError, FileOperationDriver, FileSeekOrigin,
+};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
@@ -180,7 +182,7 @@ impl FileOperationDriver for TtyManager {
         _descriptor: &mut FileDescriptor,
         buffer: VAddress,
         length: MSize,
-    ) -> Result<MSize, ()> {
+    ) -> Result<MSize, FileError> {
         for read_size in 0..length.to_usize() {
             if let Some(c) = self.getc(true) {
                 unsafe { *((buffer.to_usize() + read_size) as *mut u8) = c };
@@ -188,11 +190,7 @@ impl FileOperationDriver for TtyManager {
                     return Ok(MSize::new(read_size + 1));
                 }
             } else {
-                return if read_size == 0 {
-                    Err(())
-                } else {
-                    Ok(MSize::new(read_size))
-                };
+                return Ok(MSize::new(read_size));
             }
         }
         return Ok(length);
@@ -203,15 +201,15 @@ impl FileOperationDriver for TtyManager {
         _descriptor: &mut FileDescriptor,
         buffer: VAddress,
         length: MSize,
-    ) -> Result<MSize, ()> {
+    ) -> Result<MSize, FileError> {
         if let Ok(s) = core::str::from_utf8(unsafe {
             core::slice::from_raw_parts(buffer.to_usize() as *const u8, length.to_usize())
         }) {
-            self.puts(s).or(Err(()))?;
-            self.flush().or(Err(()))?;
+            self.puts(s).or(Err(FileError::DeviceError))?;
+            self.flush().or(Err(FileError::DeviceError))?;
             Ok(length)
         } else {
-            Err(())
+            Err(FileError::OperationNotSupported)
         }
     }
 
@@ -220,7 +218,7 @@ impl FileOperationDriver for TtyManager {
         _descriptor: &mut FileDescriptor,
         _offset: MOffset,
         _origin: FileSeekOrigin,
-    ) -> Result<MOffset, ()> {
+    ) -> Result<MOffset, FileError> {
         Ok(MOffset::new(0))
     }
 
