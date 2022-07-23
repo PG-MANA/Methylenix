@@ -4,13 +4,11 @@
 //! Boot entry code from assembly.
 //!
 
-/// TODO: fix main_handler
-pub mod interrupt;
-
 pub mod boot;
 pub mod context;
 pub mod device;
 mod initialization;
+pub mod interrupt;
 pub mod paging;
 pub mod system_call;
 

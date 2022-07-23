@@ -4,7 +4,7 @@
 
 .code32
 
-.global setup_long_mode, fin
+.global setup_long_mode
 .extern init_long_mode
 .extern main_code_segment_descriptor, tss_descriptor, gdtr_64bit_0 /* at common.asm */
 .extern tss_descriptor_address, tss, pd, pdpt, pml4
@@ -12,6 +12,7 @@
 
 .section .text.32
 
+.type   setup_long_mode, %function
 setup_long_mode:
   /* Check if cpu supports x86_64 */
   /* https://wiki.osdev.org/setting_up_long_mode#detection_of_cpuid */
@@ -107,10 +108,12 @@ fin:
   hlt
   jmp fin
 
-.section .data.32
+.size   setup_long_mode, . - setup_long_mode
 
+.section .data.32
 .align   4
 
+.type   long_mode_error_str, %object
 long_mode_error_str:
   /* Attention: little endian */
   /* 0x4f: back-color:red, color:white */
@@ -154,4 +157,5 @@ long_mode_error_str:
   .byte   'd',   0x4f
   .byte   '.',   0x4f
 
-.equ LONG_MODE_ERROR_STR_SIZE, . - long_mode_error_str
+.equ    LONG_MODE_ERROR_STR_SIZE, . - long_mode_error_str
+.size   long_mode_error_str, . - long_mode_error_str

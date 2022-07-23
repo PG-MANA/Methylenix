@@ -4,14 +4,14 @@
 
 .code64
 
-.global init_long_mode
-.extern multiboot_main, directboot_main, unknown_boot_main
-.extern main_code_segment_descriptor, user_code_segment_descriptor, tss_descriptor, user_data_segment_descriptor
-.extern BOOT_FROM_MULTIBOOT_MARK, BOOT_FROM_DIRECTBOOT_MARK
-.extern OS_STACK_SIZE, os_stack, gdtr_64bit_1
+.global     init_long_mode
+.extern     multiboot_main, directboot_main, unknown_boot_main
+.extern     main_code_segment_descriptor, user_code_segment_descriptor, tss_descriptor, user_data_segment_descriptor
+.extern     BOOT_FROM_MULTIBOOT_MARK, BOOT_FROM_DIRECTBOOT_MARK
+.extern     OS_STACK_SIZE, os_stack, gdtr_64bit_1
 
-.section .text.32
-
+.section    .text.32
+.type       init_long_mode, %function
 init_long_mode:
   /* Set segment registers to zero (DO NOT SET CS REGISTER) */
   xor   %ax, %ax
@@ -47,11 +47,16 @@ init_long_mode:
   jz    jump_to_directboot_main
   movabs    $unknown_boot_main, %rax             /* at src/arch/x86_64/mod.rs */
   jmp   *%rax
+.size       init_long_mode, . - init_long_mode
 
+.type       jump_to_multiboot_main, %function
 jump_to_multiboot_main:
   movabs    $multiboot_main, %rax                /* at src/arch/x86_64/mod.rs */
   jmp       *%rax
+.size       jump_to_multiboot_main, . - jump_to_multiboot_main
 
+.type       jump_to_directboot_main, %function
 jump_to_directboot_main:
   movabs    $directboot_main, %rax               /* at src/arch/x86_64/mod.rs */
   jmp       *%rax
+.size       jump_to_directboot_main, . - jump_to_directboot_main

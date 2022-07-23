@@ -457,9 +457,9 @@ pub unsafe extern "C" fn task_switch(
 
 global_asm!(
     "
-.global ap_entry, ap_entry_end
-.section .text
-
+.global     ap_entry, ap_entry_end
+.section    .text
+.type       ap_entry, %function
 ap_entry:
     mrs x2, CurrentEL
     lsr x2, x2, 2
@@ -495,5 +495,6 @@ ap_entry:
     mov sp, x7
     br  x8
 ap_entry_end:
+.size   ap_entry, ap_entry_end - ap_entry
 "
 );
