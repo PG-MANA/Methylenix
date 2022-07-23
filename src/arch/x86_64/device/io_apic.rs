@@ -8,10 +8,10 @@
 
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
-use crate::io_remap;
 use crate::kernel::memory_manager::data_type::{
     Address, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 
 pub struct IoApicManager {
     base_address: VAddress,

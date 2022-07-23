@@ -7,8 +7,7 @@ use super::FileManager;
 use crate::kernel::collections::guid::Guid;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize};
-
-use crate::{alloc_non_linear_pages, free_pages};
+use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages};
 
 const GPT_OFFSET: usize = 0x200;
 const GPT_SIGNATURE_OFFSET: usize = 0x00;

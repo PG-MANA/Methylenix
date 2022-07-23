@@ -4,11 +4,9 @@
 
 use super::{ipv4, InternetType, LinkType, NetworkError};
 
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
-
-use crate::kfree;
-
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::kfree;
 
 pub const UDP_HEADER_SIZE: usize = 0x08;
 pub const IPV4_PROTOCOL_UDP: u8 = 0x11;

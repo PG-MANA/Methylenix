@@ -4,8 +4,9 @@
 //! Boot entry code from assembly.
 //!
 
-#[macro_use]
+/// TODO: fix main_handler
 pub mod interrupt;
+
 pub mod boot;
 pub mod context;
 pub mod device;
@@ -20,6 +21,7 @@ use self::device::serial_port::SerialPortManager;
 use self::initialization::multiboot::{init_graphic, init_memory_by_multiboot_information};
 use self::initialization::*;
 
+use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::multiboot::MultiBootInformation;

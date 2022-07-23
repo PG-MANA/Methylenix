@@ -22,7 +22,7 @@ use crate::arch::target_arch::{
 };
 
 use crate::kernel::{
-    collections::ptr_linked_list::PtrLinkedListNode,
+    collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::{
         acpi::{device::AcpiDeviceManager, table::gtdt::GtdtManager, AcpiManager},
         dtb::DtbManager,
@@ -35,7 +35,9 @@ use crate::kernel::{
     initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster},
     memory_manager::{
+        alloc_pages, alloc_pages_with_physical_address,
         data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
+        free_pages,
         memory_allocator::MemoryAllocator,
         physical_memory_manager::PhysicalMemoryManager,
         system_memory_manager::{get_physical_memory_manager, SystemMemoryManager},
@@ -46,8 +48,6 @@ use crate::kernel::{
     task_manager::{run_queue::RunQueue, TaskManager},
     timer_manager::LocalTimerManager,
 };
-
-use crate::{alloc_pages, alloc_pages_with_physical_address, free_pages};
 
 use core::mem;
 use core::sync::atomic::AtomicBool;

@@ -16,8 +16,7 @@ use crate::kernel::file_manager::{
 };
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
-
-use crate::{kfree, kmalloc};
+use crate::kernel::memory_manager::{kfree, kmalloc};
 
 const AF_UNIX: u64 = 0x01;
 const AF_INET: u64 = 0x02;

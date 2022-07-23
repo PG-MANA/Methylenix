@@ -4,13 +4,13 @@
 
 use crate::arch::target_arch::device::cpu;
 
-use crate::io_remap;
 use crate::kernel::drivers::acpi::table::madt::MadtManager;
 use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::dtb::{DtbManager, DtbNodeInfo};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 
 const GIC_V3_DISTRIBUTOR_MEMORY_MAP_SIZE: MSize = MSize::new(0x10000);
 

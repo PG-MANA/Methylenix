@@ -4,12 +4,12 @@
 
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::interrupt::gic::GicV3Group;
-use crate::io_remap;
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 use crate::kernel::timer_manager::{GlobalTimerManager, Timer};
 
 const SYSTEM_COUNTER_MEMORY_SIZE: MSize = MSize::new(0x1000);

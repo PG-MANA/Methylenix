@@ -15,8 +15,9 @@ use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
 };
-use crate::kernel::memory_manager::MemoryManager;
-use crate::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
+use crate::kernel::memory_manager::{
+    alloc_non_linear_pages, free_pages, kfree, kmalloc, MemoryManager,
+};
 
 const DEFAULT_PRIVILEGE_LEVEL: u8 = 3;
 const DEFAULT_PRIORITY_LEVEL: u8 = 2;

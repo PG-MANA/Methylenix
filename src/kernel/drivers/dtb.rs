@@ -4,10 +4,10 @@
 
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
-use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
+use crate::kernel::memory_manager::{
+    data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
+    free_pages, io_remap, mremap,
 };
-use crate::{free_pages, io_remap, mremap};
 
 #[repr(C)]
 struct FdtHeader {

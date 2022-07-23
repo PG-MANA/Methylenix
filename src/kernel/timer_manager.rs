@@ -11,7 +11,9 @@
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 
 use crate::arch::target_arch::interrupt::InterruptManager;
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::collections::ptr_linked_list::{
+    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
+};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
 #[cfg(not(target_has_atomic = "64"))]
@@ -188,7 +190,7 @@ impl LocalTimerManager {
         list.timeout = GlobalTimerManager::calculate_timeout(current, wait_ms);
         if let Some(e) = unsafe {
             self.timer_list
-                .get_first_entry_mut(offset_of!(TimerList, t_list))
+                .get_first_entry_mut(offset_of_list_node!(TimerList, t_list))
         } {
             let mut entry = e;
             loop {
@@ -203,8 +205,11 @@ impl LocalTimerManager {
                         .insert_before(&mut entry.t_list, &mut list.t_list);
                     break;
                 }
-                if let Some(e) = unsafe { entry.t_list.get_next_mut(offset_of!(TimerList, t_list)) }
-                {
+                if let Some(e) = unsafe {
+                    entry
+                        .t_list
+                        .get_next_mut(offset_of_list_node!(TimerList, t_list))
+                } {
                     entry = e;
                 } else {
                     self.timer_list
@@ -227,7 +232,7 @@ impl LocalTimerManager {
             .get_current_tick();
         while let Some(t) = unsafe {
             self.timer_list
-                .get_first_entry(offset_of!(TimerList, t_list))
+                .get_first_entry(offset_of_list_node!(TimerList, t_list))
         } {
             if t.timeout > current_tick {
                 break;
@@ -241,7 +246,7 @@ impl LocalTimerManager {
             }
             self.timer_list_pool.free(unsafe {
                 self.timer_list
-                    .take_first_entry(offset_of!(TimerList, t_list))
+                    .take_first_entry(offset_of_list_node!(TimerList, t_list))
                     .unwrap()
             });
         }

@@ -8,19 +8,23 @@ use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE_USIZE};
 use crate::kernel::block_device::{
     BlockDeviceDescriptor, BlockDeviceDriver, BlockDeviceError, BlockDeviceInfo,
 };
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::collections::ptr_linked_list::{
+    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
+};
 use crate::kernel::drivers::pci::{
     msi::setup_msi_or_msi_x, ClassCode, PciDevice, PciDeviceDriver, PciManager,
 };
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{
-    Address, MIndex, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
-    VAddress,
+use crate::kernel::memory_manager::{
+    alloc_pages_with_physical_address,
+    data_type::{
+        Address, MIndex, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
+        VAddress,
+    },
+    free_pages, io_remap, kfree, kmalloc,
 };
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::{TaskStatus, ThreadEntry};
-
-use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kfree, kmalloc};
 
 use alloc::collections::LinkedList;
 use alloc::vec::Vec;
@@ -1121,7 +1125,11 @@ impl NvmeManager {
                     self.controller_properties_base_address,
                     self.stride,
                 );
-                for e in unsafe { queue.wait_list.iter_mut(offset_of!(WaitListEntry, list)) } {
+                for e in unsafe {
+                    queue
+                        .wait_list
+                        .iter_mut(offset_of_list_node!(WaitListEntry, list))
+                } {
                     if (e.result[3] & 0xffff) == data[3] & 0xffff {
                         e.result = data;
                         if let Err(error) = get_kernel_manager_cluster()

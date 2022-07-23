@@ -6,8 +6,7 @@ use super::{FileError, PartitionInfo, PartitionManager, PathInfo};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
-
-use crate::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
+use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
 
 use core::mem::MaybeUninit;
 

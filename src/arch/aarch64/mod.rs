@@ -25,6 +25,7 @@ use self::device::serial_port::SerialPortManager;
 use self::initialization::*;
 use self::interrupt::gic::{GicManager, GicRedistributorManager};
 
+use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::dtb::DtbManager;
 pub use crate::kernel::file_manager::elf::ELF_MACHINE_AA64 as ELF_MACHINE_DEFAULT;

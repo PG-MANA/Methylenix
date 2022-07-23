@@ -5,23 +5,9 @@
 
 #[macro_use]
 pub mod tty;
-#[macro_use]
-pub mod collections {
-    #[macro_export]
-    macro_rules! init_struct {
-        ($st:expr, $v:expr) => {
-            core::mem::forget(core::mem::replace(&mut $st, $v))
-        };
-    }
-    pub mod auxiliary_vector;
-    pub mod fifo;
-    pub mod guid;
-    #[macro_use]
-    pub mod ptr_linked_list;
-    pub mod ring_buffer;
-}
 pub mod application_loader;
 pub mod block_device;
+pub mod collections;
 pub mod drivers;
 pub mod file_manager;
 pub mod graphic_manager;

@@ -15,7 +15,7 @@ use crate::arch::target_arch::{
 };
 
 use crate::kernel::{
-    collections::ptr_linked_list::PtrLinkedListNode,
+    collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::acpi::table::madt::MadtManager,
     initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster},

@@ -9,7 +9,9 @@ use super::{TaskError, TaskManager, TaskStatus, ThreadEntry};
 
 use crate::arch::target_arch::interrupt::InterruptManager;
 
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::collections::ptr_linked_list::{
+    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
+};
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
@@ -129,7 +131,7 @@ impl WorkQueue {
             let work = unsafe {
                 manager
                     .work_queue
-                    .take_first_entry(offset_of!(WorkList, list))
+                    .take_first_entry(offset_of_list_node!(WorkList, list))
                     .unwrap()
             };
             let work_function = work.worker_function;
@@ -160,7 +162,7 @@ impl WorkQueue {
             let work = unsafe {
                 manager
                     .work_queue
-                    .take_first_entry(offset_of!(WorkList, list))
+                    .take_first_entry(offset_of_list_node!(WorkList, list))
                     .unwrap()
             };
             let work_function = work.worker_function;

@@ -5,9 +5,9 @@
 //! The Object allocator is used when the system needs to allocate small object which will be freed soon.
 //!
 
-use super::data_type::{MSize, VAddress};
+use super::data_type::{MSize, MemoryPermissionFlags, VAddress};
 use super::slab_allocator::LocalSlabAllocator;
-use super::{MemoryError, MemoryPermissionFlags};
+use super::MemoryError;
 
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 

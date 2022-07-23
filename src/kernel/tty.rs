@@ -259,40 +259,33 @@ pub fn print_debug_message(level: usize, args: fmt::Arguments) {
     }
 }
 
-// macros
-#[macro_export]
 macro_rules! kprint {
     () => ($crate::kernel::tty::kernel_print(format_args!("")));
     ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args!($fmt)));
     ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args!($fmt, $($arg)*)));
 }
 
-#[macro_export]
 macro_rules! kprintln {
     () => ($crate::kernel::tty::kernel_print(format_args_nl!("")));
     ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args_nl!($fmt)));
     ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args_nl!($fmt, $($arg)*)));
 }
 
-#[macro_export]
 macro_rules! pr_debug {
     ($fmt:expr) => ($crate::kernel::tty::print_debug_message(7, format_args!($fmt)));
     ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(7, format_args!($fmt, $($arg)*)));
 }
 
-#[macro_export]
 macro_rules! pr_info {
     ($fmt:expr) => ($crate::kernel::tty::print_debug_message(6, format_args!($fmt)));
     ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(6, format_args!($fmt, $($arg)*)));
 }
 
-#[macro_export]
 macro_rules! pr_warn {
     ($fmt:expr) => ($crate::kernel::tty::print_debug_message(4, format_args!($fmt)));
     ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(4, format_args!($fmt, $($arg)*)));
 }
 
-#[macro_export]
 macro_rules! pr_err {
     ($fmt:expr) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt)));
     ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt, $($arg)*)));

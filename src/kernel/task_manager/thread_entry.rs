@@ -7,6 +7,7 @@ use super::{scheduling_class::SchedulingClass, ProcessEntry, TaskStatus};
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
+use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 

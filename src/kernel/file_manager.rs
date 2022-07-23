@@ -17,8 +17,7 @@ pub use self::vfs::{
 use crate::kernel::block_device::BlockDeviceError;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
-use crate::kernel::memory_manager::MemoryError;
-use crate::{alloc_non_linear_pages, free_pages};
+use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, MemoryError};
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;

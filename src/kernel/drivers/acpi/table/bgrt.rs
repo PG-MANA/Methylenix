@@ -3,6 +3,7 @@
 //!
 //! This manager contains the information of BGRT.
 //! BGRT is usually vendor logo.
+//!
 
 use super::{AcpiTable, OptionalAcpiTable};
 

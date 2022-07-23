@@ -12,6 +12,7 @@ use crate::arch::target_arch::{
 use crate::kernel::{
     application_loader,
     block_device::BlockDeviceManager,
+    collections::init_struct,
     drivers::{
         acpi::{
             device::AcpiDeviceManager,
@@ -22,15 +23,14 @@ use crate::kernel::{
     },
     file_manager::FileManager,
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
-    memory_manager::data_type::{
-        Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+    memory_manager::{
+        data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress},
+        io_remap, mremap,
     },
     sync::spin_lock::Mutex,
     task_manager::run_queue::RunQueue,
     timer_manager::GlobalTimerManager,
 };
-
-use crate::{io_remap, mremap};
 
 /// Init application processor's TaskManager
 ///

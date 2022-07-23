@@ -7,8 +7,7 @@
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
-#[macro_export]
-macro_rules! offset_of {
+macro_rules! offset_of_list_node {
     ($struct_type:ty, $member: tt) => {{
         use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
         let target_struct: core::mem::MaybeUninit<$struct_type> =
@@ -23,6 +22,7 @@ macro_rules! offset_of {
         }
     }};
 }
+pub(crate) use offset_of_list_node;
 
 pub struct PtrLinkedList<T> {
     head: Option<NonNull<PtrLinkedListNode<T>>>,

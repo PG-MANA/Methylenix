@@ -2,18 +2,19 @@
 //! Socket Manager
 //!
 
+pub mod socket_system_call;
+
 use super::{ipv4, tcp, udp, InternetType, LinkType, NetworkError, TransportType};
 
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::collections::ptr_linked_list::{
+    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
+};
 use crate::kernel::collections::ring_buffer::Ringbuffer;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+use crate::kernel::memory_manager::{kfree, kmalloc};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::task_manager::wait_queue::WaitQueue;
-
-use crate::{kfree, kmalloc};
-
-pub mod socket_system_call;
 
 const DEFAULT_BUFFER_SIZE: usize = 4096;
 
@@ -125,7 +126,7 @@ impl SocketManager {
         if let Some(waiting_socket) = unsafe {
             socket
                 .waiting_socket
-                .take_first_entry(offset_of!(Socket, list))
+                .take_first_entry(offset_of_list_node!(Socket, list))
         } {
             drop(_socket_lock);
             waiting_socket.list = PtrLinkedListNode::new();
@@ -309,7 +310,7 @@ impl SocketManager {
         while let Some(child_socket) = unsafe {
             socket
                 .waiting_socket
-                .take_first_entry(offset_of!(Socket, list))
+                .take_first_entry(offset_of_list_node!(Socket, list))
         } {
             let _child_socket_lock = child_socket.lock.lock();
             if child_socket.is_active {
@@ -340,7 +341,10 @@ impl SocketManager {
         payload_base: usize,
     ) {
         let _lock = self.lock.lock();
-        for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
+        for e in unsafe {
+            self.active_socket
+                .iter_mut(offset_of_list_node!(Socket, list))
+        } {
             if let TransportType::Udp(udp_info) = &e.layer_info.transport {
                 if e.is_active
                     && udp_info.get_our_port()
@@ -423,7 +427,10 @@ impl SocketManager {
         new_session_info: tcp::TcpSessionInfo,
     ) -> Result<(), NetworkError> {
         let _lock = self.lock.lock();
-        for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
+        for e in unsafe {
+            self.active_socket
+                .iter_mut(offset_of_list_node!(Socket, list))
+        } {
             if let TransportType::Tcp(tcp_info) = &e.layer_info.transport {
                 if e.is_active
                     && tcp_info.get_status() == tcp::TcpSessionStatus::Listening
@@ -509,7 +516,10 @@ impl SocketManager {
         F: FnOnce(&mut tcp::TcpSessionInfo) -> Result<bool /* Active */, NetworkError>,
     {
         let _lock = self.lock.lock();
-        for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
+        for e in unsafe {
+            self.active_socket
+                .iter_mut(offset_of_list_node!(Socket, list))
+        } {
             if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
                 if e.is_active
                     && tcp_segment_info.get_destination_port() == tcp_info.get_our_port()
@@ -568,7 +578,10 @@ impl SocketManager {
         F: FnOnce(&mut tcp::TcpSessionInfo, &mut Ringbuffer) -> Result<(), NetworkError>,
     {
         let _lock = self.lock.lock();
-        for e in unsafe { self.active_socket.iter_mut(offset_of!(Socket, list)) } {
+        for e in unsafe {
+            self.active_socket
+                .iter_mut(offset_of_list_node!(Socket, list))
+        } {
             if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
                 if e.is_active
                     && tcp_info.get_status() == tcp::TcpSessionStatus::Opened

@@ -3,10 +3,10 @@
 //!
 //! This manager indicates memory data information like vm_page
 
+use super::super::data_type::MIndex;
 use super::virtual_memory_page::VirtualMemoryPage;
 
-use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
-use crate::kernel::memory_manager::data_type::MIndex;
+use crate::kernel::collections::ptr_linked_list::{offset_of_list_node, PtrLinkedList};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 pub struct VirtualMemoryObject {
@@ -73,7 +73,7 @@ impl VirtualMemoryObject {
     pub fn add_vm_page(&mut self, p_index: MIndex, vm_page: &'static mut VirtualMemoryPage) {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
             vm_page.set_p_index(p_index);
-            const OFFSET: usize = offset_of!(VirtualMemoryPage, list);
+            const OFFSET: usize = offset_of_list_node!(VirtualMemoryPage, list);
             if list.is_empty() {
                 assert_eq!(self.linked_page, 0);
                 let _lock = vm_page.lock.lock();
@@ -116,7 +116,7 @@ impl VirtualMemoryObject {
 
     pub fn activate_all_page(&mut self) {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
-            for e in unsafe { list.iter_mut(offset_of!(VirtualMemoryPage, list)) } {
+            for e in unsafe { list.iter_mut(offset_of_list_node!(VirtualMemoryPage, list)) } {
                 e.activate();
             }
         }
@@ -124,7 +124,7 @@ impl VirtualMemoryObject {
 
     pub fn get_vm_page(&self, p_index: MIndex) -> Option<&VirtualMemoryPage> {
         if let VirtualMemoryObjectType::Page(list) = &self.object {
-            for e in unsafe { list.iter(offset_of!(VirtualMemoryPage, list)) } {
+            for e in unsafe { list.iter(offset_of_list_node!(VirtualMemoryPage, list)) } {
                 if e.get_p_index() == p_index {
                     return Some(e);
                 }
@@ -135,7 +135,7 @@ impl VirtualMemoryObject {
 
     pub fn get_vm_page_mut(&mut self, p_index: MIndex) -> Option<&mut VirtualMemoryPage> {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
-            for e in unsafe { list.iter_mut(offset_of!(VirtualMemoryPage, list)) } {
+            for e in unsafe { list.iter_mut(offset_of_list_node!(VirtualMemoryPage, list)) } {
                 if e.get_p_index() == p_index {
                     return Some(e);
                 }
@@ -149,7 +149,7 @@ impl VirtualMemoryObject {
         p_index: MIndex,
     ) -> Option<&'static mut VirtualMemoryPage /*removed page*/> {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
-            for e in unsafe { list.iter_mut(offset_of!(VirtualMemoryPage, list)) } {
+            for e in unsafe { list.iter_mut(offset_of_list_node!(VirtualMemoryPage, list)) } {
                 if e.get_p_index() == p_index {
                     list.remove(&mut e.list);
                     return Some(e);

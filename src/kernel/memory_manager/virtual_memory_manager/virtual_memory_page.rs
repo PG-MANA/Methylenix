@@ -3,11 +3,10 @@
 //!
 //! This structure contains mapping virtual address to physical address
 
-use crate::kernel::memory_manager::data_type::{MIndex, PAddress};
-use crate::kernel::memory_manager::MemoryOptionFlags;
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use super::super::data_type::{MIndex, MemoryOptionFlags, PAddress};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
+use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 pub struct VirtualMemoryPage {
     pub(super) list: PtrLinkedListNode<Self>,

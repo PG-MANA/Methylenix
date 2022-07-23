@@ -30,9 +30,9 @@ extern crate alloc;
 pub const OS_NAME: &str = "Methylenix";
 pub const OS_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/* Arch independent modules */
+/// Arch independent modules
 #[macro_use]
 pub mod kernel;
 
-/* Arch-depend modules */
+/// Arch depended modules
 pub mod arch;

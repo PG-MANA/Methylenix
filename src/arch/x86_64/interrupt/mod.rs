@@ -16,8 +16,8 @@ use crate::arch::target_arch::device::local_apic::LocalApicManager;
 use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::{alloc_non_linear_pages, alloc_pages};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
-use crate::{alloc_non_linear_pages, alloc_pages};
 
 use core::arch::global_asm;
 
