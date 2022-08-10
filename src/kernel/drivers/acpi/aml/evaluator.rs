@@ -1187,8 +1187,8 @@ impl Evaluator {
                     )?
                     .to_int()?;
                 Ok(match region_type {
-                    OperationRegionType::SystemMemory => (AmlVariable::MMIo((offset, length))),
-                    OperationRegionType::SystemIO => (AmlVariable::Io((offset, length))),
+                    OperationRegionType::SystemMemory => AmlVariable::MMIo((offset, length)),
+                    OperationRegionType::SystemIO => AmlVariable::Io((offset, length)),
                     OperationRegionType::EmbeddedControl => AmlVariable::EcIo((offset, length)),
                     OperationRegionType::PciConfig => {
                         let operation_region_scope = operation_region.get_name().get_scope_name();
