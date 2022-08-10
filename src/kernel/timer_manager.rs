@@ -42,6 +42,7 @@ pub struct TimerList {
 pub struct LocalTimerManager {
     timer_list: PtrLinkedList<TimerList>,
     timer_list_pool: GlobalSlabAllocator<TimerList>,
+    last_processed_timeout: u64,
     source_timer: Option<&'static dyn Timer>,
 }
 
@@ -65,8 +66,8 @@ impl GlobalTimerManager {
         current.overflowing_add(ms / Self::TIMER_INTERVAL_MS)
     }
 
-    const fn calculate_timeout(current: u64, ms: u64) -> u64 {
-        Self::get_end_tick_ms(current, ms).0
+    const fn calculate_timeout(current: u64, ms: u64) -> (u64, bool /* is_overflowed */) {
+        Self::get_end_tick_ms(current, ms)
     }
 
     #[cfg(target_has_atomic = "64")]
@@ -163,6 +164,7 @@ impl LocalTimerManager {
         Self {
             timer_list: PtrLinkedList::new(),
             timer_list_pool: GlobalSlabAllocator::new(0),
+            last_processed_timeout: GlobalTimerManager::TICK_INITIAL_VALUE,
             source_timer: None,
         }
     }
@@ -185,25 +187,29 @@ impl LocalTimerManager {
                 return Err(());
             }
         };
+        let is_overflowed;
         list.data = data;
         list.function = function;
-        list.timeout = GlobalTimerManager::calculate_timeout(current, wait_ms);
+        (list.timeout, is_overflowed) = GlobalTimerManager::calculate_timeout(current, wait_ms);
+
         if let Some(e) = unsafe {
             self.timer_list
                 .get_first_entry_mut(offset_of_list_node!(TimerList, t_list))
         } {
             let mut entry = e;
             loop {
-                if entry.timeout >= current {
-                    if entry.timeout > list.timeout {
+                if !is_overflowed {
+                    if entry.timeout >= current && entry.timeout > list.timeout {
                         self.timer_list
                             .insert_before(&mut entry.t_list, &mut list.t_list);
                         break;
                     }
-                } else if entry.timeout < list.timeout {
-                    self.timer_list
-                        .insert_before(&mut entry.t_list, &mut list.t_list);
-                    break;
+                } else {
+                    if entry.timeout <= current && entry.timeout > list.timeout {
+                        self.timer_list
+                            .insert_before(&mut entry.t_list, &mut list.t_list);
+                        break;
+                    }
                 }
                 if let Some(e) = unsafe {
                     entry
@@ -234,21 +240,23 @@ impl LocalTimerManager {
             self.timer_list
                 .get_first_entry(offset_of_list_node!(TimerList, t_list))
         } {
-            if t.timeout > current_tick {
+            if self.last_processed_timeout < t.timeout && t.timeout <= current_tick {
+                if let Err(e) = get_cpu_manager_cluster()
+                    .work_queue
+                    .add_work(WorkList::new(t.function, t.data))
+                {
+                    pr_err!("Failed to add the work of timer_list: {:?}", e);
+                    break;
+                }
+                self.timer_list_pool.free(unsafe {
+                    self.timer_list
+                        .take_first_entry(offset_of_list_node!(TimerList, t_list))
+                        .unwrap()
+                });
+            } else {
+                self.last_processed_timeout = current_tick;
                 break;
             }
-            if let Err(e) = get_cpu_manager_cluster()
-                .work_queue
-                .add_work(WorkList::new(t.function, t.data))
-            {
-                pr_err!("Failed to add the work of timer_list: {:?}", e);
-                break;
-            }
-            self.timer_list_pool.free(unsafe {
-                self.timer_list
-                    .take_first_entry(offset_of_list_node!(TimerList, t_list))
-                    .unwrap()
-            });
         }
         get_cpu_manager_cluster().run_queue.tick();
     }
