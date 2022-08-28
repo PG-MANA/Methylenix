@@ -416,6 +416,15 @@ impl TaskManager {
             _lock = Some(target_process.lock.lock());
         }
 
+        if target_process.get_process_status() != ProcessStatus::Zombie {
+            pr_err!(
+                "Invalid Task Status: {:?}",
+                target_process.get_process_status()
+            );
+            /* TODO: send SIGTERM */
+            return Err(TaskError::InvalidProcessEntry);
+        }
+
         /* Delete all thread */
         while let Some(thread) = target_process.take_thread()? {
             let mut _lock = thread.lock.lock();
@@ -448,6 +457,11 @@ impl TaskManager {
                 _lock = None;
             }
             parent.children.remove(&mut target_process.siblings);
+        }
+
+        /* Delete Files */
+        while let Some(file) = target_process.remove_file_from_list_append() {
+            file.lock().unwrap().close();
         }
 
         /* Delete Memory Manager */

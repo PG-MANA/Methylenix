@@ -147,6 +147,10 @@ impl ProcessEntry {
         self.next_thread_id += 1;
     }
 
+    pub const fn get_process_status(&self) -> ProcessStatus {
+        self.status
+    }
+
     pub const fn get_pid(&self) -> usize {
         self.process_id
     }
@@ -299,5 +303,33 @@ impl ProcessEntry {
         self.files.push(Arc::new(Mutex::new(f)));
         drop(_lock);
         i
+    }
+
+    pub fn remove_file_from_list(&mut self, index: usize) -> Result<Arc<Mutex<File>>, ()> {
+        let _lock = if self.num_of_thread > 1 {
+            None
+        } else {
+            Some(self.file_vec_lock.lock())
+        };
+        if index >= self.files.len() {
+            return Err(());
+        }
+        let file = core::mem::replace(
+            &mut self.files[index],
+            Arc::new(Mutex::new(File::new_invalid())),
+        );
+        drop(_lock);
+        Ok(file)
+    }
+
+    pub fn remove_file_from_list_append(&mut self) -> Option<Arc<Mutex<File>>> {
+        let _lock = if self.num_of_thread > 1 {
+            None
+        } else {
+            Some(self.file_vec_lock.lock())
+        };
+        let file = self.files.pop();
+        drop(_lock);
+        file
     }
 }
