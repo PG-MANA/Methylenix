@@ -116,4 +116,11 @@ impl WaitQueue {
         }
         return Ok(());
     }
+
+    pub fn is_empty(&self) -> bool {
+        let _lock = self.lock.lock();
+        let result = self.list.is_empty();
+        drop(_lock);
+        result
+    }
 }

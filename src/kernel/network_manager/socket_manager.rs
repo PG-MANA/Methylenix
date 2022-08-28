@@ -10,7 +10,7 @@ use crate::kernel::collections::ptr_linked_list::{
     offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
 };
 use crate::kernel::collections::ring_buffer::Ringbuffer;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::{kfree, kmalloc};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
@@ -41,6 +41,8 @@ pub struct Socket {
 }
 
 impl SocketManager {
+    const DEFAULT_SOCKET_CLOSE_TIME_OUT_MS: u64 = 10 * 1000;
+
     pub fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
@@ -317,15 +319,38 @@ impl SocketManager {
                 drop(_child_socket_lock);
                 /* child_socket will be closed by the owner */
             } else {
-                self._close_socket(child_socket)?;
                 drop(_child_socket_lock);
-                let _ = kfree!(child_socket);
+                self._close_socket(child_socket)?;
             }
         }
 
-        let _ = socket.wait_queue.wakeup_all();
-        drop(_socket_lock);
+        if socket.is_active {
+            if socket.wait_queue.is_empty() {
+                if let Err(err) = get_cpu_manager_cluster().local_timer_manager.add_timer(
+                    Self::DEFAULT_SOCKET_CLOSE_TIME_OUT_MS,
+                    Self::delete_socket,
+                    socket as *mut _ as usize,
+                ) {
+                    pr_err!("Failed to add timeout timer: {:?}", err);
+                }
+            } else {
+                let _ = socket.wait_queue.wakeup_all();
+                /* TODO: How to delete socket? */
+            }
+            drop(_socket_lock);
+        } else {
+            drop(_socket_lock);
+            let _ = kfree!(socket);
+        }
         return Ok(());
+    }
+
+    fn delete_socket(socket_address: usize) {
+        let socket = unsafe { &mut *(socket_address as *mut Socket) };
+        let _lock = socket.lock.lock();
+        socket.is_active = false;
+        drop(_lock);
+        let _ = kfree!(socket);
     }
 
     /* Data Receive Handlers */
