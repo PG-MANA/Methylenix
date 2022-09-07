@@ -167,4 +167,8 @@ impl<'a> File<'a> {
     pub fn close(self) {
         self.driver.close(self.descriptor)
     }
+
+    pub unsafe fn close_ref(&mut self) {
+        self.driver.close(core::ptr::read(&self.descriptor))
+    }
 }

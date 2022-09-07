@@ -461,7 +461,7 @@ impl TaskManager {
 
         /* Delete Files */
         while let Some(file) = target_process.remove_file_from_list_append() {
-            file.lock().unwrap().close();
+            unsafe { file.lock().unwrap().close_ref() };
         }
 
         /* Delete Memory Manager */

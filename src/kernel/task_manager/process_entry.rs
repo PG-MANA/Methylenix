@@ -305,7 +305,7 @@ impl ProcessEntry {
         i
     }
 
-    pub fn remove_file_from_list(&mut self, index: usize) -> Result<Arc<Mutex<File>>, ()> {
+    pub fn remove_file_from_list(&mut self, index: usize) -> Result<Arc<Mutex<File<'static>>>, ()> {
         let _lock = if self.num_of_thread > 1 {
             None
         } else {
@@ -322,7 +322,7 @@ impl ProcessEntry {
         Ok(file)
     }
 
-    pub fn remove_file_from_list_append(&mut self) -> Option<Arc<Mutex<File>>> {
+    pub fn remove_file_from_list_append(&mut self) -> Option<Arc<Mutex<File<'static>>>> {
         let _lock = if self.num_of_thread > 1 {
             None
         } else {
