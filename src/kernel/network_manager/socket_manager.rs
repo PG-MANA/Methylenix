@@ -90,8 +90,10 @@ impl SocketManager {
     ) -> Result<&'static mut Socket, NetworkError> {
         match kmalloc!(Socket, socket) {
             Ok(s) => {
-                let _lock = self.lock.lock();
                 s.is_active = true;
+                s.list = PtrLinkedListNode::new();
+                s.waiting_socket = PtrLinkedList::new();
+                let _lock = self.lock.lock();
                 self.active_socket.insert_tail(&mut s.list);
                 drop(_lock);
                 Ok(s)
@@ -112,6 +114,8 @@ impl SocketManager {
             TransportType::Udp(_) => { /* Do nothing */ }
         }
         socket.is_active = true;
+        socket.list = PtrLinkedListNode::new();
+        socket.waiting_socket = PtrLinkedList::new();
         let _lock = self.lock.lock();
         self.active_socket.insert_tail(&mut socket.list);
         drop(_lock);
@@ -133,7 +137,6 @@ impl SocketManager {
             drop(_socket_lock);
             waiting_socket.list = PtrLinkedListNode::new();
             let _lock = self.lock.lock();
-
             self.active_socket.insert_tail(&mut waiting_socket.list);
             drop(_lock);
             Ok(waiting_socket)

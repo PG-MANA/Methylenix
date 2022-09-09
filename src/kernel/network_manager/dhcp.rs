@@ -54,7 +54,7 @@ const DHCP_REQUEST_IP_OFFSET: usize = 0xFE;
 
 const DHCP_TERMINATE: u8 = 0xFF;
 
-const DHCP_PACKET_SIZE: usize = 350;
+const DHCP_PACKET_SIZE: usize = 556;
 
 fn write_byte_into_buffer(buffer: &mut [u8], base: usize, offset: usize, data: u8) {
     buffer[base + offset] = data;
@@ -386,19 +386,15 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
             true,
         );
 
-    if let Err(e) = result {
-        let _ = get_kernel_manager_cluster()
-            .network_manager
-            .get_socket_manager()
-            .close_socket(socket);
-        pr_err!("Failed to read socket: {:?}", e);
-        return Err(());
-    }
-
     let _ = get_kernel_manager_cluster()
         .network_manager
         .get_socket_manager()
         .close_socket(socket);
+
+    if let Err(e) = result {
+        pr_err!("Failed to read socket: {:?}", e);
+        return Err(());
+    }
 
     let read_size = result.unwrap();
     if read_size < MSize::new(DHCP_MAGIC_OFFSET + DHCP_MAGIC.len()) {
