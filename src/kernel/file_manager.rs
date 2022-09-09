@@ -7,6 +7,7 @@ mod fat32;
 mod gpt;
 mod path_info;
 mod vfs;
+mod xfs;
 
 pub use self::path_info::{PathInfo, PathInfoIter};
 pub use self::vfs::{
@@ -133,11 +134,31 @@ impl FileManager {
         match fat32::try_detect_file_system(&partition_info, first_block_data) {
             Ok(f) => {
                 self.partition_list.push((partition_info, Box::new(f)));
+                let _ = free_pages!(first_block_data);
+                return;
             }
+            Err(FileError::BadSignature) => { /* Next FS */ }
             Err(err) => {
-                pr_err!("Failed to detect the file system: {:?}", err)
+                pr_err!("Failed to detect the file system: {:?}", err);
+                let _ = free_pages!(first_block_data);
+                return;
             }
         }
+
+        match xfs::try_detect_file_system(&partition_info, first_block_data) {
+            Ok(f) => {
+                self.partition_list.push((partition_info, Box::new(f)));
+                let _ = free_pages!(first_block_data);
+                return;
+            }
+            Err(FileError::BadSignature) => { /* Next FS */ }
+            Err(err) => {
+                pr_err!("Failed to detect the file system: {:?}", err);
+                let _ = free_pages!(first_block_data);
+                return;
+            }
+        }
+        pr_err!("Unknown File System");
         let _ = free_pages!(first_block_data);
         return;
     }
