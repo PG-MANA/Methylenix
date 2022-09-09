@@ -7,7 +7,6 @@
 #![feature(const_for)]
 #![feature(const_maybe_uninit_uninit_array)]
 #![feature(const_mut_refs)]
-#![feature(const_ptr_offset_from)]
 #![feature(const_refs_to_cell)]
 #![feature(const_size_of_val)]
 #![feature(const_trait_impl)]
