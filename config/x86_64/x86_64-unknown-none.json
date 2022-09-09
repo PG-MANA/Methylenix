@@ -11,7 +11,6 @@
   "disable-redzone": true,
   "features": "-mmx,-sse,-avx,-avx2,+soft-float",
   "panic-strategy": "abort",
-  "split-debuginfo": "packed",
   "vendor": "unknown",
   "executables": true,
   "pre-link-args": {

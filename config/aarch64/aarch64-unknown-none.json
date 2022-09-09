@@ -12,7 +12,6 @@
   "disable-redzone": true,
   "features": "+v8.1a,+strict-align,-neon,-fp-armv8",
   "panic-strategy": "abort",
-  "split-debuginfo": "packed",
   "vendor": "unknown",
   "executables": true,
   "pre-link-args": {
