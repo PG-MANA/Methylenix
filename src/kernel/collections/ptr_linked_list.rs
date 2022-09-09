@@ -79,10 +79,10 @@ impl<T> PtrLinkedList<T> {
             let mut current_tail_ptr = self.tail.clone().unwrap();
             let current_tail = unsafe { current_tail_ptr.as_mut() };
             assert!(current_tail.next.is_none());
-            entry.unset_prev_and_next();
             current_tail.next = NonNull::new(entry);
             entry.prev = self.tail;
             self.tail = current_tail.next;
+            entry.next = None;
         }
         assert!(self.tail.is_some());
     }
