@@ -132,7 +132,7 @@ impl TtyManager {
         }
         /* output_driver must be some and locked */
         let mut buffer: [u8; Self::DEFAULT_OUTPUT_BUFFER_SIZE] =
-            [unsafe { MaybeUninit::uninit().assume_init() }; Self::DEFAULT_OUTPUT_BUFFER_SIZE];
+            [unsafe { MaybeUninit::zeroed().assume_init() }; Self::DEFAULT_OUTPUT_BUFFER_SIZE];
         let mut pointer = 0usize;
         while let Some(e) = self.output_queue.dequeue() {
             buffer[pointer] = e;
