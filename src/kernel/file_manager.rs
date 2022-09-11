@@ -28,7 +28,7 @@ use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kmalloc,
 use alloc::boxed::Box;
 
 //#[derive(Clone)]
-struct PartitionInfo {
+pub struct PartitionInfo {
     device_id: usize,
     starting_lba: u64,
     #[allow(dead_code)]
@@ -36,7 +36,7 @@ struct PartitionInfo {
     lba_block_size: u64,
 }
 
-struct Partition {
+pub struct Partition {
     list: PtrLinkedListNode<Self>,
     info: PartitionInfo,
     driver: Box<dyn PartitionManager>,
@@ -75,11 +75,18 @@ impl From<BlockDeviceError> for FileError {
 }
 
 trait PartitionManager {
+    fn get_root_node(
+        &mut self,
+        partition_info: &PartitionInfo,
+        file_info: &mut FileInfo,
+        is_writable: bool,
+    ) -> Result<(), FileError>;
+
     fn search_file(
         &self,
         partition_info: &PartitionInfo,
         file_name: &str,
-        current_directory: &FileInfo,
+        current_directory: &mut FileInfo,
     ) -> Result<FileInfo, FileError>;
 
     fn get_file_size(
@@ -114,7 +121,9 @@ impl FileManager {
 
     fn analysis_partition(&mut self, partition_info: PartitionInfo) {
         let first_block_data =
-            match alloc_non_linear_pages!(MSize::new(lba_block_size as usize).page_align_up()) {
+            match alloc_non_linear_pages!(
+                MSize::new(partition_info.lba_block_size as usize).page_align_up()
+            ) {
                 Ok(a) => a,
                 Err(e) => {
                     pr_err!("Failed to allocate memory: {:?}", e);
@@ -132,9 +141,9 @@ impl FileManager {
         }
 
         macro_rules! try_detect {
-            ($fs:path) => {
-                match $fs::try_detect_file_system(&partition_info, first_block_data) {
-                    Ok(f) => {
+            ($fs:ident) => {
+                match $fs::try_mount_file_system(&partition_info, first_block_data) {
+                    Ok(driver) => {
                         match kmalloc!(
                             Partition,
                             Partition {
@@ -175,18 +184,18 @@ impl FileManager {
         Ok(unsafe { &*(descriptor.get_data() as *const FileInfo) }.get_file_size())
     }
 
-    fn _open_file(
+    fn _open_file_info(
         &mut self,
         file_name: &str,
-        current_directory: &'static mut FileInfo,
+        current_directory: &mut FileInfo,
         permission_and_flags: u16,
     ) -> Result<&'static mut FileInfo, FileError> {
         if file_name == "." || file_name.len() == 0 {
-            return Ok(current_directory);
+            return Ok(unsafe { &mut *(current_directory as *mut _) });
         } else if file_name == ".." {
             return if current_directory.parent.is_null() {
-                assert_ne!(current_directory, &mut self.root);
-                Ok(&mut self.root)
+                assert_ne!(current_directory as *mut _, &mut self.root as *mut _);
+                Ok(unsafe { &mut *(current_directory as *mut _) })
             } else {
                 Ok(unsafe { &mut *(current_directory.parent) })
             };
@@ -201,18 +210,16 @@ impl FileManager {
                 if e.get_file_name() == file_name
                     && (e.permission_and_flags & permission_and_flags == permission_and_flags)
                 {
-                    Ok(e)
+                    return Ok(e);
                 }
             }
         }
 
         let driver = unsafe { &mut *(current_directory.driver) };
-        let mut file_info = match kmalloc!(
-            FileInfo,
-            driver
-                .driver
-                .search_file(&driver.info, file_name, current_directory)?
-        ) {
+        let f = driver
+            .driver
+            .search_file(&driver.info, file_name, current_directory)?;
+        let mut file_info = match kmalloc!(FileInfo, f) {
             Ok(i) => i,
             Err(err) => {
                 pr_err!("Failed to allocate FileInfo: {:?}", err);
@@ -223,6 +230,9 @@ impl FileManager {
         current_directory.reference_counter += 1;
         file_info.parent = current_directory;
         file_info.list = PtrLinkedListNode::new();
+        if file_info.driver.is_null() {
+            file_info.driver = driver;
+        }
         current_directory.child.insert_tail(&mut file_info.list);
 
         if file_info.permission_and_flags & permission_and_flags == permission_and_flags {
@@ -232,20 +242,20 @@ impl FileManager {
         }
     }
 
-    pub fn open_file(
-        &'static mut self,
+    pub fn open_file_info(
+        &mut self,
         file_name: &PathInfo,
         current_directory: &mut FileInfo,
         _permission: u8,
     ) -> Result<&'static mut FileInfo, FileError> {
         let mut dir = if file_name.is_absolute_path() {
-            &mut self.root
+            unsafe { &mut *(&mut self.root as *mut _) }
         } else {
-            current_directory
+            unsafe { &mut *(current_directory as *mut _) }
         };
         let permission_and_flags = 0; //permission
         for e in file_name.iter() {
-            dir = self._open_file(e, dir, permission_and_flags)?;
+            dir = self._open_file_info(e, dir, permission_and_flags)?;
         }
         Ok(dir)
     }
@@ -253,7 +263,7 @@ impl FileManager {
     pub fn open_file_info_as_file(
         &mut self,
         info: &mut FileInfo,
-        _permission: u8,
+        permission: u8,
     ) -> Result<File, FileError> {
         let _lock = info.lock.lock();
         if (info.permission_and_flags & FileInfo::FLAGS_DIRECTORY) != 0
@@ -269,6 +279,18 @@ impl FileManager {
             FileDescriptor::new(info as *mut _ as usize, 0, permission),
             self,
         ))
+    }
+
+    pub fn open_file(
+        &mut self,
+        file_name: &PathInfo,
+        current_directory: Option<&mut FileInfo>,
+        permission: u8,
+    ) -> Result<File, FileError> {
+        let current_directory =
+            current_directory.unwrap_or(unsafe { &mut *(&mut self.root as *mut _) });
+        let file_info = self.open_file_info(file_name, current_directory, permission)?;
+        self.open_file_info_as_file(file_info, permission)
     }
 }
 

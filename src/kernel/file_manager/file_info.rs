@@ -2,7 +2,7 @@
 //! Inode
 //!
 
-use super::{Partition, PartitionManager};
+use super::Partition;
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
