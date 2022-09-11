@@ -29,7 +29,7 @@ struct SuperBlock {
     dblocks: XfsRfsBlock,
     rblocks: XfsRfsBlock,
     rextents: XfsRtBlock,
-    uuid: Guid,
+    uuid: [u8; 16],
     logstart: XfsFsBlock,
     root_inode: XfsIno,
     rbmino: XfsIno,
@@ -78,7 +78,7 @@ struct SuperBlock {
     spino_align: XfsExtLen,
     pquotino: XfsIno,
     lsn: XfsLSN,
-    meta_uuid: Guid,
+    meta_uuid: [u8; 16],
     rrmapino: XfsIno,
 }
 
@@ -119,7 +119,7 @@ struct DInodeCore {
     pad2: [u8; 12],
     crtime: XfsTimestamp,
     be_ino: u64,
-    uuid: Guid,
+    uuid: [u8; 16],
 }
 
 #[repr(C, packed)]
@@ -225,7 +225,7 @@ impl XfsInfo {
             let _ = free_pages!(inode_buffer);
             return;
         }
-        if inode.format != XFS_D_INODE_CORE_FORMAT_NORMAL {
+        if inode.format != XFS_D_INODE_CORE_FORMAT_LOCAL {
             pr_err!("inode is not the directory format.");
             let _ = free_pages!(inode_buffer);
             return;
@@ -423,7 +423,7 @@ pub(super) fn try_detect_file_system(
     {
         return Err(FileError::BadSignature);
     }
-    pr_debug!("XFS UUID: {}", super_block.uuid);
+    pr_debug!("XFS UUID: {}", Guild::from_be(&super_block.uuid));
     pr_debug!(
         "File System Name: {}",
         core::str::from_utf8(&super_block.file_system_name).unwrap_or("")
@@ -520,7 +520,5 @@ impl PartitionManager for XfsInfo {
         todo!()
     }
 
-    fn close_file(&self, partition_info: &PartitionInfo, file_info: &mut FileInfo) {
-        todo!()
-    }
+    fn close_file(&self, _partition_info: &PartitionInfo, _file_info: &mut FileInfo) {}
 }

@@ -111,6 +111,10 @@ impl FileInfo {
         self.file_name = String::from(name);
     }
 
+    pub const fn is_directory(&self) -> bool {
+        (self.permission_and_flags & Self::FLAGS_DIRECTORY) != 0
+    }
+
     pub fn set_attribute_directory(&mut self) {
         self.permission_and_flags |= Self::FLAGS_DIRECTORY;
     }
