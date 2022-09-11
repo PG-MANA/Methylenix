@@ -4,11 +4,13 @@
 
 pub mod elf;
 mod fat32;
+mod file_info;
 mod gpt;
 mod path_info;
 mod vfs;
 mod xfs;
 
+use self::file_info::FileInfo;
 pub use self::path_info::{PathInfo, PathInfoIter};
 pub use self::vfs::{
     File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
@@ -16,16 +18,14 @@ pub use self::vfs::{
 };
 
 use crate::kernel::block_device::BlockDeviceError;
+use crate::kernel::collections::ptr_linked_list::{
+    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
+};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
-use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, MemoryError};
+use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kmalloc, MemoryError};
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
-
-pub struct FileManager {
-    partition_list: Vec<(PartitionInfo, Box<dyn PartitionManager>)>,
-}
 
 //#[derive(Clone)]
 struct PartitionInfo {
@@ -34,6 +34,17 @@ struct PartitionInfo {
     #[allow(dead_code)]
     ending_lba: u64,
     lba_block_size: u64,
+}
+
+struct Partition {
+    list: PtrLinkedListNode<Self>,
+    info: PartitionInfo,
+    driver: Box<dyn PartitionManager>,
+}
+
+pub struct FileManager {
+    partition_list: PtrLinkedList<Partition>,
+    root: FileInfo,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -67,31 +78,33 @@ trait PartitionManager {
     fn search_file(
         &self,
         partition_info: &PartitionInfo,
-        file_name: &PathInfo,
-    ) -> Result<usize, FileError>;
+        file_name: &str,
+        current_directory: &FileInfo,
+    ) -> Result<FileInfo, FileError>;
 
     fn get_file_size(
         &self,
         partition_info: &PartitionInfo,
-        file_info: usize,
-    ) -> Result<usize, FileError>;
+        file_info: &FileInfo,
+    ) -> Result<u64, FileError>;
 
     fn read_file(
         &self,
         partition_info: &PartitionInfo,
-        file_info: usize,
+        file_info: &mut FileInfo,
         offset: MOffset,
         length: MSize,
         buffer: VAddress,
     ) -> Result<MSize, FileError>;
 
-    fn close_file(&self, partition_info: &PartitionInfo, file_info: usize);
+    fn close_file(&self, partition_info: &PartitionInfo, file_info: &mut FileInfo);
 }
 
 impl FileManager {
     pub fn new() -> Self {
         Self {
-            partition_list: Vec::new(),
+            partition_list: PtrLinkedList::new(),
+            root: FileInfo::new_root(false),
         }
     }
 
@@ -99,13 +112,7 @@ impl FileManager {
         gpt::detect_file_system(self, device_id);
     }
 
-    fn analysis_partition(
-        &mut self,
-        device_id: usize,
-        starting_lba: u64,
-        ending_lba: u64,
-        lba_block_size: u64,
-    ) {
+    fn analysis_partition(&mut self, partition_info: PartitionInfo) {
         let first_block_data =
             match alloc_non_linear_pages!(MSize::new(lba_block_size as usize).page_align_up()) {
                 Ok(a) => a,
@@ -115,77 +122,153 @@ impl FileManager {
                 }
             };
         if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
-            device_id,
+            partition_info.device_id,
             first_block_data,
-            starting_lba,
+            partition_info.starting_lba,
             1,
         ) {
             pr_err!("Failed to read data from disk: {:?}", e);
             return;
         }
 
-        let partition_info = PartitionInfo {
-            device_id,
-            starting_lba,
-            ending_lba,
-            lba_block_size,
-        };
-
-        match fat32::try_detect_file_system(&partition_info, first_block_data) {
-            Ok(f) => {
-                self.partition_list.push((partition_info, Box::new(f)));
-                let _ = free_pages!(first_block_data);
-                return;
-            }
-            Err(FileError::BadSignature) => { /* Next FS */ }
-            Err(err) => {
-                pr_err!("Failed to detect the file system: {:?}", err);
-                let _ = free_pages!(first_block_data);
-                return;
-            }
+        macro_rules! try_detect {
+            ($fs:path) => {
+                match $fs::try_detect_file_system(&partition_info, first_block_data) {
+                    Ok(f) => {
+                        match kmalloc!(
+                            Partition,
+                            Partition {
+                                list: PtrLinkedListNode::new(),
+                                info: partition_info,
+                                driver: Box::new(driver)
+                            }
+                        ) {
+                            Ok(i) => {
+                                self.partition_list.insert_tail(&mut i.list);
+                            }
+                            Err(err) => {
+                                pr_err!("Failed to allocate partition information: {:?}", err);
+                            }
+                        }
+                        let _ = free_pages!(first_block_data);
+                        return;
+                    }
+                    Err(FileError::BadSignature) => { /* Next FS */ }
+                    Err(err) => {
+                        pr_err!("Failed to detect the file system: {:?}", err);
+                        let _ = free_pages!(first_block_data);
+                        return;
+                    }
+                }
+            };
         }
 
-        match xfs::try_detect_file_system(&partition_info, first_block_data) {
-            Ok(f) => {
-                self.partition_list.push((partition_info, Box::new(f)));
-                let _ = free_pages!(first_block_data);
-                return;
-            }
-            Err(FileError::BadSignature) => { /* Next FS */ }
-            Err(err) => {
-                pr_err!("Failed to detect the file system: {:?}", err);
-                let _ = free_pages!(first_block_data);
-                return;
-            }
-        }
+        try_detect!(fat32);
+        try_detect!(xfs);
+
         pr_err!("Unknown File System");
         let _ = free_pages!(first_block_data);
         return;
     }
 
-    pub fn get_number_of_file_systems(&self) -> usize {
-        self.partition_list.len()
+    fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<u64, FileError> {
+        Ok(unsafe { &*(descriptor.get_data() as *const FileInfo) }.get_file_size())
     }
 
-    fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<usize, FileError> {
-        let p = &self.partition_list[descriptor.get_device_index()];
-        p.1.get_file_size(&p.0, descriptor.get_data())
-    }
-
-    pub fn file_open(&mut self, file_name: &PathInfo, permission: u8) -> Result<File, FileError> {
-        for (index, e) in self.partition_list.iter().enumerate() {
-            match e.1.search_file(&e.0, file_name) {
-                Ok(data) => {
-                    return Ok(File::new(
-                        FileDescriptor::new(data, index, permission),
-                        self,
-                    ));
+    fn _open_file(
+        &mut self,
+        file_name: &str,
+        current_directory: &'static mut FileInfo,
+        permission_and_flags: u16,
+    ) -> Result<&'static mut FileInfo, FileError> {
+        if file_name == "." || file_name.len() == 0 {
+            return Ok(current_directory);
+        } else if file_name == ".." {
+            return if current_directory.parent.is_null() {
+                assert_ne!(current_directory, &mut self.root);
+                Ok(&mut self.root)
+            } else {
+                Ok(unsafe { &mut *(current_directory.parent) })
+            };
+        }
+        let _lock = current_directory.lock.lock();
+        if (current_directory.permission_and_flags & FileInfo::FLAGS_VOLATILE) == 0 {
+            for e in unsafe {
+                current_directory
+                    .child
+                    .iter_mut(offset_of_list_node!(FileInfo, list))
+            } {
+                if e.get_file_name() == file_name
+                    && (e.permission_and_flags & permission_and_flags == permission_and_flags)
+                {
+                    Ok(e)
                 }
-                Err(FileError::FileNotFound) => { /* Continue */ }
-                Err(e) => Err(e)?,
             }
         }
-        return Err(FileError::FileNotFound);
+
+        let driver = unsafe { &mut *(current_directory.driver) };
+        let mut file_info = match kmalloc!(
+            FileInfo,
+            driver
+                .driver
+                .search_file(&driver.info, file_name, current_directory)?
+        ) {
+            Ok(i) => i,
+            Err(err) => {
+                pr_err!("Failed to allocate FileInfo: {:?}", err);
+                return Err(FileError::MemoryError(err));
+            }
+        };
+
+        current_directory.reference_counter += 1;
+        file_info.parent = current_directory;
+        file_info.list = PtrLinkedListNode::new();
+        current_directory.child.insert_tail(&mut file_info.list);
+
+        if file_info.permission_and_flags & permission_and_flags == permission_and_flags {
+            Ok(file_info)
+        } else {
+            Err(FileError::OperationNotPermitted)
+        }
+    }
+
+    pub fn open_file(
+        &'static mut self,
+        file_name: &PathInfo,
+        current_directory: &mut FileInfo,
+        _permission: u8,
+    ) -> Result<&'static mut FileInfo, FileError> {
+        let mut dir = if file_name.is_absolute_path() {
+            &mut self.root
+        } else {
+            current_directory
+        };
+        let permission_and_flags = 0; //permission
+        for e in file_name.iter() {
+            dir = self._open_file(e, dir, permission_and_flags)?;
+        }
+        Ok(dir)
+    }
+
+    pub fn open_file_info_as_file(
+        &mut self,
+        info: &mut FileInfo,
+        _permission: u8,
+    ) -> Result<File, FileError> {
+        let _lock = info.lock.lock();
+        if (info.permission_and_flags & FileInfo::FLAGS_DIRECTORY) != 0
+            || (info.permission_and_flags & FileInfo::FLAGS_META_DARA) != 0
+        {
+            return Err(FileError::InvalidFile);
+        }
+        /* TODO: permission check based on user/group */
+
+        info.reference_counter += 1;
+
+        Ok(File::new(
+            FileDescriptor::new(info as *mut _ as usize, 0, permission),
+            self,
+        ))
     }
 }
 
@@ -196,14 +279,19 @@ impl FileOperationDriver for FileManager {
         buffer: VAddress,
         length: MSize,
     ) -> Result<MSize, FileError> {
-        let p = &self.partition_list[descriptor.get_device_index()];
-        let result = p.1.read_file(
-            &p.0,
-            descriptor.get_data(),
+        let file_info = unsafe { &mut *(descriptor.get_data() as *mut FileInfo) };
+        let _lock = file_info.lock.lock();
+
+        let partition_info = unsafe { &mut *(file_info.driver) };
+
+        let result = partition_info.driver.read_file(
+            &mut partition_info.info,
+            file_info,
             descriptor.get_position(),
             length,
             buffer,
         );
+
         if let Ok(s) = result {
             descriptor.add_position(s);
         }
@@ -229,7 +317,7 @@ impl FileOperationDriver for FileManager {
             FileSeekOrigin::SeekSet => descriptor.set_position(offset),
             FileSeekOrigin::SeekCur => descriptor.add_position(offset),
             FileSeekOrigin::SeekEnd => {
-                let pos = self.get_file_size(descriptor)?;
+                let pos = self.get_file_size(descriptor)? as usize;
                 descriptor.set_position(MOffset::new(pos));
             }
         }
@@ -237,7 +325,15 @@ impl FileOperationDriver for FileManager {
     }
 
     fn close(&mut self, descriptor: FileDescriptor) {
-        let p = &self.partition_list[descriptor.get_device_index()];
-        p.1.close_file(&p.0, descriptor.get_data());
+        let file_info = unsafe { &mut *(descriptor.get_data() as *mut FileInfo) };
+        let _lock = file_info.lock.lock();
+        let partition_info = unsafe { &mut *(file_info.driver) };
+
+        partition_info
+            .driver
+            .close_file(&mut partition_info.info, file_info);
+
+        file_info.reference_counter -= 1;
+        if file_info.reference_counter == 0 { /*TODO: delete file info */ }
     }
 }

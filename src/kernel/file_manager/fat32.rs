@@ -3,11 +3,13 @@
 //!
 
 use super::{FileError, PartitionInfo, PartitionManager, PathInfo};
+use alloc::string::String;
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kfree, kmalloc};
 
+use crate::kernel::file_manager::file_info::FileInfo;
 use core::mem::MaybeUninit;
 
 const FAT32_SIGNATURE: [u8; 8] = [b'F', b'A', b'T', b'3', b'2', b' ', b' ', b' '];
@@ -40,6 +42,7 @@ struct Fat32EntryInfo {
     entry_cluster: u32,
     attribute: u8,
     file_size: u32,
+    file_name: String,
 }
 
 pub(super) fn try_detect_file_system(
@@ -115,67 +118,59 @@ impl PartitionManager for Fat32Info {
     fn search_file(
         &self,
         partition_info: &PartitionInfo,
-        file_name: &PathInfo,
-    ) -> Result<usize, FileError> {
-        let mut entry_info = Fat32EntryInfo {
-            entry_cluster: self.root_cluster,
-            attribute: FAT32_ATTRIBUTE_DIRECTORY,
-            file_size: 0,
-        };
-        for e in file_name.iter() {
-            if e.len() == 0 || e == "/" {
-                continue;
-            }
-            if (entry_info.attribute & FAT32_ATTRIBUTE_DIRECTORY) == 0 {
-                pr_debug!("Failed to search {}", file_name.as_str());
-                return Err(FileError::FileNotFound);
-            }
-            match self.find_entry(partition_info, entry_info.entry_cluster, e) {
-                Ok(entry) => {
-                    entry_info = entry;
-                }
-                Err(_) => {
-                    pr_debug!(
-                        "Failed to search: {}(Failed to search: {})",
-                        file_name.as_str(),
-                        e
-                    );
-                    return Err(FileError::FileNotFound);
-                }
-            }
+        file_name: &str,
+        current_directory: &mut FileInfo,
+    ) -> Result<FileInfo, FileError> {
+        let entry = self.find_entry(
+            partition_info,
+            current_directory.get_inode_number() as u32,
+            file_name,
+        )?;
+
+        let mut file_info = FileInfo::new(current_directory);
+
+        file_info.set_inode_number(entry.entry_cluster as _);
+        file_info.set_file_size(entry.file_size as _);
+        file_info.set_file_name(entry.file_name);
+
+        let all_permission = FileInfo::PERMISSION_FLAG_EXECUTE
+            | FileInfo::PERMISSION_FLAG_WRITE
+            | FileInfo::PERMISSION_FLAG_READ;
+        file_info.set_permission(all_permission, all_permission, all_permission);
+
+        if (entry.attribute & FAT32_ATTRIBUTE_DIRECTORY) != 0 {
+            file_info.set_attribute_directory();
         }
-        kmalloc!(Fat32EntryInfo, entry_info)
-            .and_then(|i| Ok(i as *mut _ as usize))
-            .or_else(|err| Err(FileError::MemoryError(err)))
+        if (entry.attribute & FAT32_ATTRIBUTE_VOLUME_ID) != 0
+            || (entry.attribute & FAT32_ATTRIBUTE_LONG_FILE_NAME) != 0
+        {
+            file_info.set_attribute_meta_file();
+        }
+
+        Ok(FileInfo)
     }
 
-    fn get_file_size(&self, _: &PartitionInfo, file_info: usize) -> Result<usize, FileError> {
-        let entry_info = unsafe { &*(file_info as *const Fat32EntryInfo) };
-        Ok(entry_info.file_size as usize)
+    fn get_file_size(
+        &self,
+        _partition_info: &PartitionInfo,
+        file_info: &FileInfo,
+    ) -> Result<u64, FileError> {
+        Ok(file_info.get_file_size())
     }
 
     fn read_file(
         &self,
         partition_info: &PartitionInfo,
-        file_info: usize,
+        file_info: &mut FileInfo,
         offset: MOffset,
         mut length: MSize,
         buffer: VAddress,
     ) -> Result<MSize, FileError> {
-        let entry_info = unsafe { &*(file_info as *const Fat32EntryInfo) };
-        if (entry_info.attribute
-            & (FAT32_ATTRIBUTE_DIRECTORY
-                | FAT32_ATTRIBUTE_VOLUME_ID
-                | FAT32_ATTRIBUTE_LONG_FILE_NAME))
-            != 0
-        {
-            return Err(FileError::InvalidFile);
-        }
-        if offset + length > MSize::new(entry_info.file_size as usize) {
-            if offset >= MSize::new(entry_info.file_size as usize) {
+        if offset + length > MSize::new(file_info.get_file_size() as usize) {
+            if offset >= MSize::new(file_info.get_file_size() as usize) {
                 return Ok(MSize::new(0));
             }
-            length -= MSize::new(entry_info.file_size as usize) - offset;
+            length -= MSize::new(file_info.get_file_size() as usize) - offset;
         }
         let length = length.to_usize();
 
@@ -195,7 +190,7 @@ impl PartitionManager for Fat32Info {
         let number_of_clusters_to_skip = offset.to_usize() / bytes_per_cluster;
         let mut page_buffer_offset =
             offset.to_usize() - number_of_clusters_to_skip * bytes_per_cluster;
-        let mut reading_cluster = entry_info.entry_cluster;
+        let mut reading_cluster = file_info.get_inode_number() as u32;
         let mut buffer_pointer = 0usize;
 
         for _ in 0..number_of_clusters_to_skip {
@@ -270,9 +265,7 @@ impl PartitionManager for Fat32Info {
         return Ok(MSize::new(buffer_pointer));
     }
 
-    fn close_file(&self, _: &PartitionInfo, file_info: usize) {
-        let _ = kfree!(unsafe { &*(file_info as *const Fat32EntryInfo) });
-    }
+    fn close_file(&self, _: &PartitionInfo, _file_info: &mut FileInfo) {}
 }
 
 impl Fat32Info {
@@ -373,6 +366,7 @@ impl Fat32Info {
                         entry_cluster,
                         attribute,
                         file_size,
+                        file_name: String::from(entry_name_ascii),
                     });
                 }
 
