@@ -352,6 +352,8 @@ pub fn main_initialization_process() -> ! {
 
     let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
 
+    idle(); /* Fo debug */
+
     /* Test */
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
         ("OSTYPE", crate::OS_NAME),
