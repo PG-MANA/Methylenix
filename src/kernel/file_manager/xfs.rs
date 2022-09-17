@@ -285,13 +285,6 @@ impl XfsDriver {
             if (file_type & XFS_DIR3_FT_DIR) != 0 && name.len() != 0 {
                 self.list_files(partition_info, entry_inode_number, indent + 1);
             }
-            if pointer != next_offset {
-                pr_warn!(
-                    "Pointer({:#X}) is not different from offset({:#X})",
-                    pointer,
-                    next_offset
-                );
-            }
         }
         let _ = free_pages!(inode_buffer);
     }
@@ -500,7 +493,7 @@ impl XfsDriver {
 pub(super) fn try_mount_file_system(
     partition_info: &PartitionInfo,
     first_4k_data: VAddress,
-) -> Result<XfsDriver, FileError> {
+) -> Result<(XfsDriver, Guid), FileError> {
     let super_block = unsafe { &*(first_4k_data.to_usize() as *const SuperBlock) };
     if super_block.magic_number != XFS_SB_SIGNATURE
         || (super_block.version & XFS_SB_VERSION_NUMBITS.to_be()) != XFS_SB_VERSION_5.to_be()
@@ -530,7 +523,7 @@ pub(super) fn try_mount_file_system(
     pr_debug!("Root inode: {}", xfs_info.root_inode);
 
     xfs_info.list_files(partition_info, xfs_info.root_inode, 0);
-    return Ok(xfs_info);
+    return Ok((xfs_info, Guid::new_be(&super_block.uuid)));
 }
 
 impl PartitionManager for XfsDriver {

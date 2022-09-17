@@ -18,6 +18,7 @@ pub use self::vfs::{
 };
 
 use crate::kernel::block_device::BlockDeviceError;
+use crate::kernel::collections::guid::Guid;
 use crate::kernel::collections::ptr_linked_list::{
     offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
 };
@@ -39,6 +40,7 @@ pub struct PartitionInfo {
 pub struct Partition {
     list: PtrLinkedListNode<Self>,
     info: PartitionInfo,
+    uuid: Guid,
     driver: Box<dyn PartitionManager>,
 }
 
@@ -143,12 +145,14 @@ impl FileManager {
         macro_rules! try_detect {
             ($fs:ident) => {
                 match $fs::try_mount_file_system(&partition_info, first_block_data) {
-                    Ok(driver) => {
+                    Ok((driver, uuid)) => {
+                        pr_debug!("Add: Partition(UUID: {uuid})");
                         match kmalloc!(
                             Partition,
                             Partition {
                                 list: PtrLinkedListNode::new(),
                                 info: partition_info,
+                                uuid,
                                 driver: Box::new(driver)
                             }
                         ) {
@@ -215,6 +219,9 @@ impl FileManager {
             }
         }
 
+        if current_directory.driver.is_null() {
+            return Err(FileError::FileNotFound);
+        }
         let driver = unsafe { &mut *(current_directory.driver) };
         let f = driver
             .driver

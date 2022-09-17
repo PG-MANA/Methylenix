@@ -2,14 +2,14 @@
 //! FAT32
 //!
 
-use super::{FileError, PartitionInfo, PartitionManager};
+use super::{FileError, FileInfo, PartitionInfo, PartitionManager};
 use alloc::string::String;
 
+use crate::kernel::collections::guid::Guid;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages};
 
-use crate::kernel::file_manager::file_info::FileInfo;
 use core::mem::MaybeUninit;
 
 const FAT32_SIGNATURE: [u8; 8] = [b'F', b'A', b'T', b'3', b'2', b' ', b' ', b' '];
@@ -20,6 +20,7 @@ const NUM_OF_RESERVED_CLUSTER_OFFSET: usize = 14;
 const NUM_OF_FATS_OFFSET: usize = 16;
 const FAT_SIZE_OFFSET: usize = 36;
 const ROOT_CLUSTER_OFFSET: usize = 44;
+const FAT32_VOLUME_ID_OFFSET: usize = 67;
 const FAT32_SIGNATURE_OFFSET: usize = 82;
 
 const FAT32_ATTRIBUTE_DIRECTORY: u8 = 0x10;
@@ -48,7 +49,7 @@ struct Fat32EntryInfo {
 pub(super) fn try_mount_file_system(
     partition_info: &PartitionInfo,
     first_4k_data: VAddress,
-) -> Result<Fat32Driver, FileError> {
+) -> Result<(Fat32Driver, Guid), FileError> {
     if unsafe { *((first_4k_data.to_usize() + FAT32_SIGNATURE_OFFSET) as *const [u8; 8]) }
         != FAT32_SIGNATURE
     {
@@ -111,7 +112,20 @@ pub(super) fn try_mount_file_system(
     };
 
     fat32_driver.list_files(partition_info, root_cluster, 0); // Debug
-    return Ok(fat32_driver);
+    return Ok((
+        fat32_driver,
+        Guid::new(
+            u16::from_le(unsafe {
+                *((first_4k_data.to_usize() + FAT32_VOLUME_ID_OFFSET + 2) as *const u16)
+            }) as u32,
+            u16::from_le(unsafe {
+                *((first_4k_data.to_usize() + FAT32_VOLUME_ID_OFFSET) as *const u16)
+            }),
+            0,
+            0,
+            0,
+        ),
+    ));
 }
 
 impl PartitionManager for Fat32Driver {
