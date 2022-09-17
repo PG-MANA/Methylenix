@@ -184,6 +184,33 @@ impl FileManager {
         return;
     }
 
+    pub fn mount_root(&mut self, root_uuid: Guid, is_writable: bool) {
+        for e in unsafe {
+            self.partition_list
+                .iter_mut(offset_of_list_node!(Partition, list))
+        } {
+            if root_uuid == e.uuid {
+                e.driver
+                    .get_root_node(&e.info, &mut self.root, is_writable)
+                    .expect("Failed to create root");
+                self.root.driver = e as *mut _;
+                self.root.reference_counter = 1;
+                return;
+            }
+        }
+        pr_err!("Root is not found");
+        return;
+    }
+
+    /// Temporary function for [`crate::kernel::initialization::mount_root_file_system`]
+    pub fn get_first_uuid(&self) -> Option<Guid> {
+        unsafe {
+            self.partition_list
+                .get_first_entry(offset_of_list_node!(Partition, list))
+        }
+        .and_then(|p| Some(p.uuid.clone()))
+    }
+
     fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<u64, FileError> {
         Ok(unsafe { &*(descriptor.get_data() as *const FileInfo) }.get_file_size())
     }

@@ -254,7 +254,6 @@ impl XfsDriver {
             let name_len = unsafe { *(pointer as *const u8) };
             pointer += core::mem::size_of::<u8>();
             let offset = u16::from_be(unsafe { *(pointer as *const u16) });
-            let next_offset = dir_entries_base_address + offset as usize;
             pointer += core::mem::size_of::<u16>();
             let name = core::str::from_utf8(unsafe {
                 core::slice::from_raw_parts(pointer as *const u8, name_len as usize)

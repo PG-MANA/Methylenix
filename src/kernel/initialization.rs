@@ -201,6 +201,21 @@ pub fn init_block_devices_and_file_system_later() {
     }
 }
 
+/// Mount Root System
+///
+/// Currently, mount the first detected file system as root
+/// TODO: support command line
+pub fn mount_root_file_system() {
+    if let Some(uuid) = get_kernel_manager_cluster().file_manager.get_first_uuid() {
+        pr_info!("Mount {uuid} as root");
+        get_kernel_manager_cluster()
+            .file_manager
+            .mount_root(uuid, true);
+    } else {
+        pr_info!("No root partition was found");
+    }
+}
+
 /// Draw the OEM Logo by ACPI's BGRT
 pub fn draw_boot_logo() {
     let free_mapped_address = |address: usize| {
@@ -350,7 +365,7 @@ pub fn main_initialization_process() -> ! {
 
     init_block_devices_and_file_system_later();
 
-    let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
+    mount_root_file_system();
 
     idle(); /* Fo debug */
 
