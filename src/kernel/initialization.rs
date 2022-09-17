@@ -369,15 +369,16 @@ pub fn main_initialization_process() -> ! {
 
     idle(); /* Fo debug */
 
-    /* Test */
+    pr_info!("Execute the init process");
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
         ("OSTYPE", crate::OS_NAME),
         ("OSVERSION", crate::OS_VERSION),
         ("TARGET", crate::arch::target_arch::TARGET_ARCH_NAME),
     ];
+    const INIT_PROCESS_FILE_PATH: &str = "/sbin/init";
     let _ = application_loader::load_and_execute(
-        "/OS/FILES/APP",
-        &["Arg1", "Arg2", "Arg3"],
+        INIT_PROCESS_FILE_PATH,
+        &[],
         &ENVIRONMENT_VARIABLES,
         ELF_MACHINE_DEFAULT,
     );
