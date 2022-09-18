@@ -447,7 +447,6 @@ impl MemoryManager {
     }
 }
 
-#[macro_export]
 macro_rules! io_remap {
     ($address:expr, $len:expr, $permission:expr) => {
         $crate::kernel::manager_cluster::get_kernel_manager_cluster()
@@ -461,7 +460,6 @@ macro_rules! io_remap {
     };
 }
 
-#[macro_export]
 macro_rules! mremap {
     ($old_address:expr, $old_size:expr, $new_size:expr) => {
         $crate::kernel::manager_cluster::get_kernel_manager_cluster()
@@ -470,7 +468,6 @@ macro_rules! mremap {
     };
 }
 
-#[macro_export]
 macro_rules! alloc_pages {
     ($order:expr) => {
         $crate::kernel::manager_cluster::get_kernel_manager_cluster()
@@ -493,7 +490,6 @@ macro_rules! alloc_pages {
     };
 }
 
-#[macro_export]
 macro_rules! alloc_pages_with_physical_address {
     ($order:expr) => {
         $crate::kernel::manager_cluster::get_kernel_manager_cluster()
@@ -516,7 +512,6 @@ macro_rules! alloc_pages_with_physical_address {
     };
 }
 
-#[macro_export]
 macro_rules! alloc_non_linear_pages {
     ($size:expr) => {
         $crate::kernel::manager_cluster::get_kernel_manager_cluster()
@@ -539,7 +534,6 @@ macro_rules! alloc_non_linear_pages {
     };
 }
 
-#[macro_export]
 macro_rules! free_pages {
     ($address:expr) => {
         $crate::kernel::manager_cluster::get_kernel_manager_cluster()
@@ -548,7 +542,6 @@ macro_rules! free_pages {
     };
 }
 
-#[macro_export]
 macro_rules! kmalloc {
     ($size:expr) => {
         $crate::kernel::manager_cluster::get_cpu_manager_cluster()
@@ -563,6 +556,7 @@ macro_rules! kmalloc {
                 core::mem::size_of::<$t>(),
             ))
             .and_then(|addr| {
+                use $crate::kernel::collections::init_struct;
                 use $crate::kernel::memory_manager::data_type::Address;
                 let o = unsafe { &mut *(addr.to_usize() as *mut $t) };
                 init_struct!(*o, $initial_value);
@@ -571,7 +565,6 @@ macro_rules! kmalloc {
     };
 }
 
-#[macro_export]
 macro_rules! kfree {
     ($address:expr, $size:expr) => {
         $crate::kernel::manager_cluster::get_cpu_manager_cluster()
@@ -592,3 +585,8 @@ macro_rules! kfree {
             )
     };
 }
+
+pub(crate) use {
+    alloc_non_linear_pages, alloc_pages, alloc_pages_with_physical_address, free_pages, io_remap,
+    kfree, kmalloc, mremap,
+};

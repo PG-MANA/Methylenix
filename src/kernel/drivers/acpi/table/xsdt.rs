@@ -18,7 +18,7 @@ use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
-use crate::{free_pages, io_remap};
+use crate::kernel::memory_manager::{free_pages, io_remap};
 
 use core::mem::MaybeUninit;
 

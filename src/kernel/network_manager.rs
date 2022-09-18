@@ -2,6 +2,7 @@
 //! Network Manager
 //!
 
+use crate::kernel::collections::init_struct;
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 use crate::kernel::memory_manager::MemoryError;
 

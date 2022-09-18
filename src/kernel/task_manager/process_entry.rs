@@ -5,7 +5,10 @@
 
 use super::{ProcessStatus, TaskError, TaskSignal, ThreadEntry};
 
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::collections::init_struct;
+use crate::kernel::collections::ptr_linked_list::{
+    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
+};
 use crate::kernel::file_manager::File;
 use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
@@ -70,7 +73,7 @@ impl ProcessEntry {
         memory_manager: *mut MemoryManager,
         privilege_level: u8,
     ) {
-        core::mem::forget(core::mem::replace(self, Self::new()));
+        init_struct!(*self, Self::new());
         self.parent = parent;
         self.process_id = p_id;
         self.privilege_level = privilege_level;
@@ -130,7 +133,7 @@ impl ProcessEntry {
             /* Current chain the last of t_list */
             let tail = unsafe {
                 self.thread
-                    .get_last_entry_mut(offset_of!(ThreadEntry, t_list))
+                    .get_last_entry_mut(offset_of_list_node!(ThreadEntry, t_list))
                     .unwrap()
             };
             let _lock = thread.lock.lock();
@@ -142,6 +145,10 @@ impl ProcessEntry {
 
     fn update_next_thread_id(&mut self) {
         self.next_thread_id += 1;
+    }
+
+    pub const fn get_process_status(&self) -> ProcessStatus {
+        self.status
     }
 
     pub const fn get_pid(&self) -> usize {
@@ -180,7 +187,10 @@ impl ProcessEntry {
                 None
             }
         } else {
-            for thread in unsafe { self.thread.iter_mut(offset_of!(ThreadEntry, t_list)) } {
+            for thread in unsafe {
+                self.thread
+                    .iter_mut(offset_of_list_node!(ThreadEntry, t_list))
+            } {
                 if thread.get_t_id() == t_id {
                     return Some(thread);
                 }
@@ -237,7 +247,7 @@ impl ProcessEntry {
             self.thread.remove(&mut thread.t_list);
             let single_thread = unsafe {
                 self.thread
-                    .take_first_entry(offset_of!(ThreadEntry, t_list))
+                    .take_first_entry(offset_of_list_node!(ThreadEntry, t_list))
                     .unwrap()
             };
             assert!(self.thread.is_empty());
@@ -262,7 +272,7 @@ impl ProcessEntry {
         } else {
             let thread = unsafe {
                 self.thread
-                    .get_first_entry_mut(offset_of!(ThreadEntry, t_list))
+                    .get_first_entry_mut(offset_of_list_node!(ThreadEntry, t_list))
                     .unwrap()
             };
             let _lock = thread.lock.lock();
@@ -293,5 +303,33 @@ impl ProcessEntry {
         self.files.push(Arc::new(Mutex::new(f)));
         drop(_lock);
         i
+    }
+
+    pub fn remove_file_from_list(&mut self, index: usize) -> Result<Arc<Mutex<File<'static>>>, ()> {
+        let _lock = if self.num_of_thread > 1 {
+            None
+        } else {
+            Some(self.file_vec_lock.lock())
+        };
+        if index >= self.files.len() {
+            return Err(());
+        }
+        let file = core::mem::replace(
+            &mut self.files[index],
+            Arc::new(Mutex::new(File::new_invalid())),
+        );
+        drop(_lock);
+        Ok(file)
+    }
+
+    pub fn remove_file_from_list_append(&mut self) -> Option<Arc<Mutex<File<'static>>>> {
+        let _lock = if self.num_of_thread > 1 {
+            None
+        } else {
+            Some(self.file_vec_lock.lock())
+        };
+        let file = self.files.pop();
+        drop(_lock);
+        file
     }
 }

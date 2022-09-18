@@ -16,7 +16,7 @@ pub mod table {
         ($address:expr,$new_size:expr) => {{
             use crate::kernel::drivers::acpi::INITIAL_MMAP_SIZE;
             use crate::kernel::memory_manager::data_type::MSize;
-            use crate::mremap;
+            use crate::kernel::memory_manager::mremap;
             match mremap!(
                 $address,
                 MSize::new(INITIAL_MMAP_SIZE),

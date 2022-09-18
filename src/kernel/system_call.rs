@@ -131,9 +131,12 @@ pub fn system_call_handler(context: &mut ContextData) {
                 if let Ok(s) = core::str::from_utf8(unsafe {
                     core::slice::from_raw_parts(file_name as *const u8, str_len)
                 }) {
-                    if let Ok(f) = get_kernel_manager_cluster()
-                        .file_manager
-                        .file_open(PathInfo::new(s), FILE_PERMISSION_READ)
+                    if let Ok(f) = get_kernel_manager_cluster().file_manager.open_file(
+                        PathInfo::new(s),
+                        None,
+                        FILE_PERMISSION_READ,
+                    )
+                    /* TODO: Current Directory*/
                     {
                         let process = get_cpu_manager_cluster().run_queue.get_running_process();
                         let fd = process.add_file(f);
@@ -485,6 +488,10 @@ fn system_call_write(file: &mut File, data: usize, len: usize) -> Result<usize, 
     }
     file.write(VAddress::new(data), MSize::new(len))
         .and_then(|s| Ok(s.to_usize()))
+        .or_else(|err| {
+            pr_err!("Failed to write: {:?}", err);
+            Err(())
+        })
 }
 
 fn system_call_memory_map(

@@ -9,11 +9,11 @@ use super::{AcpiInt, AmlError};
 
 use crate::arch::target_arch::device::acpi::{read_io, write_io};
 
-use crate::io_remap;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 use crate::kernel::sync::spin_lock::Mutex;
 
 use core::sync::atomic::{AtomicU8, Ordering};

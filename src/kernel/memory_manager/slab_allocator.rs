@@ -8,12 +8,10 @@ pub mod pool_allocator;
 
 use self::pool_allocator::PoolAllocator;
 
-use super::data_type::{Address, MPageOrder};
-use super::{MemoryError, MemoryPermissionFlags};
+use super::data_type::{Address, MPageOrder, MemoryPermissionFlags};
+use super::{alloc_pages, MemoryError};
 
 use crate::arch::target_arch::interrupt::InterruptManager;
-
-use crate::alloc_pages;
 
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 

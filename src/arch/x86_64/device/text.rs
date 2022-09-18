@@ -3,15 +3,16 @@
 //!
 //! VGA text mode is one of the display modes, we can show text by putting ASCII code in the memory.
 //! This mode will be enabled when boot from legacy BIOS. Under the UEFI BIOS, this mode will be unusable.
+//!
 
 use crate::arch::target_arch::device::crt;
-use crate::io_remap;
 
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::graphic_manager::text_buffer_driver::TextBufferDriver;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 
 /// VgaTextDriver
 ///

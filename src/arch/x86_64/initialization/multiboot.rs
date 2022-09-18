@@ -5,26 +5,29 @@
 
 use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
-use crate::arch::target_arch::context::memory_layout::{
-    kernel_area_to_physical_address, KERNEL_MAP_START_ADDRESS,
-};
-use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
-
-use crate::kernel::drivers::efi::memory_map::EfiMemoryType;
-use crate::kernel::drivers::multiboot::MultiBootInformation;
-use crate::kernel::graphic_manager::font::FontType;
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MOrder, MSize, PAddress, VAddress};
-use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use crate::kernel::memory_manager::virtual_memory_manager::VirtualMemoryManager;
-use crate::kernel::memory_manager::{
-    data_type::MemoryOptionFlags, data_type::MemoryPermissionFlags,
-    system_memory_manager::get_physical_memory_manager, MemoryManager,
+use crate::arch::target_arch::{
+    context::memory_layout::{kernel_area_to_physical_address, KERNEL_MAP_START_ADDRESS},
+    paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
-use crate::io_remap;
-use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
-use crate::kernel::memory_manager::system_memory_manager::SystemMemoryManager;
+use crate::kernel::{
+    collections::init_struct,
+    drivers::{efi::memory_map::EfiMemoryType, multiboot::MultiBootInformation},
+    graphic_manager::font::FontType,
+    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
+    memory_manager::{
+        data_type::{
+            Address, MOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+        },
+        io_remap,
+        memory_allocator::MemoryAllocator,
+        physical_memory_manager::PhysicalMemoryManager,
+        system_memory_manager::get_physical_memory_manager,
+        system_memory_manager::SystemMemoryManager,
+        virtual_memory_manager::VirtualMemoryManager,
+        MemoryManager,
+    },
+};
 
 use core::mem;
 
@@ -163,10 +166,10 @@ pub fn init_memory_by_multiboot_information(
         PAddress::new(max_available_address),
         &mut physical_memory_manager,
     );
-    core::mem::forget(core::mem::replace(
-        &mut get_kernel_manager_cluster().system_memory_manager,
-        SystemMemoryManager::new(physical_memory_manager),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().system_memory_manager,
+        SystemMemoryManager::new(physical_memory_manager)
+    );
     get_kernel_manager_cluster()
         .system_memory_manager
         .init_pools(&mut virtual_memory_manager);
@@ -231,10 +234,10 @@ pub fn init_memory_by_multiboot_information(
         .expect("Cannot map multiboot information");
 
     /* Set up Memory Manager */
-    core::mem::forget(core::mem::replace(
-        &mut get_kernel_manager_cluster().kernel_memory_manager,
-        MemoryManager::new(virtual_memory_manager),
-    ));
+    init_struct!(
+        get_kernel_manager_cluster().kernel_memory_manager,
+        MemoryManager::new(virtual_memory_manager)
+    );
     /* Apply paging */
     get_kernel_manager_cluster()
         .kernel_memory_manager

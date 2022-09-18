@@ -4,7 +4,7 @@
 //! This entry contains arch-depending data.
 //!
 
-use crate::arch::target_arch::cpu::{SPSR_M_EL0T, SPSR_M_EL1H};
+use crate::arch::target_arch::device::cpu::{SPSR_M_EL0T, SPSR_M_EL1H};
 
 #[repr(C, align(64))]
 #[derive(Clone)]

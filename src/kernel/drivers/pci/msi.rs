@@ -12,8 +12,7 @@ pub struct MsiInfo {
 use crate::kernel::drivers::pci::PciDevice;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize, MemoryPermissionFlags, PAddress};
-
-use crate::{free_pages, io_remap};
+use crate::kernel::memory_manager::{free_pages, io_remap};
 
 pub fn setup_msi_or_msi_x(
     pci_dev: &PciDevice,

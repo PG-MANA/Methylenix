@@ -5,10 +5,10 @@
 //!
 
 use crate::arch::target_arch::device::cpu;
-use crate::io_remap;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 
 pub struct LocalApicManager {
     apic_id: u32,

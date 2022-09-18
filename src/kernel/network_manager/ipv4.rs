@@ -5,8 +5,7 @@
 use super::{tcp, udp, LinkType, NetworkError};
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
-
-use crate::kfree;
+use crate::kernel::memory_manager::kfree;
 
 use alloc::vec::Vec;
 

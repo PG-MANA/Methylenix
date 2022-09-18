@@ -2,13 +2,13 @@
 //! PCIe Enhanced Configuration Access Mechanism
 //!
 
-use crate::io_remap;
 use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
 use crate::kernel::drivers::pci::PciDevice;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 
 pub struct Ecam {
     ecam_base_address: PAddress,

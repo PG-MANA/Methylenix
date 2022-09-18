@@ -2,12 +2,12 @@
 //! Virtual Memory Entry Chain
 //!
 
+use super::super::data_type::{
+    Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+};
 use super::virtual_memory_object::VirtualMemoryObject;
 
-use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
-use crate::kernel::memory_manager::{MemoryOptionFlags, MemoryPermissionFlags};
-
-use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
+use crate::kernel::collections::ptr_linked_list::{offset_of_list_node, PtrLinkedListNode};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 #[allow(dead_code)]
@@ -58,9 +58,10 @@ impl VirtualMemoryEntry {
 
     pub fn set_vm_end_address(&mut self, new_end_address: VAddress) {
         let _lock = self.lock.lock();
-        if let Some(next_entry) =
-            unsafe { self.list.get_next(offset_of!(VirtualMemoryEntry, list)) }
-        {
+        if let Some(next_entry) = unsafe {
+            self.list
+                .get_next(offset_of_list_node!(VirtualMemoryEntry, list))
+        } {
             assert!(next_entry.get_vm_start_address() > new_end_address);
         }
         self.end_address = new_end_address;

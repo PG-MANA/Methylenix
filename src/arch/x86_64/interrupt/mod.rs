@@ -16,8 +16,8 @@ use crate::arch::target_arch::device::local_apic::LocalApicManager;
 use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MSize};
+use crate::kernel::memory_manager::{alloc_non_linear_pages, alloc_pages};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
-use crate::{alloc_non_linear_pages, alloc_pages};
 
 use core::arch::global_asm;
 
@@ -446,8 +446,7 @@ impl InterruptManager {
     /// Main handler for interrupt
     ///
     /// This function calls `schedule` if needed.
-    #[no_mangle]
-    pub extern "C" fn main_interrupt_handler(context_data: u64, index: usize) {
+    extern "C" fn main_interrupt_handler(context_data: u64, index: usize) {
         let address = unsafe { INTERRUPT_HANDLER[index - IDT_DEVICE_MIN] };
 
         if address != 0 {
@@ -477,8 +476,7 @@ impl InterruptManager {
     }
 
     /// Main handler for syscall
-    #[no_mangle]
-    pub extern "C" fn main_syscall_handler(context_data: u64) {
+    extern "C" fn main_syscall_handler(context_data: u64) {
         let context_data = unsafe { &mut *(context_data as *mut ContextData) };
         context_data.registers.gs_base = unsafe { cpu::rdmsr(0xC0000102) };
         let user_segment_base = (unsafe { cpu::rdmsr(MSR_STAR) } >> 48) & 0xffff;
@@ -507,6 +505,8 @@ handler_block \"(\\base + 0x10)\",\\end
 .endif
 .endm 
 
+.section    .text
+.type       irq_handler_list, %function
 irq_handler_list:
 handler_block  0x20, 0x40
 handler_block  0x50, 0x70
@@ -514,12 +514,15 @@ handler_block  0x80, 0xa0
 handler_block  0xb0, 0xd0
 handler_block  0xe0, 0xf0
 irq_handler_list_end:
+.size   irq_handler_list, irq_handler_list_end - irq_handler_list
 
 ",
  const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS,
 );
 
 global_asm!("
+.section    .text
+.type       handler_entry, %function
 handler_entry:
     mov     [rsp +  0 * 8] ,rax
     mov     [rsp +  1 * 8], rdx
@@ -570,7 +573,7 @@ handler_entry:
 1:
     mov     rbp, rsp
     mov     rdi, rsp
-    call    main_interrupt_handler
+    call    {1}
     mov     rsp, rbp
     mov     rax, cs
     cmp     [rsp + 512 +  ({0} + 1) * 8 + 8], rax
@@ -597,10 +600,15 @@ handler_entry:
     mov     r15, [rsp + 14 * 8] 
     add     rsp, ({0} + 1) * 8
     iretq
+.size   handler_entry, . - handler_entry
 ",
-    const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS);
+    const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS,
+    sym InterruptManager::main_interrupt_handler
+);
 
 global_asm!("
+.section    .text
+.type       syscall_handler_entry, %function
 syscall_handler_entry:
     swapgs
     sub     rsp, ({0} + 1) * 8 // +1 is for stack alignment
@@ -641,7 +649,7 @@ syscall_handler_entry:
 
     mov     rbp, rsp
     mov     rdi, rsp
-    call    main_syscall_handler
+    call    {1}
     mov     rsp, rbp
 
     //fxrstor [rsp]
@@ -665,5 +673,8 @@ syscall_handler_entry:
     add     rsp, ({0} + 1) * 8
     swapgs
     sysretq
+.size   syscall_handler_entry, . - syscall_handler_entry
 ",
-    const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS);
+    const crate::arch::target_arch::context::context_data::ContextData::NUM_OF_REGISTERS,
+    sym InterruptManager::main_syscall_handler
+);

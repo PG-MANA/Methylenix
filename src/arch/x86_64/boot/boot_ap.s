@@ -112,3 +112,4 @@ ap_os_stack_address:
     .quad   0
 
 ap_entry_end:
+.size   ap_entry, ap_entry_end - ap_entry

@@ -4,16 +4,17 @@
 
 .code32
 
-.global boot_multiboot, BOOT_FROM_MULTIBOOT_MARK
-.extern setup_long_mode, fin                /* at setup_long_mode.s */
-.extern OS_STACK_SIZE, os_stack             /* at common.s */
+.global     boot_multiboot, BOOT_FROM_MULTIBOOT_MARK
+.extern     setup_long_mode, fin                    /* at setup_long_mode.s */
+.extern     OS_STACK_SIZE, os_stack                 /* at common.s */
 
-.equ MULTIBOOT_CHECK_MAGIC, 0x36d76289      /* multiboot2 magic code */
-.equ BOOT_FROM_MULTIBOOT_MARK, 1
+.equ        MULTIBOOT_CHECK_MAGIC, 0x36d76289       /* multiboot2 magic code */
+.equ        BOOT_FROM_MULTIBOOT_MARK, 1
 
-.section .text.32
-.align 4
+.section    .text.32
+.align      4
 
+.type   boot_multiboot, %function
 boot_multiboot:
   mov   $(os_stack + OS_STACK_SIZE - KERNEL_MAP_START_ADDRESS), %esp
 
@@ -27,18 +28,21 @@ boot_multiboot:
   cmp   $MULTIBOOT_CHECK_MAGIC, %eax
   jne   bad_magic
   jmp   setup_long_mode
+.size   boot_multiboot, . - boot_multiboot
 
+.type   bad_magic, %function
 bad_magic:
   mov   $BOOT_ERROR_STR_SIZE, %ecx
   mov   $0xb8000, %edi
   mov   $boot_error_str, %esi
   rep   movsb
   jmp   fin
+.size   bad_magic, . - bad_magic
 
-.section .data.32
+.section    .data.32
+.align      4
 
-.align   4
-
+.type   boot_error_str, %object
 boot_error_str:
   /* Attention: little endian */
   /* 0x4f: back-color:red, color:white */
@@ -75,5 +79,5 @@ boot_error_str:
   .byte  'e', 0x4f
   .byte  'd', 0x4f
   .byte  '.', 0x4f
-
-.equ BOOT_ERROR_STR_SIZE, . - boot_error_str
+.equ    BOOT_ERROR_STR_SIZE, . - boot_error_str
+.size   boot_error_str, . - boot_error_str

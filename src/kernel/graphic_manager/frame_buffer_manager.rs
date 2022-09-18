@@ -4,12 +4,12 @@
 //! This manager is used to write image or text.
 //!
 
-use crate::io_remap;
 use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 
 pub struct FrameBufferManager {
     frame_buffer_address: usize,

@@ -11,11 +11,12 @@ use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
+use crate::kernel::memory_manager::{
+    alloc_pages_with_physical_address, free_pages, kfree, kmalloc,
+};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::work_queue::WorkList;
 use crate::kernel::task_manager::ThreadEntry;
-
-use crate::{alloc_pages_with_physical_address, free_pages, kfree, kmalloc};
 
 use core::ptr::NonNull;
 

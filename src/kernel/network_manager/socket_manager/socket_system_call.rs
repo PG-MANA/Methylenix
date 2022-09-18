@@ -11,13 +11,12 @@ use super::super::{
 use super::Socket;
 
 use crate::kernel::file_manager::{
-    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
+    File, FileDescriptor, FileError, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
     FILE_PERMISSION_WRITE,
 };
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
-
-use crate::{kfree, kmalloc};
+use crate::kernel::memory_manager::{kfree, kmalloc};
 
 const AF_UNIX: u64 = 0x01;
 const AF_INET: u64 = 0x02;
@@ -339,8 +338,8 @@ impl FileOperationDriver for NetworkSocketDriver {
         descriptor: &mut FileDescriptor,
         buffer: VAddress,
         length: MSize,
-    ) -> Result<MSize, ()> {
-        _recv_from(descriptor, buffer, length, 0, None)
+    ) -> Result<MSize, FileError> {
+        _recv_from(descriptor, buffer, length, 0, None).or(Err(FileError::DeviceError))
     }
 
     fn write(
@@ -348,8 +347,8 @@ impl FileOperationDriver for NetworkSocketDriver {
         descriptor: &mut FileDescriptor,
         buffer: VAddress,
         length: MSize,
-    ) -> Result<MSize, ()> {
-        _send_to(descriptor, buffer, length, 0, None)
+    ) -> Result<MSize, FileError> {
+        _send_to(descriptor, buffer, length, 0, None).or(Err(FileError::DeviceError))
     }
 
     fn seek(
@@ -357,8 +356,8 @@ impl FileOperationDriver for NetworkSocketDriver {
         _descriptor: &mut FileDescriptor,
         _offset: MOffset,
         _origin: FileSeekOrigin,
-    ) -> Result<MOffset, ()> {
-        Err(())
+    ) -> Result<MOffset, FileError> {
+        Err(FileError::OperationNotSupported)
     }
 
     fn close(&mut self, descriptor: FileDescriptor) {

@@ -3,8 +3,9 @@
 //!
 //! This is the allocator for core::alloc::GlobalAlloc
 
+use super::data_type::{Address, MSize, VAddress};
+
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 use core::alloc::{GlobalAlloc, Layout};
 

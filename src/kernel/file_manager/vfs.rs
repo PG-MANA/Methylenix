@@ -2,6 +2,8 @@
 //! Virtual File System
 //!
 
+use super::FileError;
+
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -19,12 +21,12 @@ struct FakeDriver {}
 static mut FAKE_DRIVER: FakeDriver = FakeDriver {};
 
 impl FileOperationDriver for FakeDriver {
-    fn read(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, ()> {
-        Err(())
+    fn read(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, FileError> {
+        Err(FileError::OperationNotSupported)
     }
 
-    fn write(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, ()> {
-        Err(())
+    fn write(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, FileError> {
+        Err(FileError::OperationNotSupported)
     }
 
     fn seek(
@@ -32,8 +34,8 @@ impl FileOperationDriver for FakeDriver {
         _: &mut FileDescriptor,
         _: MOffset,
         _: FileSeekOrigin,
-    ) -> Result<MOffset, ()> {
-        Err(())
+    ) -> Result<MOffset, FileError> {
+        Err(FileError::OperationNotSupported)
     }
 
     fn close(&mut self, _: FileDescriptor) {}
@@ -45,21 +47,21 @@ pub trait FileOperationDriver {
         descriptor: &mut FileDescriptor,
         buffer: VAddress,
         length: MSize,
-    ) -> Result<MSize, ()>;
+    ) -> Result<MSize, FileError>;
 
     fn write(
         &mut self,
         descriptor: &mut FileDescriptor,
         buffer: VAddress,
         length: MSize,
-    ) -> Result<MSize, ()>;
+    ) -> Result<MSize, FileError>;
 
     fn seek(
         &mut self,
         descriptor: &mut FileDescriptor,
         offset: MOffset,
         origin: FileSeekOrigin,
-    ) -> Result<MOffset, ()>;
+    ) -> Result<MOffset, FileError>;
 
     fn close(&mut self, descriptor: FileDescriptor);
 }
@@ -144,25 +146,29 @@ impl<'a> File<'a> {
             .0 as usize
     }
 
-    pub fn read(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, ()> {
+    pub fn read(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, FileError> {
         if !self.is_readable() {
-            return Err(());
+            return Err(FileError::OperationNotPermitted);
         }
         self.driver.read(&mut self.descriptor, buffer, length)
     }
 
-    pub fn write(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, ()> {
+    pub fn write(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, FileError> {
         if !self.is_writable() {
-            return Err(());
+            return Err(FileError::OperationNotPermitted);
         }
         self.driver.write(&mut self.descriptor, buffer, length)
     }
 
-    pub fn seek(&mut self, offset: MOffset, origin: FileSeekOrigin) -> Result<MOffset, ()> {
+    pub fn seek(&mut self, offset: MOffset, origin: FileSeekOrigin) -> Result<MOffset, FileError> {
         self.driver.seek(&mut self.descriptor, offset, origin)
     }
 
     pub fn close(self) {
         self.driver.close(self.descriptor)
+    }
+
+    pub unsafe fn close_ref(&mut self) {
+        self.driver.close(core::ptr::read(&self.descriptor))
     }
 }

@@ -6,12 +6,12 @@ mod devices;
 
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
-use crate::io_remap;
 use crate::kernel::drivers::acpi::table::spcr::SpcrManager;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
 };
+use crate::kernel::memory_manager::io_remap;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 /// Dummy putc Function

@@ -10,11 +10,11 @@ use self::ecam::Ecam;
 use crate::arch::target_arch::device::pci::{setup_arch_depend_devices, ArchDependPciManager};
 
 use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
+use crate::kernel::drivers::device::i210::I210Manager;
 use crate::kernel::drivers::device::lpc::LpcManager;
 use crate::kernel::drivers::device::nvme::NvmeManager;
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 
-use crate::kernel::drivers::device::i210::I210Manager;
 use alloc::vec::Vec;
 
 pub trait PciDeviceDriver {

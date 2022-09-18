@@ -13,7 +13,9 @@ use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 use crate::arch::target_arch::interrupt::{InterruptManager, StoredIrqData};
 
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::collections::ptr_linked_list::{
+    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
+};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
 use crate::kernel::memory_manager::MemoryError;
@@ -108,10 +110,10 @@ impl RunQueue {
     fn get_highest_priority_thread(
         run_list: &mut PtrLinkedList<RunList>,
     ) -> Option<&mut ThreadEntry> {
-        for list in unsafe { run_list.iter_mut(offset_of!(RunList, chain)) } {
+        for list in unsafe { run_list.iter_mut(offset_of_list_node!(RunList, chain)) } {
             if let Some(t) = unsafe {
                 list.thread_list
-                    .get_first_entry_mut(offset_of!(ThreadEntry, run_list))
+                    .get_first_entry_mut(offset_of_list_node!(ThreadEntry, run_list))
             } {
                 return Some(t);
             }
@@ -132,7 +134,7 @@ impl RunQueue {
         assert!(self.lock.is_locked());
         assert!(thread.lock.is_locked());
         let priority = thread.get_priority_level();
-        for list in unsafe { self.run_list.iter_mut(offset_of!(RunList, chain)) } {
+        for list in unsafe { self.run_list.iter_mut(offset_of_list_node!(RunList, chain)) } {
             if list.priority_level == priority {
                 list.thread_list.remove(&mut thread.run_list);
                 return Ok(());
@@ -240,13 +242,13 @@ impl RunQueue {
             &mut self.run_list
         };
         if let Some(mut list) =
-            unsafe { target_list.get_first_entry_mut(offset_of!(RunList, chain)) }
+            unsafe { target_list.get_first_entry_mut(offset_of_list_node!(RunList, chain)) }
         {
             loop {
                 if list.priority_level == priority {
                     if let Some(last_entry) = unsafe {
                         list.thread_list
-                            .get_last_entry_mut(offset_of!(ThreadEntry, run_list))
+                            .get_last_entry_mut(offset_of_list_node!(ThreadEntry, run_list))
                     } {
                         let _last_thread_lock = last_entry
                             .lock
@@ -264,7 +266,10 @@ impl RunQueue {
                     target_list.insert_before(&mut list.chain, &mut run_list.chain);
                     break;
                 }
-                if let Some(next) = unsafe { list.chain.get_next_mut(offset_of!(RunList, chain)) } {
+                if let Some(next) = unsafe {
+                    list.chain
+                        .get_next_mut(offset_of_list_node!(RunList, chain))
+                } {
                     list = next;
                 } else {
                     let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
@@ -383,7 +388,7 @@ impl RunQueue {
                 if let Some(prev_thread) = unsafe {
                     running_thread
                         .run_list
-                        .get_prev_mut(offset_of!(ThreadEntry, run_list))
+                        .get_prev_mut(offset_of_list_node!(ThreadEntry, run_list))
                 } {
                     Some(prev_thread.lock.lock())
                 } else {
@@ -411,7 +416,7 @@ impl RunQueue {
         let next_thread = if let Some(next_thread) = unsafe {
             running_thread
                 .run_list
-                .get_next_mut(offset_of!(ThreadEntry, run_list))
+                .get_next_mut(offset_of_list_node!(ThreadEntry, run_list))
         } {
             assert_ne!(running_thread as *mut _, self.idle_thread);
 

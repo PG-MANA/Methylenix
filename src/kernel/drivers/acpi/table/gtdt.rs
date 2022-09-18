@@ -4,8 +4,8 @@
 
 use super::{AcpiTable, OptionalAcpiTable};
 
-use crate::free_pages;
 use crate::kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::memory_manager::free_pages;
 
 #[repr(C, packed)]
 struct GTDT {

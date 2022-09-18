@@ -1,41 +1,32 @@
 //!
-//! Initialization Functions
+//! The arch-depended functions for initialization
 //!
 //! This module including init codes for device, memory, and task system.
 //! This module is called by boot function.
+//!
 
 pub mod multiboot;
 
-use crate::arch::target_arch::device::io_apic::IoApicManager;
-use crate::arch::target_arch::device::local_apic_timer::LocalApicTimer;
-use crate::arch::target_arch::device::pci::ArchDependPciManager;
-use crate::arch::target_arch::device::pit::PitManager;
-use crate::arch::target_arch::device::{cpu, pic};
-use crate::arch::target_arch::interrupt::{idt::GateDescriptor, InterruptIndex, InterruptManager};
-use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE};
 use crate::arch::target_arch::{
-    context::memory_layout::physical_address_to_direct_map, context::ContextManager,
+    context::{memory_layout::physical_address_to_direct_map, ContextManager},
+    device::{cpu, io_apic::IoApicManager, local_apic_timer::LocalApicTimer, pic, pit::PitManager},
+    interrupt::{idt::GateDescriptor, InterruptIndex, InterruptManager},
+    paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
-use crate::kernel::block_device::BlockDeviceManager;
-use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
-use crate::kernel::drivers::acpi::{
-    device::AcpiDeviceManager,
-    table::{madt::MadtManager, mcfg::McfgManager},
-    AcpiManager,
+use crate::kernel::{
+    collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
+    drivers::acpi::table::madt::MadtManager,
+    initialization::{idle, init_task_ap, init_work_queue},
+    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster},
+    memory_manager::{
+        data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
+        memory_allocator::MemoryAllocator,
+    },
+    sync::spin_lock::Mutex,
+    task_manager::{run_queue::RunQueue, TaskManager},
+    timer_manager::{LocalTimerManager, Timer},
 };
-use crate::kernel::drivers::pci::PciManager;
-use crate::kernel::file_manager::FileManager;
-use crate::kernel::manager_cluster::{
-    get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
-};
-use crate::kernel::memory_manager::{
-    data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
-    memory_allocator::MemoryAllocator,
-};
-use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::task_manager::{run_queue::RunQueue, TaskManager};
-use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager, Timer};
 
 use core::sync::atomic::AtomicBool;
 
@@ -45,8 +36,6 @@ static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; P
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// Init TaskManager
-///
-///
 pub fn init_task(
     system_cs: u16,
     user_cs: u16,
@@ -81,26 +70,6 @@ pub fn init_task(
     init_struct!(get_kernel_manager_cluster().task_manager, task_manager);
 }
 
-/// Init application processor's TaskManager
-///
-///
-pub fn init_task_ap(idle_task: fn() -> !) {
-    let mut run_queue = RunQueue::new();
-    run_queue.init().expect("Failed to init RunQueue");
-
-    get_kernel_manager_cluster()
-        .task_manager
-        .init_idle(idle_task, &mut run_queue);
-    get_cpu_manager_cluster().run_queue = run_queue;
-}
-
-/// Init Work Queue
-pub fn init_work_queue() {
-    get_cpu_manager_cluster()
-        .work_queue
-        .init_cpu_work_queue(&mut get_kernel_manager_cluster().task_manager);
-}
-
 /// Init InterruptManager
 ///
 /// This function disables 8259 PIC and init InterruptManager
@@ -119,112 +88,6 @@ pub fn init_interrupt(kernel_code_segment: u16, user_code_segment: u16) {
             .io_apic_manager,
         Mutex::new(io_apic_manager)
     );
-}
-
-/// Init AcpiManager without parsing AML
-///
-/// This function initializes ACPI Manager.
-/// ACPI Manager will parse some tables and return.
-/// If succeeded, this will move it into kernel_manager_cluster.
-pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
-    let mut acpi_manager = AcpiManager::new();
-    let mut device_manager = AcpiDeviceManager::new();
-    let set_manger = |a: AcpiManager, d: AcpiDeviceManager| {
-        init_struct!(get_kernel_manager_cluster().acpi_manager, Mutex::new(a));
-        init_struct!(get_kernel_manager_cluster().acpi_device_manager, d);
-    };
-
-    if !acpi_manager.init(rsdp_ptr, &mut device_manager) {
-        pr_warn!("Cannot init ACPI.");
-        set_manger(acpi_manager, device_manager);
-        return false;
-    }
-    if let Some(e) = acpi_manager.create_acpi_event_manager() {
-        init_struct!(get_kernel_manager_cluster().acpi_event_manager, e);
-    } else {
-        pr_err!("Cannot init ACPI Event Manager");
-        set_manger(acpi_manager, device_manager);
-        return false;
-    }
-    set_manger(acpi_manager, device_manager);
-    return true;
-}
-
-/// Init AcpiManager and AcpiEventManager with parsing AML
-///
-/// This function will setup some devices like power button.
-/// They will call malloc, therefore this function should be called after init of kernel_memory_manager
-pub fn init_acpi_later() -> bool {
-    let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
-    if !acpi_manager.is_available() {
-        pr_info!("ACPI is not available.");
-        return true;
-    }
-    if !acpi_manager.setup_aml_interpreter() {
-        pr_err!("Cannot setup ACPI AML Interpreter.");
-        return false;
-    }
-    if !super::device::acpi::setup_interrupt(&acpi_manager) {
-        pr_err!("Cannot setup ACPI interrupt.");
-        return false;
-    }
-    if !acpi_manager.setup_acpi_devices(&mut get_kernel_manager_cluster().acpi_device_manager) {
-        pr_err!("Cannot setup ACPI devices.");
-        return false;
-    }
-    if !acpi_manager.initialize_all_devices() {
-        pr_err!("Cannot evaluate _STA/_INI methods.");
-        return false;
-    }
-    get_kernel_manager_cluster()
-        .acpi_event_manager
-        .init_event_registers();
-    if !acpi_manager.enable_acpi() {
-        pr_err!("Cannot enable ACPI.");
-        return false;
-    }
-    if !acpi_manager.enable_power_button(&mut get_kernel_manager_cluster().acpi_event_manager) {
-        pr_err!("Cannot enable power button.");
-        return false;
-    }
-    get_kernel_manager_cluster()
-        .acpi_event_manager
-        .enable_gpes();
-    return true;
-}
-
-/// Init PciManager without scanning all bus
-///
-/// This function should be called before `init_acpi_later`.
-pub fn init_pci_early() -> bool {
-    let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
-
-    let pci_manager;
-    if acpi_manager.is_available() {
-        if let Some(mcfg_manager) = acpi_manager
-            .get_table_manager()
-            .get_table_manager::<McfgManager>()
-        {
-            drop(acpi_manager);
-            pci_manager = PciManager::new_ecam(mcfg_manager);
-        } else {
-            pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
-        }
-    } else {
-        pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
-    }
-    init_struct!(get_kernel_manager_cluster().pci_manager, pci_manager);
-    if let Err(e) = get_kernel_manager_cluster().pci_manager.build_device_tree() {
-        pr_err!("Failed to build PCI device tree: {:?}", e);
-        return false;
-    }
-    return true;
-}
-
-/// Init PciManager with scanning all bus
-pub fn init_pci_later() -> bool {
-    get_kernel_manager_cluster().pci_manager.setup_devices();
-    return true;
 }
 
 /// Init Timer
@@ -296,13 +159,6 @@ pub fn init_local_timer() {
         .expect("Failed to setup the interrupt for Local APIC Timer");
 
     /* Setup TimerManager */
-}
-
-pub fn init_global_timer() {
-    init_struct!(
-        get_kernel_manager_cluster().global_timer_manager,
-        GlobalTimerManager::new()
-    );
 }
 
 /// Allocate CpuManager and set self pointer
@@ -540,40 +396,5 @@ fn ap_idle() -> ! {
                 .interrupt_manager
                 .get_local_apic_manager(),
         );
-    super::idle();
-}
-
-/// Initialize Block Device Manager and File System Manager
-///
-/// This function must be called before calling device scan functions.
-pub fn init_block_devices_and_file_system_early() {
-    init_struct!(
-        get_kernel_manager_cluster().block_device_manager,
-        BlockDeviceManager::new()
-    );
-    init_struct!(
-        get_kernel_manager_cluster().file_manager,
-        FileManager::new()
-    );
-}
-
-/// Initialize Network Manager
-///
-/// This function must be called before calling device scan functions.
-pub fn init_network_manager_early() {
-    get_kernel_manager_cluster().network_manager.init();
-}
-
-/// Search partitions and try to mount them
-///
-/// This function will be called after completing the device initializations.
-pub fn init_block_devices_and_file_system_later() {
-    for i in 0..get_kernel_manager_cluster()
-        .block_device_manager
-        .get_number_of_devices()
-    {
-        get_kernel_manager_cluster()
-            .file_manager
-            .detect_partitions(i);
-    }
+    idle()
 }

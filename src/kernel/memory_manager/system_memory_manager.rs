@@ -12,17 +12,14 @@ use super::slab_allocator::pool_allocator::PoolAllocator;
 use super::virtual_memory_manager::{
     VirtualMemoryEntry, VirtualMemoryManager, VirtualMemoryObject, VirtualMemoryPage,
 };
-use super::{MemoryError, MemoryManager};
+use super::{alloc_pages, MemoryError, MemoryManager};
 
 use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE};
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::work_queue::WorkList;
-
-use crate::alloc_pages;
 
 pub struct SystemMemoryManager {
     lock: IrqSaveSpinLockFlag,

@@ -6,14 +6,14 @@ use crate::kernel::drivers::pci::{
     msi::setup_msi_or_msi_x, ClassCode, PciDevice, PciDeviceDriver, PciManager,
 };
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::*;
+use crate::kernel::memory_manager::{
+    alloc_pages_with_physical_address, data_type::*, free_pages, io_remap, kmalloc,
+};
 use crate::kernel::network_manager::ethernet_device::{
     EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo, MacAddress, TxEntry,
 };
 use crate::kernel::network_manager::NetworkError;
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
-
-use crate::{alloc_pages_with_physical_address, free_pages, io_remap, kmalloc};
 
 use alloc::collections::LinkedList;
 

@@ -3,7 +3,7 @@
 //!
 //! The structures are temporary
 
-use crate::kernel::memory_manager::data_type::VAddress;
+use crate::kernel::memory_manager::{data_type::VAddress, MemoryError};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use alloc::vec::Vec;
@@ -15,7 +15,7 @@ pub trait BlockDeviceDriver {
         buffer: VAddress,
         base_lba: u64,
         number_of_blocks: u64,
-    ) -> Result<(), ()>;
+    ) -> Result<(), BlockDeviceError>;
 
     fn get_lba_block_size(&self, info: &BlockDeviceInfo) -> u64;
 }
@@ -35,6 +35,21 @@ pub struct BlockDeviceDescriptor {
 pub struct BlockDeviceManager {
     lock: IrqSaveSpinLockFlag,
     device_list: Vec<BlockDeviceDescriptor>,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum BlockDeviceError {
+    InvalidDevice,
+    InvalidBuffer,
+    InvalidOperation,
+    DeviceError,
+    MemoryError(MemoryError),
+}
+
+impl From<MemoryError> for BlockDeviceError {
+    fn from(m: MemoryError) -> Self {
+        Self::MemoryError(m)
+    }
 }
 
 impl BlockDeviceManager {
@@ -62,11 +77,11 @@ impl BlockDeviceManager {
         buffer: VAddress,
         base_lba: u64,
         number_of_blocks: u64,
-    ) -> Result<(), ()> {
+    ) -> Result<(), BlockDeviceError> {
         let _lock = self.lock.lock();
         if id >= self.device_list.len() {
             drop(_lock);
-            return Err(());
+            return Err(BlockDeviceError::InvalidDevice);
         }
 
         let d = &self.device_list[id];
