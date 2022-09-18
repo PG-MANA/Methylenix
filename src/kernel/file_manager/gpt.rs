@@ -2,7 +2,7 @@
 //! Guid Partition Table
 //!
 
-use super::FileManager;
+use super::{FileManager, PartitionInfo};
 
 use crate::kernel::collections::guid::Guid;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -153,7 +153,13 @@ pub fn detect_file_system(manager: &mut FileManager, block_device_id: usize) {
                 starting_lba,
                 ending_lba,
             );
-            manager.analysis_partition(block_device_id, starting_lba, ending_lba, lba_block_size);
+            let partition_info = PartitionInfo {
+                device_id: block_device_id,
+                starting_lba,
+                ending_lba,
+                lba_block_size,
+            };
+            manager.analysis_partition(partition_info);
         }
         let _ = free_pages!(partition_entries);
     }

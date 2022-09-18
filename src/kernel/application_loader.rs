@@ -29,9 +29,11 @@ pub fn load_and_execute(
     elf_machine_type: u16,
 ) -> Result<(), ()> {
     pr_debug!("Search {}", file_name);
-    let result = get_kernel_manager_cluster()
-        .file_manager
-        .file_open(PathInfo::new(file_name), FILE_PERMISSION_READ);
+    let result = get_kernel_manager_cluster().file_manager.open_file(
+        PathInfo::new(file_name),
+        None,
+        FILE_PERMISSION_READ,
+    );
     if let Err(e) = result {
         pr_err!("{} is not found: {:?}", file_name, e);
         return Err(());

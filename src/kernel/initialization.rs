@@ -201,6 +201,21 @@ pub fn init_block_devices_and_file_system_later() {
     }
 }
 
+/// Mount Root System
+///
+/// Currently, mount the first detected file system as root
+/// TODO: support command line
+pub fn mount_root_file_system() {
+    if let Some(uuid) = get_kernel_manager_cluster().file_manager.get_first_uuid() {
+        pr_info!("Mount {uuid} as root");
+        get_kernel_manager_cluster()
+            .file_manager
+            .mount_root(uuid, true);
+    } else {
+        pr_info!("No root partition was found");
+    }
+}
+
 /// Draw the OEM Logo by ACPI's BGRT
 pub fn draw_boot_logo() {
     let free_mapped_address = |address: usize| {
@@ -350,17 +365,20 @@ pub fn main_initialization_process() -> ! {
 
     init_block_devices_and_file_system_later();
 
+    mount_root_file_system();
+
     let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
 
-    /* Test */
+    pr_info!("Execute the init process");
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
         ("OSTYPE", crate::OS_NAME),
         ("OSVERSION", crate::OS_VERSION),
         ("TARGET", crate::arch::target_arch::TARGET_ARCH_NAME),
     ];
+    const INIT_PROCESS_FILE_PATH: &str = "/sbin/init";
     let _ = application_loader::load_and_execute(
-        "/OS/FILES/APP",
-        &["Arg1", "Arg2", "Arg3"],
+        INIT_PROCESS_FILE_PATH,
+        &[],
         &ENVIRONMENT_VARIABLES,
         ELF_MACHINE_DEFAULT,
     );

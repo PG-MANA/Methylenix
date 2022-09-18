@@ -23,6 +23,10 @@ impl<'a> PathInfo {
     pub fn as_str(&self) -> &str {
         unsafe { &*(self as *const Self as *const str) }
     }
+
+    pub fn is_absolute_path(&self) -> bool {
+        unsafe { &*(self as *const Self as *const str) }.starts_with('/')
+    }
 }
 
 impl<'a> Iterator for PathInfoIter<'a> {
