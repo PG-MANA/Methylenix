@@ -145,7 +145,7 @@ pub struct XfsDriver {
     root_inode: u64,
     ag_block_log2: u8,
     inode_per_block_log2: u8,
-    ag_blocks: u32,
+    ag_block_size: u32,
     block_size_log2: u8,
     inode_size_log2: u8,
 }
@@ -170,7 +170,7 @@ impl XfsDriver {
 
     pub fn get_inode_block(&self, inode_number: u64) -> u64 {
         (self.get_inode_block_number(inode_number)
-            + (self.ag_blocks as u64) * self.get_ag(inode_number))
+            + (self.ag_block_size as u64) * self.get_ag(inode_number))
             << self.block_size_log2
     }
 
@@ -388,64 +388,96 @@ impl XfsDriver {
         buffer: VAddress,
     ) -> Result<MSize, FileError> {
         let extent_list_base = inode as *const _ as usize + core::mem::size_of::<DInodeCore>();
-        let number_of_extent_records = inode.next_entries;
-        let mut buffer_pointer = 0;
+        let number_of_extent_records = u32::from_be(inode.next_entries) as usize;
+        let mut buffer_pointer = MSize::new(0);
         let mut page_buffer = VAddress::new(0);
         let mut page_buffer_size = MSize::new(0);
 
-        for i in 0..(number_of_extent_records as usize) {
+        for i in 0..number_of_extent_records {
             let record = unsafe { &*((extent_list_base + i * (128 / 8)) as *const [u8; 16]) };
             //let flag = record[0] >> 7;
             let block_offset =
-                (u64::from_be(unsafe { core::mem::transmute_copy::<u8, u64>(&record[0]) })
+                (u64::from_be_bytes(unsafe { *(record[0..7].as_ptr() as *const [u8; 8]) })
                     & !(1 << 63))
                     >> (73 - 64);
             let block_number =
-                (u64::from_be(unsafe { core::mem::transmute_copy::<u8, u64>(&record[0]) })
+                (u64::from_be_bytes(unsafe { *(record[0..7].as_ptr() as *const [u8; 8]) })
                     & ((1 << (73 - 64)) - 1))
-                    | (u64::from_be(unsafe { core::mem::transmute_copy::<u8, u64>(&record[8]) })
-                        >> 20);
+                    | (u64::from_be_bytes(unsafe { *(record[8..15].as_ptr() as *const [u8; 8]) })
+                        >> 21);
             let number_of_blocks =
-                u64::from_be(unsafe { core::mem::transmute_copy::<u8, u64>(&record[8]) })
-                    & ((1 << 20) - 1);
-            pr_debug!("Block Offset: {block_offset}, Block Number: {block_number}, Number of Blocks: {number_of_blocks}");
-            if offset > MSize::new(1 << self.block_size_log2) {
-                offset -= MSize::new(1 << self.block_size_log2);
+                u64::from_be_bytes(unsafe { *(record[8..15].as_ptr() as *const [u8; 8]) })
+                    & ((1 << 21) - 1);
+
+            if offset < MSize::new((block_offset << self.block_size_log2) as usize) {
+                let hole_size =
+                    MSize::new((block_offset << self.block_size_log2) as usize) - offset;
+                let size_to_zero_clear = hole_size.min(length);
+                pr_debug!(
+                    "TODO: Debug: hole size: {hole_size}, offset: {offset}, length: {length}"
+                );
+                unsafe {
+                    core::ptr::write_bytes(
+                        (buffer + buffer_pointer).to_usize() as *mut u8,
+                        0,
+                        size_to_zero_clear.to_usize(),
+                    )
+                };
+                buffer_pointer += size_to_zero_clear;
+                length -= size_to_zero_clear;
+                offset = MSize::new(0);
+                if length.is_zero() {
+                    break;
+                }
+            }
+            if offset >= MSize::new((number_of_blocks << self.block_size_log2) as usize) {
+                offset -= MSize::new((number_of_blocks << self.block_size_log2) as usize);
                 continue;
             }
-            let read_length = (offset + length)
-                .min(MSize::new(
-                    (number_of_blocks << self.block_size_log2) as usize,
-                ))
-                .page_align_up();
-            if read_length > page_buffer_size {
-                page_buffer = match alloc_non_linear_pages!(read_length) {
+
+            let read_length = length.min(MSize::new(
+                (number_of_blocks << self.block_size_log2) as usize,
+            ));
+            let block = ((block_number >> self.ag_block_log2) * self.ag_block_size as u64)
+                + (block_number & ((1 << self.ag_block_log2) - 1));
+            let lba_base = ((block << self.block_size_log2) + offset.to_usize() as u64)
+                / partition_info.lba_block_size;
+            let data_offset = ((block << self.block_size_log2) + offset.to_usize() as u64)
+                - lba_base * partition_info.lba_block_size;
+            let total_read_size = read_length + MSize::new(data_offset as usize);
+            let number_of_blocks =
+                (total_read_size.to_usize() as u64 - 1) / partition_info.lba_block_size + 1;
+
+            if total_read_size > page_buffer_size {
+                let new_allocation_size = total_read_size.page_align_up();
+                if !page_buffer_size.is_zero() {
+                    let _ = free_pages!(page_buffer);
+                }
+                page_buffer = match alloc_non_linear_pages!(new_allocation_size) {
                     Ok(a) => a,
                     Err(err) => {
                         pr_err!("Failed to allocate memory for read: {:?}", err);
                         return Err(FileError::MemoryError(err));
                     }
                 };
-                page_buffer_size = read_length;
+                page_buffer_size = new_allocation_size;
             }
             get_kernel_manager_cluster().block_device_manager.read_lba(
                 partition_info.device_id,
                 page_buffer,
-                partition_info.starting_lba
-                    + (block_number << self.block_size_log2) / partition_info.lba_block_size,
-                (read_length.to_usize() as u64 / partition_info.lba_block_size).max(1),
+                partition_info.starting_lba + lba_base,
+                number_of_blocks,
             )?;
             unsafe {
                 core::ptr::copy_nonoverlapping(
-                    (page_buffer + offset).to_usize() as *const u8,
-                    (buffer.to_usize() + buffer_pointer) as *mut u8,
-                    (read_length - offset).to_usize(),
+                    (page_buffer.to_usize() + data_offset as usize) as *const u8,
+                    (buffer + buffer_pointer).to_usize() as *mut u8,
+                    read_length.to_usize(),
                 )
             };
-            buffer_pointer += (read_length - offset).to_usize();
-            length -= read_length - offset;
+            buffer_pointer += read_length;
+            length -= read_length;
             offset = MSize::new(0);
-
             if length.is_zero() {
                 break;
             }
@@ -454,7 +486,7 @@ impl XfsDriver {
         if !page_buffer_size.is_zero() {
             let _ = free_pages!(page_buffer);
         }
-        return Ok(MSize::new(buffer_pointer));
+        return Ok(buffer_pointer);
     }
 
     fn analysis_file_and_set_file_info(
@@ -509,15 +541,15 @@ pub(super) fn try_mount_file_system(
         root_inode: u64::from_be(super_block.root_inode),
         ag_block_log2: super_block.agblklog,
         inode_per_block_log2: super_block.inopblog,
-        ag_blocks: u32::from_be(super_block.ag_blocks),
+        ag_block_size: u32::from_be(super_block.ag_blocks),
         block_size_log2: super_block.blocklog,
         inode_size_log2: super_block.inodelog,
     };
 
     pr_debug!(
-        "Block Size: {}(AG Blocks: {:#X})",
+        "Block Size: {}(AG Block Size: {:#X})",
         u32::from_be(super_block.block_size),
-        xfs_info.ag_blocks
+        xfs_info.ag_block_size
     );
     pr_debug!("Root inode: {}", xfs_info.root_inode);
 
