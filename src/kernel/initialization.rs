@@ -367,7 +367,7 @@ pub fn main_initialization_process() -> ! {
 
     mount_root_file_system();
 
-    idle(); /* Fo debug */
+    let _ = crate::kernel::network_manager::dhcp::get_ipv4_address_sync(0);
 
     pr_info!("Execute the init process");
     const ENVIRONMENT_VARIABLES: [(&str, &str); 3] = [
