@@ -440,10 +440,13 @@ impl XfsDriver {
             ));
             let block = ((block_number >> self.ag_block_log2) * self.ag_block_size as u64)
                 + (block_number & ((1 << self.ag_block_log2) - 1));
-            let lba_base = ((block << self.block_size_log2) + offset.to_usize() as u64)
-                / partition_info.lba_block_size;
-            let data_offset = ((block << self.block_size_log2) + offset.to_usize() as u64)
-                - lba_base * partition_info.lba_block_size;
+            let lba_base = if (1 << self.block_size_log2) > partition_info.lba_block_size {
+                block * ((1 << self.block_size_log2) / partition_info.lba_block_size)
+            } else {
+                block / (partition_info.lba_block_size / (1 << self.block_size_log2))
+            } + (offset.to_usize() as u64 / partition_info.lba_block_size);
+            let data_offset = ((1 << self.block_size_log2) + offset.to_usize() as u64)
+                % partition_info.lba_block_size;
             let total_read_size = read_length + MSize::new(data_offset as usize);
             let number_of_blocks =
                 (total_read_size.to_usize() as u64 - 1) / partition_info.lba_block_size + 1;
