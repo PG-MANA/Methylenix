@@ -36,6 +36,7 @@ pub struct MemoryPermissionFlags(u8);
 #[derive(Clone, Eq, PartialEq, Copy)]
 pub struct MemoryOptionFlags(u16);
 
+#[const_trait]
 pub trait Address:
     Copy
     + Clone
@@ -81,21 +82,20 @@ macro_rules! address {
 
 macro_rules! address_bit_operation {
     ($t:ty) => {
-#[rustfmt::skip]
         impl const BitAnd<usize> for $t {
             type Output = usize;
             fn bitand(self, rhs: usize) -> Self::Output {
                 self.0 & rhs
             }
         }
-#[rustfmt::skip]
+
         impl const BitOr<usize> for $t {
             type Output = usize;
             fn bitor(self, rhs: usize) -> Self::Output {
                 self.0 | rhs
             }
         }
-#[rustfmt::skip]
+
         impl const BitXor<usize> for $t {
             type Output = usize;
             fn bitxor(self, rhs: usize) -> Self::Output {
@@ -117,7 +117,6 @@ macro_rules! to_usize {
 
 macro_rules! add_and_sub_shift_with_m_size {
     ($t:ty) => {
-#[rustfmt::skip]
         impl const Add<MSize> for $t {
             type Output = Self;
             #[inline]
@@ -126,7 +125,6 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-#[rustfmt::skip]
         impl const AddAssign<MSize> for $t {
             #[inline]
             fn add_assign(&mut self, rhs: MSize) {
@@ -134,7 +132,6 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-#[rustfmt::skip]
         impl const Sub<MSize> for $t {
             type Output = Self;
             #[inline]
@@ -143,7 +140,6 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-#[rustfmt::skip]
         impl const SubAssign<MSize> for $t {
             #[inline]
             fn sub_assign(&mut self, rhs: MSize) {
@@ -151,7 +147,6 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-#[rustfmt::skip]
         impl const Shr<MSize> for $t {
             type Output = Self;
             #[inline]
@@ -160,7 +155,6 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-#[rustfmt::skip]
         impl const ShrAssign<MSize> for $t {
             #[inline]
             fn shr_assign(&mut self, rhs: MSize) {
@@ -168,7 +162,6 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-#[rustfmt::skip]
         impl const Shl<MSize> for $t {
             type Output = Self;
             #[inline]
@@ -177,7 +170,6 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-#[rustfmt::skip]
         impl const ShlAssign<MSize> for $t {
             #[inline]
             fn shl_assign(&mut self, rhs: MSize) {
@@ -189,14 +181,12 @@ macro_rules! add_and_sub_shift_with_m_size {
 
 macro_rules! into_and_from_usize {
     ($t:ty) => {
-#[rustfmt::skip]
         impl const Into<usize> for $t {
             fn into(self) -> usize {
                 self.0
             }
         }
 
-#[rustfmt::skip]
         impl const From<usize> for $t {
             fn from(s: usize) -> Self {
                 Self(s)
@@ -230,21 +220,18 @@ impl VAddress {
     }
 }
 
-#[rustfmt::skip]
 impl<T: Sized> const Into<*mut T> for VAddress {
     fn into(self) -> *mut T {
         self.0 as usize as *mut T
     }
 }
 
-#[rustfmt::skip]
 impl<T: Sized> const Into<*const T> for VAddress {
     fn into(self) -> *const T {
         self.0 as usize as *const T
     }
 }
 
-#[rustfmt::skip]
 impl const Sub<Self> for VAddress {
     type Output = MSize;
     fn sub(self, rhs: Self) -> Self::Output {
@@ -267,7 +254,6 @@ impl PAddress {
     }
 }
 
-#[rustfmt::skip]
 impl const Sub<Self> for PAddress {
     type Output = MSize;
     fn sub(self, rhs: Self) -> Self::Output {
@@ -317,7 +303,6 @@ impl MSize {
     }
 }
 
-#[rustfmt::skip]
 impl const Add<VAddress> for MSize {
     type Output = VAddress;
     fn add(self, rhs: VAddress) -> Self::Output {
@@ -325,7 +310,6 @@ impl const Add<VAddress> for MSize {
     }
 }
 
-#[rustfmt::skip]
 impl const Add<PAddress> for MSize {
     type Output = PAddress;
     fn add(self, rhs: PAddress) -> Self::Output {
@@ -436,7 +420,6 @@ impl MIndex {
     }
 }
 
-#[rustfmt::skip]
 impl const Add for MIndex {
     type Output = Self;
     #[inline]
@@ -445,7 +428,6 @@ impl const Add for MIndex {
     }
 }
 
-#[rustfmt::skip]
 impl const AddAssign for MIndex {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
@@ -453,7 +435,6 @@ impl const AddAssign for MIndex {
     }
 }
 
-#[rustfmt::skip]
 impl const Sub for MIndex {
     type Output = Self;
     #[inline]
@@ -462,7 +443,6 @@ impl const Sub for MIndex {
     }
 }
 
-#[rustfmt::skip]
 impl const SubAssign for MIndex {
     #[inline]
     fn sub_assign(&mut self, rhs: Self) {
