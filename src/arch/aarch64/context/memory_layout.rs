@@ -63,3 +63,7 @@ pub fn physical_address_to_direct_map(physical_address: PAddress) -> VAddress {
             + unsafe { DIRECT_MAP_START_ADDRESS }.to_usize(),
     )
 }
+
+pub fn is_user_memory_area(address: VAddress) -> bool {
+    address <= USER_END_ADDRESS
+}
