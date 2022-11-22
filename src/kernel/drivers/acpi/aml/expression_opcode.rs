@@ -501,14 +501,16 @@ impl ExpressionOpcode {
                     Ok(Self::DefLoad((name, target)))
                 }
                 opcode::LOAD_TABLE_OP => {
+                    use core::mem::MaybeUninit;
                     stream.seek(2)?;
-                    let mut table: [TermArg; 6] =
-                        unsafe { core::mem::MaybeUninit::uninit().assume_init() };
-                    for i in 0..table.len() {
+                    let mut table: [MaybeUninit<TermArg>; 6] = MaybeUninit::uninit_array();
+                    for e in &mut table {
                         /* Using this style instead of Iter */
-                        table[i] = TermArg::try_parse(stream, current_scope, evaluator)?;
+                        e.write(TermArg::try_parse(stream, current_scope, evaluator)?);
                     }
-                    Ok(Self::DefLoadTable(table))
+                    Ok(Self::DefLoadTable(unsafe {
+                        MaybeUninit::array_assume_init(table)
+                    }))
                 }
                 opcode::TIMER_OP => {
                     stream.seek(2)?;
