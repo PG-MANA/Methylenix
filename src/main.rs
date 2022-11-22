@@ -3,7 +3,6 @@
 #![feature(abi_efiapi)]
 #![feature(alloc_error_handler)]
 #![feature(asm_const)]
-#![feature(asm_sym)]
 #![feature(const_for)]
 #![feature(const_maybe_uninit_uninit_array)]
 #![feature(const_mut_refs)]
