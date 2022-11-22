@@ -645,23 +645,26 @@ impl PageManager {
         let index = (virtual_address.to_usize() >> shift_level) & (NUM_OF_TABLE_ENTRIES - 1);
         let table =
             unsafe { &mut *(table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES]) };
-        for index in index..NUM_OF_TABLE_ENTRIES {
-            if table[index].is_table_descriptor() {
-                let next_table_address = table[index].get_next_table_address();
-                if !self._cleanup_page_tables(
-                    shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
-                    physical_address_to_direct_map(next_table_address),
-                    pm_manager,
-                    virtual_address,
-                )? {
-                    return Ok(false);
-                }
-                table[index].invalidate();
-                /* Free this table */
-                if let Err(_e) = pm_manager.free(next_table_address, PAGE_SIZE, false) {
-                    return Err(PagingError::MemoryCacheOverflowed);
-                }
+        if table[index].is_table_descriptor() {
+            let next_table_address = table[index].get_next_table_address();
+            if !self._cleanup_page_tables(
+                shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
+                physical_address_to_direct_map(next_table_address),
+                pm_manager,
+                virtual_address,
+            )? {
+                return Ok(false);
             }
+            table[index].invalidate();
+            /* Free this table */
+            if let Err(_e) = pm_manager.free(next_table_address, PAGE_SIZE, false) {
+                return Err(PagingError::MemoryCacheOverflowed);
+            }
+        }
+        if table[index].is_validated() {
+            return Ok(false);
+        }
+        for index in 0..NUM_OF_TABLE_ENTRIES {
             if table[index].is_validated() {
                 return Ok(false);
             }
@@ -722,7 +725,8 @@ impl PageManager {
 
     /// Flush page table and apply new page table.
     ///
-    /// This function sets PML4 into CR3.
+    /// This function sets page_table into TTBR0.
+    /// If Self is for kernel page manager, this function does nothing.
     /// **This function must call after [`init`], otherwise system may crash.**
     ///
     /// [`init`]: #method.init
