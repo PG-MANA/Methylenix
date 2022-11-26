@@ -524,98 +524,106 @@ impl I210Manager {
     }
 
     pub fn interrupt_handler(&mut self) {
-        let icr = read_mmio::<u32>(self.base_address, Self::ICR_OFFSET);
-        //pr_debug!("ICR: {:#X}", icr);
+        loop {
+            let icr = read_mmio::<u32>(self.base_address, Self::ICR_OFFSET);
+            //pr_debug!("ICR: {:#X}", icr);
 
-        if (icr & Self::ICR_RX_FINISHED) != 0 {
-            let _lock = self.receive_ring_lock.lock();
-            let rx_ring_buffer = unsafe {
-                &mut *(self.receive_ring_buffer.to_usize()
-                    as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
-                        / core::mem::size_of::<u64>()])
-            };
-
-            let mut receive_descriptor = Self::get_next_receive_pointer(self.receive_tail);
-            while receive_descriptor != read_mmio::<u32>(self.base_address, Self::RDH_OFFSET)
-                && ((rx_ring_buffer[2 * (receive_descriptor as usize) + 1] >> 32) & 0x01) != 0
-            {
-                let length =
-                    rx_ring_buffer[2 * (receive_descriptor as usize) + 1] & ((1 << 16) - 1);
-                if length > 0 {
-                    let buffer = kmalloc!(MSize::new(length as usize));
-                    if let Ok(buffer) = buffer {
-                        unsafe {
-                            core::ptr::copy_nonoverlapping(
-                                (self.receive_buffer.to_usize()
-                                    + 2048 * (receive_descriptor as usize))
-                                    as *const u8,
-                                buffer.to_usize() as *mut u8,
-                                length as usize,
-                            )
-                        };
-                        /* Throw ethernet manager */
-                        get_kernel_manager_cluster()
-                            .network_manager
-                            .received_ethernet_frame_handler(
-                                self.device_id,
-                                buffer,
-                                MSize::new(length as usize),
-                            );
-                    } else {
-                        pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
-                    }
-                }
-                rx_ring_buffer[2 * (receive_descriptor as usize) + 1] = 0;
-                write_mmio(self.base_address, Self::RDT_OFFSET, receive_descriptor);
-                self.receive_tail = receive_descriptor;
-                receive_descriptor = Self::get_next_receive_pointer(receive_descriptor);
+            if (icr & (Self::ICR_RX_FINISHED | Self::ICR_TX_FINISHED)) == 0 {
+                return;
             }
-            assert_eq!(
-                self.receive_tail,
-                read_mmio::<u32>(self.base_address, Self::RDT_OFFSET)
-            );
 
-            if Self::get_next_receive_pointer(self.receive_tail)
-                != read_mmio::<u32>(self.base_address, Self::RDH_OFFSET)
-            {
-                pr_debug!(
-                    "Tail: {:#X}, Head: {:#X}(Entry: {:#X} )",
+            if (icr & Self::ICR_RX_FINISHED) != 0 {
+                let _lock = self.receive_ring_lock.lock();
+                let rx_ring_buffer = unsafe {
+                    &mut *(self.receive_ring_buffer.to_usize()
+                        as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
+                            / core::mem::size_of::<u64>()])
+                };
+
+                let mut receive_descriptor = Self::get_next_receive_pointer(self.receive_tail);
+                while receive_descriptor != read_mmio::<u32>(self.base_address, Self::RDH_OFFSET)
+                    && ((rx_ring_buffer[2 * (receive_descriptor as usize) + 1] >> 32) & 0x01) != 0
+                {
+                    let length =
+                        rx_ring_buffer[2 * (receive_descriptor as usize) + 1] & ((1 << 16) - 1);
+                    if length > 0 {
+                        let buffer = kmalloc!(MSize::new(length as usize));
+                        if let Ok(buffer) = buffer {
+                            unsafe {
+                                core::ptr::copy_nonoverlapping(
+                                    (self.receive_buffer.to_usize()
+                                        + 2048 * (receive_descriptor as usize))
+                                        as *const u8,
+                                    buffer.to_usize() as *mut u8,
+                                    length as usize,
+                                )
+                            };
+                            /* Throw ethernet manager */
+                            get_kernel_manager_cluster()
+                                .network_manager
+                                .received_ethernet_frame_handler(
+                                    self.device_id,
+                                    buffer,
+                                    MSize::new(length as usize),
+                                );
+                        } else {
+                            pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
+                        }
+                    }
+                    rx_ring_buffer[2 * (receive_descriptor as usize) + 1] = 0;
+                    write_mmio(self.base_address, Self::RDT_OFFSET, receive_descriptor);
+                    self.receive_tail = receive_descriptor;
+                    receive_descriptor = Self::get_next_receive_pointer(receive_descriptor);
+                }
+                assert_eq!(
                     self.receive_tail,
-                    read_mmio::<u32>(self.base_address, Self::RDH_OFFSET),
-                    rx_ring_buffer
-                        [2 * (read_mmio::<u32>(self.base_address, Self::RDH_OFFSET) as usize) + 1]
+                    read_mmio::<u32>(self.base_address, Self::RDT_OFFSET)
+                );
+
+                if Self::get_next_receive_pointer(self.receive_tail)
+                    != read_mmio::<u32>(self.base_address, Self::RDH_OFFSET)
+                {
+                    pr_debug!(
+                        "Tail: {:#X}, Head: {:#X}(Entry: {:#X} )",
+                        self.receive_tail,
+                        read_mmio::<u32>(self.base_address, Self::RDH_OFFSET),
+                        rx_ring_buffer[2
+                            * (read_mmio::<u32>(self.base_address, Self::RDH_OFFSET) as usize)
+                            + 1]
+                    );
+                }
+            }
+            if (icr & Self::ICR_TX_FINISHED) != 0 {
+                let _lock = self.transfer_ring_lock.lock();
+                let tx_ring_buffer = unsafe {
+                    &mut *(self.transfer_ring_buffer.to_usize()
+                        as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE
+                            / core::mem::size_of::<u64>()])
+                };
+
+                let device_transfer_head = read_mmio::<u32>(self.base_address, Self::TDH_OFFSET);
+                while (((tx_ring_buffer[2 * (self.transfer_head as usize) + 1] >> 32) & 0b1111)
+                    != 0)
+                    && (device_transfer_head != self.transfer_head)
+                    && (self.transfer_tail != self.transfer_head)
+                {
+                    //let cmd = ((receive_ring_buffer[2 * self.transfer_head + 1] >> 24) & 0xff) as u8;
+                    let id = self.transfer_ids[self.transfer_head as usize];
+                    let done = tx_ring_buffer[2 * (self.transfer_head as usize) + 1] & (1 << 32);
+                    if done == 0 {
+                        pr_err!("Failed to transmit frame: id:{id}");
+                    }
+                    get_kernel_manager_cluster()
+                        .network_manager
+                        .update_ethernet_transmit_status(self.device_id, id, done != 0);
+                    tx_ring_buffer[2 * (self.transfer_head as usize) + 1] = 0;
+                    self.transfer_head = Self::get_next_transfer_pointer(self.transfer_head);
+                }
+                assert_ne!(
+                    Self::get_next_transfer_pointer(self.transfer_tail),
+                    self.transfer_head
                 );
             }
-        }
-        if (icr & Self::ICR_TX_FINISHED) != 0 {
-            let _lock = self.transfer_ring_lock.lock();
-            let tx_ring_buffer = unsafe {
-                &mut *(self.transfer_ring_buffer.to_usize()
-                    as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE
-                        / core::mem::size_of::<u64>()])
-            };
-
-            let device_transfer_head = read_mmio::<u32>(self.base_address, Self::TDH_OFFSET);
-            while (((tx_ring_buffer[2 * (self.transfer_head as usize) + 1] >> 32) & 0b1111) != 0)
-                && (device_transfer_head != self.transfer_head)
-                && (self.transfer_tail != self.transfer_head)
-            {
-                //let cmd = ((receive_ring_buffer[2 * self.transfer_head + 1] >> 24) & 0xff) as u8;
-                let id = self.transfer_ids[self.transfer_head as usize];
-                let done = tx_ring_buffer[2 * (self.transfer_head as usize) + 1] & (1 << 32);
-                if done == 0 {
-                    pr_err!("Failed to transmit frame: id:{id}");
-                }
-                get_kernel_manager_cluster()
-                    .network_manager
-                    .update_ethernet_transmit_status(self.device_id, id, done != 0);
-                tx_ring_buffer[2 * (self.transfer_head as usize) + 1] = 0;
-                self.transfer_head = Self::get_next_transfer_pointer(self.transfer_head);
-            }
-            assert_ne!(
-                Self::get_next_transfer_pointer(self.transfer_tail),
-                self.transfer_head
-            );
         }
     }
 
