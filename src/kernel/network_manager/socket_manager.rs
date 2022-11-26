@@ -165,6 +165,16 @@ impl SocketManager {
             let _lock = socket_list.lock.lock();
             socket_list.list.insert_tail(&mut waiting_socket.list);
             drop(_lock);
+            /* Send ACK */
+            if let TransportType::Tcp(tcp_session) = &mut waiting_socket.layer_info.transport {
+                if let Err(err) = tcp::send_tcp_syn_ack_header(
+                    tcp_session,
+                    &waiting_socket.layer_info.internet,
+                    &waiting_socket.layer_info.link,
+                ) {
+                    pr_err!("Failed to open the session: {:?}", err);
+                }
+            }
             Ok(waiting_socket)
         } else if allow_sleep {
             drop(_socket_lock);

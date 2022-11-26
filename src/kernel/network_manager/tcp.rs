@@ -487,6 +487,44 @@ pub(super) fn send_ipv4_tcp_header(
     }
 }
 
+pub(super) fn send_tcp_syn_ack_header(
+    session_info: &mut TcpSessionInfo,
+    internet_info: &InternetType,
+    link_info: &LinkType,
+) -> Result<(), NetworkError> {
+    let reply_segment_info = TcpSegmentInfo {
+        sender_port: session_info.get_our_port(),
+        destination_port: session_info.get_their_port(),
+        sequence_number: session_info.next_sequence_number.overflowing_sub(1).0,
+        acknowledgement_number: session_info.last_sent_acknowledge_number,
+        window_size: session_info.window_size,
+    };
+    match internet_info {
+        InternetType::Ipv4(ipv4_info) => {
+            if let Err(e) = send_ipv4_tcp_header(
+                &reply_segment_info,
+                false,
+                true,
+                true,
+                0,
+                ipv4_info.get_destination_address(),
+                ipv4_info.get_sender_address(),
+                &link_info,
+            ) {
+                pr_err!("Failed to send SYN+ACK: {:?}", e);
+                return Err(e);
+            }
+        }
+        InternetType::Ipv6(_) => {
+            unimplemented!()
+        }
+        InternetType::None => {
+            unreachable!();
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn send_tcp_ipv4_data(
     session_info: &mut TcpSessionInfo,
     data_address: &mut VAddress,
@@ -763,7 +801,7 @@ pub(super) fn tcp_ipv4_segment_handler(
             send_buffer_list: PtrLinkedList::new(),
         };
 
-        let result = get_kernel_manager_cluster()
+        if let Err(err) = get_kernel_manager_cluster()
             .network_manager
             .get_socket_manager()
             .tcp_port_open_handler(
@@ -771,28 +809,9 @@ pub(super) fn tcp_ipv4_segment_handler(
                 InternetType::Ipv4(ipv4_packet_info.clone()),
                 &segment_info,
                 new_session,
-            );
-
-        if result.is_ok() {
-            let reply_segment_info = TcpSegmentInfo {
-                sender_port: segment_info.get_destination_port(),
-                destination_port: segment_info.get_sender_port(),
-                sequence_number,
-                acknowledgement_number: segment_info.get_sequence_number().overflowing_add(1).0,
-                window_size: segment_info.get_window_size(),
-            };
-            if let Err(e) = send_ipv4_tcp_header(
-                &reply_segment_info,
-                false,
-                true,
-                true,
-                0,
-                ipv4_packet_info.get_destination_address(),
-                ipv4_packet_info.get_sender_address(),
-                &link_info,
-            ) {
-                pr_err!("Failed to send SYN+ACK: {:?}", e);
-            }
+            )
+        {
+            pr_err!("Failed to add waiting socket: {:?}", err);
         }
         let _ = kfree!(allocated_data_base, data_length);
     } else if tcp_segment.is_fin_active() {
