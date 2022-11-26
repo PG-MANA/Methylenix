@@ -18,9 +18,15 @@ use crate::kernel::task_manager::wait_queue::WaitQueue;
 
 const DEFAULT_BUFFER_SIZE: usize = 4096;
 
-pub struct SocketManager {
+struct SocketListEntry {
     lock: SpinLockFlag,
-    active_socket: PtrLinkedList<Socket>,
+    list: PtrLinkedList<Socket>,
+}
+
+pub struct SocketManager {
+    listening_socket_lock: SpinLockFlag,
+    listening_socket: PtrLinkedList<Socket>,
+    active_socket: [SocketListEntry; 1 << Self::SOCKET_LIST_ORDER],
 }
 
 struct SocketLayerInfo {
@@ -42,11 +48,23 @@ pub struct Socket {
 
 impl SocketManager {
     const DEFAULT_SOCKET_CLOSE_TIME_OUT_MS: u64 = 10 * 1000;
+    /// Self::active_list\[(1 << Self:::SOCKET_LIST_ORDER\]
+    const SOCKET_LIST_ORDER: usize = 4;
 
     pub fn new() -> Self {
+        use core::mem::MaybeUninit;
+        let mut active_socket: [MaybeUninit<SocketListEntry>; 1 << Self::SOCKET_LIST_ORDER] =
+            MaybeUninit::uninit_array();
+        for e in &mut active_socket {
+            e.write(SocketListEntry {
+                lock: SpinLockFlag::new(),
+                list: PtrLinkedList::new(),
+            });
+        }
         Self {
-            lock: SpinLockFlag::new(),
-            active_socket: PtrLinkedList::new(),
+            listening_socket_lock: SpinLockFlag::new(),
+            listening_socket: PtrLinkedList::new(),
+            active_socket: unsafe { MaybeUninit::array_assume_init(active_socket) },
         }
     }
 
@@ -93,8 +111,12 @@ impl SocketManager {
                 s.is_active = true;
                 s.list = PtrLinkedListNode::new();
                 s.waiting_socket = PtrLinkedList::new();
-                let _lock = self.lock.lock();
-                self.active_socket.insert_tail(&mut s.list);
+                let socket_list = &mut self.active_socket[Self::calc_hash_number_of_list(
+                    &s.layer_info.internet,
+                    &s.layer_info.transport,
+                )];
+                let _lock = socket_list.lock.lock();
+                socket_list.list.insert_tail(&mut s.list);
                 drop(_lock);
                 Ok(s)
             }
@@ -116,8 +138,8 @@ impl SocketManager {
         socket.is_active = true;
         socket.list = PtrLinkedListNode::new();
         socket.waiting_socket = PtrLinkedList::new();
-        let _lock = self.lock.lock();
-        self.active_socket.insert_tail(&mut socket.list);
+        let _lock = self.listening_socket_lock.lock();
+        self.listening_socket.insert_tail(&mut socket.list);
         drop(_lock);
         Ok(())
     }
@@ -136,8 +158,12 @@ impl SocketManager {
         } {
             drop(_socket_lock);
             waiting_socket.list = PtrLinkedListNode::new();
-            let _lock = self.lock.lock();
-            self.active_socket.insert_tail(&mut waiting_socket.list);
+            let socket_list = &mut self.active_socket[Self::calc_hash_number_of_list(
+                &waiting_socket.layer_info.internet,
+                &waiting_socket.layer_info.transport,
+            )];
+            let _lock = socket_list.lock.lock();
+            socket_list.list.insert_tail(&mut waiting_socket.list);
             drop(_lock);
             Ok(waiting_socket)
         } else if allow_sleep {
@@ -368,42 +394,64 @@ impl SocketManager {
         data_length: MSize,
         payload_base: usize,
     ) {
-        let _lock = self.lock.lock();
+        let udp_socket_handler = |e: &mut Socket| {
+            let _socket_lock = e.lock.lock();
+            let payload_size = MSize::new(udp_segment_info.payload_size);
+            if e.receive_ring_buffer.get_buffer_size().is_zero() {
+                let new_buffer_size = MSize::new(DEFAULT_BUFFER_SIZE);
+                match kmalloc!(new_buffer_size) {
+                    Ok(a) => {
+                        e.receive_ring_buffer.set_new_buffer(a, new_buffer_size);
+                    }
+                    Err(err) => {
+                        pr_err!("Failed to allocate memory: {:?}", err);
+                        let _ = kfree!(data_buffer, data_length);
+                        return;
+                    }
+                }
+            }
+            let written_size = e
+                .receive_ring_buffer
+                .write(data_buffer + MSize::new(payload_base), payload_size);
+            if payload_size != written_size {
+                pr_warn!("Overflowed {} Bytes", payload_size - written_size);
+            }
+            if let Err(err) = e.wait_queue.wakeup_all() {
+                pr_err!("Failed to wake up threads: {:?}", err);
+            }
+            drop(_socket_lock);
+            let _ = kfree!(data_buffer, data_length);
+        };
+
+        /* Search actually matched socket */
+        let socket_list = &mut self.active_socket[Self::calc_hash_number_of_list_tcp_udp(
+            &transport_info,
+            udp_segment_info.connection_info.get_our_port(),
+            udp_segment_info.connection_info.get_their_port(),
+        )];
+        let _lock = socket_list.lock.lock();
         for e in unsafe {
-            self.active_socket
+            socket_list
+                .list
                 .iter_mut(offset_of_list_node!(Socket, list))
         } {
             if let TransportType::Udp(udp_info) = &e.layer_info.transport {
                 if e.is_active
                     && udp_info.get_our_port()
                         == udp_segment_info.connection_info.get_destination_port()
-                    && (udp_info.get_their_port() == udp::UDP_PORT_ANY
-                        || udp_info.get_their_port()
-                            == udp_segment_info.connection_info.get_sender_port())
+                    && udp_info.get_their_port()
+                        == udp_segment_info.connection_info.get_sender_port()
                 {
                     match &e.layer_info.internet {
                         InternetType::None => { /* Check: OK */ }
                         InternetType::Ipv4(ipv4_info) => {
-                            let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else {break;};
-
-                            if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
-                                && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
+                            let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else { continue; };
+                            if (ipv4_info.get_their_address()
+                                != arrive_ipv4_info.get_sender_address())
+                                || (ipv4_info.get_our_address()
+                                    != arrive_ipv4_info.get_destination_address())
                             {
-                                if ipv4_info.get_their_address()
-                                    != arrive_ipv4_info.get_sender_address()
-                                {
-                                    break;
-                                }
-                            }
-                            if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
-                                && arrive_ipv4_info.get_destination_address()
-                                    != ipv4::IPV4_BROAD_CAST
-                            {
-                                if ipv4_info.get_our_address()
-                                    != arrive_ipv4_info.get_destination_address()
-                                {
-                                    break;
-                                }
+                                continue;
                             }
                         }
                         InternetType::Ipv6(_) => {
@@ -411,37 +459,66 @@ impl SocketManager {
                         }
                     }
                     drop(_lock);
-                    let _socket_lock = e.lock.lock();
-                    let payload_size = MSize::new(udp_segment_info.payload_size);
-                    if e.receive_ring_buffer.get_buffer_size().is_zero() {
-                        let new_buffer_size = MSize::new(DEFAULT_BUFFER_SIZE);
-                        match kmalloc!(new_buffer_size) {
-                            Ok(a) => {
-                                e.receive_ring_buffer.set_new_buffer(a, new_buffer_size);
-                            }
-                            Err(err) => {
-                                pr_err!("Failed to allocate memory: {:?}", err);
-                                let _ = kfree!(data_buffer, data_length);
-                                return;
-                            }
-                        }
-                    }
-                    let written_size = e
-                        .receive_ring_buffer
-                        .write(data_buffer + MSize::new(payload_base), payload_size);
-                    if payload_size != written_size {
-                        pr_warn!("Overflowed {} Bytes", payload_size - written_size);
-                    }
-                    if let Err(err) = e.wait_queue.wakeup_all() {
-                        pr_err!("Failed to wake up threads: {:?}", err);
-                    }
-                    drop(_socket_lock);
-                    let _ = kfree!(data_buffer, data_length);
+                    udp_socket_handler(e);
                     return;
                 }
             }
         }
         drop(_lock);
+
+        /* Search Special Sockets */
+        for socket_list in &mut self.active_socket {
+            let _lock = socket_list.lock.lock();
+            for e in unsafe {
+                socket_list
+                    .list
+                    .iter_mut(offset_of_list_node!(Socket, list))
+            } {
+                if let TransportType::Udp(udp_info) = &e.layer_info.transport {
+                    if e.is_active
+                        && udp_info.get_our_port()
+                            == udp_segment_info.connection_info.get_destination_port()
+                        && (udp_info.get_their_port() == udp::UDP_PORT_ANY
+                            || udp_info.get_their_port()
+                                == udp_segment_info.connection_info.get_sender_port())
+                    {
+                        match &e.layer_info.internet {
+                            InternetType::None => { /* Check: OK */ }
+                            InternetType::Ipv4(ipv4_info) => {
+                                let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else { continue; };
+
+                                if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
+                                    && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
+                                {
+                                    if ipv4_info.get_their_address()
+                                        != arrive_ipv4_info.get_sender_address()
+                                    {
+                                        continue;
+                                    }
+                                }
+                                if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
+                                    && arrive_ipv4_info.get_destination_address()
+                                        != ipv4::IPV4_BROAD_CAST
+                                {
+                                    if ipv4_info.get_our_address()
+                                        != arrive_ipv4_info.get_destination_address()
+                                    {
+                                        continue;
+                                    }
+                                }
+                            }
+                            InternetType::Ipv6(_) => {
+                                unimplemented!()
+                            }
+                        }
+                        drop(_lock);
+                        udp_socket_handler(e);
+                        return;
+                    }
+                }
+            }
+            drop(_lock);
+        }
         pr_debug!("UDP segment will be deleted...");
         let _ = kfree!(data_buffer, data_length);
     }
@@ -454,9 +531,9 @@ impl SocketManager {
         tcp_segment_info: &tcp::TcpSegmentInfo,
         new_session_info: tcp::TcpSessionInfo,
     ) -> Result<(), NetworkError> {
-        let _lock = self.lock.lock();
+        let _lock = self.listening_socket_lock.lock();
         for e in unsafe {
-            self.active_socket
+            self.listening_socket
                 .iter_mut(offset_of_list_node!(Socket, list))
         } {
             if let TransportType::Tcp(tcp_info) = &e.layer_info.transport {
@@ -543,9 +620,15 @@ impl SocketManager {
     where
         F: FnOnce(&mut tcp::TcpSessionInfo) -> Result<bool /* Active */, NetworkError>,
     {
-        let _lock = self.lock.lock();
+        let socket_list = &mut self.active_socket[Self::calc_hash_number_of_list_tcp_udp(
+            &internet_info,
+            tcp_segment_info.get_our_port(),
+            tcp_segment_info.get_their_port(),
+        )];
+        let _lock = socket_list.lock.lock();
         for e in unsafe {
-            self.active_socket
+            socket_list
+                .list
                 .iter_mut(offset_of_list_node!(Socket, list))
         } {
             if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
@@ -592,6 +675,7 @@ impl SocketManager {
             }
         }
         drop(_lock);
+        pr_debug!("Failed to search valid socket.");
         return Err(NetworkError::InvalidAddress);
     }
 
@@ -605,9 +689,15 @@ impl SocketManager {
     where
         F: FnOnce(&mut tcp::TcpSessionInfo, &mut Ringbuffer) -> Result<(), NetworkError>,
     {
-        let _lock = self.lock.lock();
+        let socket_list = &mut self.active_socket[Self::calc_hash_number_of_list_tcp_udp(
+            &internet_info,
+            tcp_segment_info.get_our_port(),
+            tcp_segment_info.get_their_port(),
+        )];
+        let _lock = socket_list.lock.lock();
         for e in unsafe {
-            self.active_socket
+            socket_list
+                .list
                 .iter_mut(offset_of_list_node!(Socket, list))
         } {
             if let TransportType::Tcp(tcp_info) = &mut e.layer_info.transport {
@@ -670,6 +760,83 @@ impl SocketManager {
             }
         }
         drop(_lock);
+        pr_debug!("Failed to search valid socket.");
         return Err(NetworkError::InvalidAddress);
+    }
+
+    fn _calc_hash_number_of_list_ip(
+        mut seed: usize,
+        our_address: &[u8],
+        their_address: &[u8],
+    ) -> usize {
+        for e in our_address {
+            seed += *e as usize;
+        }
+        for e in their_address {
+            seed += *e as usize;
+        }
+        seed
+    }
+
+    fn _calc_hash_number_of_list_tp(seed: usize, our_port: u16, their_port: u16) -> usize {
+        seed * (our_port as usize + their_port as usize)
+    }
+
+    fn _calc_hash_number_of_list_finalize(value: usize) -> usize {
+        value & ((1 << Self::SOCKET_LIST_ORDER) - 1)
+    }
+
+    fn calc_hash_number_of_list(
+        internet_type: &InternetType,
+        transport_type: &TransportType,
+    ) -> usize {
+        let mut hash: usize = 0;
+        match &internet_type {
+            InternetType::None => { /* Do nothing */ }
+            InternetType::Ipv4(v4) => {
+                hash = Self::_calc_hash_number_of_list_ip(
+                    hash,
+                    &v4.get_our_address().to_ne_bytes(),
+                    &v4.get_their_address().to_ne_bytes(),
+                );
+            }
+            InternetType::Ipv6(_v6) => {
+                unimplemented!()
+            }
+        }
+        match &transport_type {
+            TransportType::Tcp(t) => {
+                hash =
+                    Self::_calc_hash_number_of_list_tp(hash, t.get_our_port(), t.get_their_port());
+            }
+            TransportType::Udp(t) => {
+                hash =
+                    Self::_calc_hash_number_of_list_tp(hash, t.get_our_port(), t.get_their_port());
+            }
+        }
+        Self::_calc_hash_number_of_list_finalize(hash)
+    }
+
+    fn calc_hash_number_of_list_tcp_udp(
+        internet_type: &InternetType,
+        our_port: u16,
+        their_port: u16,
+    ) -> usize {
+        let mut hash: usize = 0;
+        match &internet_type {
+            InternetType::None => { /* Do nothing */ }
+            InternetType::Ipv4(v4) => {
+                hash = Self::_calc_hash_number_of_list_ip(
+                    hash,
+                    &v4.get_our_address().to_ne_bytes(),
+                    &v4.get_their_address().to_ne_bytes(),
+                );
+            }
+            InternetType::Ipv6(_v6) => {
+                unimplemented!()
+            }
+        }
+        hash = Self::_calc_hash_number_of_list_tp(hash, our_port, their_port);
+        Self::_calc_hash_number_of_list_finalize(hash)
     }
 }
