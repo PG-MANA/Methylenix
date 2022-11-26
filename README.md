@@ -21,11 +21,12 @@ Methylenixという名前はメチレン基(Methylene)より採っています�
 * メモリ・ページング動的管理
 * タスク管理
 * マルチコア対応
-* ACPI AMLの部分的な解析とシャットダウン
+* ACPI Tableの部分的な解析とAML Interpreterによるシャットダウンボタンによるシャットダウン実装(一部未対応)
 * フォント解析による簡易GUI
 * NVM Expressからのデータ読み出し
-* GPT及びFAT32からのディレクトリとファイル取得
+* GPT及びFAT32/XFSからのディレクトリとファイル取得
 * 簡易アプリケーション実行
+* NIC対応及びTCP/IP通信及びSocket API提供(部分的)
 
 ## 方針
 * GUIについては基本対応しない(デバイスの認識などはしておく、デバッグテキストを表示する程度)
@@ -92,6 +93,9 @@ qemu-system-x86_64 --cdrom bin/img/boot.iso -cpu qemu64,+fsgsbase -smp 2 -m 512M
 
 # or (to emulate host cpu)
 qemu-system-x86_64 --cdrom bin/img/boot.iso  -cpu host -smp 2 -m 512M -bios /usr/bin/OVMF/OVMF.fd --enable-kvm
+
+# NIC and NVMe Emulation
+qemu-system-x86_64 -drive if=pflash,format=raw,readonly=on,file=/path/to/OVMF_CODE.fd -drive if=pflash,format=raw,file=/path/to/QEMU_VARS.fd -m 1G -cdrom bin/img/boot.iso -smp 4 --enable-kvm -cpu host -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56 -drive file=/path/to/img.qcow2,if=none,id=nvm -device nvme,serial=12345678,drive=nvm --boot order=d
 ```
 
 ### AArch64
@@ -99,7 +103,7 @@ qemu-system-aarch64とAArch64向けのOVMFが必要です。
 
 ```shell
 # Modify "/usr/bin/OVMF/OVMF_AARCH64.fd" to your suitable path
-qemu-system-aarch64 -m 1G -cpu a64fx -machine virt,virtualization=on,gic-version=3 -smp 4 -nographic -bios /usr/bin/OVMF/OVMF_AARCH64.fd  -drive file=fat:rw:bin/,format=raw,media=disk
+qemu-system-aarch64 -m 1G -cpu a64fx -machine virt,gic-version=3 -smp 2 -nographic -bios /usr/bin/OVMF/OVMF_AARCH64.fd  -drive file=fat:rw:bin/,format=raw,media=disk
 ```
 
 ## ドキュメント
