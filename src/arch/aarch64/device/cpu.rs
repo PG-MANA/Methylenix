@@ -185,12 +185,10 @@ pub unsafe fn set_mair(mair: u64) {
 pub unsafe fn tlbi_va(target: u64) {
     asm!("
             dsb ishst
-            tlbi vaae1,{:x}
-            dc cvau, {:x}
+            tlbi vale1is,{:x}
             dsb ish
             ",
             in(reg) (target >> 12),
-            in(reg) target
     );
 }
 
