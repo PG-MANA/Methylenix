@@ -273,7 +273,8 @@ impl PciDeviceDriver for NvmeManager {
         write_mmio::<u32>(
             controller_properties_base_address,
             Self::CONTROLLER_PROPERTIES_ADMIN_QUEUE_ATTRIBUTES,
-            (admin_completion_queue_size as u32) << 16 | (admin_submission_queue_size as u32),
+            (admin_completion_queue_size as u32 - 1) << 16
+                | (admin_submission_queue_size as u32 - 1),
         );
         write_mmio::<u64>(
             controller_properties_base_address,
