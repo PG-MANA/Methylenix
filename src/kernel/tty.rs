@@ -266,9 +266,9 @@ macro_rules! kprint {
 }
 
 macro_rules! kprintln {
-    () => ($crate::kernel::tty::kernel_print(format_args_nl!("")));
-    ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args_nl!($fmt)));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args_nl!($fmt, $($arg)*)));
+    () => ($crate::kernel::tty::kernel_print(format_args!("\n")));
+    ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args!("{}\n", format_args!($fmt))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args!("{}\n", format_args!($fmt, $($arg)*))));
 }
 
 macro_rules! pr_debug {

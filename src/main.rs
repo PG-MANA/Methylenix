@@ -8,7 +8,6 @@
 #![feature(const_refs_to_cell)]
 #![feature(const_size_of_val)]
 #![feature(const_trait_impl)]
-#![feature(format_args_nl)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
