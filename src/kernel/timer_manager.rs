@@ -11,15 +11,15 @@
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 use crate::arch::target_arch::interrupt::InterruptManager;
 
-use crate::kernel::collections::ptr_linked_list::{
-    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
-};
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
 use crate::kernel::task_manager::work_queue::WorkList;
 
 #[cfg(not(target_has_atomic = "64"))]
 use crate::kernel::sync::spin_lock::SequenceSpinLock;
+
+use core::mem::offset_of;
 #[cfg(target_has_atomic = "64")]
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -204,7 +204,7 @@ impl LocalTimerManager {
 
         if let Some(e) = unsafe {
             self.timer_list
-                .get_first_entry_mut(offset_of_list_node!(TimerList, t_list))
+                .get_first_entry_mut(offset_of!(TimerList, t_list))
         } {
             let mut entry = e;
             loop {
@@ -221,11 +221,8 @@ impl LocalTimerManager {
                         break;
                     }
                 }
-                if let Some(e) = unsafe {
-                    entry
-                        .t_list
-                        .get_next_mut(offset_of_list_node!(TimerList, t_list))
-                } {
+                if let Some(e) = unsafe { entry.t_list.get_next_mut(offset_of!(TimerList, t_list)) }
+                {
                     entry = e;
                 } else {
                     self.timer_list
@@ -250,7 +247,7 @@ impl LocalTimerManager {
 
         while let Some(t) = unsafe {
             self.timer_list
-                .get_first_entry(offset_of_list_node!(TimerList, t_list))
+                .get_first_entry(offset_of!(TimerList, t_list))
         } {
             if (!is_overflowed
                 && self.last_processed_timeout < t.timeout
@@ -267,14 +264,14 @@ impl LocalTimerManager {
                     if e == TIMER_LIST_FLAGS_CANCELED {
                         self.timer_list_pool.free(unsafe {
                             self.timer_list
-                                .take_first_entry(offset_of_list_node!(TimerList, t_list))
+                                .take_first_entry(offset_of!(TimerList, t_list))
                                 .unwrap()
                         });
                     } else {
                         pr_err!("Unexpected flag: {:#X}", e);
                         let _ = unsafe {
                             self.timer_list
-                                .take_first_entry(offset_of_list_node!(TimerList, t_list))
+                                .take_first_entry(offset_of!(TimerList, t_list))
                                 .unwrap()
                         };
                     }
@@ -289,7 +286,7 @@ impl LocalTimerManager {
                 }
                 unsafe {
                     self.timer_list
-                        .take_first_entry(offset_of_list_node!(TimerList, t_list))
+                        .take_first_entry(offset_of!(TimerList, t_list))
                         .unwrap()
                 };
             } else {

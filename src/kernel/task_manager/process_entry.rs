@@ -6,12 +6,12 @@
 use super::{ProcessStatus, TaskError, TaskSignal, ThreadEntry};
 
 use crate::kernel::collections::init_struct;
-use crate::kernel::collections::ptr_linked_list::{
-    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
-};
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::file_manager::File;
 use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
+
+use core::mem::offset_of;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -133,7 +133,7 @@ impl ProcessEntry {
             /* Current chain the last of t_list */
             let tail = unsafe {
                 self.thread
-                    .get_last_entry_mut(offset_of_list_node!(ThreadEntry, t_list))
+                    .get_last_entry_mut(offset_of!(ThreadEntry, t_list))
                     .unwrap()
             };
             let _lock = thread.lock.lock();
@@ -187,10 +187,7 @@ impl ProcessEntry {
                 None
             }
         } else {
-            for thread in unsafe {
-                self.thread
-                    .iter_mut(offset_of_list_node!(ThreadEntry, t_list))
-            } {
+            for thread in unsafe { self.thread.iter_mut(offset_of!(ThreadEntry, t_list)) } {
                 if thread.get_t_id() == t_id {
                     return Some(thread);
                 }
@@ -247,7 +244,7 @@ impl ProcessEntry {
             self.thread.remove(&mut thread.t_list);
             let single_thread = unsafe {
                 self.thread
-                    .take_first_entry(offset_of_list_node!(ThreadEntry, t_list))
+                    .take_first_entry(offset_of!(ThreadEntry, t_list))
                     .unwrap()
             };
             assert!(self.thread.is_empty());
@@ -272,7 +269,7 @@ impl ProcessEntry {
         } else {
             let thread = unsafe {
                 self.thread
-                    .get_first_entry_mut(offset_of_list_node!(ThreadEntry, t_list))
+                    .get_first_entry_mut(offset_of!(ThreadEntry, t_list))
                     .unwrap()
             };
             let _lock = thread.lock.lock();

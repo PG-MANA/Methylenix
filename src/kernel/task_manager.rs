@@ -18,7 +18,7 @@ pub use self::thread_entry::ThreadEntry;
 
 use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
 
-use crate::kernel::collections::ptr_linked_list::{offset_of_list_node, PtrLinkedList};
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{
     get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
 };
@@ -27,6 +27,8 @@ use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
 use crate::kernel::memory_manager::{kfree, kmalloc, MemoryError, MemoryManager};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::scheduling_class::user::UserSchedulingClass;
+
+use core::mem::offset_of;
 
 pub const KERNEL_PID: usize = 0;
 
@@ -409,7 +411,7 @@ impl TaskManager {
         for e in unsafe {
             target_process
                 .children
-                .iter_mut(offset_of_list_node!(ProcessEntry, siblings))
+                .iter_mut(offset_of!(ProcessEntry, siblings))
         } {
             _lock = None;
             self.delete_user_process(e)?;
@@ -499,7 +501,7 @@ impl TaskManager {
             for cpu in unsafe {
                 get_kernel_manager_cluster()
                     .cpu_list
-                    .iter_mut(offset_of_list_node!(CpuManagerCluster, list))
+                    .iter_mut(offset_of!(CpuManagerCluster, list))
             } {
                 let load = cpu.run_queue.get_number_of_running_threads();
                 if load < current_cpu_load {

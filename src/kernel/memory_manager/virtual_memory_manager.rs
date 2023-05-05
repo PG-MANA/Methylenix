@@ -32,10 +32,11 @@ use crate::arch::target_arch::paging::{
 };
 
 use crate::kernel::collections::init_struct;
-use crate::kernel::collections::ptr_linked_list::{offset_of_list_node, PtrLinkedList};
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::ClassicIrqSaveSpinLockFlag;
 
+use core::mem::offset_of;
 use core::ops::RangeInclusive;
 
 pub struct VirtualMemoryManager {
@@ -713,7 +714,7 @@ impl VirtualMemoryManager {
         } else if vm_entry.get_vm_end_address()
             < unsafe {
                 self.vm_entry
-                    .get_first_entry(offset_of_list_node!(VirtualMemoryEntry, list))
+                    .get_first_entry(offset_of!(VirtualMemoryEntry, list))
             }
             .unwrap()
             .get_vm_start_address()
@@ -993,11 +994,9 @@ impl VirtualMemoryManager {
         if old_size >= new_size {
             return true;
         }
-        if let Some(next_entry) = unsafe {
-            vm_entry
-                .list
-                .get_next(offset_of_list_node!(VirtualMemoryEntry, list))
-        } {
+        if let Some(next_entry) =
+            unsafe { vm_entry.list.get_next(offset_of!(VirtualMemoryEntry, list)) }
+        {
             let next_entry_start_address =
                 unsafe { &*(next_entry as *const VirtualMemoryEntry) }.get_vm_start_address();
             if new_size.to_end_address(vm_entry.get_vm_start_address()) >= next_entry_start_address
@@ -1102,10 +1101,7 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         self.lock.lock();
-        for e in unsafe {
-            self.vm_entry
-                .iter_mut(offset_of_list_node!(VirtualMemoryEntry, list))
-        } {
+        for e in unsafe { self.vm_entry.iter_mut(offset_of!(VirtualMemoryEntry, list)) } {
             if let Err(e) = self._free_address(e, pm_manager) {
                 self.lock.unlock();
                 return Err(e);
@@ -1152,10 +1148,7 @@ impl VirtualMemoryManager {
     }
 
     fn _find_entry(&self, vm_address: VAddress) -> Option<&'static VirtualMemoryEntry> {
-        for e in unsafe {
-            self.vm_entry
-                .iter(offset_of_list_node!(VirtualMemoryEntry, list))
-        } {
+        for e in unsafe { self.vm_entry.iter(offset_of!(VirtualMemoryEntry, list)) } {
             if e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address {
                 return Some(e);
             }
@@ -1164,10 +1157,7 @@ impl VirtualMemoryManager {
     }
 
     fn find_entry_mut(&mut self, vm_address: VAddress) -> Option<&'static mut VirtualMemoryEntry> {
-        for e in unsafe {
-            self.vm_entry
-                .iter_mut(offset_of_list_node!(VirtualMemoryEntry, list))
-        } {
+        for e in unsafe { self.vm_entry.iter_mut(offset_of!(VirtualMemoryEntry, list)) } {
             if e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address {
                 return Some(e);
             }
@@ -1179,7 +1169,7 @@ impl VirtualMemoryManager {
         &mut self,
         vm_address: VAddress,
     ) -> Option<&'static mut VirtualMemoryEntry> {
-        const OFFSET: usize = offset_of_list_node!(VirtualMemoryEntry, list);
+        const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
         for e in unsafe { self.vm_entry.iter_mut(OFFSET) } {
             if e.get_vm_start_address() > vm_address {
                 return unsafe { e.list.get_prev_mut(OFFSET) };
@@ -1200,7 +1190,7 @@ impl VirtualMemoryManager {
         } else {
             unimplemented!()
         };
-        const OFFSET: usize = offset_of_list_node!(VirtualMemoryEntry, list);
+        const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
         let mut available_start_address = virtual_address_limit_start;
 
         for e in unsafe { self.vm_entry.iter(OFFSET) } {
@@ -1266,7 +1256,7 @@ impl VirtualMemoryManager {
             kprintln!("There is no root entry.");
             return;
         }
-        let offset = offset_of_list_node!(VirtualMemoryEntry, list);
+        let offset = offset_of!(VirtualMemoryEntry, list);
         self.lock.lock();
         let mut entry = unsafe { self.vm_entry.get_first_entry(offset) }.unwrap();
         loop {

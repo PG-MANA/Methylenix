@@ -26,6 +26,8 @@ use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
 use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kmalloc, MemoryError};
 
+use core::mem::offset_of;
+
 use alloc::boxed::Box;
 
 //#[derive(Clone)]
@@ -185,10 +187,7 @@ impl FileManager {
     }
 
     pub fn mount_root(&mut self, root_uuid: Guid, is_writable: bool) {
-        for e in unsafe {
-            self.partition_list
-                .iter_mut(offset_of_list_node!(Partition, list))
-        } {
+        for e in unsafe { self.partition_list.iter_mut(offset_of!(Partition, list)) } {
             if root_uuid == e.uuid {
                 e.driver
                     .get_root_node(&e.info, &mut self.root, is_writable)
@@ -206,7 +205,7 @@ impl FileManager {
     pub fn get_first_uuid(&self) -> Option<Guid> {
         unsafe {
             self.partition_list
-                .get_first_entry(offset_of_list_node!(Partition, list))
+                .get_first_entry(offset_of!(Partition, list))
         }
         .and_then(|p| Some(p.uuid.clone()))
     }
@@ -233,11 +232,7 @@ impl FileManager {
         }
         let _lock = current_directory.lock.lock();
         if (current_directory.permission_and_flags & FileInfo::FLAGS_VOLATILE) == 0 {
-            for e in unsafe {
-                current_directory
-                    .child
-                    .iter_mut(offset_of_list_node!(FileInfo, list))
-            } {
+            for e in unsafe { current_directory.child.iter_mut(offset_of!(FileInfo, list)) } {
                 if e.get_file_name() == file_name
                     && (e.permission_and_flags & permission_and_flags == permission_and_flags)
                 {

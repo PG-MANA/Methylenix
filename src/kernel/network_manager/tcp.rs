@@ -4,14 +4,13 @@
 
 use super::{ipv4, AddressPrinter, InternetType, LinkType, NetworkError};
 
-use crate::kernel::collections::ptr_linked_list::{
-    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
-};
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::collections::{init_struct, ring_buffer::Ringbuffer};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 use crate::kernel::memory_manager::{kfree, kmalloc};
 
+use core::mem::offset_of;
 use core::ptr::copy_nonoverlapping;
 
 use alloc::collections::LinkedList;
@@ -104,7 +103,7 @@ impl TcpSessionInfo {
         }
         while let Some(e) = unsafe {
             self.send_buffer_list
-                .take_first_entry(offset_of_list_node!(TcpSendDataBufferHeader, list))
+                .take_first_entry(offset_of!(TcpSendDataBufferHeader, list))
         } {
             if !e.buffer_length.is_zero() {
                 let _ = kfree!(VAddress::new(e as *const _ as usize), e.buffer_length);
@@ -672,7 +671,7 @@ pub(super) fn ipv4_tcp_ack_handler(
     if let Some(first_entry) = unsafe {
         session_info
             .send_buffer_list
-            .get_first_entry_mut(offset_of_list_node!(TcpSendDataBufferHeader, list))
+            .get_first_entry_mut(offset_of!(TcpSendDataBufferHeader, list))
     } {
         let expected_ack = first_entry
             .sequence_number
@@ -701,7 +700,7 @@ pub(super) fn ipv4_tcp_ack_handler(
             for entry in unsafe {
                 session_info
                     .send_buffer_list
-                    .iter_mut(offset_of_list_node!(TcpSendDataBufferHeader, list))
+                    .iter_mut(offset_of!(TcpSendDataBufferHeader, list))
             } {
                 let expected_ack = entry.sequence_number.overflowing_add(entry.payload_size).0;
                 if segment_info.get_acknowledgement_number() == expected_ack {

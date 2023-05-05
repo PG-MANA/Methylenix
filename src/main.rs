@@ -11,6 +11,7 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(naked_functions)]
+#![feature(offset_of)]
 #![feature(panic_info_message)]
 #![feature(ptr_metadata)]
 #![feature(raw_ref_op)]

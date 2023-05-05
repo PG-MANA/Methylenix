@@ -13,9 +13,11 @@ use super::{TaskError, TaskStatus, ThreadEntry};
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 use crate::arch::target_arch::interrupt::InterruptManager;
 
-use crate::kernel::collections::ptr_linked_list::{offset_of_list_node, PtrLinkedList};
+use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::SpinLockFlag;
+
+use core::mem::offset_of;
 
 pub struct WaitQueue {
     lock: SpinLockFlag,
@@ -35,7 +37,7 @@ impl WaitQueue {
 
         if let Some(last_thread) = unsafe {
             self.list
-                .get_last_entry_mut(offset_of_list_node!(ThreadEntry, sleep_list))
+                .get_last_entry_mut(offset_of!(ThreadEntry, sleep_list))
         } {
             let _last_thread_lock = last_thread
                 .lock
@@ -87,7 +89,7 @@ impl WaitQueue {
         let _lock = self.lock.lock();
         if let Some(thread) = unsafe {
             self.list
-                .get_first_entry_mut(offset_of_list_node!(ThreadEntry, sleep_list))
+                .get_first_entry_mut(offset_of!(ThreadEntry, sleep_list))
         } {
             let _thread_lock = thread.lock.lock();
             self.list.remove(&mut thread.sleep_list);
@@ -103,10 +105,7 @@ impl WaitQueue {
 
     pub fn wakeup_all(&mut self) -> Result<(), TaskError> {
         let _lock = self.lock.lock();
-        for thread in unsafe {
-            self.list
-                .iter_mut(offset_of_list_node!(ThreadEntry, sleep_list))
-        } {
+        for thread in unsafe { self.list.iter_mut(offset_of!(ThreadEntry, sleep_list)) } {
             let _thread_lock = thread.lock.lock();
             self.list.remove(&mut thread.sleep_list);
             drop(_thread_lock);
