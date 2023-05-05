@@ -7,23 +7,6 @@
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
-macro_rules! offset_of_list_node {
-    ($struct_type:ty, $member: tt) => {{
-        use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
-        let target_struct: core::mem::MaybeUninit<$struct_type> =
-            core::mem::MaybeUninit::<$struct_type>::uninit();
-        let target_struct_ptr: *const $struct_type = target_struct.as_ptr();
-        #[allow(unused_unsafe)]
-        let target_member_ptr: *const PtrLinkedListNode<$struct_type> =
-            unsafe { core::ptr::addr_of!((*target_struct_ptr).$member) };
-        #[allow(unused_unsafe)]
-        unsafe {
-            (target_member_ptr as *const u8).offset_from(target_struct_ptr as *const u8) as usize
-        }
-    }};
-}
-pub(crate) use offset_of_list_node;
-
 pub struct PtrLinkedList<T> {
     head: Option<NonNull<PtrLinkedListNode<T>>>,
     tail: Option<NonNull<PtrLinkedListNode<T>>>,
