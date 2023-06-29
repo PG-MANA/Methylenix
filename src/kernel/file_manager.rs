@@ -19,9 +19,7 @@ pub use self::vfs::{
 
 use crate::kernel::block_device::BlockDeviceError;
 use crate::kernel::collections::guid::Guid;
-use crate::kernel::collections::ptr_linked_list::{
-    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
-};
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
 use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kmalloc, MemoryError};

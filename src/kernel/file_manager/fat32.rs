@@ -33,7 +33,7 @@ pub(super) struct Fat32Driver {
     bytes_per_sector: u16,
     sectors_per_cluster: u8,
     reserved_sectors: u16,
-    fat_size: u32,
+    fat_sectors: u32,
     number_of_fats: u16,
     root_cluster: u32,
     fat: VAddress,
@@ -65,13 +65,14 @@ pub(super) fn try_mount_file_system(
     });
     let number_of_fats =
         u16::from_le(unsafe { *((first_4k_data.to_usize() + NUM_OF_FATS_OFFSET) as *const u16) });
-    let fat_size =
+    let fat_sectors =
         u32::from_le(unsafe { *((first_4k_data.to_usize() + FAT_SIZE_OFFSET) as *const u32) });
+    let fat_size = (fat_sectors as usize) * (bytes_per_sector as usize);
     let root_cluster =
         u32::from_le(unsafe { *((first_4k_data.to_usize() + ROOT_CLUSTER_OFFSET) as *const u32) });
 
-    let lba_aligned_fat_size = ((fat_size - 1) & (!(partition_info.lba_block_size as u32 - 1)))
-        + partition_info.lba_block_size as u32;
+    let lba_aligned_fat_size = ((fat_size - 1) & (!(partition_info.lba_block_size as usize - 1)))
+        + partition_info.lba_block_size as usize;
 
     pr_debug!(
         "LBA Block Size: {:#X}, FAT Size: {:#X}(Aligned; {:#X}), SectorsPerCluster: {:#X}",
@@ -105,7 +106,7 @@ pub(super) fn try_mount_file_system(
         bytes_per_sector,
         sectors_per_cluster,
         reserved_sectors: number_of_reserved_sectors,
-        fat_size,
+        fat_sectors,
         number_of_fats,
         root_cluster,
         fat,
@@ -534,7 +535,7 @@ impl Fat32Driver {
 
     fn cluster_to_sector(&self, cluster: u32) -> u32 {
         (self.reserved_sectors as u32)
-            + (self.number_of_fats as u32) * self.fat_size
+            + (self.number_of_fats as u32) * self.fat_sectors
             + (cluster - 2) * (self.sectors_per_cluster as u32)
     }
 
