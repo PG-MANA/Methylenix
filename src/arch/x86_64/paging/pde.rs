@@ -37,11 +37,7 @@ impl PDE {
     }
 
     fn get_bit(&self, bit: u64) -> bool {
-        if (self.flags & bit) == 0 {
-            false
-        } else {
-            true
-        }
+        (self.flags & bit) != 0
     }
 
     pub fn is_address_set(&self) -> bool {
@@ -57,7 +53,7 @@ impl PDE {
     }
 
     pub fn set_huge(&mut self, b: bool) {
-        assert_eq!(self.is_present(), false);
+        assert!(!self.is_present());
         self.set_bit(1 << 7, b);
     }
 }
@@ -127,9 +123,9 @@ impl PagingEntry for PDE {
     fn get_address(&self) -> Option<PAddress> {
         if self.is_address_set() {
             if self.is_huge() {
-                Some(((self.flags & 0x000F_FFFF_FFE0_0000) as usize).into())
+                Some(PAddress::new((self.flags & 0x000F_FFFF_FFE0_0000) as usize))
             } else {
-                Some(((self.flags & 0x000F_FFFF_FFFF_F000) as usize).into())
+                Some(PAddress::new((self.flags & 0x000F_FFFF_FFFF_F000) as usize))
             }
         } else {
             None

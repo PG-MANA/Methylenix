@@ -61,7 +61,7 @@ impl<T: ?Sized> RwLock<T> {
                 data: unsafe { &*self.data.get() },
             });
         }
-        return Err(());
+        Err(())
     }
 
     pub fn write(&self) -> Result<RwLockWriteGuard<'_, T>, ()> {
@@ -88,14 +88,14 @@ impl<T: ?Sized> RwLock<T> {
                 data: unsafe { &mut *self.data.get() },
             });
         }
-        return Err(());
+        Err(())
     }
 }
 
 impl<T: ?Sized> Deref for RwLockReadGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {
-        &*self.data
+        self.data
     }
 }
 

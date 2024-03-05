@@ -11,7 +11,7 @@ use crate::kernel::sync::spin_lock::SpinLockFlag;
 /// SerialPortManager
 ///
 /// SerialPortManager has SpinLockFlag inner.
-/// Default Fifo size is 256 byte. In the future, it may variable by using vec<u8>
+/// Default Fifo size is 256 byte. In the future, it may be variable by using vec<u8>
 pub struct SerialPortManager {
     port: u16,
     write_lock: SpinLockFlag,
@@ -90,7 +90,7 @@ impl SerialPortManager {
 
     /// Send a string.
     ///
-    /// This function sends str by calling [`send`] by each bytes.
+    /// This function sends str by calling [`send`] by each byte.
     /// If serial port is full or unusable, this function **may take long time**.
     ///
     /// [`send`]: #method.send
@@ -101,7 +101,7 @@ impl SerialPortManager {
         let _lock = self.write_lock.lock();
         for c in s.bytes() {
             if c as char == '\n' {
-                self._send('\r' as u8);
+                self._send(b'\r');
             }
             self._send(c);
         }
@@ -126,7 +126,7 @@ impl SerialPortManager {
         get_kernel_manager_cluster()
             .kernel_tty_manager
             .input_from_interrupt_handler(get_kernel_manager_cluster().serial_port_manager.read());
-        return true;
+        true
     }
 
     /// Check if the transmission was completed.

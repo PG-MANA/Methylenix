@@ -46,6 +46,12 @@ pub struct Socket {
     waiting_socket: PtrLinkedList<Self>,
 }
 
+impl Default for SocketManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SocketManager {
     const DEFAULT_SOCKET_CLOSE_TIME_OUT_MS: u64 = 10 * 1000;
     /// Self::active_list\[(1 << Self:::SOCKET_LIST_ORDER\]
@@ -206,7 +212,7 @@ impl SocketManager {
             }
             return self.read_socket(socket, buffer_address, buffer_size, allow_sleep);
         }
-        return Ok(read_size);
+        Ok(read_size)
     }
 
     pub fn send_socket(
@@ -218,9 +224,7 @@ impl SocketManager {
         let mut _lock = socket.lock.lock();
         match &mut socket.layer_info.transport {
             TransportType::Tcp(session_info) => match &socket.layer_info.internet {
-                InternetType::None => {
-                    return Err(NetworkError::InvalidSocket);
-                }
+                InternetType::None => Err(NetworkError::InvalidSocket),
                 InternetType::Ipv4(v4) => {
                     let mut current_buffer_address = buffer_address;
                     let mut remaining_size = buffer_size;
@@ -247,9 +251,7 @@ impl SocketManager {
                 }
             },
             TransportType::Udp(u) => match &socket.layer_info.internet {
-                InternetType::None => {
-                    return Err(NetworkError::InvalidSocket);
-                }
+                InternetType::None => Err(NetworkError::InvalidSocket),
                 InternetType::Ipv4(v4) => {
                     let send_buffer_size =
                         MSize::new(udp::UDP_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE)
@@ -306,7 +308,7 @@ impl SocketManager {
                         }
                     };
                     let _ = kfree!(send_buffer, send_buffer_size);
-                    return result.and_then(|_| Ok(buffer_size));
+                    result.map(|_| buffer_size)
                 }
                 InternetType::Ipv6(_) => {
                     unimplemented!()
@@ -381,7 +383,7 @@ impl SocketManager {
             drop(_socket_lock);
             let _ = kfree!(socket);
         }
-        return Ok(());
+        Ok(())
     }
 
     fn delete_socket(socket_address: usize) {
@@ -451,7 +453,9 @@ impl SocketManager {
                     match &e.layer_info.internet {
                         InternetType::None => { /* Check: OK */ }
                         InternetType::Ipv4(ipv4_info) => {
-                            let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else { continue; };
+                            let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else {
+                                continue;
+                            };
                             if (ipv4_info.get_their_address()
                                 != arrive_ipv4_info.get_sender_address())
                                 || (ipv4_info.get_our_address()
@@ -487,26 +491,24 @@ impl SocketManager {
                         match &e.layer_info.internet {
                             InternetType::None => { /* Check: OK */ }
                             InternetType::Ipv4(ipv4_info) => {
-                                let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else { continue; };
+                                let InternetType::Ipv4(arrive_ipv4_info) = &transport_info else {
+                                    continue;
+                                };
 
                                 if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
                                     && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
-                                {
-                                    if ipv4_info.get_their_address()
+                                    && ipv4_info.get_their_address()
                                         != arrive_ipv4_info.get_sender_address()
-                                    {
-                                        continue;
-                                    }
+                                {
+                                    continue;
                                 }
                                 if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
                                     && arrive_ipv4_info.get_destination_address()
                                         != ipv4::IPV4_BROAD_CAST
-                                {
-                                    if ipv4_info.get_our_address()
+                                    && ipv4_info.get_our_address()
                                         != arrive_ipv4_info.get_destination_address()
-                                    {
-                                        continue;
-                                    }
+                                {
+                                    continue;
                                 }
                             }
                             InternetType::Ipv6(_) => {
@@ -545,26 +547,24 @@ impl SocketManager {
                     match &e.layer_info.internet {
                         InternetType::None => { /* Check: OK */ }
                         InternetType::Ipv4(ipv4_info) => {
-                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
+                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {
+                                break;
+                            };
 
                             if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
                                 && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
-                            {
-                                if ipv4_info.get_their_address()
+                                && ipv4_info.get_their_address()
                                     != arrive_ipv4_info.get_sender_address()
-                                {
-                                    break;
-                                }
+                            {
+                                break;
                             }
                             if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
                                 && arrive_ipv4_info.get_destination_address()
                                     != ipv4::IPV4_BROAD_CAST
-                            {
-                                if ipv4_info.get_our_address()
+                                && ipv4_info.get_our_address()
                                     != arrive_ipv4_info.get_destination_address()
-                                {
-                                    break;
-                                }
+                            {
+                                break;
                             }
                         }
                         InternetType::Ipv6(_) => {
@@ -606,7 +606,7 @@ impl SocketManager {
             }
         }
         drop(_lock);
-        return Err(NetworkError::InvalidAddress);
+        Err(NetworkError::InvalidAddress)
     }
 
     pub(super) fn tcp_update_status<F>(
@@ -634,25 +634,23 @@ impl SocketManager {
                     match &e.layer_info.internet {
                         InternetType::None => { /* Check: OK */ }
                         InternetType::Ipv4(ipv4_info) => {
-                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
+                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {
+                                break;
+                            };
                             if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
                                 && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
-                            {
-                                if ipv4_info.get_their_address()
+                                && ipv4_info.get_their_address()
                                     != arrive_ipv4_info.get_sender_address()
-                                {
-                                    break;
-                                }
+                            {
+                                break;
                             }
                             if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
                                 && arrive_ipv4_info.get_destination_address()
                                     != ipv4::IPV4_BROAD_CAST
-                            {
-                                if ipv4_info.get_our_address()
+                                && ipv4_info.get_our_address()
                                     != arrive_ipv4_info.get_destination_address()
-                                {
-                                    break;
-                                }
+                            {
+                                break;
                             }
                         }
                         InternetType::Ipv6(_) => {
@@ -661,8 +659,7 @@ impl SocketManager {
                     }
                     drop(_lock);
                     let _socket_lock = e.lock.lock();
-                    let result =
-                        update_function(tcp_info).and_then(|active| Ok(e.is_active = active));
+                    let result = update_function(tcp_info).map(|active| e.is_active = active);
                     let _ = e.wait_queue.wakeup_all();
                     drop(_socket_lock);
                     return result;
@@ -671,7 +668,7 @@ impl SocketManager {
         }
         drop(_lock);
         pr_debug!("Failed to search valid socket.");
-        return Err(NetworkError::InvalidAddress);
+        Err(NetworkError::InvalidAddress)
     }
 
     pub(super) fn tcp_data_receive_handler<F>(
@@ -700,25 +697,23 @@ impl SocketManager {
                     match &e.layer_info.internet {
                         InternetType::None => { /* Check: OK */ }
                         InternetType::Ipv4(ipv4_info) => {
-                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {break;};
+                            let InternetType::Ipv4(arrive_ipv4_info) = &internet_info else {
+                                break;
+                            };
                             if ipv4_info.get_their_address() != ipv4::IPV4_ADDRESS_ANY
                                 && ipv4_info.get_their_address() != ipv4::IPV4_BROAD_CAST
-                            {
-                                if ipv4_info.get_their_address()
+                                && ipv4_info.get_their_address()
                                     != arrive_ipv4_info.get_sender_address()
-                                {
-                                    break;
-                                }
+                            {
+                                break;
                             }
                             if ipv4_info.get_our_address() != ipv4::IPV4_ADDRESS_ANY
                                 && arrive_ipv4_info.get_destination_address()
                                     != ipv4::IPV4_BROAD_CAST
-                            {
-                                if ipv4_info.get_our_address()
+                                && ipv4_info.get_our_address()
                                     != arrive_ipv4_info.get_destination_address()
-                                {
-                                    break;
-                                }
+                            {
+                                break;
                             }
                         }
                         InternetType::Ipv6(_) => {
@@ -752,7 +747,7 @@ impl SocketManager {
         }
         drop(_lock);
         pr_debug!("Failed to search valid socket.");
-        return Err(NetworkError::InvalidAddress);
+        Err(NetworkError::InvalidAddress)
     }
 
     fn _calc_hash_number_of_list_ip(

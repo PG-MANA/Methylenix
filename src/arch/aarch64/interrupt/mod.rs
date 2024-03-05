@@ -143,7 +143,7 @@ impl InterruptManager {
         }
         drop(_lock);
         drop(_self_lock);
-        return Ok(interrupt_id as usize);
+        Ok(interrupt_id as usize)
     }
 
     pub fn setup_msi_interrupt(
@@ -174,11 +174,11 @@ impl InterruptManager {
         let (address, data) = gic_distributor.get_pending_register_address_and_data(interrupt_id);
 
         drop(_self_lock);
-        return Ok(MsiInfo {
+        Ok(MsiInfo {
             message_address: address.to_usize() as u64,
             message_data: data as u64,
             interrupt_id: interrupt_id as usize,
-        });
+        })
     }
 
     /// Save current the interrupt status and disable interrupt
@@ -223,7 +223,7 @@ impl InterruptManager {
     #[allow(dead_code)]
     fn reschedule_ipi_handler(_: usize) -> bool {
         /* Do nothing */
-        return true;
+        true
     }
 
     fn send_eoi(&self, index: u32, group: GicV3Group) {

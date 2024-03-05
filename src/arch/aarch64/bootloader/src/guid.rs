@@ -3,8 +3,6 @@
 //!
 //! This file is from kernel/collections/guid.rs
 
-use core::fmt::Formatter;
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(C)]
 pub struct Guid {
@@ -13,9 +11,8 @@ pub struct Guid {
     pub d3: u16,
     pub d4: [u8; 8],
 }
-
 impl core::fmt::Display for Guid {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
             self.d1,

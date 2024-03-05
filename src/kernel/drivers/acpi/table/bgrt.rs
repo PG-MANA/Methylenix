@@ -50,7 +50,7 @@ impl AcpiTable for BgrtManager {
         }
         let bgrt_vm_address = remap_table!(vm_address, bgrt.length);
         self.base_address = bgrt_vm_address;
-        return Ok(());
+        Ok(())
     }
 }
 

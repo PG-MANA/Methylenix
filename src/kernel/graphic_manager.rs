@@ -133,7 +133,7 @@ impl GraphicManager {
         let mut frame_buffer_manager = self.graphic.lock().unwrap();
         let frame_buffer_size = frame_buffer_manager.get_frame_buffer_size();
 
-        for c in s.chars().into_iter() {
+        for c in s.chars() {
             if c == '\n' {
                 cursor.x = 0;
                 cursor.y += font_manager.get_max_font_height();

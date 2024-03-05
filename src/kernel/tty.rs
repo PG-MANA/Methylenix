@@ -86,7 +86,7 @@ impl TtyManager {
             unimplemented!();
         } else {
             self.output_driver = Some(driver);
-            return true;
+            true
         }
     }
 
@@ -107,14 +107,14 @@ impl TtyManager {
             //return Err(fmt::Error {});
         }
 
-        for c in s.bytes().into_iter() {
+        for c in s.bytes() {
             if !self.output_queue.enqueue(c) {
                 self._flush()?;
                 if !self.output_queue.enqueue(c) {
                     return Err(fmt::Error {});
                 }
             }
-            if c == '\n' as u8 {
+            if c == b'\n' {
                 self._flush()?;
             }
         }
@@ -162,7 +162,7 @@ impl TtyManager {
         let old = self.text_color;
         self.text_color = (foreground_color, background_color);
         drop(_lock);
-        return Some(old);
+        Some(old)
     }
 
     pub fn open_tty_as_file(&'static mut self, permission: u8) -> Result<File, ()> {
@@ -193,7 +193,7 @@ impl FileOperationDriver for TtyManager {
                 return Ok(MSize::new(read_size));
             }
         }
-        return Ok(length);
+        Ok(length)
     }
 
     fn write(

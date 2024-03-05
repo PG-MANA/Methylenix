@@ -75,7 +75,7 @@ enum IstIndex {
 }
 
 impl InterruptManager {
-    pub const LIMIT_IDT: u16 = 0x100 * (core::mem::size_of::<idt::GateDescriptor>() as u16) - 1;
+    pub const LIMIT_IDT: u16 = 0x100 * (core::mem::size_of::<GateDescriptor>() as u16) - 1;
 
     /// Create InterruptManager with invalid data.
     ///
@@ -149,7 +149,7 @@ impl InterruptManager {
     /// Init this manager.
     ///
     /// This function alloc page from memory manager and
-    /// fills all of IDT converted from the allocated page with a invalid handler.
+    /// fills all of IDT converted from the allocated page with an invalid handler.
     /// After that, this also init LocalApicManager.
     pub fn init(&mut self, kernel_code_segment: u16, user_code_segment: u16) {
         let _lock = self.lock.lock();
@@ -163,13 +163,12 @@ impl InterruptManager {
         unsafe { self.flush() };
         drop(_lock);
         self.init_ipi();
-        return;
     }
 
     /// Init this manager by copying some data from given manager.
     ///
     /// This function alloc page from memory manager and
-    /// fills all of IDT converted from the allocated page with a invalid handler.
+    /// fills all of IDT converted from the allocated page with an invalid handler.
     /// After that, this also init LocalApicManager.
     /// This will be used to init the application processors.
     /// GDT and TSS Descriptor must be valid.
@@ -184,7 +183,6 @@ impl InterruptManager {
             .init_from_other_manager(original.get_local_apic_manager());
         unsafe { self.flush() };
         drop(_lock);
-        return;
     }
 
     /// Init Inter Processors Interrupt.
@@ -208,7 +206,7 @@ impl InterruptManager {
     unsafe fn flush(&self) {
         let idtr = idt::DescriptorTableRegister {
             limit: InterruptManager::LIMIT_IDT,
-            offset: &IDT as *const _ as u64,
+            offset: core::ptr::addr_of!(IDT) as u64,
         };
         cpu::lidt(&idtr as *const _ as usize);
     }
@@ -308,7 +306,7 @@ impl InterruptManager {
             drop(_lock);
             drop(_self_lock);
         }
-        return Ok(index);
+        Ok(index)
     }
 
     pub fn setup_msi_interrupt(
@@ -321,15 +319,12 @@ impl InterruptManager {
             self.set_device_interrupt_function(function, None, None, 0, is_level_trigger)?;
         let destination_id = self.local_apic.get_apic_id();
         let message_address = 0xfee00000u64 | ((destination_id as u64) << 12);
-        let message_data = ((is_level_trigger as u64) << 15)
-            | (1u64 << 14)
-            | (0b000u64/* Fixed */  << 8)
-            | (interrupt_id as u64);
-        return Ok(MsiInfo {
+        let message_data = ((is_level_trigger as u64) << 15) | (1u64 << 14) | (interrupt_id as u64);
+        Ok(MsiInfo {
             message_address,
             message_data,
             interrupt_id,
-        });
+        })
     }
 
     fn search_available_handler_index() -> Option<usize> {
@@ -341,7 +336,7 @@ impl InterruptManager {
                 return Some(index);
             }
         }
-        return None;
+        None
     }
 
     /// Save current the interrupt status and disable interrupt
@@ -440,7 +435,7 @@ impl InterruptManager {
 
     fn reschedule_ipi_handler(_: usize) -> bool {
         /* Do nothing */
-        return true;
+        true
     }
 
     /// Main handler for interrupt
@@ -450,7 +445,7 @@ impl InterruptManager {
         let address = unsafe { INTERRUPT_HANDLER[index - IDT_DEVICE_MIN] };
 
         if address != 0 {
-            if unsafe { (core::mem::transmute::<usize, fn(usize) -> bool>(address))(index) } {
+            if unsafe { core::mem::transmute::<usize, fn(usize) -> bool>(address)(index) } {
                 if let Some(irq) = Self::index_to_irq(index) {
                     let irq_index = irq >> 3;
                     let irq_offset = irq & 0b111;

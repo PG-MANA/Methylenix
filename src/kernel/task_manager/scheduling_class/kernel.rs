@@ -31,7 +31,7 @@ impl KernelSchedulingClass {
         if priority_level == Self::get_idle_thread_priority() {
             10
         } else {
-            assert!(priority_level >= 80 && priority_level <= 120);
+            assert!((80..=120).contains(&priority_level));
             (200 * (120 - priority_level) as u64 / (number_of_threads as u64 * interval_ms)).max(10)
         }
     }

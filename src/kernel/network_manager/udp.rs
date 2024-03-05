@@ -136,7 +136,7 @@ pub fn create_ipv4_udp_header(
         sender_ipv4_address,
         destination_ipv4_address,
     )?;
-    return Ok(());
+    Ok(())
 }
 
 pub(super) fn udp_ipv4_segment_handler(

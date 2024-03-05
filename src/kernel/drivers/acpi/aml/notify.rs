@@ -12,6 +12,12 @@ pub struct NotifyList {
     list: Mutex<Vec<(NameString, fn(AmlVariable))>>,
 }
 
+impl Default for NotifyList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NotifyList {
     pub fn new() -> Self {
         Self {

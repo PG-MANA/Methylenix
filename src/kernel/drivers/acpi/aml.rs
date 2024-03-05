@@ -3,6 +3,17 @@
 //!
 //! This is the parser for AML.
 
+use alloc::vec::Vec;
+
+use crate::arch::target_arch::device::acpi::osi;
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
+
+pub use self::aml_variable::AmlVariable;
+pub use self::data_object::{eisa_id_to_dword, ConstData, DataRefObject};
+use self::evaluator::Evaluator;
+pub use self::name_object::NameString;
+use self::term_object::TermList;
+
 pub(super) mod aml_variable;
 mod data_object;
 pub(super) mod evaluator;
@@ -16,19 +27,8 @@ mod statement_opcode;
 mod term_object;
 mod variable_tree;
 
-pub use self::aml_variable::{AmlPciConfig, AmlVariable};
-pub use self::data_object::{eisa_id_to_dword, ConstData, DataRefObject};
-use self::evaluator::Evaluator;
-pub use self::name_object::NameString;
-use self::term_object::TermList;
-
-use crate::arch::target_arch::device::acpi::osi;
-
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
-
-use alloc::vec::Vec;
-
 type AcpiInt = usize;
+
 const ACPI_INT_ONES: AcpiInt = opcode::ONES_OP as _;
 
 #[derive(Clone)]
@@ -181,7 +181,7 @@ impl AmlInterpreter {
                 } else {
                     pr_err!("{} is not found.", n);
                     Err(())
-                }
+                };
             }
             Err(e) => {
                 pr_err!("Parsing AML was failed: {:?}", e);
@@ -227,9 +227,9 @@ impl AmlStream {
 
     fn read<T: ?Sized + Copy>(&mut self) -> Result<T, AmlError> {
         self.check_pointer(core::mem::size_of::<T>())?;
-        let d = unsafe { *((self.pointer).to_usize() as *const T) };
+        let d = unsafe { *(self.pointer.to_usize() as *const T) };
         self.pointer += MSize::new(core::mem::size_of::<T>());
-        return Ok(d);
+        Ok(d)
     }
 
     fn read_byte(&mut self) -> Result<u8, AmlError> {

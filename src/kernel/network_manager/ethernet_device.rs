@@ -167,7 +167,7 @@ impl EthernetDeviceManager {
             p += MSize::new(MAX_FRAME_SIZE);
             self.number_of_memory_buffer += 1;
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn add_device(&mut self, d: EthernetDeviceDescriptor) -> usize {
@@ -175,7 +175,7 @@ impl EthernetDeviceManager {
         let device_id = self.device_list.len();
         self.device_list.push(d);
         drop(_lock);
-        return device_id;
+        device_id
     }
 
     pub fn reply_data(
@@ -264,7 +264,7 @@ impl EthernetDeviceManager {
                 cursor.move_next();
             }
         }
-        return result.and_then(|_| Ok(()));
+        result.map(|_| ())
     }
 
     pub fn get_mac_address(&self, device_id: usize) -> Result<MacAddress, NetworkError> {
@@ -275,7 +275,7 @@ impl EthernetDeviceManager {
     }
 
     pub fn update_transmit_status(&mut self, _device_id: usize, id: u32, is_successful: bool) {
-        if self.tx_list.len() == 0 {
+        if self.tx_list.is_empty() {
             return;
         }
         if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
@@ -300,7 +300,7 @@ impl EthernetDeviceManager {
                 if !is_successful {
                     e.result |= 1;
                 }
-                let thread = core::mem::replace(&mut e.thread, None);
+                let thread = e.thread.take();
                 if let Some(mut thread) = thread {
                     if let Err(error) = get_kernel_manager_cluster()
                         .task_manager
@@ -470,7 +470,7 @@ fn create_ethernet_frame(
             break;
         }
     }
-    return Ok(MSize::new(buffer_pointer));
+    Ok(MSize::new(buffer_pointer))
 }
 
 /*

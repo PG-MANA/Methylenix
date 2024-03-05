@@ -2,7 +2,7 @@
 //! Task Run Queue
 //!
 //! This module manages per-cpu run queue.
-//! RunQueue will be usually used only specific cpu, but some methods may be called from other cpu,
+//! RunQueue will usually be used only specific cpu, but some methods may be called from other cpu,
 //! therefore, it has SpinLock.
 
 use super::process_entry::ProcessEntry;
@@ -104,7 +104,7 @@ impl RunQueue {
         let result = self.number_of_threads;
         drop(_lock);
         InterruptManager::restore_local_irq(irq);
-        return result;
+        result
     }
 
     fn get_highest_priority_thread(
@@ -118,7 +118,7 @@ impl RunQueue {
                 return Some(t);
             }
         }
-        return None;
+        None
     }
 
     fn alloc_run_list(
@@ -140,7 +140,7 @@ impl RunQueue {
                 return Ok(());
             }
         }
-        return Err(TaskError::InvalidThreadEntry);
+        Err(TaskError::InvalidThreadEntry)
     }
 
     /// Sleep running thread and switch to next thread.
@@ -165,7 +165,7 @@ impl RunQueue {
         };
         drop(_lock);
         InterruptManager::restore_local_irq(irq);
-        return result;
+        result
     }
 
     /// Set current thread's status to Sleeping and call [Self::schedule].
@@ -182,27 +182,27 @@ impl RunQueue {
         interrupt_flag: Option<StoredIrqData>,
         task_status: TaskStatus,
     ) -> Result<(), TaskError> {
-        let irq = interrupt_flag.unwrap_or_else(|| InterruptManager::save_and_disable_local_irq());
+        let irq = interrupt_flag.unwrap_or_else(InterruptManager::save_and_disable_local_irq);
         let lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let _running_thread_lock = running_thread.lock.lock();
         running_thread.set_task_status(task_status);
         self._schedule(None, Some(irq), Some(lock), Some(_running_thread_lock));
-        return Ok(());
+        Ok(())
     }
 
     /// Get current thread
     ///
     /// This function returns mut reference of current thread.
     ///
-    /// To avoid dead lock of current thread's lock, the interrupt must be disabled.
+    /// To avoid deadlock of current thread's lock, the interrupt must be disabled.
     pub fn get_running_thread(&mut self) -> &mut ThreadEntry {
         assert!(!is_interrupt_enabled());
         unsafe { &mut *self.running_thread.unwrap() }
     }
 
     pub fn get_running_process(&mut self) -> &mut ProcessEntry {
-        unsafe { (&mut *self.running_thread.unwrap()).get_process_mut() }
+        unsafe { (*self.running_thread.unwrap()).get_process_mut() }
     }
 
     pub fn get_running_pid(&self) -> usize {
@@ -226,7 +226,7 @@ impl RunQueue {
         };
         drop(_lock);
         InterruptManager::restore_local_irq(irq);
-        return result;
+        result
     }
 
     fn _add_thread(
@@ -285,9 +285,7 @@ impl RunQueue {
             thread.set_task_status(TaskStatus::Running);
             if self
                 .running_thread
-                .and_then(|r| {
-                    Some(thread.get_priority_level() > unsafe { &*r }.get_priority_level())
-                })
+                .map(|r| thread.get_priority_level() > unsafe { &*r }.get_priority_level())
                 .unwrap_or(false)
             {
                 self.should_recheck_priority = true;
@@ -299,7 +297,7 @@ impl RunQueue {
                 GlobalTimerManager::TIMER_INTERVAL_MS,
             );
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Add thread into this run queue.
@@ -314,13 +312,13 @@ impl RunQueue {
         let result = self._add_thread(thread, false);
         drop(_lock);
         InterruptManager::restore_local_irq(irq);
-        return result;
+        result
     }
 
     /// Add thread into this run queue from **other cpus**.
     ///
     /// This function will add the thread into this run queue.
-    /// The return value indicates if should notify the cpu having this run queue to reschedule.
+    /// The return value indicates if you should notify the cpu having this run queue to reschedule.
     ///
     /// `thread` must be locked.
     pub fn assign_thread(&mut self, thread: &mut ThreadEntry) -> Result<bool, TaskError> {
@@ -330,7 +328,7 @@ impl RunQueue {
         self._add_thread(thread, false)?;
         let thread_priority = thread.get_priority_level();
         let should_reschedule =
-            if let Some(running_thread) = self.running_thread.and_then(|r| Some(unsafe { &*r })) {
+            if let Some(running_thread) = self.running_thread.map(|r| unsafe { &*r }) {
                 let _running_thread_lock = running_thread.lock.lock();
                 let running_thread_priority = running_thread.get_priority_level();
                 if thread_priority < running_thread_priority {
@@ -344,7 +342,7 @@ impl RunQueue {
             };
         drop(_lock);
         InterruptManager::restore_local_irq(irq);
-        return Ok(should_reschedule);
+        Ok(should_reschedule)
     }
 
     pub fn tick(&mut self) {
@@ -378,7 +376,7 @@ impl RunQueue {
         running_thread_lock: Option<SpinLockFlagHolder>,
     ) {
         let interrupt_flag =
-            interrupt_flag.unwrap_or_else(|| InterruptManager::save_and_disable_local_irq());
+            interrupt_flag.unwrap_or_else(InterruptManager::save_and_disable_local_irq);
         let _lock = lock.unwrap_or_else(|| self.lock.lock());
         let get_prev_thread_lock =
             |running_thread: &mut ThreadEntry| -> Option<SpinLockFlagHolder> {

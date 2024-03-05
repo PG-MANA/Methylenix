@@ -72,8 +72,8 @@ pub fn setup_msi(
     )?;
     get_kernel_manager_cluster().pci_manager.write_data(
         pci_dev,
-        usable_capability + 0x0,
+        usable_capability,
         message_control | (1 << 16),
     )?;
-    return Ok(());
+    Ok(())
 }

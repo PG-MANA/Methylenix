@@ -43,7 +43,7 @@ impl AcpiTable for SsdtManager {
 
         let ssdt_vm_address = remap_table!(vm_address, ssdt.length);
         self.base_address = ssdt_vm_address;
-        return Ok(());
+        Ok(())
     }
 }
 

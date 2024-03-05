@@ -1,7 +1,7 @@
 //!
 //! Paging Manager
 //!
-//! This modules treat the paging system of AArch64.
+//! These modules treat the paging system of AArch64.
 //!
 //! This does not handle memory status(which process using what memory area).
 //! This is the back-end of VirtualMemoryManager.
@@ -22,7 +22,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 
 /// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
-pub const PAGE_SIZE: MSize = MSize::from(PAGE_SIZE_USIZE);
+pub const PAGE_SIZE: MSize = MSize::new(PAGE_SIZE_USIZE);
 
 /// Default Page Size, the mainly using 4KiB paging.(Type = usize)
 pub const PAGE_SIZE_USIZE: usize = 0x1000;
@@ -64,7 +64,7 @@ const SHAREABILITY_INNER_SHAREABLE: u64 = 0b11;
 ///
 /// This controls paging system.
 /// This manager does not check if specified address is usable,
-/// that should done by VirtualMemoryManager.
+/// that should be done by VirtualMemoryManager.
 #[derive(Clone)]
 pub struct PageManager {
     page_table: Option<VAddress>,
@@ -125,7 +125,7 @@ impl PageManager {
             DIRECT_MAP_START_ADDRESS = HIGH_MEMORY_START_ADDRESS;
             cpu::set_tcr(tcr_el1);
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn init_user(
@@ -137,11 +137,11 @@ impl PageManager {
         for e in self.get_user_table().unwrap().iter_mut() {
             *e = TableEntry::new();
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn copy_system_area(&mut self, _: &Self) -> Result<(), PagingError> {
-        return Ok(());
+        Ok(())
     }
 
     const fn get_user_table(&self) -> Option<&mut [TableEntry; NUM_OF_TOP_LEVEL_TABLE_ENTRIES]> {
@@ -468,7 +468,7 @@ impl PageManager {
             }
             index += 1;
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Map virtual_address to physical address with size.
@@ -554,7 +554,7 @@ impl PageManager {
     /// If target entry is not exists, this function will ignore it and call [`Self::cleanup_page_table`]
     /// when entry_may_be_deleted == true, otherwise this will return PagingError:PagingError::EntryIsNotFound.
     ///
-    /// This does not delete physical address and huge bit from the entry. it  disable present flag only.
+    /// This does not delete physical address and huge bit from the entry. it disables present flag only.
     /// It helps [`Self::cleanup_page_table`].
     pub fn unassociate_address(
         &self,
@@ -584,7 +584,7 @@ impl PageManager {
     /// If target entry is not exists, this function will return Error:EntryIsNotFound.
     /// When huge table was used and the mapped size is different from expected size, this will return error.
     ///
-    /// This does not delete physical address and huge bit from the entry. it  disable present flag only.
+    /// This does not delete physical address and huge bit from the entry. it disables present flag only.
     pub fn unassociate_address_width_size(
         &self,
         virtual_address: VAddress,
@@ -669,7 +669,7 @@ impl PageManager {
                 return Ok(false);
             }
         }
-        return Ok(true);
+        Ok(true)
     }
 
     /// Clean up the page table.

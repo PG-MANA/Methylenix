@@ -33,7 +33,7 @@ pub(super) struct Fat32Driver {
     bytes_per_sector: u16,
     sectors_per_cluster: u8,
     reserved_sectors: u16,
-    fat_size: u32,
+    fat_sectors: u32,
     number_of_fats: u16,
     root_cluster: u32,
     fat: VAddress,
@@ -65,13 +65,14 @@ pub(super) fn try_mount_file_system(
     });
     let number_of_fats =
         u16::from_le(unsafe { *((first_4k_data.to_usize() + NUM_OF_FATS_OFFSET) as *const u16) });
-    let fat_size =
+    let fat_sectors =
         u32::from_le(unsafe { *((first_4k_data.to_usize() + FAT_SIZE_OFFSET) as *const u32) });
+    let fat_size = (fat_sectors as usize) * (bytes_per_sector as usize);
     let root_cluster =
         u32::from_le(unsafe { *((first_4k_data.to_usize() + ROOT_CLUSTER_OFFSET) as *const u32) });
 
-    let lba_aligned_fat_size = ((fat_size - 1) & (!(partition_info.lba_block_size as u32 - 1)))
-        + partition_info.lba_block_size as u32;
+    let lba_aligned_fat_size = ((fat_size - 1) & (!(partition_info.lba_block_size as usize - 1)))
+        + partition_info.lba_block_size as usize;
 
     pr_debug!(
         "LBA Block Size: {:#X}, FAT Size: {:#X}(Aligned; {:#X}), SectorsPerCluster: {:#X}",
@@ -81,20 +82,19 @@ pub(super) fn try_mount_file_system(
         sectors_per_cluster
     );
 
-    let fat =
-        match alloc_non_linear_pages!(MSize::new(lba_aligned_fat_size as usize).page_align_up()) {
-            Ok(a) => a,
-            Err(e) => {
-                pr_err!("Failed to allocate memory for FAT: {:?}", e);
-                Err(e)?
-            }
-        };
+    let fat = match alloc_non_linear_pages!(MSize::new(lba_aligned_fat_size).page_align_up()) {
+        Ok(a) => a,
+        Err(e) => {
+            pr_err!("Failed to allocate memory for FAT: {:?}", e);
+            Err(e)?
+        }
+    };
     if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
         partition_info.device_id,
         fat,
         partition_info.starting_lba
             + (number_of_reserved_sectors as u64) * (bytes_per_sector as u64)
-                / (partition_info.lba_block_size as u64),
+                / (partition_info.lba_block_size),
         (lba_aligned_fat_size as u64 / partition_info.lba_block_size).max(1),
     ) {
         let _ = free_pages!(fat);
@@ -105,14 +105,14 @@ pub(super) fn try_mount_file_system(
         bytes_per_sector,
         sectors_per_cluster,
         reserved_sectors: number_of_reserved_sectors,
-        fat_size,
+        fat_sectors,
         number_of_fats,
         root_cluster,
         fat,
     };
 
     fat32_driver.list_files(partition_info, root_cluster, 0); // Debug
-    return Ok((
+    Ok((
         fat32_driver,
         Guid::new(
             u16::from_le(unsafe {
@@ -125,7 +125,7 @@ pub(super) fn try_mount_file_system(
             0,
             0,
         ),
-    ));
+    ))
 }
 
 impl PartitionManager for Fat32Driver {
@@ -146,7 +146,7 @@ impl PartitionManager for Fat32Driver {
         file_info.set_permission(all_permission, all_permission, all_permission);
         file_info.set_attribute_directory();
 
-        return Ok(());
+        Ok(())
     }
 
     fn search_file(
@@ -297,7 +297,7 @@ impl PartitionManager for Fat32Driver {
             }
             reading_cluster = next_cluster!(reading_cluster);
         }
-        return Ok(MSize::new(buffer_pointer));
+        Ok(MSize::new(buffer_pointer))
     }
 
     fn close_file(&self, _: &PartitionInfo, _file_info: &mut FileInfo) {}
@@ -416,7 +416,7 @@ impl Fat32Driver {
             }
             break;
         }
-        return Err(FileError::FileNotFound);
+        Err(FileError::FileNotFound)
     }
 
     fn list_files(&self, partition_info: &PartitionInfo, mut cluster: u32, indent: usize) {
@@ -510,7 +510,6 @@ impl Fat32Driver {
             }
             break;
         }
-        return;
     }
 
     fn read_sectors(
@@ -534,7 +533,7 @@ impl Fat32Driver {
 
     fn cluster_to_sector(&self, cluster: u32) -> u32 {
         (self.reserved_sectors as u32)
-            + (self.number_of_fats as u32) * self.fat_size
+            + (self.number_of_fats as u32) * self.fat_sectors
             + (cluster - 2) * (self.sectors_per_cluster as u32)
     }
 

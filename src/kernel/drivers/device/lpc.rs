@@ -25,13 +25,13 @@ impl PciDeviceDriver for LpcManager {
                 pr_err!("Failed to enable bit: {:?}", e);
                 return Err(());
             }
-            return Ok(());
+            Ok(())
         };
         enable_bit(Self::ACPI_CONTROL, Self::ACPI_ENABLE)?;
         enable_bit(Self::GPIO_CONTROL, Self::GPIO_ENABLE)?;
         /* Enable(62h and 66h) Micro controller in LPC_EN */
         enable_bit(Self::LPC_I, Self::MC_LPC_EN << 16)?;
-        return Ok(());
+        Ok(())
     }
 }
 

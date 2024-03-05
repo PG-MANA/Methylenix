@@ -35,7 +35,8 @@ type ArgumentVariables = [Arc<Mutex<AmlVariable>>; Evaluator::NUMBER_OF_ARGUMENT
 #[derive(Clone)]
 pub struct Evaluator {
     current_root_term_list: TermList,
-    root_term_list: Arc<Vec<TermList>>, /* For SSDT */
+    root_term_list: Arc<Vec<TermList>>,
+    /* For SSDT */
     variable_tree: AmlVariableTree,
     original_searching_name: Option<NameString>,
     term_list_hierarchy: Vec<TermList>,
@@ -87,7 +88,7 @@ impl Evaluator {
         let dlm = AmlVariable::ConstData(ConstData::Byte(0 /* Temporary fix */));
         self.variable_tree.add_data(DLM_NAME, dlm, true)?;
 
-        return Ok(());
+        Ok(())
     }
 
     fn evaluate_sta_and_ini_in_device(&mut self, device: Device) -> Result<(), AmlError> {
@@ -129,16 +130,13 @@ impl Evaluator {
                     }
                     _ => {
                         pr_err!("Expected a method, but found {:?}", &*locked_sta_object);
-                        match locked_sta_object.to_int() {
-                            Ok(s) => s,
-                            Err(e) => {
-                                pr_err!(
-                                    "Failed to convert to an integer: {:?}, skip this device.",
-                                    e
-                                );
-                                STA_FUNCTIONAL_BIT
-                            }
-                        }
+                        locked_sta_object.to_int().unwrap_or_else(|e| {
+                            pr_err!(
+                                "Failed to convert to an integer: {:?}, skip this device.",
+                                e
+                            );
+                            STA_FUNCTIONAL_BIT
+                        })
                     }
                 }
             }
@@ -241,7 +239,7 @@ impl Evaluator {
                 TermObj::ExpressionOpcode(_) => { /* Ignore */ }
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Initialize all devices by evaluating all _STA and _INI methods.
@@ -257,7 +255,7 @@ impl Evaluator {
             self.walk_all_devices(self.current_root_term_list.clone())?;
         }
         self.current_root_term_list = backup;
-        return Ok(());
+        Ok(())
     }
 
     pub(super) fn init_local_variables_and_argument_variables(
@@ -293,7 +291,7 @@ impl Evaluator {
     ) -> Result<Option<Arc<Mutex<AmlVariable>>>, AmlError> {
         if !term_list.get_scope_name().is_child(name)
             && search_scope
-                .and_then(|s| Some(!term_list.get_scope_name().is_child(s)))
+                .map(|s| !term_list.get_scope_name().is_child(s))
                 .unwrap_or(true)
         {
             return Ok(None);
@@ -302,9 +300,7 @@ impl Evaluator {
             .move_current_scope(term_list.get_scope_name())?;
 
         let is_in_search_scope = search_scope
-            .and_then(|s| {
-                Some(term_list.get_scope_name() == s || term_list.get_scope_name().is_child(s))
-            })
+            .map(|s| term_list.get_scope_name() == s || term_list.get_scope_name().is_child(s))
             .unwrap_or(true);
         let get_next_term_obj =
             |t: &mut TermList, p: &mut Self| -> Result<Option<TermObj>, AmlError> {
@@ -371,8 +367,8 @@ impl Evaluator {
                                 || s.get_name().suffix_search(name)
                                 || s.get_name().is_child(name)
                                 || search_scope
-                                    .and_then(|scope| {
-                                        Some(scope == s.get_name() || s.get_name().is_child(scope))
+                                    .map(|scope| {
+                                        scope == s.get_name() || s.get_name().is_child(scope)
                                     })
                                     .unwrap_or(false)
                             {
@@ -432,13 +428,14 @@ impl Evaluator {
                 TermObj::StatementOpcode(s) => {
                     if let StatementOpcode::DefIfElse(_i_e) = s {
                         /* Currently ignore it*/
-                    } else { /* Ignore */
+                    } else {
+                        /* Ignore */
                     }
                 }
                 TermObj::ExpressionOpcode(_) => { /* Ignore */ }
             }
         }
-        return Ok(None);
+        Ok(None)
     }
 
     fn search_aml_variable_by_parsing_named_object(
@@ -455,7 +452,7 @@ impl Evaluator {
         if let Some(named_object_name) = named_object.get_name() {
             if name == named_object_name
                 || name_single_relative
-                    .and_then(|n| Some(is_in_current_scope && named_object_name.suffix_search(n)))
+                    .map(|n| is_in_current_scope && named_object_name.suffix_search(n))
                     .unwrap_or(false)
             {
                 let v = self.eval_named_object(name, named_object, current_scope)?;
@@ -478,9 +475,7 @@ impl Evaluator {
                         let v = self.eval_named_object(name, named_object, current_scope)?;
                         return Ok(Some(self.variable_tree.add_data(name.clone(), v, false)?));
                     } else if name_single_relative
-                        .and_then(|relative_name| {
-                            Some(is_in_current_scope && n.suffix_search(relative_name))
-                        })
+                        .map(|relative_name| is_in_current_scope && n.suffix_search(relative_name))
                         .unwrap_or(false)
                     {
                         let v = self.eval_named_object(name, named_object, current_scope)?;
@@ -578,7 +573,7 @@ impl Evaluator {
             &mut term_list_hierarchy_backup,
             &mut self.term_list_hierarchy,
         );
-        return Ok(None);
+        Ok(None)
     }
 
     /// Find Element with parsing Field and return the object including it.
@@ -627,7 +622,7 @@ impl Evaluator {
             && self
                 .term_list_hierarchy
                 .last()
-                .and_then(|s| Some(!s.get_scope_name().is_child(name)))
+                .map(|s| !s.get_scope_name().is_child(name))
                 .unwrap_or(false)
             && preferred_search_scope.is_none()
         {
@@ -701,7 +696,7 @@ impl Evaluator {
 
             let search_target_name = single_name
                 .as_ref()
-                .and_then(|n| Some(n.get_full_name_path(term_list.get_scope_name(), false)))
+                .map(|n| n.get_full_name_path(term_list.get_scope_name(), false))
                 .unwrap_or_else(|| name.clone());
 
             match self.search_aml_variable_by_parsing_term_list(
@@ -743,7 +738,7 @@ impl Evaluator {
 
         match self
             .variable_tree
-            .find_data_from_root(&single_name.as_ref().unwrap_or(name))
+            .find_data_from_root(single_name.as_ref().unwrap_or(name))
         {
             Ok(None) | Err(AmlError::NestedSearch) => { /* Continue */ }
             Ok(Some(v)) => {
@@ -776,7 +771,7 @@ impl Evaluator {
         }
 
         match self.search_aml_variable_by_parsing_term_list(
-            &single_name.as_ref().unwrap_or(name),
+            single_name.as_ref().unwrap_or(name),
             single_name.as_ref(),
             self.current_root_term_list.clone(),
             Some(&search_scope),
@@ -829,7 +824,7 @@ impl Evaluator {
         }
 
         restore_status(self, current_term_list_back_up)?;
-        return Err(AmlError::InvalidName(name.clone()));
+        Err(AmlError::InvalidName(name.clone()))
     }
 
     fn move_into_object(
@@ -882,7 +877,7 @@ impl Evaluator {
         }
 
         self.current_root_term_list = current_term_list_back_up;
-        return Err(AmlError::InvalidName(object_name.clone()));
+        Err(AmlError::InvalidName(object_name.clone()))
     }
 
     fn _move_into_device(
@@ -963,7 +958,7 @@ impl Evaluator {
                 TermObj::ExpressionOpcode(_) => { /* Ignore */ }
             }
         }
-        return Ok(false);
+        Ok(false)
     }
 
     pub fn move_into_device(&mut self, hid: &[u8; 7]) -> Result<bool, AmlError> {
@@ -989,7 +984,7 @@ impl Evaluator {
             }
         }
         self.current_root_term_list = backup;
-        return Ok(false);
+        Ok(false)
     }
 
     pub fn find_method_argument_count(
@@ -1023,7 +1018,7 @@ impl Evaluator {
                     f.get_source_buffer().clone(),
                     current_scope,
                 )?;
-                return if f.is_bit_field() {
+                if f.is_bit_field() {
                     let index = self
                         .eval_integer_expression(f.get_index().clone(), current_scope)?
                         .to_int()?;
@@ -1055,7 +1050,7 @@ impl Evaluator {
                         num_of_bytes: field_size,
                         should_lock_global_lock: false,
                     }))
-                };
+                }
             }
             NamedObject::DefDataRegion(d) => {
                 pr_err!("DefDataRegion is not implemented: {:?}", d);
@@ -1325,7 +1320,7 @@ impl Evaluator {
     ) -> Result<Arc<Mutex<AmlVariable>>, AmlError> {
         match super_name {
             SuperName::SimpleName(simple_name) => match simple_name {
-                SimpleName::NameString(name) => self.search_aml_variable(&name, None, false),
+                SimpleName::NameString(name) => self.search_aml_variable(name, None, false),
                 SimpleName::ArgObj(c) => {
                     if *c as usize >= Self::NUMBER_OF_ARGUMENT_VARIABLES {
                         pr_err!("ArgObj({}) is out of index.", c);
@@ -1414,7 +1409,7 @@ impl Evaluator {
         current_scope: &NameString,
     ) -> Result<Arc<(AtomicU8, u8)>, AmlError> {
         let aml_variable =
-            &self.create_aml_variable_reference_from_super_name(&mutex_name, current_scope)?;
+            &self.create_aml_variable_reference_from_super_name(mutex_name, current_scope)?;
         let locked_aml_variable = aml_variable.try_lock().or(Err(AmlError::MutexError))?;
         let mutex_object = if let AmlVariable::Mutex(m) = &*locked_aml_variable {
             m.clone()
@@ -1493,7 +1488,7 @@ impl Evaluator {
                 Err(e) => Err(e)?,
             }
         }
-        return Ok(v);
+        Ok(v)
     }
 
     fn eval_package(
@@ -1622,7 +1617,7 @@ impl Evaluator {
                 },
             },
         }
-        return Ok(());
+        Ok(())
     }
 
     fn eval_bool_expression(
@@ -1898,8 +1893,8 @@ impl Evaluator {
                 Ok(result_aml_variable)
             }
             ExpressionOpcode::DefFindSetLeftBit((operand, target)) => {
-                let operand_data:usize /* To detect error when changed the return type of to_int() */
-                    = self.eval_integer_expression(operand,current_scope)?.to_int()?;
+                let operand_data: usize /* To detect error when changed the return type of to_int() */
+                    = self.eval_integer_expression(operand, current_scope)?.to_int()?;
                 let result = AmlVariable::ConstData(ConstData::Byte(
                     (usize::BITS - operand_data.leading_zeros()) as u8,
                 ));
@@ -1909,8 +1904,8 @@ impl Evaluator {
                 Ok(result)
             }
             ExpressionOpcode::DefFindSetRightBit((operand, target)) => {
-                let operand_data:usize /* To detect error when changed the return type of to_int() */
-                    = self.eval_integer_expression(operand,current_scope)?.to_int()?;
+                let operand_data: usize /* To detect error when changed the return type of to_int() */
+                    = self.eval_integer_expression(operand, current_scope)?.to_int()?;
                 let result = AmlVariable::ConstData(ConstData::Byte(if operand_data == 0 {
                     0
                 } else {
@@ -1992,10 +1987,10 @@ impl Evaluator {
                 };
                 let result = match constant_data {
                     AmlVariable::ConstData(c) => c,
-                    AmlVariable::String(s) if s.len() > 0 => {
+                    AmlVariable::String(s) if !s.is_empty() => {
                         ConstData::QWord(parse_integer_from_buffer(s.as_bytes())? as _)
                     }
-                    AmlVariable::Buffer(b) if b.len() > 0 => {
+                    AmlVariable::Buffer(b) if !b.is_empty() => {
                         let mut result = 0u64;
                         for index in 0..b.len().min(8) {
                             result |= (b[index] as u64) << index;
@@ -2153,7 +2148,7 @@ impl Evaluator {
                 }
                 ReferenceTypeOpcode::UserTermObj => {
                     pr_err!("UserTermObj is not supported.");
-                    return Err(AmlError::InvalidType);
+                    Err(AmlError::InvalidType)
                 }
             },
             ExpressionOpcode::DefMid(_) => {
@@ -2175,17 +2170,17 @@ impl Evaluator {
                             result.push((data & 0xff) as u8);
                             data >>= 8;
                         }
-                        if result.len() == 0 {
+                        if result.is_empty() {
                             result.push(0);
                         }
                         result
                     }
-                    AmlVariable::String(s) if s.len() > 0 => {
+                    AmlVariable::String(s) if !s.is_empty() => {
                         let mut result = Vec::from(s);
                         result.push(0);
                         result
                     }
-                    AmlVariable::String(s) if s.len() == 0 => Vec::new(),
+                    AmlVariable::String(s) if s.is_empty() => Vec::new(),
                     AmlVariable::Buffer(b) => b,
                     _ => Err(AmlError::InvalidOperation)?,
                 };
@@ -2210,14 +2205,14 @@ impl Evaluator {
                         format!("{}", c.to_int())
                     }
                     AmlVariable::String(s) => s,
-                    AmlVariable::Buffer(b) if b.len() > 0 => {
+                    AmlVariable::Buffer(b) if !b.is_empty() => {
                         let mut result = format!("{}", b[0]);
                         for e in b.iter().skip(1) {
                             result.push_str(format!(",{}", e).as_str());
                         }
                         result
                     }
-                    AmlVariable::Buffer(b) if b.len() == 0 => String::new(),
+                    AmlVariable::Buffer(b) if b.is_empty() => String::new(),
                     _ => Err(AmlError::InvalidOperation)?,
                 };
                 if !target.is_null() {
@@ -2241,14 +2236,14 @@ impl Evaluator {
                         format!("{:X}", c.to_int())
                     }
                     AmlVariable::String(s) => s,
-                    AmlVariable::Buffer(b) if b.len() > 0 => {
+                    AmlVariable::Buffer(b) if !b.is_empty() => {
                         let mut result = format!("{:X}", b[0]);
                         for e in b.iter().skip(1) {
                             result.push_str(format!(",{:X}", e).as_str());
                         }
                         result
                     }
-                    AmlVariable::Buffer(b) if b.len() == 0 => String::new(),
+                    AmlVariable::Buffer(b) if b.is_empty() => String::new(),
                     _ => Err(AmlError::InvalidOperation)?,
                 };
                 if !target.is_null() {
@@ -2272,13 +2267,13 @@ impl Evaluator {
                     .to_int()?;
 
                 let result = match constant_data {
-                    AmlVariable::Buffer(mut b) if b.len() > 0 => {
+                    AmlVariable::Buffer(mut b) if !b.is_empty() => {
                         if len != 0 && len != ACPI_INT_ONES {
                             b.truncate(len);
                         };
                         String::from_utf8(b).or(Err(AmlError::InvalidOperation))?
                     }
-                    AmlVariable::Buffer(b) if b.len() == 0 => String::new(),
+                    AmlVariable::Buffer(b) if b.is_empty() => String::new(),
                     _ => Err(AmlError::InvalidOperation)?,
                 };
                 if !target.is_null() {
@@ -2336,7 +2331,7 @@ impl Evaluator {
                 notify_value
             );
         }
-        return Ok(());
+        Ok(())
     }
 
     fn release_mutex(
@@ -2344,15 +2339,15 @@ impl Evaluator {
         mutex_name: &SuperName,
         current_scope: &NameString,
     ) -> Result<(), AmlError> {
-        self.search_mutex_object(&mutex_name, current_scope)?
+        self.search_mutex_object(mutex_name, current_scope)?
             .0
             .fetch_sub(1, Ordering::Release);
-        return Ok(());
+        Ok(())
     }
 
     fn reset_event(&mut self, event: &SuperName) -> Result<(), AmlError> {
         pr_err!("Resetting {:?} is not supported currently.", event);
-        return Err(AmlError::UnsupportedType);
+        Err(AmlError::UnsupportedType)
     }
 
     fn eval_break_point(&self, term_list: &TermList) {
@@ -2361,12 +2356,12 @@ impl Evaluator {
 
     fn eval_fatal(&self, fatal: &Fatal, term_list: &TermList) -> Result<(), AmlError> {
         pr_err!("AML Fatal: {:?} ({:?})", fatal, term_list);
-        return Ok(());
+        Ok(())
     }
 
     fn eval_signal(&self, signal: &SuperName) -> Result<(), AmlError> {
         pr_err!("Signal to {:?} is not supported currently.", signal);
-        return Err(AmlError::UnsupportedType);
+        Err(AmlError::UnsupportedType)
     }
 
     fn eval_sleep(
@@ -2529,7 +2524,7 @@ impl Evaluator {
                 }
             }
         }
-        return Ok(None);
+        Ok(None)
     }
 
     fn eval_builtin_method(
@@ -2622,7 +2617,7 @@ impl Evaluator {
         if self
             .term_list_hierarchy
             .pop()
-            .and_then(|t| Some(&t != method.get_term_list()))
+            .map(|t| &t != method.get_term_list())
             .unwrap_or(true)
         {
             pr_err!("TermListHierarchy may be broken.");
@@ -2636,7 +2631,7 @@ impl Evaluator {
             &mut new_argument_variables,
         );
 
-        return result;
+        result
     }
 
     pub fn eval_method(
@@ -2664,7 +2659,7 @@ impl Evaluator {
         self.variable_tree.restore_current_scope(tree_backup);
         self.current_root_term_list = current_term_list_backup;
 
-        return result;
+        result
     }
 
     fn eval_method_invocation(

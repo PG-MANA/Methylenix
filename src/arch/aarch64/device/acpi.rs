@@ -10,7 +10,7 @@ use crate::kernel::sync::spin_lock::Mutex;
 use alloc::sync::Arc;
 
 pub fn setup_interrupt(_acpi_manager: &AcpiManager) -> bool {
-    return true;
+    true
     //let irq = acpi_manager.get_fadt_manager().get_sci_int();
 }
 
@@ -19,7 +19,7 @@ fn acpi_event_handler(_: usize) -> bool {
     get_kernel_manager_cluster()
         .acpi_event_manager
         .sci_handler();
-    return true;
+    true
 }
 
 #[inline]

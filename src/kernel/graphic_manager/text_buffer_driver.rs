@@ -36,6 +36,6 @@ impl TextBufferDriver for DummyTextBuffer {
                 return false;
             }
         }
-        return true;
+        true
     }
 }

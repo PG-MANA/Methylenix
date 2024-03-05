@@ -1,7 +1,7 @@
 //!
 //! Local APIC Timer Manager
 //!
-//! Local APIC Timer is 32bit programmable timer and it is available when Local APIC is enabled.
+//! Local APIC Timer is 32bit programmable timer, and it is available when Local APIC is enabled.
 //!
 //! It has four registers: divide configuration, initial count, current count, LVT timer.
 //!
@@ -93,12 +93,12 @@ impl LocalApicTimer {
             .arch_depend_data
             .local_apic_timer
             .write_deadline();
-        return true;
+        true
     }
 
     fn calculate_next_reload_value(&self, ms: u64) -> (u64, bool) {
         self.reload_value
-            .overflowing_add((self.frequency as u64 / 1000) * ms as u64)
+            .overflowing_add((self.frequency as u64 / 1000) * ms)
     }
 
     /// Reset timer deadline for next interrupt
@@ -135,7 +135,7 @@ impl LocalApicTimer {
             return false;
         }
         unsafe { wrmsr(Self::TSC_DEADLINE_MSR, self.reload_value) };
-        return true;
+        true
     }
 
     /// Enable TSC-Deadline mode.
@@ -184,7 +184,7 @@ impl LocalApicTimer {
         );
         self.is_deadline_mode_enabled = true;
         InterruptManager::restore_local_irq(irq);
-        return true;
+        true
     }
 
     /// Set up interruption of timer.
@@ -219,7 +219,7 @@ impl LocalApicTimer {
         let difference = self.get_difference(u32::MAX as usize, end as usize);
         self.frequency = difference * 20;
         InterruptManager::restore_local_irq(irq);
-        return true;
+        true
     }
 
     /// Set the register to start interruption.
@@ -251,7 +251,7 @@ impl LocalApicTimer {
         }
         self.is_interrupt_enabled = true;
         InterruptManager::restore_local_irq(irq);
-        return true;
+        true
     }
 
     /// Return interrupt status.
@@ -273,7 +273,7 @@ impl LocalApicTimer {
             LocalApicRegisters::TimerInitialCount,
             self.reload_value as u32,
         );
-        return true;
+        true
     }
 }
 
@@ -298,7 +298,7 @@ impl Timer for LocalApicTimer {
     }
 
     fn get_difference(&self, earlier: usize, later: usize) -> usize {
-        assert_eq!(self.is_deadline_mode_enabled, false);
+        assert!(!self.is_deadline_mode_enabled);
         if earlier <= later {
             earlier + (self.reload_value as usize - later)
         } else {

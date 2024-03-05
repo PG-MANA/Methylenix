@@ -45,13 +45,13 @@ pub fn load_and_execute(
         Ok(v) => v,
         Err(e) => {
             pr_err!("Failed to allocate memory: {:?}", e);
-            let _ = file_descriptor.close();
+            file_descriptor.close();
             return Err(());
         }
     };
     if let Err(e) = file_descriptor.read(head_data, head_read_size) {
         pr_err!("Failed to read data: {:?}", e);
-        let _ = file_descriptor.close();
+        file_descriptor.close();
         let _ = kfree!(head_data, head_read_size);
         return Err(());
     }
@@ -60,7 +60,7 @@ pub fn load_and_execute(
         Ok(e) => e,
         Err(e) => {
             pr_err!("File is not valid ELF file: {:?}", e);
-            let _ = file_descriptor.close();
+            file_descriptor.close();
             let _ = kfree!(head_data, head_read_size);
             return Err(());
         }
@@ -70,7 +70,7 @@ pub fn load_and_execute(
         || !header.is_lsb()
     {
         pr_err!("The file is not executable.");
-        let _ = file_descriptor.close();
+        file_descriptor.close();
         let _ = kfree!(head_data, head_read_size);
         return Err(());
     }
@@ -79,7 +79,7 @@ pub fn load_and_execute(
         > head_read_size.to_usize()
     {
         pr_err!("Program Header is too far from head(TODO: support...)");
-        let _ = file_descriptor.close();
+        file_descriptor.close();
         let _ = kfree!(head_data, head_read_size);
         return Err(());
     }
@@ -91,7 +91,7 @@ pub fn load_and_execute(
         Ok(e) => e,
         Err(e) => {
             pr_err!("Failed to create the user process: {:?}", e);
-            let _ = file_descriptor.close();
+            file_descriptor.close();
             let _ = kfree!(head_data, head_read_size);
             return Err(());
         }
@@ -201,7 +201,7 @@ pub fn load_and_execute(
             }
         }
     };
-    let _ = file_descriptor.close();
+    file_descriptor.close();
 
     if result.is_err() {
         let _ = kfree!(head_data, head_read_size);
@@ -253,7 +253,7 @@ pub fn load_and_execute(
     if (ap_offset_from_stack_top & 0b111) != 0 {
         ap_offset_from_stack_top = (ap_offset_from_stack_top & !0b111) + 8;
     }
-    ap_offset_from_stack_top += (1 /* argc */+ 1 /* file_name */ + arguments.len() + 1 + environments.len() + 1)
+    ap_offset_from_stack_top += (1 /* argc */ + 1 /* file_name */ + arguments.len() + 1 + environments.len() + 1)
         * core::mem::size_of::<u64>();
 
     let ap_offset_from_stack_top = ap_offset_from_stack_top;
@@ -263,7 +263,7 @@ pub fn load_and_execute(
 
     /* Write argc */
     unsafe {
-        *(ap as *mut u64) = 1 /* file_name */ +  arguments.len() as u64
+        *(ap as *mut u64) = 1 /* file_name */ + arguments.len() as u64
     };
     ap += core::mem::size_of::<u64>();
 
@@ -282,7 +282,7 @@ pub fn load_and_execute(
         unsafe { *(ap as *mut u64) = (stack_top_address_user - argv_env_pointer) as u64 };
         ap += core::mem::size_of::<u64>();
     }
-    unsafe { *(ap as *mut u64) = 0 as u64 };
+    unsafe { *(ap as *mut u64) = 0u64 };
     ap += core::mem::size_of::<u64>();
 
     /* Write environment variables */
@@ -308,7 +308,7 @@ pub fn load_and_execute(
         unsafe { *(ap as *mut u64) = (stack_top_address_user - argv_env_pointer) as u64 };
         ap += core::mem::size_of::<u64>();
     }
-    unsafe { *(ap as *mut u64) = 0 as u64 };
+    unsafe { *(ap as *mut u64) = 0u64 };
 
     assert!(ap < (stack_top_address - argv_env_pointer));
 
@@ -391,5 +391,5 @@ pub fn load_and_execute(
         pr_err!("Failed to run the thread: {:?}", e);
         return Err(());
     }
-    return Ok(());
+    Ok(())
 }

@@ -54,6 +54,8 @@ impl ContextManager {
         user_ss: u16,
         system_page_table_address: usize,
     ) {
+        const { memory_layout::check_memory_layout() };
+
         self.system_cs = system_cs;
         self.system_ss = system_ss;
         self.user_ss = user_ss;

@@ -65,7 +65,7 @@ impl MemoryManager {
     }
 
     pub fn is_kernel_memory_manager(&self) -> bool {
-        &get_kernel_manager_cluster().kernel_memory_manager as *const _ == self as *const _
+        core::ptr::eq(&get_kernel_manager_cluster().kernel_memory_manager, self)
     }
 
     fn clone_kernel_memory_pages(&mut self) -> Result<(), MemoryError> {
@@ -108,7 +108,7 @@ impl MemoryManager {
             physical_address_to_direct_map(address).to_usize(),
             PAGE_SIZE_USIZE,
         );
-        return Ok(());
+        Ok(())
     }
 
     fn allocate_physical_memory(
@@ -143,7 +143,7 @@ impl MemoryManager {
         user_virtual_memory_manager
             .init_user(&self.virtual_memory_manager, get_physical_memory_manager())?;
 
-        return Ok(Self::new(user_virtual_memory_manager));
+        Ok(Self::new(user_virtual_memory_manager))
     }
 
     fn _alloc_pages(
@@ -199,7 +199,7 @@ impl MemoryManager {
         option: Option<MemoryOptionFlags>,
     ) -> Result<VAddress, MemoryError> {
         self.alloc_pages_with_physical_address(order, permission, option)
-            .and_then(|r| Ok(r.0))
+            .map(|r| r.0)
     }
 
     pub fn alloc_nonlinear_pages(
@@ -260,7 +260,7 @@ impl MemoryManager {
         }
 
         self._clone_kernel_memory_pages_if_needed()?;
-        return Ok(vm_start_address);
+        Ok(vm_start_address)
     }
 
     pub fn free(&mut self, address: VAddress) -> Result<(), MemoryError> {
@@ -274,8 +274,8 @@ impl MemoryManager {
             return Err(e);
         }
         self._clone_kernel_memory_pages_if_needed()?;
-        return Ok(());
-        /* Freeing Physical Memory will be done by Virtual Memory Manager, if it be needed. */
+        Ok(())
+        /* Freeing Physical Memory will be done by Virtual Memory Manager, if it is needed. */
     }
 
     pub fn free_physical_memory(
@@ -391,14 +391,14 @@ impl MemoryManager {
         o: &Option<MemoryOptionFlags>,
     ) -> Result<(), MemoryError> {
         if o.as_ref()
-            .and_then(|o| Some(o.is_for_user() && !p.is_user_accessible()))
+            .map(|o| o.is_for_user() && !p.is_user_accessible())
             .unwrap_or(false)
         {
             pr_err!("User Memory must be accessible from user.");
             return Err(MemoryError::InternalError);
         }
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn set_paging_table(&mut self) {
@@ -413,7 +413,7 @@ impl MemoryManager {
 
     pub fn dump_memory_manager(&self) {
         kprintln!("----Physical Memory Entries Dump----");
-        if let Err(_) = get_physical_memory_manager().dump_memory_entry() {
+        if get_physical_memory_manager().dump_memory_entry().is_err() {
             kprintln!("Failed to dump Physical Memory Manager");
         }
         kprintln!("----Physical Memory Entries Dump End----");

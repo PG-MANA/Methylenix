@@ -69,7 +69,6 @@ impl Scope {
         let pkg_length = PkgLength::parse(stream)?;
         let mut scope_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         scope_stream.change_size(pkg_length.actual_length)?;
         let name = NameString::parse(&mut scope_stream, Some(current_scope))?;
         Ok(Self {

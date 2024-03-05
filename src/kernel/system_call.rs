@@ -63,9 +63,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                 context.get_system_call_arguments(3).unwrap() as usize,
             );
             context.set_system_call_return_value(
-                result
-                    .and_then(|r| Ok(r as u64))
-                    .unwrap_or(SYSCALL_RETURN_ERROR),
+                result.map(|r| r as u64).unwrap_or(SYSCALL_RETURN_ERROR),
             );
         }
         SYSCALL_WRITEV => {
@@ -134,30 +132,29 @@ pub fn system_call_handler(context: &mut ContextData) {
                 }
             };
             let result = file.unwrap().lock().unwrap().read(kernel_buffer, size);
-            if result.is_ok() {
-                if write_data_into_user(
+            if result.is_ok()
+                && write_data_into_user(
                     VAddress::new(context.get_system_call_arguments(2).unwrap() as usize),
                     size,
                     kernel_buffer,
                 )
                 .is_err()
-                {
-                    pr_err!("Failed to copy data into user");
-                    let _ = kfree!(kernel_buffer, size);
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
-                    return;
-                }
+            {
+                pr_err!("Failed to copy data into user");
+                let _ = kfree!(kernel_buffer, size);
+                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                return;
             }
             let _ = kfree!(kernel_buffer, size);
             context.set_system_call_return_value(
                 result
-                    .and_then(|r| Ok(r.to_usize() as u64))
+                    .map(|r| r.to_usize() as u64)
                     .unwrap_or(SYSCALL_RETURN_ERROR),
             );
         }
         SYSCALL_OPEN => {
             const O_RDONLY: u64 = 0;
-            const O_LARGEFILE: u64 = 00100000;
+            const O_LARGEFILE: u64 = 0o0100000;
 
             let mut str_len = 0usize;
             let file_name = context.get_system_call_arguments(1).unwrap() as usize;
@@ -230,7 +227,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             );
             context.set_system_call_return_value(
                 result
-                    .and_then(|r| Ok(r.to_usize() as u64))
+                    .map(|r| r.to_usize() as u64)
                     .unwrap_or(SYSCALL_RETURN_ERROR),
             );
         }
@@ -253,7 +250,7 @@ pub fn system_call_handler(context: &mut ContextData) {
         }
         SYSCALL_ARCH_PRCTL => {
             let v = system_call::syscall_arch_prctl(context);
-            context.set_system_call_return_value(v as u64);
+            context.set_system_call_return_value(v);
         }
         SYSCALL_SET_TID_ADDRESS => {
             pr_debug!(
@@ -537,9 +534,8 @@ fn system_call_write(file: &mut File, data: usize, len: usize) -> Result<usize, 
 
     let result = file.write(kernel_buffer, size);
     let _ = kfree!(kernel_buffer, size);
-    result.and_then(|s| Ok(s.to_usize())).or_else(|err| {
+    result.map(|s| s.to_usize()).map_err(|err| {
         pr_err!("Failed to write: {:?}", err);
-        Err(())
     })
 }
 
@@ -599,7 +595,7 @@ fn system_call_memory_map(
         pr_err!("Failed to allocate memory: {:?}", e);
         return Err(());
     }
-    return Ok(result.unwrap().to_usize());
+    Ok(result.unwrap().to_usize())
 }
 
 fn check_user_address(
@@ -628,7 +624,7 @@ fn read_data_from_user(user_address: VAddress, size: MSize, buffer: VAddress) ->
             size.to_usize(),
         )
     };
-    return Ok(());
+    Ok(())
 }
 
 fn write_data_into_user(user_address: VAddress, size: MSize, buffer: VAddress) -> Result<(), ()> {
@@ -641,5 +637,5 @@ fn write_data_into_user(user_address: VAddress, size: MSize, buffer: VAddress) -
             size.to_usize(),
         )
     };
-    return Ok(());
+    Ok(())
 }

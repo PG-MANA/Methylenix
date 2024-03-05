@@ -170,15 +170,11 @@ impl MultiBootInformation {
             }
             tag += ((unsafe { (*(tag as *const MultibootTag)).size } as usize) + 7) & !7;
         }
-        return mbi;
+        mbi
     }
 
     fn test(address: usize) -> bool {
-        if address & 7 != 0 {
-            false
-        } else {
-            true
-        }
+        address & 7 == 0
     }
 
     fn get_total_size(address: usize) -> usize {

@@ -55,6 +55,12 @@ const TIMER_LIST_FLAGS_RUNNING: u8 = 1 << 1;
 const TIMER_LIST_FLAGS_FINISHED: u8 = 1 << 2;
 const TIMER_LIST_FLAGS_CANCELED: u8 = 1 << 3;
 
+impl Default for GlobalTimerManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GlobalTimerManager {
     pub const TIMER_INTERVAL_MS: u64 = 10;
     const TICK_INITIAL_VALUE: u64 = 0;
@@ -125,7 +131,7 @@ impl GlobalTimerManager {
             pr_err!("Interrupt is disabled.");
             return false;
         }
-        let (end_tick, overflowed) = Self::get_end_tick_ms(start_tick as u64, ms);
+        let (end_tick, overflowed) = Self::get_end_tick_ms(start_tick, ms);
         if overflowed {
             while self.get_current_tick() >= start_tick {
                 core::hint::spin_loop();
@@ -135,7 +141,7 @@ impl GlobalTimerManager {
         while self.get_current_tick() <= end_tick {
             core::hint::spin_loop();
         }
-        return true;
+        true
     }
 
     pub fn busy_wait_us(&self, us: u64) -> bool {
@@ -160,11 +166,17 @@ impl GlobalTimerManager {
         while self.get_current_tick() <= end_tick {
             core::hint::spin_loop();
         }
-        return true;
+        true
     }
 
     pub fn global_timer_handler(&mut self) {
         self.count_up_tick();
+    }
+}
+
+impl Default for LocalTimerManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -214,12 +226,10 @@ impl LocalTimerManager {
                             .insert_before(&mut entry.t_list, &mut list.t_list);
                         break;
                     }
-                } else {
-                    if entry.timeout <= current && entry.timeout > list.timeout {
-                        self.timer_list
-                            .insert_before(&mut entry.t_list, &mut list.t_list);
-                        break;
-                    }
+                } else if entry.timeout <= current && entry.timeout > list.timeout {
+                    self.timer_list
+                        .insert_before(&mut entry.t_list, &mut list.t_list);
+                    break;
                 }
                 if let Some(e) = unsafe { entry.t_list.get_next_mut(offset_of!(TimerList, t_list)) }
                 {
@@ -313,10 +323,10 @@ impl LocalTimerManager {
                 }
             }
         }
-        return get_kernel_manager_cluster()
+        get_kernel_manager_cluster()
             .global_timer_manager
             .get_current_tick()
-            * (nano_second_freq / (GlobalTimerManager::TIMER_INTERVAL_MS * 1000));
+            * (nano_second_freq / (GlobalTimerManager::TIMER_INTERVAL_MS * 1000))
     }
 
     fn expired_timer_list_worker(data: usize) {

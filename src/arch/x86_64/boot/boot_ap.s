@@ -49,7 +49,7 @@ ap_setup_long_mode:
     mov     %ax, %ds
 
     /* Set jump address into ljmpl */
-    mov    $(ljmpl_64_address - ap_entry), %eax
+    mov     $(ljmpl_64_address - ap_entry), %eax
     add     %ebx, (%ebx, %eax)          /* add base address */
 
     mov     $pml4, %eax

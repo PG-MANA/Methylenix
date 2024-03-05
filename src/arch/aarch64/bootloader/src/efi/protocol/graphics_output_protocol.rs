@@ -2,7 +2,7 @@
 //! EFI Graphics Output Protocol
 //!
 
-use super::super::Guid;
+use crate::guid::Guid;
 
 #[derive(Clone)]
 #[repr(C)]

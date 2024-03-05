@@ -127,7 +127,7 @@ impl Pff2FontManager {
             pointer += section_length;
         }
         self.build_ascii_cache();
-        return true;
+        true
     }
 
     fn build_ascii_cache(&mut self) {
@@ -176,7 +176,7 @@ impl Pff2FontManager {
             x_offset: i16::from_be_bytes(pff2_font_data.x_offset),
             y_offset: i16::from_be_bytes(pff2_font_data.y_offset),
             device_width: i16::from_be_bytes(pff2_font_data.device_width),
-            bitmap_address: (&(pff2_font_data.bitmap) as *const u8 as usize).into(),
+            bitmap_address: VAddress::new(&(pff2_font_data.bitmap) as *const u8 as usize),
         }
     }
 
@@ -200,7 +200,7 @@ impl Pff2FontManager {
         } else if let Some(f) = self.font_cache.get_cached_normal_font_data(c) {
             Some(f)
         } else if let Some(f) = self.find_uni_code_data(c) {
-            self.font_cache.add_normal_font_cache(c, f.clone());
+            self.font_cache.add_normal_font_cache(c, f);
             Some(f)
         } else {
             None

@@ -349,7 +349,7 @@ impl PciDeviceDriver for I210Manager {
                 Self::ICR_RX_FINISHED | Self::ICR_TX_FINISHED,
             );
         }
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -360,7 +360,7 @@ impl EthernetDeviceDriver for I210Manager {
             entry.get_length(),
             entry.get_id(),
         )?;
-        return Ok(entry.get_length());
+        Ok(entry.get_length())
     }
 }
 
@@ -520,7 +520,7 @@ impl I210Manager {
             remaining_length -= transfer_length;
             number_of_descriptors += 1;
         }
-        return Ok(number_of_descriptors);
+        Ok(number_of_descriptors)
     }
 
     pub fn interrupt_handler(&mut self) {
@@ -647,12 +647,7 @@ impl I210Manager {
 }
 
 fn i210_handler(index: usize) -> bool {
-    if let Some(i210) = unsafe {
-        I210_LIST
-            .iter()
-            .find(|x| (**x).0 == index)
-            .and_then(|x| Some(x.1.clone()))
-    } {
+    if let Some(i210) = unsafe { I210_LIST.iter().find(|x| x.0 == index).map(|x| x.1) } {
         unsafe { &mut *(i210) }.interrupt_handler();
         true
     } else {

@@ -102,8 +102,6 @@ pub fn detect_file_system(manager: &mut FileManager, block_device_id: usize) {
     });
 
     let _ = free_pages!(first_block_data);
-    drop(gpt_header_address);
-    drop(first_block_data);
 
     'sector_loop: for block in
         0..=((number_of_partitions * partition_entry_size) as usize / lba_block_size as usize)
@@ -163,6 +161,4 @@ pub fn detect_file_system(manager: &mut FileManager, block_device_id: usize) {
         }
         let _ = free_pages!(partition_entries);
     }
-
-    return;
 }

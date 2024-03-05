@@ -103,19 +103,11 @@ pub struct EfiSystemTable {
     configuration_table: usize,
 }
 
-#[repr(C)]
-pub struct EfiConfigurationTable {
-    pub vendor_guid: Guid,
-    pub vendor_table: usize,
-}
-
 impl EfiSystemTable {
     const EFI_SYSTEM_TABLE_SIGNATURE: u64 = 0x5453595320494249;
+
     pub fn verify(&self) -> bool {
-        if self.efi_table_header.signature != Self::EFI_SYSTEM_TABLE_SIGNATURE {
-            return false;
-        }
-        return true;
+        self.efi_table_header.signature == Self::EFI_SYSTEM_TABLE_SIGNATURE
     }
 
     pub const fn get_console_output_protocol(&self) -> *const EfiSimpleTextOutputProtocol {
@@ -124,28 +116,5 @@ impl EfiSystemTable {
 
     pub const fn get_boot_services(&self) -> *const EfiBootServices {
         self.efi_boot_services
-    }
-
-    #[allow(dead_code)]
-    pub const fn get_configuration_table(&self) -> usize {
-        self.configuration_table
-    }
-
-    #[allow(dead_code)]
-    pub fn set_configuration_table(&mut self, address: usize) {
-        self.configuration_table = address;
-    }
-
-    #[allow(dead_code)]
-    pub const fn get_number_of_configuration_tables(&self) -> usize {
-        self.num_table_entries
-    }
-
-    #[allow(dead_code)]
-    pub unsafe fn get_configuration_table_slice(&self) -> &[EfiConfigurationTable] {
-        core::slice::from_raw_parts(
-            self.get_configuration_table() as *const EfiConfigurationTable,
-            self.get_number_of_configuration_tables(),
-        )
     }
 }

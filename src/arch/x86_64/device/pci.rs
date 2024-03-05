@@ -16,6 +16,12 @@ pub struct ArchDependPciManager {
     register_lock: SpinLockFlag,
 }
 
+impl Default for ArchDependPciManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArchDependPciManager {
     const CONFIG_ADDRESS: u16 = 0xcf8;
     const CONFIG_DATA: u16 = 0xcfc;
@@ -44,9 +50,7 @@ impl ArchDependPciManager {
         })
     }
 
-    pub fn delete_pci_device_struct(&mut self, _pci_dev: PciDevice) {
-        return;
-    }
+    pub fn delete_pci_device_struct(&mut self, _pci_dev: PciDevice) {}
 
     pub fn get_start_bus(&self) -> u8 {
         0
@@ -67,13 +71,14 @@ impl ArchDependPciManager {
         if offset > 0xFF {
             return Err(());
         }
-        Ok(self.write_data(
+        self.write_data(
             pci_dev.bus,
             pci_dev.device,
             pci_dev.function,
             offset as u8,
             data,
-        ))
+        );
+        Ok(())
     }
 
     fn read_data(&self, bus: u8, device: u8, function: u8, offset: u8) -> u32 {
@@ -83,7 +88,7 @@ impl ArchDependPciManager {
         self.write_config_address_register(config_address);
         let data = self.read_config_data_register();
         drop(_lock);
-        return data;
+        data
     }
 
     fn write_data(&self, bus: u8, device: u8, function: u8, offset: u8, data: u32) {
@@ -92,7 +97,6 @@ impl ArchDependPciManager {
         self.write_config_address_register(config_address);
         self.write_config_data_register(data);
         drop(_lock);
-        return;
     }
 
     fn calculate_config_address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {

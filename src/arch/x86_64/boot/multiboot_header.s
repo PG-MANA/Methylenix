@@ -5,7 +5,7 @@
 /* http://git.savannah.gnu.org/cgit/grub.git/tree/doc/multiboot2.h?h=multiboot2 */
 .equ MULTIBOOT_HEADER_MAGIC,                0xe85250d6
 .equ MULTIBOOT_HEADER_ARCH,                 0           /* 4=> MIPS */
-.equ MULTIBOOT_HEADER_LEN,                  multiboot_end - multiboot_start
+.equ MULTIBOOT_HEADER_LEN,                  multiboot_end - multiboot
 .equ MULTIBOOT_HEADER_CHECKSUM,             -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_ARCH + MULTIBOOT_HEADER_LEN)
 .equ MULTIBOOT_HEADER_FLAG,                 1           /* Optional flag */
 .equ MULTIBOOT_HEADER_TAG_TYPE_END,         0           /* Tag end */
@@ -17,9 +17,10 @@
 
 .section .header.multiboot, "a" /* Alloc flag */
 
-.align 8
-
-multiboot_start:
+.align  8
+.type   multiboot, %object
+.size   multiboot, MULTIBOOT_HEADER_LEN
+multiboot:
   .long      MULTIBOOT_HEADER_MAGIC
   .long      MULTIBOOT_HEADER_ARCH
   .long      MULTIBOOT_HEADER_LEN

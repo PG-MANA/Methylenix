@@ -2,7 +2,7 @@
 //! EFI Simple File System Protocol and EFI File Protocol
 //!
 
-use super::super::{EfiStatus, Guid};
+use crate::efi::{EfiStatus, Guid};
 
 pub const EFI_FILE_MODE_READ: u64 = 0x0000000000000001;
 

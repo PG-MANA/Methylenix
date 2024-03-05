@@ -1,15 +1,15 @@
 //!
 //! Paging Manager
 //!
-//! This modules treat the paging system of x86_64.
-//! Currently this module can handle 4K, 2M, and 1G paging.
+//! These modules treat the paging system of x86_64.
+//! Currently, this module can handle 4K, 2M, and 1G paging.
 //!
 //! This does not handle memory status(which process using what memory area).
 //! This is the back-end of VirtualMemoryManager.
 //!
 //! The paging system of x86_64 is the system translate from "linear-address" to physical address.
 //! With 4-level paging, virtual address is substantially same as linear address.
-//! VirtualMemoryManager call this manager to setup the translation from virtual address to physical address.
+//! VirtualMemoryManager call this manager to set up the translation from virtual address to physical address.
 //! Therefore, the name of argument is unified as not "linear address" but "virtual address".
 
 mod pde;
@@ -34,7 +34,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 
 /// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
-pub const PAGE_SIZE: MSize = MSize::from(PAGE_SIZE_USIZE);
+pub const PAGE_SIZE: MSize = MSize::new(PAGE_SIZE_USIZE);
 
 /// Default Page Size, the mainly using 4KiB paging.(Type = usize)
 pub const PAGE_SIZE_USIZE: usize = 0x1000;
@@ -60,7 +60,7 @@ pub const NEED_COPY_HIGH_MEMORY_PAGE_TABLE: bool = true;
 ///
 /// This controls paging system.
 /// This manager does not check if specified address is usable,
-/// that should done by VirtualMemoryManager.
+/// that should be done by VirtualMemoryManager.
 #[derive(Clone)]
 pub struct PageManager {
     pml4: VAddress,
@@ -83,11 +83,13 @@ pub enum PagingError {
 /// PagingEntry
 ///
 /// This trait is to treat PML4, PDPTE, PDE, and PTE as the common way.
+#[allow(dead_code)]
 trait PagingEntry {
     fn is_present(&self) -> bool;
     fn set_present(&mut self, b: bool);
     fn is_writable(&self) -> bool;
     fn set_writable(&mut self, b: bool);
+    #[allow(dead_code)]
     fn is_user_accessible(&self) -> bool;
     fn set_user_accessible(&mut self, b: bool);
     fn set_wtc(&mut self, b: bool);
@@ -137,7 +139,7 @@ impl PageManager {
         for pml4 in pml4_table.iter_mut() {
             pml4.init();
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn init_user(
@@ -152,7 +154,7 @@ impl PageManager {
             pml4e.init();
         }
         self.copy_system_area(system_page_manager)?;
-        return Ok(());
+        Ok(())
     }
 
     pub fn copy_system_area(&mut self, system_page_manager: &Self) -> Result<(), PagingError> {
@@ -163,7 +165,7 @@ impl PageManager {
         for i in high_area_start..pml4_table.len() {
             pml4_table[i] = system_pml4_table[i].clone();
         }
-        return Ok(());
+        Ok(())
     }
 
     const fn get_top_level_table(&self) -> &mut [PML4E; PML4_MAX_ENTRY] {
@@ -237,7 +239,7 @@ impl PageManager {
         should_create_entry: bool,
         pdpte: Option<&'static mut PDPTE>,
     ) -> Result<&'static mut PDE, PagingError> {
-        let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 1)) & (0x1FF);
+        let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9)) & (0x1FF);
 
         let pdpte = if let Some(p) = pdpte {
             p
@@ -292,7 +294,7 @@ impl PageManager {
         should_create_entry: bool,
         pde: Option<&'static mut PDE>,
     ) -> Result<&'static mut PTE, PagingError> {
-        let number_of_pte = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 0)) & (0x1FF);
+        let number_of_pte = (virtual_address.to_usize() >> PAGE_SHIFT) & (0x1FF);
 
         let pde = if let Some(p) = pde {
             p
@@ -471,9 +473,8 @@ impl PageManager {
             let processing_virtual_address = virtual_address + processed_size;
             let processing_physical_address = physical_address + processed_size;
             let number_of_pde =
-                (processing_virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 1)) & (0x1FF);
-            let number_of_pte =
-                (processing_virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 0)) & (0x1FF);
+                (processing_virtual_address.to_usize() >> (PAGE_SHIFT + 9)) & (0x1FF);
+            let number_of_pte = (processing_virtual_address.to_usize() >> PAGE_SHIFT) & (0x1FF);
 
             if number_of_pde == 0
                 && number_of_pte == 0
@@ -570,7 +571,7 @@ impl PageManager {
     /// If target entry is not exists, this function will ignore it and call [`Self::cleanup_page_table`]
     /// when entry_may_be_deleted == true, otherwise this will return PagingError:PagingError::EntryIsNotFound.
     ///
-    /// This does not delete physical address and huge bit from the entry. it  disable present flag only.
+    /// This does not delete physical address and huge bit from the entry. it disables present flag only.
     /// It helps [`Self::cleanup_page_table`].
     pub fn unassociate_address(
         &self,
@@ -600,7 +601,7 @@ impl PageManager {
     /// If target entry is not exists, this function will return Error:EntryIsNotFound.
     /// When huge table was used and the mapped size is different from expected size, this will return error.
     ///
-    /// This does not delete physical address and huge bit from the entry. it  disable present flag only.
+    /// This does not delete physical address and huge bit from the entry. it disables present flag only.
     pub fn unassociate_address_width_size(
         &self,
         virtual_address: VAddress,
@@ -670,7 +671,7 @@ impl PageManager {
             self.cleanup_page_table(processing_virtual_address, pm_manager)?;
             processed_size += PAGE_SIZE;
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Clean up the page table.
@@ -684,7 +685,7 @@ impl PageManager {
     ) -> Result<(), PagingError> {
         let number_of_pml4e = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 3)) & (0x1FF);
         let number_of_pdpte = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 2)) & (0x1FF);
-        let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 1)) & (0x1FF);
+        let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9)) & (0x1FF);
         let pml4e = &mut self.get_top_level_table()[number_of_pml4e];
         if !pml4e.is_address_set() {
             return Ok(());
@@ -770,7 +771,7 @@ impl PageManager {
             .free(direct_map_to_physical_address(self.pml4), PAGE_SIZE, false)
             .or(Err(PagingError::MemoryCacheOverflowed))?;
         self.pml4 = VAddress::new(0);
-        return Ok(());
+        Ok(())
     }
 
     /// Allocate the page table.
@@ -819,8 +820,8 @@ impl PageManager {
         let mut permission = (false /* writable */, false /* no_execute */);
         let mut omitted = false;
         let mut last_address = (
-            VAddress::from(0), /* virtual address */
-            PAddress::from(0), /* physical address */
+            VAddress::new(0), /* virtual address */
+            PAddress::new(0), /* physical address */
         );
         let print_normal = |v: usize, p: usize, w: bool, e: bool, a: bool, s: &str| {
             kprintln!("Linear addresses: {:>#16X} => Physical Address: {:>#16X}, W:{:>5}, E:{:>5}, A:{:>5} {}", v, p, w, e, a, s);
@@ -839,8 +840,8 @@ impl PageManager {
          -> VAddress {
             let address = (pml4_count << (PAGE_SHIFT + 9 * 3))
                 | (pdpte_count << (PAGE_SHIFT + 9 * 2))
-                | (pde_count << (PAGE_SHIFT + 9 * 1))
-                | (pte_count << (PAGE_SHIFT + 9 * 0));
+                | (pde_count << (PAGE_SHIFT + 9))
+                | (pte_count << PAGE_SHIFT);
             VAddress::new(if (address & (1 << 47)) != 0 {
                 (0xffff << 48) | address
             } else {
@@ -911,8 +912,8 @@ impl PageManager {
                         if start.is_some() && virtual_address < start.unwrap() {
                             continue;
                         }
-                        if last_address.0 + MSize::new(1 << (PAGE_SHIFT + 9 * 1)) == virtual_address
-                            && last_address.1 + MSize::from(1 << (PAGE_SHIFT + 9 * 1))
+                        if last_address.0 + MSize::new(1 << (PAGE_SHIFT + 9)) == virtual_address
+                            && last_address.1 + MSize::new(1 << (PAGE_SHIFT + 9))
                                 == pde.get_address().unwrap()
                             && permission.0 == pde.is_writable()
                             && permission.1 == pde.is_no_execute()
@@ -959,8 +960,8 @@ impl PageManager {
                         if start.is_some() && virtual_address < start.unwrap() {
                             continue;
                         }
-                        if last_address.0 + MSize::new(1 << (PAGE_SHIFT + 9 * 0)) == virtual_address
-                            && last_address.1 + MSize::new(1 << (PAGE_SHIFT + 9 * 0))
+                        if last_address.0 + MSize::new(1 << PAGE_SHIFT) == virtual_address
+                            && last_address.1 + MSize::new(1 << PAGE_SHIFT)
                                 == pte.get_address().unwrap()
                             && permission.0 == pte.is_writable()
                             && permission.1 == pte.is_no_execute()

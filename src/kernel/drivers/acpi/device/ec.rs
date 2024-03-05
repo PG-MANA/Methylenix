@@ -180,7 +180,7 @@ impl EmbeddedController {
 
         pr_debug!("Read EC(Address: {:#X}) => {:#X}", address, result);
         drop(_lock);
-        return result;
+        result
     }
 
     pub fn write_data(&self, address: u8, data: u8) {
@@ -200,7 +200,6 @@ impl EmbeddedController {
 
         /* write_io_byte(self.ec_sc, Self::BD_EC); */
         drop(_lock);
-        return;
     }
 
     pub fn read_query(&self) -> u8 {
@@ -216,7 +215,7 @@ impl EmbeddedController {
 
         /* write_io_byte(self.ec_sc, Self::BD_EC); */
         drop(_lock);
-        return result;
+        result
     }
 
     pub fn is_sci_pending(&self) -> bool {

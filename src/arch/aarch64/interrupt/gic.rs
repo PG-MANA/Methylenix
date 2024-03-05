@@ -116,10 +116,10 @@ impl GicManager {
     pub fn init_generic_interrupt_distributor(&mut self) -> bool {
         match &self.info_source {
             GicInformationSoruce::Madt(madt_manager) => {
-                let Some(gic_distributor_info) =
-                    madt_manager.find_generic_interrupt_distributor() else {
-                        pr_err!("GIC Distributor information is not found.");
-                        return false;
+                let Some(gic_distributor_info) = madt_manager.find_generic_interrupt_distributor()
+                else {
+                    pr_err!("GIC Distributor information is not found.");
+                    return false;
                 };
                 if gic_distributor_info.version < 3 {
                     pr_err!("Unsupported GIC version: {}", gic_distributor_info.version);
@@ -174,7 +174,7 @@ impl GicManager {
             Self::GICD_CTLR,
             Self::GICD_CTLR_ARE | Self::GCID_CTLR_ENABLE_GRP1NS | Self::GCID_CTLR_ENABLE_GRP0,
         );
-        return true;
+        true
     }
 
     pub fn init_redistributor(&self) -> Option<GicRedistributorManager> {
@@ -184,7 +184,7 @@ impl GicManager {
             pr_err!("Failed to init GIC Redistributor.");
             return None;
         }
-        return Some(redistributor_manager);
+        Some(redistributor_manager)
     }
 
     fn find_redistributor_address_of_this_pe(&self) -> Option<VAddress> {
@@ -211,11 +211,11 @@ impl GicManager {
                 "GIC Redistributor for affinity({:#X}) is not found.",
                 self_affinity
             );
-            return None;
+            None
         } else {
             match &self.info_source {
                 GicInformationSoruce::Madt(madt) => {
-                    return if let Some(info) = madt.find_generic_interrupt_controller_cpu_interface(
+                    if let Some(info) = madt.find_generic_interrupt_controller_cpu_interface(
                         cpu::mpidr_to_affinity(unsafe { cpu::get_mpidr() }),
                     ) {
                         match io_remap!(
@@ -236,7 +236,7 @@ impl GicManager {
                                     "Failed to map Generic Interrupt Redistributor area: {:?}",
                                     e
                                 );
-                                return None;
+                                None
                             }
                         }
                     } else {
@@ -408,7 +408,7 @@ impl GicRedistributorManager {
         self.set_binary_point(Self::DEFAULT_BINARY_POINT);
         unsafe { cpu::set_icc_igrpen1(Self::ICC_IGRPEN1_EN) };
         unsafe { cpu::set_icc_igrpen0(Self::ICC_IGRPEN0_EN) };
-        return true;
+        true
     }
 
     pub const fn is_available(&self) -> bool {
@@ -501,7 +501,7 @@ impl GicRedistributorManager {
         self.write_register(
             Self::GICR_ICFGR0 + register_index,
             (self.read_register(Self::GICR_ICFGR0 + register_index) & !(0x03 << register_offset))
-                | (((((!is_level_trigger) as u32) << 1) as u32) << register_offset),
+                | ((((!is_level_trigger) as u32) << 1) << register_offset),
         );
     }
 

@@ -99,8 +99,8 @@ impl VirtualMemoryEntry {
 
     pub fn set_disabled(&mut self) {
         let _lock = self.lock.lock();
-        self.start_address = 0.into();
-        self.end_address = 0.into();
+        self.start_address = VAddress::new(0);
+        self.end_address = VAddress::new(0);
         self.object.set_disabled();
     }
 

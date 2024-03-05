@@ -51,38 +51,38 @@ impl SizeAllocator {
         self.size_1024.init()?;
         self.size_2048.init()?;
         self.size_4096.init()?;
-        return Ok(());
+        Ok(())
     }
 
     pub fn alloc(&mut self, size: MSize) -> Result<VAddress, MemoryError> {
         if size <= MSize::new(64) {
             self.size_64
                 .alloc()
-                .and_then(|a| Ok(VAddress::new(a.as_ptr() as usize)))
+                .map(|a| VAddress::new(a.as_ptr() as usize))
         } else if size <= MSize::new(128) {
             self.size_128
                 .alloc()
-                .and_then(|a| Ok(VAddress::new(a.as_ptr() as usize)))
+                .map(|a| VAddress::new(a.as_ptr() as usize))
         } else if size <= MSize::new(256) {
             self.size_256
                 .alloc()
-                .and_then(|a| Ok(VAddress::new(a.as_ptr() as usize)))
+                .map(|a| VAddress::new(a.as_ptr() as usize))
         } else if size <= MSize::new(512) {
             self.size_512
                 .alloc()
-                .and_then(|a| Ok(VAddress::new(a.as_ptr() as usize)))
+                .map(|a| VAddress::new(a.as_ptr() as usize))
         } else if size <= MSize::new(1024) {
             self.size_1024
                 .alloc()
-                .and_then(|a| Ok(VAddress::new(a.as_ptr() as usize)))
+                .map(|a| VAddress::new(a.as_ptr() as usize))
         } else if size <= MSize::new(2048) {
             self.size_2048
                 .alloc()
-                .and_then(|a| Ok(VAddress::new(a.as_ptr() as usize)))
+                .map(|a| VAddress::new(a.as_ptr() as usize))
         } else if size <= MSize::new(4096) {
             self.size_4096
                 .alloc()
-                .and_then(|a| Ok(VAddress::new(a.as_ptr() as usize)))
+                .map(|a| VAddress::new(a.as_ptr() as usize))
         } else {
             Err(MemoryError::InvalidSize)
         }

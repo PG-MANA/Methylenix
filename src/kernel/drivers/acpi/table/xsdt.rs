@@ -81,7 +81,6 @@ impl XsdtManager {
                     return Err(());
                 }
             };
-            drop(entry_physical_address); /* Avoid using it */
             pr_info!(
                 "{}",
                 core::str::from_utf8(unsafe { &*(vm_address.to_usize() as *const [u8; 4]) })
@@ -144,7 +143,7 @@ impl XsdtManager {
             }
             self.dsdt_manager.write(dsdt_manager);
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn get_table_manager<T: AcpiTable + OptionalAcpiTable>(&self) -> Option<T> {
@@ -162,7 +161,7 @@ impl XsdtManager {
             }
             return Some(manager);
         }
-        return None;
+        None
     }
 
     pub fn get_fadt_manager(&self) -> &FadtManager {
@@ -217,7 +216,7 @@ impl XsdtManager {
             };
             index += 1;
         }
-        return true;
+        true
     }
 
     fn get_length(&self) -> usize {
@@ -226,7 +225,7 @@ impl XsdtManager {
 
     fn get_entry(&self, index: usize) -> Option<PAddress> {
         if (self.get_length() - 0x24) >> 3 > index {
-            Some(PAddress::from(unsafe {
+            Some(PAddress::new(unsafe {
                 *((self.base_address.to_usize() + 0x24 + index * 8) as *const u64)
             } as usize))
         } else {
@@ -273,6 +272,6 @@ impl XsdtManager {
             }
             index += 1;
         }
-        return None;
+        None
     }
 }

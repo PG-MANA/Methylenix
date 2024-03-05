@@ -43,7 +43,7 @@ impl<T> PtrLinkedList<T> {
             self.head = NonNull::new(entry);
             self.tail = self.head;
         } else {
-            let mut current_head_ptr = self.head.clone().unwrap();
+            let mut current_head_ptr = self.head.unwrap();
             let current_head = unsafe { current_head_ptr.as_mut() };
             assert!(current_head.prev.is_none());
             entry.unset_prev_and_next();
@@ -59,7 +59,7 @@ impl<T> PtrLinkedList<T> {
             assert!(self.head.is_none());
             self.insert_head(entry);
         } else {
-            let mut current_tail_ptr = self.tail.clone().unwrap();
+            let mut current_tail_ptr = self.tail.unwrap();
             let current_tail = unsafe { current_tail_ptr.as_mut() };
             assert!(current_tail.next.is_none());
             current_tail.next = NonNull::new(entry);
@@ -104,20 +104,20 @@ impl<T> PtrLinkedList<T> {
                 self.head = None;
                 self.tail = None;
             } else {
-                let mut new_head_ptr = list_entry.next.clone().unwrap();
+                let mut new_head_ptr = list_entry.next.unwrap();
                 let new_head = unsafe { new_head_ptr.as_mut() };
                 new_head.prev = None;
                 self.head = list_entry.next;
             }
         } else if list_entry.next.is_none() {
             assert_eq!(self.tail.unwrap().as_ptr(), list_entry as *mut _);
-            let mut new_tail_ptr = list_entry.prev.clone().unwrap();
+            let mut new_tail_ptr = list_entry.prev.unwrap();
             let new_tail = unsafe { new_tail_ptr.as_mut() };
             new_tail.next = None;
             self.tail = list_entry.prev;
         } else {
-            let mut prev_ptr = list_entry.prev.clone().unwrap();
-            let mut next_ptr = list_entry.next.clone().unwrap();
+            let mut prev_ptr = list_entry.prev.unwrap();
+            let mut next_ptr = list_entry.next.unwrap();
             let prev = unsafe { prev_ptr.as_mut() };
             let next = unsafe { next_ptr.as_mut() };
             prev.next = list_entry.next;
@@ -131,7 +131,7 @@ impl<T> PtrLinkedList<T> {
             None
         } else {
             let result = self.get_first_entry_mut(offset).unwrap();
-            let mut head_ptr = self.head.clone().unwrap();
+            let mut head_ptr = self.head.unwrap();
             let head = head_ptr.as_mut();
             self.remove(head);
             Some(result)

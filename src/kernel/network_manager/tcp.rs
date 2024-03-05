@@ -31,7 +31,8 @@ struct TcpReceiveDataBuffer {
 
 struct TcpSendDataBufferHeader {
     list: PtrLinkedListNode<Self>,
-    buffer_length: MSize, /* Including this header */
+    buffer_length: MSize,
+    /* Including this header */
     sequence_number: u32,
     payload_size: u32,
 }
@@ -442,7 +443,7 @@ pub(super) fn create_ipv4_tcp_header(
 
     ipv4::create_default_ipv4_header(
         ipv4_header,
-        TCP_DEFAULT_HEADER_SIZE as usize + data.len(),
+        TCP_DEFAULT_HEADER_SIZE + data.len(),
         ipv4_packet_id,
         ipv4::get_default_ttl(),
         IPV4_PROTOCOL_TCP,
@@ -508,7 +509,7 @@ pub(super) fn send_tcp_syn_ack_header(
                 0,
                 ipv4_info.get_destination_address(),
                 ipv4_info.get_sender_address(),
-                &link_info,
+                link_info,
             ) {
                 pr_err!("Failed to send SYN+ACK: {:?}", e);
                 return Err(e);
@@ -643,7 +644,7 @@ pub(super) fn send_tcp_ipv4_data(
         *data_address += send_size;
         session_info.available_window_size -= send_size.to_usize() as u16;
     }
-    return Ok(());
+    Ok(())
 }
 
 pub(super) fn ipv4_tcp_ack_handler(
@@ -719,7 +720,7 @@ pub(super) fn ipv4_tcp_ack_handler(
             }
         }
     }
-    return Ok(true);
+    Ok(true)
 }
 
 pub(super) fn tcp_ipv4_segment_handler(
@@ -877,7 +878,7 @@ pub(super) fn tcp_ipv4_segment_handler(
                         &link_info,
                         &ipv4_packet_info,
                     )
-                    .and_then(|s| Ok(should_free_buffer = s))
+                    .map(|s| should_free_buffer = s)
                 },
             )
         {
@@ -986,7 +987,7 @@ fn ipv4_tcp_data_handler(
             /* TODO: Rollback */
             return Err(NetworkError::DataOverflowed);
         }
-        if session_info.receive_buffer_list.len() != 0 {
+        if !session_info.receive_buffer_list.is_empty() {
             /* The packets are not arrived sequentially */
             let mut next_sequence_number = segment_info
                 .sequence_number
@@ -1055,7 +1056,7 @@ fn ipv4_tcp_data_handler(
         0,
         ipv4_packet_info.get_destination_address(),
         ipv4_packet_info.get_sender_address(),
-        &link_info,
+        link_info,
     ) {
         pr_err!("Failed to send SYN+ACK: {:?}", e);
     }
@@ -1101,7 +1102,7 @@ pub(super) fn close_tcp_session(
                         0,
                         v4_info.get_our_address(),
                         v4_info.get_their_address(),
-                        &link_info,
+                        link_info,
                     ) {
                         pr_err!("Failed to send FIN: {:?}", e);
                         return Err(e);

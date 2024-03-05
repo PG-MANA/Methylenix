@@ -1,30 +1,26 @@
 #![no_std]
 #![no_main]
-#![feature(abi_efiapi)]
 #![feature(const_maybe_uninit_uninit_array)]
-#![feature(format_args_nl)]
 #![feature(naked_functions)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_uninit_array)]
-#![feature(panic_info_message)]
 
 #[macro_use]
 mod print;
+mod boot_information;
 mod cpu;
 mod efi;
 mod elf;
 mod guid;
 mod paging;
 
+use self::boot_information::*;
 use self::efi::protocol::{
     file_protocol::{
         EfiFileProtocol, EfiSimpleFileProtocol, EFI_FILE_MODE_READ,
         EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,
     },
-    graphics_output_protocol::{
-        EfiGraphicsOutputModeInformation, EfiGraphicsOutputProtocol,
-        EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID,
-    },
+    graphics_output_protocol::{EfiGraphicsOutputProtocol, EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID},
     loaded_image_protocol::{
         EfiLoadedImageProtocol, EFI_LOADED_IMAGE_PROTOCOL_GUID,
         EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
@@ -44,7 +40,6 @@ use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::panic;
 
-static mut SYSTEM_TABLE: *const EfiSystemTable = core::ptr::null();
 static mut PAGE_TABLES_BASE_ADDRESS: usize = 0;
 static mut NUM_OF_PAGE_TABLES: usize = 0;
 static mut BOOT_INFO: MaybeUninit<BootInformation> = MaybeUninit::uninit();
@@ -58,40 +53,12 @@ const DIRECT_MAP_BASE_ADDRESS: usize = 0;
 
 const ELF_64_HEADER_SIZE: usize = core::mem::size_of::<Elf64Header>();
 
-struct BootInformation {
-    elf_header_buffer: [u8; ELF_64_HEADER_SIZE],
-    elf_program_header_address: usize,
-    efi_system_table: EfiSystemTable,
-    graphic_info: Option<GraphicInfo>,
-    font_address: Option<(usize, usize)>,
-    memory_info: MemoryInfo,
-}
-
-struct MemoryInfo {
-    #[allow(dead_code)]
-    efi_descriptor_version: u32,
-    #[allow(dead_code)]
-    efi_descriptor_size: usize,
-    #[allow(dead_code)]
-    efi_memory_map_size: usize,
-    #[allow(dead_code)]
-    efi_memory_map_address: usize,
-}
-
-struct GraphicInfo {
-    #[allow(dead_code)]
-    pub frame_buffer_base: usize,
-    #[allow(dead_code)]
-    pub frame_buffer_size: usize,
-    #[allow(dead_code)]
-    pub info: EfiGraphicsOutputModeInformation,
-}
-
 #[no_mangle]
 extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSystemTable) {
     assert!(!system_table.is_null());
     let system_table = unsafe { &*system_table };
-    unsafe { SYSTEM_TABLE = system_table };
+    print::init(system_table.get_console_output_protocol());
+
     if !system_table.verify() {
         panic!("Failed to verify the EFI System Table.");
     }
@@ -99,20 +66,16 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
     println!("Boot loader for AArch64");
 
     let mut boot_info: BootInformation = unsafe { MaybeUninit::zeroed().assume_init() };
-    unsafe {
-        core::mem::forget(core::mem::replace(
-            &mut boot_info.efi_system_table,
-            core::mem::transmute_copy(system_table),
-        ))
-    };
+    boot_info.efi_system_table = unsafe { core::mem::transmute_copy(system_table) };
+
     set_paging_settings();
     dump_system();
 
     let mut num_of_needed_page_tables = 1
         + 3
         + estimate_num_of_pages_to_direct_map(
-            DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS } + 1,
-        );
+        DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS } + 1,
+    );
     load_elf_binary(
         main_handle,
         unsafe { &*system_table.get_boot_services() },
@@ -136,7 +99,7 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
     let mut page_table_address = 0;
     let r = (unsafe { &*system_table.get_boot_services() }.allocate_pages)(
         efi::memory_map::EfiAllocateType::AllocateAnyPages,
-        efi::memory_map::EfiMemoryType::EfiLoaderData,
+        efi::memory_map::EfiMemoryType::LoaderData,
         num_of_needed_page_tables,
         &mut page_table_address,
     );
@@ -152,7 +115,7 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
     let mut memory_map_address = 0;
     let r = (unsafe { &*system_table.get_boot_services() }.allocate_pages)(
         efi::memory_map::EfiAllocateType::AllocateAnyPages,
-        efi::memory_map::EfiMemoryType::EfiLoaderData,
+        efi::memory_map::EfiMemoryType::LoaderData,
         1,
         &mut memory_map_address,
     );
@@ -191,15 +154,15 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
     if r != EFI_SUCCESS {
         panic!("Failed to exit boot service");
     }
-    unsafe { SYSTEM_TABLE = core::ptr::null() };
     unsafe { cpu::cli() };
 
     /* Down to EL1 if currentEL is EL2 */
     if unsafe { cpu::get_current_el() >> 2 } == 2 {
         down_to_el1();
         /* Never comes here */
+    } else {
+        boot_latter_half();
     }
-    boot_latter_half();
 }
 
 fn boot_latter_half() -> ! {
@@ -231,7 +194,7 @@ fn boot_latter_half() -> ! {
                 num_of_pages,
                 alloc_table,
             )
-            .expect("Failed to map kernel");
+                .expect("Failed to map kernel");
         }
     }
 
@@ -242,12 +205,12 @@ fn boot_latter_half() -> ! {
         DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS } + 1,
         alloc_table,
     )
-    .expect("Failed to setup direct map");
+        .expect("Failed to setup direct map");
     /* TODO: pass remained pages to kernel */
     unsafe {
-        (core::mem::transmute::<u64, extern "C" fn(*const BootInformation)>(
+        core::mem::transmute::<u64, extern "C" fn(*const BootInformation)>(
             elf_header.get_entry_point(),
-        ))(BOOT_INFO.as_ptr())
+        )(BOOT_INFO.as_ptr())
     };
 
     unreachable!()
@@ -375,7 +338,7 @@ fn load_elf_binary(
     println!("Entry Point: {:#X}", elf_header.get_entry_point());
     let r = (boot_service.allocate_pages)(
         efi::memory_map::EfiAllocateType::AllocateAnyPages,
-        efi::memory_map::EfiMemoryType::EfiLoaderData,
+        efi::memory_map::EfiMemoryType::LoaderData,
         ((elf_program_headers_size - 1) & EFI_PAGE_MASK) / EFI_PAGE_SIZE + 1,
         &mut boot_info.elf_program_header_address,
     );
@@ -438,7 +401,7 @@ fn load_elf_binary(
             let mut allocated_memory = 0;
             let r = (boot_service.allocate_pages)(
                 efi::memory_map::EfiAllocateType::AllocateAnyPages,
-                efi::memory_map::EfiMemoryType::EfiLoaderData,
+                efi::memory_map::EfiMemoryType::LoaderData,
                 num_of_pages,
                 &mut allocated_memory,
             );
@@ -560,7 +523,7 @@ fn load_font_file(
     let mut allocated_memory = 0;
     let r = (boot_service.allocate_pages)(
         efi::memory_map::EfiAllocateType::AllocateAnyPages,
-        efi::memory_map::EfiMemoryType::EfiLoaderData,
+        efi::memory_map::EfiMemoryType::LoaderData,
         num_of_pages,
         &mut allocated_memory,
     );
@@ -616,10 +579,10 @@ fn detect_graphics(boot_service: &EfiBootServices) -> Option<GraphicInfo> {
 }
 
 #[naked]
-extern "C" fn down_to_el1() {
+extern "C" fn down_to_el1() -> ! {
     unsafe {
         asm!(
-            "
+        "
             mov x0, (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 1) | (1 << 0) 
             msr cnthctl_el2, x0
             mov x0, sp
@@ -642,8 +605,8 @@ extern "C" fn down_to_el1() {
             msr hcr_el2, x0
             eret
         ",
-            sym boot_latter_half,
-            options(noreturn)
+        sym boot_latter_half,
+        options(noreturn)
         )
     }
 }
@@ -651,16 +614,7 @@ extern "C" fn down_to_el1() {
 #[panic_handler]
 #[no_mangle]
 pub fn panic(p: &panic::PanicInfo) -> ! {
-    if let Some(location) = p.location() {
-        if unsafe { !SYSTEM_TABLE.is_null() } {
-            println!(
-                "Panic: Line {} in {}: {}",
-                location.line(),
-                location.file(),
-                p.message().unwrap()
-            )
-        }
-    }
+    println!("{p}");
     loop {
         unsafe { asm!("wfi") };
     }

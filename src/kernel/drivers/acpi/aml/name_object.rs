@@ -118,14 +118,14 @@ impl NameString {
             if count != 0 {
                 c = stream.read_byte()?;
             }
-            if !c.is_ascii_uppercase() && c != '_' as u8 {
+            if !c.is_ascii_uppercase() && c != b'_' {
                 return Err(AmlError::InvalidType);
             }
             let mut name: [u8; 4] = [0; 4];
             name[0] = c;
             for i in 1..4 {
                 c = stream.read_byte()?;
-                if !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != '_' as u8 {
+                if !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != b'_' {
                     return Err(AmlError::InvalidType);
                 }
                 name[i] = c;
@@ -141,7 +141,7 @@ impl NameString {
                 }
             }
         }
-        return Ok(result);
+        Ok(result)
     }
 
     fn up_to_parent_name_space(&mut self) {
@@ -179,7 +179,7 @@ impl NameString {
                 }
                 NameStringData::Normal(v) => {
                     pr_warn!("Invalid NameString: {:?}", self);
-                    normal = v.clone();
+                    normal = *v;
                     if normal.1 > 0 {
                         normal.1 -= 1;
                     }
@@ -192,7 +192,7 @@ impl NameString {
         } else {
             match &self.data {
                 NameStringData::Normal(v) => {
-                    let mut normal = v.clone();
+                    let mut normal = *v;
                     if normal.1 > 0 {
                         normal.1 -= 1;
                     }
@@ -246,7 +246,7 @@ impl NameString {
                 }
             }
         }
-        return result;
+        result
     }
 
     fn delete_extra_under_score(e: &mut [u8; 4]) {
@@ -312,13 +312,13 @@ impl NameString {
             let s1 = self.get_element(index);
             let s2 = child.get_element(index);
             if s1.is_none() {
-                return if s2.is_some() { true } else { false };
+                return s2.is_some();
             }
             if s1 != s2 {
                 return false;
             }
         }
-        return false;
+        false
     }
 
     pub fn get_relative_name(&self, scope_name: &Self) -> Option<Self> {
@@ -329,9 +329,7 @@ impl NameString {
             let s1 = self.get_element(index);
             let s2 = scope_name.get_element(index);
             if s2.is_none() {
-                if s1.is_none() {
-                    return None;
-                }
+                s1?;
                 let mut buffer = [[0u8; 4]; Self::NORMAL_LIMIT];
                 let mut vector: Option<Vec<[u8; 4]>> = None;
                 let mut counter = 1;
@@ -406,7 +404,7 @@ impl NameString {
         if should_to_be_absolute_path {
             result.flag = NameStringFlag::AbsolutePath;
         }
-        return result;
+        result
     }
 
     pub fn from_array(array: &[[u8; 4]], is_absolute: bool) -> Self {
@@ -428,7 +426,7 @@ impl NameString {
                 data: NameStringData::Normal((buf, array.len() as u8)),
                 flag: if is_absolute {
                     NameStringFlag::AbsolutePath
-                } else if array.len() == 0 {
+                } else if array.is_empty() {
                     NameStringFlag::NullName
                 } else if array.len() == 1 {
                     NameStringFlag::SingleRelativePath
@@ -454,7 +452,7 @@ impl NameString {
             data: NameStringData::Normal((normal, array.len() as u8)),
             flag: if is_absolute {
                 NameStringFlag::AbsolutePath
-            } else if array.len() == 0 {
+            } else if array.is_empty() {
                 NameStringFlag::NullName
             } else if array.len() == 1 {
                 NameStringFlag::SingleRelativePath
@@ -484,7 +482,7 @@ impl NameString {
                 if e.len() > 4 {
                     return None;
                 }
-                if e.len() != 0 {
+                if !e.is_empty() {
                     let mut array = to_u8_4_array(e);
                     Self::delete_extra_under_score(&mut array);
                     vec.push(array);
@@ -505,7 +503,7 @@ impl NameString {
                 if e.len() > 4 {
                     return None;
                 }
-                if e.len() != 0 {
+                if !e.is_empty() {
                     buf[index] = to_u8_4_array(e);
                     index += 1;
                 }
@@ -540,7 +538,7 @@ impl NameString {
 
     pub fn to_be_absolute_path(&self) -> Self {
         Self {
-            data: (self.data.clone()),
+            data: self.data.clone(),
             flag: NameStringFlag::AbsolutePath,
         }
     }
@@ -557,11 +555,11 @@ impl NameString {
                 return false;
             }
         }
-        return true;
+        true
     }
 }
 
-impl core::cmp::PartialEq for NameString {
+impl PartialEq for NameString {
     fn eq(&self, other: &Self) -> bool {
         if self.flag == NameStringFlag::NullName && other.flag == NameStringFlag::NullName {
             return true;
@@ -574,7 +572,7 @@ impl core::cmp::PartialEq for NameString {
                 return false;
             }
         }
-        return true;
+        true
     }
 }
 
@@ -662,10 +660,10 @@ pub enum SimpleName {
 impl SimpleName {
     pub fn parse(stream: &mut AmlStream, current_scope: &NameString) -> Result<Self, AmlError> {
         ignore_invalid_type_error!(try_parse_local_object(stream), |n| {
-            return Ok(Self::LocalObj(n));
+            Ok(Self::LocalObj(n))
         });
         ignore_invalid_type_error!(try_parse_argument_object(stream), |n| {
-            return Ok(Self::ArgObj(n));
+            Ok(Self::ArgObj(n))
         });
         Ok(Self::NameString(NameString::parse(
             stream,
@@ -689,13 +687,11 @@ impl SuperName {
     ) -> Result<Self, AmlError> {
         ignore_invalid_type_error!(
             expression_opcode::ReferenceTypeOpcode::try_parse(stream, current_scope, evaluator),
-            |r_n| {
-                return Ok(Self::ReferenceTypeOpcode(Box::new(r_n)));
-            }
+            |r_n| { Ok(Self::ReferenceTypeOpcode(Box::new(r_n))) }
         );
         let backup = stream.clone();
         ignore_invalid_type_error!(SimpleName::parse(stream, current_scope), |n| {
-            return Ok(Self::SimpleName(n));
+            Ok(Self::SimpleName(n))
         });
         stream.roll_back(&backup);
         let op = stream.peek_byte()?;
@@ -706,6 +702,6 @@ impl SuperName {
                 return Ok(Self::DebugObj);
             }
         }
-        return Err(AmlError::InvalidType);
+        Err(AmlError::InvalidType)
     }
 }

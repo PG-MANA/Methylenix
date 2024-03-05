@@ -84,7 +84,7 @@ impl Ringbuffer {
                 )
             };
         }
-        return size;
+        size
     }
 
     pub fn read(&mut self, buffer: VAddress, size: MSize) -> MSize {
@@ -110,6 +110,6 @@ impl Ringbuffer {
                 )
             };
         }
-        return size;
+        size
     }
 }

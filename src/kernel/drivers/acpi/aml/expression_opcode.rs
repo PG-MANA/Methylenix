@@ -28,7 +28,6 @@ impl Package {
             let pkg_length = PkgLength::parse(stream)?;
             let mut element_list_stream = stream.clone();
             stream.seek(pkg_length.actual_length)?;
-            drop(stream); /* Avoid using this */
             element_list_stream.change_size(pkg_length.actual_length)?;
             let num_elements = element_list_stream.read_byte()?;
             Ok(Self {
@@ -54,12 +53,12 @@ impl Package {
         let backup = self.stream.clone();
         ignore_invalid_type_error!(DataRefObject::parse(&mut self.stream, current_scope), |e| {
             self.num_elements -= 1;
-            return Ok(Some(PackageElement::DataRefObject(e)));
+            Ok(Some(PackageElement::DataRefObject(e)))
         });
         self.stream.roll_back(&backup);
         let name_string = NameString::parse(&mut self.stream, Some(current_scope))?;
         self.num_elements -= 1;
-        return Ok(Some(PackageElement::NameString(name_string)));
+        Ok(Some(PackageElement::NameString(name_string)))
     }
 }
 
@@ -75,7 +74,6 @@ impl VarPackage {
             let pkg_length = PkgLength::parse(stream)?;
             let mut element_list_stream = stream.clone();
             stream.seek(pkg_length.actual_length)?;
-            drop(stream); /* Avoid using this */
             element_list_stream.change_size(pkg_length.actual_length)?;
             Ok(Self {
                 stream: element_list_stream,
@@ -149,7 +147,8 @@ pub enum ReferenceTypeOpcode {
     DefRefOf(SuperName),
     DefDerefOf(TermArg),
     DefIndex(Index),
-    UserTermObj, /* What is this? */
+    UserTermObj,
+    /* What is this? */
 }
 
 impl ReferenceTypeOpcode {
@@ -200,7 +199,6 @@ impl ByteList {
         let pkg_length = PkgLength::parse(stream)?;
         let mut byte_list_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         byte_list_stream.change_size(pkg_length.actual_length)?;
         //let buffer_size = TermArg::parse_integer(&mut byte_list_stream,current_scope)?;
         /* ATTENTION: When eval, buffer_size must be eval first. */
@@ -496,7 +494,7 @@ impl ExpressionOpcode {
 
                 opcode::LOAD_OP => {
                     stream.seek(2)?;
-                    let name = NameString::parse(stream, Some(&current_scope))?;
+                    let name = NameString::parse(stream, Some(current_scope))?;
                     let target = Target::parse(stream, current_scope, evaluator)?;
                     Ok(Self::DefLoad((name, target)))
                 }
@@ -753,9 +751,7 @@ impl ExpressionOpcode {
             _ => {
                 ignore_invalid_type_error!(
                     ReferenceTypeOpcode::try_parse(stream, current_scope, evaluator),
-                    |r| {
-                        return Ok(Self::ReferenceTypeOpcode(r));
-                    }
+                    |r| { Ok(Self::ReferenceTypeOpcode(r)) }
                 );
                 Ok(Self::MethodInvocation(MethodInvocation::try_parse(
                     stream,

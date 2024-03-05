@@ -1,8 +1,8 @@
 //!
 //! Multiple APIC Description Table
 //!
-//! This manager contains the information of MADT
-//! MADT has the list of Local APIC IDs.
+//! This manager contains the information of MADT.
+//! It has the list of Local APIC IDs.
 
 use super::{AcpiTable, OptionalAcpiTable};
 
@@ -73,7 +73,7 @@ impl AcpiTable for MadtManager {
             pr_err!("Not supported MADT version: {}", madt.revision);
         }
         self.base_address = remap_table!(vm_address, madt.length);
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -124,19 +124,18 @@ impl MadtManager {
             let record_type = unsafe { *(record_base as *const u8) };
             let record_length = unsafe { *((record_base + 1) as *const u8) };
 
-            if record_type == 0x0B {
-                if (unsafe { *((record_base + 68) as *const u64) } == target_mpidr)
-                    && (unsafe { *((record_base + 12) as *const u8) } & 1) != 0
-                {
-                    return Some(GenericInterruptControllerCpuInfo {
-                        acpi_processor_uid: unsafe { *((record_base + 8) as *const u32) },
-                        gicr_base_address: unsafe { *((record_base + 60) as *const u64) },
-                    });
-                }
+            if record_type == 0x0B
+                && (unsafe { *((record_base + 68) as *const u64) } == target_mpidr)
+                && (unsafe { *((record_base + 12) as *const u8) } & 1) != 0
+            {
+                return Some(GenericInterruptControllerCpuInfo {
+                    acpi_processor_uid: unsafe { *((record_base + 8) as *const u32) },
+                    gicr_base_address: unsafe { *((record_base + 60) as *const u64) },
+                });
             }
             pointer += record_length as usize;
         }
-        return None;
+        None
     }
 
     ///
@@ -161,7 +160,7 @@ impl MadtManager {
             }
             pointer += record_length as usize;
         }
-        return None;
+        None
     }
 
     pub fn find_generic_interrupt_redistributor_struct(
@@ -187,7 +186,7 @@ impl MadtManager {
             }
             pointer += record_length as usize;
         }
-        return None;
+        None
     }
 
     /// Release memory map and drop my self

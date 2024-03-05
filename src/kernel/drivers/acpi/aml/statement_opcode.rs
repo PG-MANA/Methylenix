@@ -3,6 +3,7 @@
 //!
 //!
 #![allow(dead_code)]
+
 use super::data_object::PkgLength;
 use super::name_object::{NameString, SuperName};
 use super::opcode;
@@ -70,7 +71,6 @@ impl IfElse {
             let pkg_length = PkgLength::parse(stream)?;
             let mut else_scope_stream = stream.clone();
             stream.seek(pkg_length.actual_length)?;
-            drop(stream); /* Avoid using this */
             else_scope_stream.change_size(pkg_length.actual_length)?;
             let else_term_list = TermList::new(else_scope_stream, current_scope.clone());
             Ok(Self {
@@ -140,7 +140,6 @@ impl While {
         let pkg_length = PkgLength::parse(stream)?;
         let mut while_scope_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         while_scope_stream.change_size(pkg_length.actual_length)?;
         let predicate = TermArg::parse_integer(&mut while_scope_stream, current_scope, evaluator)?;
         let term_list = TermList::new(while_scope_stream, current_scope.clone());

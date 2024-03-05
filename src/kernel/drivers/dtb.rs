@@ -40,6 +40,12 @@ pub struct DtbPropertyInfo {
     len: u32,
 }
 
+impl Default for DtbManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DtbManager {
     const DTB_MAGIC: [u8; 4] = [0xd0, 0x0d, 0xfe, 0xed];
     const DTB_VERSION: u32 = 17;
@@ -109,7 +115,7 @@ impl DtbManager {
                 }
             };
         }
-        return true;
+        true
     }
 
     fn compare_name_segment(
@@ -134,7 +140,7 @@ impl DtbManager {
                 return Ok(true);
             }
         }
-        return Ok(false);
+        Ok(false)
     }
 
     fn compare_string(
@@ -163,7 +169,7 @@ impl DtbManager {
             *pointer += 1;
         }
         self.skip_padding(pointer);
-        return Ok(false);
+        Ok(false)
     }
 
     fn get_struct_offset(&self) -> VAddress {
@@ -204,7 +210,7 @@ impl DtbManager {
         while *self.read_node(*pointer)? == Self::FDT_NOP {
             *pointer += Self::FDT_NODE_BYTE;
         }
-        return Ok(());
+        Ok(())
     }
 
     fn skip_padding(&self, pointer: &mut usize) {
@@ -354,7 +360,7 @@ impl DtbManager {
                 Err(()) => return None,
             }
         }
-        return None;
+        None
     }
 
     pub fn get_property(
@@ -421,13 +427,8 @@ impl DtbManager {
     }
 
     pub fn is_node_operational(&self, node: &DtbNodeInfo) -> bool {
-        self.get_property(node, &Self::PROP_STATUS)
-            .and_then(|p| {
-                Some(
-                    unsafe { *(p.base_address.to_usize() as *const [u8; 5]) }
-                        == Self::PROP_STATUS_OKAY,
-                )
-            })
+        self.get_property(node, &Self::PROP_STATUS).map(|p| unsafe { *(p.base_address.to_usize() as *const [u8; 5]) }
+            == Self::PROP_STATUS_OKAY)
             .unwrap_or(true)
     }
 
@@ -455,7 +456,7 @@ impl DtbManager {
             }
             return true;
         }
-        return false;
+        false
     }
 
     pub fn read_reg_property(&self, node: &DtbNodeInfo, index: usize) -> Option<(usize, usize)> {

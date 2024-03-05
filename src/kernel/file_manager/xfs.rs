@@ -197,7 +197,7 @@ impl XfsDriver {
                     return;
                 }
             };
-        let block_lba = inode_block as u64 / partition_info.lba_block_size;
+        let block_lba = inode_block / partition_info.lba_block_size;
         let block_offset = inode_block - (block_lba * partition_info.lba_block_size);
         if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
             partition_info.device_id,
@@ -281,7 +281,7 @@ impl XfsDriver {
                 file_type,
                 entry_inode_number
             );
-            if (file_type & XFS_DIR3_FT_DIR) != 0 && name.len() != 0 {
+            if (file_type & XFS_DIR3_FT_DIR) != 0 && !name.is_empty() {
                 self.list_files(partition_info, entry_inode_number, indent + 1);
             }
         }
@@ -305,7 +305,7 @@ impl XfsDriver {
                     return Err(FileError::MemoryError(err));
                 }
             };
-        let block_lba = inode_block as u64 / partition_info.lba_block_size;
+        let block_lba = inode_block / partition_info.lba_block_size;
         let block_offset = inode_block - (block_lba * partition_info.lba_block_size);
         if let Err(err) = get_kernel_manager_cluster().block_device_manager.read_lba(
             partition_info.device_id,
@@ -375,7 +375,7 @@ impl XfsDriver {
                 return Ok((file_info, file_type));
             }
         }
-        return Err(FileError::FileNotFound);
+        Err(FileError::FileNotFound)
     }
 
     fn read_file_extents_inode(
@@ -489,7 +489,7 @@ impl XfsDriver {
         if !page_buffer_size.is_zero() {
             let _ = free_pages!(page_buffer);
         }
-        return Ok(buffer_pointer);
+        Ok(buffer_pointer)
     }
 
     fn analysis_file_and_set_file_info(
@@ -557,7 +557,7 @@ pub(super) fn try_mount_file_system(
     pr_debug!("Root inode: {}", xfs_info.root_inode);
 
     xfs_info.list_files(partition_info, xfs_info.root_inode, 0);
-    return Ok((xfs_info, Guid::new_be(&super_block.uuid)));
+    Ok((xfs_info, Guid::new_be(&super_block.uuid)))
 }
 
 impl PartitionManager for XfsDriver {

@@ -61,7 +61,7 @@ impl AcpiTable for McfgManager {
         let mcfg_vm_address = remap_table!(vm_address, mcfg.length);
         self.base_address = mcfg_vm_address;
 
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -76,8 +76,7 @@ impl McfgManager {
         const BASE_ADDRESS_ALLOCATION_STRUCT_SIZE: usize =
             core::mem::size_of::<BaseAddressAllocationStructure>();
 
-        if ((unsafe { &*(self.base_address.to_usize() as *const MCFG) }.length) as usize
-            - MCFG_SIZE)
+        if (unsafe { &*(self.base_address.to_usize() as *const MCFG) }.length as usize - MCFG_SIZE)
             / BASE_ADDRESS_ALLOCATION_STRUCT_SIZE
             < index
         {
@@ -89,11 +88,11 @@ impl McfgManager {
                 + index * BASE_ADDRESS_ALLOCATION_STRUCT_SIZE)
                 as *const BaseAddressAllocationStructure)
         };
-        return Some(PciBaseAddressInfo {
+        Some(PciBaseAddressInfo {
             base_address: info.base_address,
             segment_group: info.pci_segment_group,
             start_bus: info.start_bus,
             end_bus: info.end_bus,
-        });
+        })
     }
 }

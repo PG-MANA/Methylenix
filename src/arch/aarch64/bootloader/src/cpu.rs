@@ -3,7 +3,6 @@
 //!
 
 use core::arch::asm;
-
 pub unsafe fn get_current_el() -> u64 {
     let c: u64;
     asm!("mrs {:x}, CurrentEL", out(reg) c);

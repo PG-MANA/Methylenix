@@ -57,7 +57,7 @@ impl LocalApicManager {
     /// After that, enable EOI-Broadcast Suppression.
     pub fn init(&mut self) -> bool {
         let local_apic_msr = unsafe { cpu::rdmsr(Self::MSR_INDEX) };
-        let base_address = PAddress::from((local_apic_msr & Self::BASE_ADDR_MASK) as usize);
+        let base_address = PAddress::new((local_apic_msr & Self::BASE_ADDR_MASK) as usize);
         let is_x2apic_supported = unsafe {
             let mut eax = 1u32;
             let mut ebx = 0u32;
@@ -103,7 +103,7 @@ impl LocalApicManager {
             self.apic_id,
             self.is_x2apic_enabled
         );
-        return true;
+        true
     }
 
     /// Init LocalApicManager by other LocalApicManager
@@ -135,7 +135,7 @@ impl LocalApicManager {
             self.apic_id,
             self.is_x2apic_enabled
         );
-        return true;
+        true
     }
 
     /// Get current CPU's APIC ID

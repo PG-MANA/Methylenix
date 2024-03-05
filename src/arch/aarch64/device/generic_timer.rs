@@ -34,6 +34,12 @@ pub struct SystemCounter {
     base_address_type: SystemCounterBaseAddressType,
 }
 
+impl Default for SystemCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemCounter {
     const CNTCR: usize = 0x00;
     const CNTCR_EN: u64 = 0x01;
@@ -174,7 +180,7 @@ impl GenericTimer {
                 .global_timer_handler();
         }
         generic_timer.reload_timeout_value();
-        return true;
+        true
     }
 }
 
@@ -200,7 +206,7 @@ impl Timer for GenericTimer {
 
     fn get_difference(&self, earlier: usize, later: usize) -> usize {
         if earlier <= later {
-            earlier + (self.get_max_counter_value() as usize - later)
+            earlier + (self.get_max_counter_value() - later)
         } else {
             earlier - later
         }

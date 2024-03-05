@@ -14,33 +14,60 @@ pub struct ContextData {
 #[repr(C)]
 #[derive(Default, Clone)]
 pub struct Registers {
-    pub rax: u64,     /* +  0 */
-    pub rdx: u64,     /* +  1 */
-    pub rcx: u64,     /* +  2 */
-    pub rbx: u64,     /* +  3 */
-    pub rbp: u64,     /* +  4 */
-    pub rsi: u64,     /* +  5 */
-    pub rdi: u64,     /* +  6 */
-    pub r8: u64,      /* +  7 */
-    pub r9: u64,      /* +  8 */
-    pub r10: u64,     /* +  9 */
-    pub r11: u64,     /* + 10 */
-    pub r12: u64,     /* + 11 */
-    pub r13: u64,     /* + 12 */
-    pub r14: u64,     /* + 13 */
-    pub r15: u64,     /* + 14 */
-    pub ds: u64,      /* + 15 */
-    pub fs: u64,      /* + 16 */
-    pub fs_base: u64, /* + 17 */
-    pub gs: u64,      /* + 18 */
-    pub gs_base: u64, /* + 19 */
-    pub es: u64,      /* + 20 */
-    pub ss: u64,      /* + 21 */
-    pub rsp: u64,     /* + 22 */
-    pub rflags: u64,  /* + 23 */
-    pub cs: u64,      /* + 24 */
-    pub rip: u64,     /* + 25 */
-    pub cr3: u64,     /* + 26 */
+    pub rax: u64,
+    /* +  0 */
+    pub rdx: u64,
+    /* +  1 */
+    pub rcx: u64,
+    /* +  2 */
+    pub rbx: u64,
+    /* +  3 */
+    pub rbp: u64,
+    /* +  4 */
+    pub rsi: u64,
+    /* +  5 */
+    pub rdi: u64,
+    /* +  6 */
+    pub r8: u64,
+    /* +  7 */
+    pub r9: u64,
+    /* +  8 */
+    pub r10: u64,
+    /* +  9 */
+    pub r11: u64,
+    /* + 10 */
+    pub r12: u64,
+    /* + 11 */
+    pub r13: u64,
+    /* + 12 */
+    pub r14: u64,
+    /* + 13 */
+    pub r15: u64,
+    /* + 14 */
+    pub ds: u64,
+    /* + 15 */
+    pub fs: u64,
+    /* + 16 */
+    pub fs_base: u64,
+    /* + 17 */
+    pub gs: u64,
+    /* + 18 */
+    pub gs_base: u64,
+    /* + 19 */
+    pub es: u64,
+    /* + 20 */
+    pub ss: u64,
+    /* + 21 */
+    pub rsp: u64,
+    /* + 22 */
+    pub rflags: u64,
+    /* + 23 */
+    pub cs: u64,
+    /* + 24 */
+    pub rip: u64,
+    /* + 25 */
+    pub cr3: u64,
+    /* + 26 */
     pub padding: u64,
 }
 
@@ -88,7 +115,7 @@ impl ContextData {
         data.registers.rflags = 0x202;
         data.registers.rsp = stack as u64;
         //data.registers.cr3 = cr3 as u64;
-        return data;
+        data
     }
 
     /// Create ContextData for user.
@@ -108,7 +135,7 @@ impl ContextData {
         data.registers.ss = ss;
         data.registers.rflags = 0x202;
         data.registers.rsp = stack as u64;
-        if arguments.len() > 0 {
+        if !arguments.is_empty() {
             data.registers.rdi = arguments[0] as u64;
         }
         if arguments.len() > 1 {
@@ -130,7 +157,7 @@ impl ContextData {
             pr_err!("Too many arguments.");
         }
         //data.registers.cr3 = cr3 as u64;
-        return data;
+        data
     }
     /// Create ContextData for system from 'original_context'.
     ///
@@ -143,27 +170,27 @@ impl ContextData {
         forked_data.registers.ss = original_context.registers.ss;
         forked_data.registers.rflags = 0x202;
         forked_data.registers.rsp = stack as u64;
-        return forked_data;
+        forked_data
     }
 
     pub fn set_function_call_arguments(&mut self, arguments: &[u64]) {
-        if arguments.len() > 0 {
-            self.registers.rdi = arguments[0] as u64;
+        if !arguments.is_empty() {
+            self.registers.rdi = arguments[0];
         }
         if arguments.len() > 1 {
-            self.registers.rsi = arguments[1] as u64;
+            self.registers.rsi = arguments[1];
         }
         if arguments.len() > 2 {
-            self.registers.rdx = arguments[2] as u64;
+            self.registers.rdx = arguments[2];
         }
         if arguments.len() > 3 {
-            self.registers.rcx = arguments[3] as u64;
+            self.registers.rcx = arguments[3];
         }
         if arguments.len() > 4 {
-            self.registers.r8 = arguments[4] as u64;
+            self.registers.r8 = arguments[4];
         }
         if arguments.len() > 5 {
-            self.registers.r9 = arguments[5] as u64;
+            self.registers.r9 = arguments[5];
         }
         if arguments.len() >= 6 {
             pr_err!("Too many arguments.");

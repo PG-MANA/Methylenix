@@ -44,7 +44,7 @@ impl AcpiTable for DsdtManager {
 
         let dsdt_vm_address = remap_table!(vm_address, dsdt.length);
         self.base_address = dsdt_vm_address;
-        return Ok(());
+        Ok(())
     }
 }
 

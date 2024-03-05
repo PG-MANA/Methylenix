@@ -34,7 +34,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
             Ok(address) => address.to_usize() as *mut u8,
             Err(e) => {
                 pr_err!("Cannot alloc memory for {:?}. Error: {:?}", layout, e);
-                0 as *mut u8
+                core::ptr::null_mut::<u8>()
             }
         }
     }
@@ -51,5 +51,5 @@ unsafe impl GlobalAlloc for GlobalAllocator {
 
 #[inline(always)]
 fn layout_to_size(layout: Layout) -> MSize {
-    core::cmp::max(layout.size(), layout.align()).into()
+    MSize::new(core::cmp::max(layout.size(), layout.align()))
 }

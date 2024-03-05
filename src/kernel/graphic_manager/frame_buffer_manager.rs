@@ -38,8 +38,6 @@ impl FrameBufferManager {
         self.frame_buffer_width = pixel_info.horizontal_resolution as usize;
         self.frame_buffer_height = pixel_info.vertical_resolution as usize;
         self.frame_buffer_color_depth = 32;
-
-        return;
     }
 
     pub fn init_by_multiboot_information(&mut self, frame_buffer_info: &FrameBufferInfo) -> bool {
@@ -50,7 +48,7 @@ impl FrameBufferManager {
         self.frame_buffer_width = frame_buffer_info.width as usize;
         self.frame_buffer_height = frame_buffer_info.height as usize;
         self.frame_buffer_color_depth = frame_buffer_info.depth;
-        return true;
+        true
     }
 
     pub fn set_frame_buffer_memory_permission(&mut self) -> bool {
@@ -315,6 +313,6 @@ impl FrameBufferManager {
             }
         }
 
-        return true;
+        true
     }
 }

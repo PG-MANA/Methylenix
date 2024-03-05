@@ -62,7 +62,7 @@ impl<'a> core::fmt::Display for AddressPrinter<'a> {
                 f.write_char(self.separator)?;
             }
         }
-        return Ok(());
+        Ok(())
     }
 }
 

@@ -49,7 +49,7 @@ impl<T> SlabAllocator<T> {
                 Self::DEFAULT_ALLOC_ORDER.to_offset().to_usize(),
             )
         };
-        return Ok(());
+        Ok(())
     }
 
     pub fn alloc(&mut self) -> Result<&'static mut T, MemoryError> {
@@ -82,28 +82,27 @@ impl<T> LocalSlabAllocator<T> {
         let irq = InterruptManager::save_and_disable_local_irq();
         let result = self.slab_allocator.init();
         InterruptManager::restore_local_irq(irq);
-        return result;
+        result
     }
 
     pub fn alloc(&mut self) -> Result<&'static mut T, MemoryError> {
         let irq = InterruptManager::save_and_disable_local_irq();
         let result = self.slab_allocator.alloc();
         InterruptManager::restore_local_irq(irq);
-        return result;
+        result
     }
 
     pub fn free(&mut self, entry: &'static mut T) {
         let irq = InterruptManager::save_and_disable_local_irq();
-        let result = self.slab_allocator.free(entry);
+        self.slab_allocator.free(entry);
         InterruptManager::restore_local_irq(irq);
-        return result;
     }
 
     pub fn len(&self) -> usize {
         let irq = InterruptManager::save_and_disable_local_irq();
         let result = self.slab_allocator.len();
         InterruptManager::restore_local_irq(irq);
-        return result;
+        result
     }
 }
 
@@ -119,27 +118,26 @@ impl<T> GlobalSlabAllocator<T> {
         let _lock = self.lock.lock();
         let result = self.slab_allocator.init();
         drop(_lock);
-        return result;
+        result
     }
 
     pub fn alloc(&mut self) -> Result<&'static mut T, MemoryError> {
         let _lock = self.lock.lock();
         let result = self.slab_allocator.alloc();
         drop(_lock);
-        return result;
+        result
     }
 
     pub fn free(&mut self, entry: &'static mut T) {
         let _lock = self.lock.lock();
-        let result = self.slab_allocator.free(entry);
+        self.slab_allocator.free(entry);
         drop(_lock);
-        return result;
     }
 
     pub fn len(&self) -> usize {
         let _lock = self.lock.lock();
         let result = self.slab_allocator.len();
         drop(_lock);
-        return result;
+        result
     }
 }

@@ -110,7 +110,7 @@ impl WorkQueue {
         }
         drop(_worker_thread_lock);
         InterruptManager::restore_local_irq(irq);
-        return Ok(());
+        Ok(())
     }
 
     fn work_queue_local_thread() -> ! {

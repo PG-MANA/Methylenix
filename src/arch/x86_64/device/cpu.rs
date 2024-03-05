@@ -46,25 +46,25 @@ pub unsafe fn hlt() {
 
 #[inline(always)]
 pub unsafe fn out_byte(port: u16, data: u8) {
-    asm!("out dx, al",in("dx") port, in("al") data);
+    asm!("out dx, al", in("dx") port, in("al") data);
 }
 
 #[inline(always)]
 pub unsafe fn in_byte(port: u16) -> u8 {
     let result: u8;
-    asm!("in al, dx",in("dx") port,out("al") result);
+    asm!("in al, dx", in("dx") port, out("al") result);
     result
 }
 
 #[inline(always)]
 pub unsafe fn out_word(port: u16, data: u16) {
-    asm!("out dx, ax",in("dx") port, in("ax") data);
+    asm!("out dx, ax", in("dx") port, in("ax") data);
 }
 
 #[inline(always)]
 pub unsafe fn in_word(port: u16) -> u16 {
     let result: u16;
-    asm!("in ax, dx",in("dx") port,out("ax") result);
+    asm!("in ax, dx", in("dx") port, out("ax") result);
     result
 }
 
@@ -78,7 +78,7 @@ pub unsafe fn in_byte_twice(port: u16) -> (u8 /*first*/, u8 /*second*/) {
     asm!("  in  al, dx
             mov cl, al
             in  al, dx    
-    ", in("dx") port,out("cl") r1,out("al") r2);
+    ", in("dx") port, out("cl") r1, out("al") r2);
     (r1, r2)
 }
 
@@ -91,17 +91,17 @@ pub unsafe fn in_dword(port: u16) -> u32 {
 
 #[inline(always)]
 pub unsafe fn out_dword(port: u16, data: u32) {
-    asm!("out dx, eax",in("dx") port, in("eax") data);
+    asm!("out dx, eax", in("dx") port, in("eax") data);
 }
 
 #[inline(always)]
 pub unsafe fn sgdt(gdtr: &mut u128) {
-    asm!("sgdt [{}]", in(reg) (gdtr as *const _ as usize));
+    asm!("sgdt [{}]", in(reg) gdtr as *const _ as usize);
 }
 
 #[inline(always)]
 pub unsafe fn lgdt(gdtr: &u128) {
-    asm!("lgdt [{}]", in(reg) (gdtr as *const _ as usize));
+    asm!("lgdt [{}]", in(reg) gdtr as *const _ as usize);
 }
 
 #[inline(always)]
@@ -172,7 +172,7 @@ pub unsafe fn get_cr0() -> u64 {
 
 #[inline(always)]
 pub unsafe fn set_cr0(cr0: u64) {
-    asm!("mov cr0, {}",in(reg) cr0);
+    asm!("mov cr0, {}", in(reg) cr0);
 }
 
 #[inline(always)]
@@ -246,7 +246,7 @@ pub unsafe fn enable_fs_gs_base() {
 
 pub unsafe fn get_cpu_base_address() -> usize {
     let result: usize;
-    asm!("mov {}, gs:0",out(reg) result);
+    asm!("mov {}, gs:0", out(reg) result);
     result
 }
 
@@ -336,7 +336,7 @@ pub unsafe extern "C" fn task_switch(
     now_context_data_address: *mut ContextData,
 ) {
     asm!(
-        "
+    "
                 fxsave  [rsi]
                 mov     [rsi + 512],          rax
                 mov     [rsi + 512 + 8 *  1], rdx
@@ -387,8 +387,8 @@ pub unsafe extern "C" fn task_switch(
                 jmp     {}
                 1:
                 ",
-                   sym run_task,
-                   in("rdi") next_context_data_address,
-                   in("rsi") now_context_data_address
+    sym run_task,
+    in("rdi") next_context_data_address,
+    in("rsi") now_context_data_address
     );
 }

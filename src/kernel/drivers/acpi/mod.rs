@@ -8,6 +8,7 @@
 pub mod aml;
 pub mod device;
 pub mod event;
+
 pub mod table {
     use crate::kernel::memory_manager::data_type::VAddress;
 
@@ -122,13 +123,13 @@ impl AcpiManager {
 
         device_manager.pm_timer = self.get_fadt_manager().get_acpi_pm_timer();
 
-        return true;
+        true
     }
 
     pub fn create_acpi_event_manager(&self) -> Option<AcpiEventManager> {
         if self.enabled {
             Some(AcpiEventManager::new(
-                &self.get_table_manager().get_fadt_manager(),
+                self.get_table_manager().get_fadt_manager(),
             ))
         } else {
             None
@@ -192,13 +193,13 @@ impl AcpiManager {
     /* FADT must exists */
     pub fn get_fadt_manager(&self) -> &FadtManager {
         assert!(self.is_available());
-        &self.xsdt_manager.get_fadt_manager()
+        self.xsdt_manager.get_fadt_manager()
     }
 
-    /* DSDT must exists */
+    /* DSDT must exist */
     pub fn get_dsdt_manager(&self) -> &DsdtManager {
         assert!(self.is_available());
-        &self.xsdt_manager.get_dsdt_manager()
+        self.xsdt_manager.get_dsdt_manager()
     }
 
     pub fn enable_acpi(&self) -> bool {
@@ -220,7 +221,7 @@ impl AcpiManager {
                 core::hint::spin_loop();
             }
         }
-        return true;
+        true
     }
 
     fn find_sleep_state_object(interpreter: &mut AmlInterpreter, s: u8) -> Option<(usize, usize)> {
@@ -231,7 +232,7 @@ impl AcpiManager {
         let name = NameString::from_array(&[[b'_', b'S', s + 0x30, 0]], true);
         if let Some(d) = interpreter.get_aml_variable(&name) {
             if let AmlVariable::Package(package) = &d {
-                if let Some(AmlPackage::ConstData(pm1_a)) = package.get(0) {
+                if let Some(AmlPackage::ConstData(pm1_a)) = package.first() {
                     if let Some(AmlPackage::ConstData(pm1_b)) = package.get(1) {
                         return Some((pm1_a.to_int(), pm1_b.to_int()));
                     }
@@ -284,7 +285,7 @@ impl AcpiManager {
                 write_io_word(pm1_b as _, status);
             }
         }
-        return true;
+        true
     }
 
     pub fn shutdown(&mut self) -> ! {
@@ -309,7 +310,7 @@ impl AcpiManager {
                 self.aml_interpreter.as_mut().unwrap(),
                 pm1_a_port,
                 pm1_b_port,
-                sleep_control_register
+                sleep_control_register,
             ),
             "Cannot enter S5."
         );
@@ -389,7 +390,7 @@ impl AcpiManager {
                 }
             }
         }
-        return true;
+        true
     }
 
     pub fn search_interrupt_information_with_evaluation_aml(
@@ -400,7 +401,7 @@ impl AcpiManager {
     ) -> Option<ResourceData> {
         let debug_and_return_none = |e: Option<AmlVariable>| -> Option<ResourceData> {
             pr_err!("Invalid PCI Routing Table: {:?}", e.unwrap());
-            return None;
+            None
         };
         let mut interpreter = if let Some(i) = &self.aml_interpreter {
             i.clone()
@@ -421,7 +422,7 @@ impl AcpiManager {
         if let Some(AmlVariable::Package(vector)) = &returned_value {
             for element in vector.iter() {
                 if let AmlPackage::Package(device_element) = element {
-                    if let Some(AmlPackage::ConstData(c)) = device_element.get(0) {
+                    if let Some(AmlPackage::ConstData(c)) = device_element.first() {
                         let target = c.to_int();
                         let target_device = ((target >> 0x10) & 0xFFFF) as u16;
                         let target_function = (target & 0xFFFF) as u16;
@@ -466,7 +467,7 @@ impl AcpiManager {
                             let returned_value = link_device_evaluation_result.unwrap();
 
                             return if let Some(AmlVariable::Buffer(v)) = &returned_value {
-                                let resource_type_tag = match v.get(0) {
+                                let resource_type_tag = match v.first() {
                                     Some(c) => *c,
                                     None => {
                                         return debug_and_return_none(returned_value);
@@ -643,7 +644,10 @@ impl AcpiManager {
                 )
                 .get_full_name_path(interpreter.get_current_scope(), false);
                 pr_debug!("Evaluate: {}", query_method_name);
-                if let Err(_) = interpreter.evaluate_method(&query_method_name, &[]) {
+                if interpreter
+                    .evaluate_method(&query_method_name, &[])
+                    .is_err()
+                {
                     pr_err!("Failed to evaluate: {}", query_method_name);
                 }
             }
@@ -672,7 +676,7 @@ impl GenericAddress {
         }
         Self {
             space_id: address_type,
-            address: u64::from_le_bytes((a[4..12]).try_into().unwrap()),
+            address: u64::from_le_bytes(a[4..12].try_into().unwrap()),
         }
     }
 }

@@ -27,7 +27,7 @@ pub fn setup_msi_or_msi_x(
     if let Ok(a) = setup_msi_x(pci_dev, handler, priority, is_level_trigger) {
         return Ok(a);
     }
-    return Err(());
+    Err(())
 }
 
 pub fn setup_msi(
@@ -93,10 +93,10 @@ pub fn setup_msi(
     )?;
     get_kernel_manager_cluster().pci_manager.write_data(
         pci_dev,
-        usable_capability + 0x0,
+        usable_capability,
         message_control | (1 << 16),
     )?;
-    return Ok(info.interrupt_id);
+    Ok(info.interrupt_id)
 }
 
 pub fn setup_msi_x(
@@ -184,5 +184,5 @@ pub fn setup_msi_x(
         (message_control & !(1 << 30)) | (1 << 31),
     )?;
 
-    return Ok(info.interrupt_id);
+    Ok(info.interrupt_id)
 }

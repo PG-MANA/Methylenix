@@ -2,7 +2,7 @@
 //! EFI Loaded Image Protocol
 //!
 
-use super::super::{memory_map::EfiMemoryType, EfiHandle, EfiSystemTable, Guid};
+use crate::efi::{memory_map::EfiMemoryType, EfiHandle, EfiSystemTable, Guid};
 
 #[repr(C)]
 pub struct EfiLoadedImageProtocol {

@@ -87,7 +87,6 @@ impl Ecam {
                 pr_err!("Failed to free memory mapping: {:?}", e);
             }
         }
-        return;
     }
 
     pub fn read_data(&self, function_base_address: VAddress, offset: usize, size: u8) -> u32 {
@@ -99,11 +98,11 @@ impl Ecam {
         };
         let byte_offset = (offset & 0b11) as u8;
         assert!(byte_offset + size <= 4);
-        return if size == 4 {
+        if size == 4 {
             data
         } else {
             (data >> (byte_offset << 3)) & ((1 << (size << 3)) - 1)
-        };
+        }
     }
 
     pub fn read_data_pci_dev(&self, pci_dev: &PciDevice, offset: u32) -> Result<u32, ()> {

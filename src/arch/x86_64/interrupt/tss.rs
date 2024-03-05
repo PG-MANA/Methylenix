@@ -102,7 +102,7 @@ impl TssManager {
             *(target_ist_address as *mut u32) = (stack_address & 0xffffffff) as u32;
             *((target_ist_address + 4) as *mut u32) = (stack_address >> 32) as u32;
         }
-        return true;
+        true
     }
 
     pub fn set_rsp(&self, rsp: u8, stack_address: usize) -> bool {
@@ -114,6 +114,6 @@ impl TssManager {
             *(target_rsp_address as *mut u32) = (stack_address & 0xffffffff) as u32;
             *((target_rsp_address + 4) as *mut u32) = (stack_address >> 32) as u32;
         }
-        return true;
+        true
     }
 }

@@ -184,7 +184,7 @@ impl IrqSaveSpinLockFlag {
 impl Drop for IrqSaveSpinLockFlagHolder {
     fn drop(&mut self) {
         unsafe {
-            (&*self.flag).store(false, Ordering::Release);
+            (*self.flag).store(false, Ordering::Release);
             InterruptManager::restore_local_irq_by_reference(&self.irq);
         }
     }

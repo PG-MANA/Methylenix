@@ -2,6 +2,23 @@
 //! File System
 //!
 
+use alloc::boxed::Box;
+use core::mem::offset_of;
+
+use crate::kernel::block_device::BlockDeviceError;
+use crate::kernel::collections::guid::Guid;
+use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
+use crate::kernel::manager_cluster::get_kernel_manager_cluster;
+use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
+use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kmalloc, MemoryError};
+
+use self::file_info::FileInfo;
+pub use self::path_info::PathInfo;
+pub use self::vfs::{
+    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
+    FILE_PERMISSION_WRITE,
+};
+
 pub mod elf;
 mod fat32;
 mod file_info;
@@ -9,26 +26,6 @@ mod gpt;
 mod path_info;
 mod vfs;
 mod xfs;
-
-use self::file_info::FileInfo;
-pub use self::path_info::{PathInfo, PathInfoIter};
-pub use self::vfs::{
-    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
-    FILE_PERMISSION_WRITE,
-};
-
-use crate::kernel::block_device::BlockDeviceError;
-use crate::kernel::collections::guid::Guid;
-use crate::kernel::collections::ptr_linked_list::{
-    offset_of_list_node, PtrLinkedList, PtrLinkedListNode,
-};
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
-use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kmalloc, MemoryError};
-
-use core::mem::offset_of;
-
-use alloc::boxed::Box;
 
 //#[derive(Clone)]
 pub struct PartitionInfo {
@@ -93,6 +90,7 @@ trait PartitionManager {
         current_directory: &mut FileInfo,
     ) -> Result<FileInfo, FileError>;
 
+    #[allow(dead_code)]
     fn get_file_size(
         &self,
         partition_info: &PartitionInfo,
@@ -109,6 +107,12 @@ trait PartitionManager {
     ) -> Result<MSize, FileError>;
 
     fn close_file(&self, partition_info: &PartitionInfo, file_info: &mut FileInfo);
+}
+
+impl Default for FileManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FileManager {
@@ -183,7 +187,6 @@ impl FileManager {
 
         pr_err!("Unknown File System");
         let _ = free_pages!(first_block_data);
-        return;
     }
 
     pub fn mount_root(&mut self, root_uuid: Guid, is_writable: bool) {
@@ -198,7 +201,6 @@ impl FileManager {
             }
         }
         pr_err!("Root is not found");
-        return;
     }
 
     /// Temporary function for [`crate::kernel::initialization::mount_root_file_system`]
@@ -207,7 +209,7 @@ impl FileManager {
             self.partition_list
                 .get_first_entry(offset_of!(Partition, list))
         }
-        .and_then(|p| Some(p.uuid.clone()))
+        .map(|p| p.uuid)
     }
 
     fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<u64, FileError> {
@@ -220,7 +222,7 @@ impl FileManager {
         current_directory: &mut FileInfo,
         permission_and_flags: u16,
     ) -> Result<&'static mut FileInfo, FileError> {
-        if file_name == "." || file_name.len() == 0 {
+        if file_name == "." || file_name.is_empty() {
             return Ok(unsafe { &mut *(current_directory as *mut _) });
         } else if file_name == ".." {
             return if current_directory.parent.is_null() {
@@ -248,7 +250,7 @@ impl FileManager {
         let f = driver
             .driver
             .search_file(&driver.info, file_name, current_directory)?;
-        let mut file_info = match kmalloc!(FileInfo, f) {
+        let file_info = match kmalloc!(FileInfo, f) {
             Ok(i) => i,
             Err(err) => {
                 pr_err!("Failed to allocate FileInfo: {:?}", err);
@@ -346,7 +348,7 @@ impl FileOperationDriver for FileManager {
         if let Ok(s) = result {
             descriptor.add_position(s);
         }
-        return result;
+        result
     }
 
     fn write(
@@ -372,7 +374,7 @@ impl FileOperationDriver for FileManager {
                 descriptor.set_position(MOffset::new(pos));
             }
         }
-        return Ok(descriptor.get_position());
+        Ok(descriptor.get_position())
     }
 
     fn close(&mut self, descriptor: FileDescriptor) {

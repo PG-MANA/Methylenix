@@ -28,7 +28,7 @@ impl FontCache {
 
     pub fn get_cached_ascii_font_data(&self, c: char) -> BitmapFontData {
         assert!(c.is_ascii());
-        self.ascii[(c as usize) - 0x20].clone()
+        self.ascii[(c as usize) - 0x20]
     }
 
     pub fn add_normal_font_cache(&mut self, c: char, font_data: BitmapFontData) -> bool {
@@ -41,10 +41,6 @@ impl FontCache {
     }
 
     pub fn get_cached_normal_font_data(&self, c: char) -> Option<BitmapFontData> {
-        if let Some(cache) = self.normal.iter().find(|&t| t.0 == c) {
-            Some(cache.1.clone())
-        } else {
-            None
-        }
+        self.normal.iter().find(|&t| t.0 == c).map(|cache| cache.1)
     }
 }

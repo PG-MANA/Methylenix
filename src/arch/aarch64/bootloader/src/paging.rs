@@ -26,7 +26,7 @@ pub struct MemoryPermissionFlags(u8);
 impl MemoryPermissionFlags {
     pub const fn new(read: bool, write: bool, execute: bool, user_access: bool) -> Self {
         Self(
-            ((read as u8) << 0)
+            (read as u8)
                 | ((write as u8) << 1)
                 | ((execute as u8) << 2)
                 | ((user_access as u8) << 3),
@@ -122,7 +122,7 @@ pub fn init_ttbr1(top_level_page: usize) {
     let mut mair_el1 = unsafe { get_mair_el1() };
     for i in 0..8 {
         if (mair_el1 & 0xff) == 0xff {
-            unsafe { MAIR_INDEX == i };
+            unsafe { MAIR_INDEX = i };
             break;
         }
         mair_el1 >>= 8;
@@ -183,7 +183,7 @@ fn _associate_address(
 
         index += 1;
     }
-    return Ok(());
+    Ok(())
 }
 
 pub fn associate_address(

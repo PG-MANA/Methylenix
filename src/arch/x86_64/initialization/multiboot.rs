@@ -44,8 +44,8 @@ pub fn init_memory_by_multiboot_information(
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
         physical_memory_manager.add_memory_entry_pool(
-            &MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize,
-            mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER),
+            core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER) as usize,
+            mem::size_of_val(&*core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)),
         );
     }
     let mut max_available_address = 0;
@@ -84,32 +84,32 @@ pub fn init_memory_by_multiboot_information(
     /* Reserve EFI Memory Area */
     for entry in multiboot_information.efi_memory_map_info.clone() {
         match entry.memory_type {
-            EfiMemoryType::EfiReservedMemoryType|
+            EfiMemoryType::EfiReservedMemoryType |
             EfiMemoryType::EfiBootServicesData/* for BGRT */ |
             EfiMemoryType::EfiRuntimeServicesCode |
             EfiMemoryType::EfiRuntimeServicesData |
             EfiMemoryType::EfiUnusableMemory |
-            EfiMemoryType::EfiACPIReclaimMemory|
+            EfiMemoryType::EfiACPIReclaimMemory |
             EfiMemoryType::EfiACPIMemoryNVS |
             EfiMemoryType::EfiMemoryMappedIO |
             EfiMemoryType::EfiMemoryMappedIOPortSpace |
             EfiMemoryType::EfiPalCode |
             EfiMemoryType::EfiPersistentMemory => {
                 if let Err(e) =
-                   physical_memory_manager.reserve_memory(
-                       PAddress::new(entry.physical_start),
-                       MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT),
-                       MOrder::new(0)) {
+                    physical_memory_manager.reserve_memory(
+                        PAddress::new(entry.physical_start),
+                        MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT),
+                        MOrder::new(0)) {
                     pr_warn!("Failed to free {:?}: {:?}", entry.memory_type, e);
                 }
             }
-            _=>{}
+            _ => {}
         }
         pr_info!(
             "[{:#016X}~{:#016X}] {}",
             entry.physical_start,
             MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT)
-                .to_end_address(PAddress::new(entry.physical_start as usize))
+                .to_end_address(PAddress::new(entry.physical_start))
                 .to_usize(),
             entry.memory_type
         );
@@ -138,7 +138,7 @@ pub fn init_memory_by_multiboot_information(
         .reserve_memory(
             PAddress::new(multiboot_information.address),
             MSize::new(multiboot_information.size),
-            0.into(),
+            MOrder::new(0),
         )
         .expect("Failed to reserve memory area of the multiboot information");
 
@@ -152,9 +152,9 @@ pub fn init_memory_by_multiboot_information(
         if e.start_address != 0 && e.end_address != 0 {
             physical_memory_manager
                 .reserve_memory(
-                    e.start_address.into(),
-                    (e.end_address - e.start_address).into(),
-                    0.into(),
+                    PAddress::new(e.start_address),
+                    MSize::new(e.end_address - e.start_address),
+                    MOrder::new(0),
                 )
                 .expect("Failed to reserve memory area of the multiboot modules");
         }
@@ -271,8 +271,8 @@ pub fn init_memory_by_multiboot_information(
     let _ = get_kernel_manager_cluster()
         .kernel_memory_manager
         .free_physical_memory(
-            multiboot_information.address.into(),
-            multiboot_information.size.into(),
+            PAddress::new(multiboot_information.address),
+            MSize::new(multiboot_information.size),
         ); /* It may be already freed */
 
     /* Store managers to cluster */
@@ -292,8 +292,8 @@ pub fn init_graphic(multiboot_information: &MultiBootInformation) {
     for module in multiboot_information.modules.iter() {
         if module.name == "font.pf2" {
             let vm_address = io_remap!(
-                module.start_address.into(),
-                (module.end_address - module.start_address).into(),
+                PAddress::new(module.start_address),
+                MSize::new(module.end_address - module.start_address),
                 MemoryPermissionFlags::rodata(),
                 MemoryOptionFlags::PRE_RESERVED
             );

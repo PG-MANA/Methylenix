@@ -43,8 +43,6 @@ init_long_mode:
   movabs    $(os_stack + OS_STACK_SIZE), %rsp   /* Reset Stack */
   cmp   $BOOT_FROM_MULTIBOOT_MARK, %rax
   jz    jump_to_multiboot_main
-  cmp   $BOOT_FROM_DIRECTBOOT_MARK, %rax
-  jz    jump_to_directboot_main
   movabs    $unknown_boot_main, %rax             /* at src/arch/x86_64/mod.rs */
   jmp   *%rax
 .size       init_long_mode, . - init_long_mode
@@ -55,8 +53,3 @@ jump_to_multiboot_main:
   jmp       *%rax
 .size       jump_to_multiboot_main, . - jump_to_multiboot_main
 
-.type       jump_to_directboot_main, %function
-jump_to_directboot_main:
-  movabs    $directboot_main, %rax               /* at src/arch/x86_64/mod.rs */
-  jmp       *%rax
-.size       jump_to_directboot_main, . - jump_to_directboot_main

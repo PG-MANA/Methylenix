@@ -145,7 +145,7 @@ impl PciDeviceDriver for NvmeManager {
             controller_properties_base_address,
             Self::CONTROLLER_PROPERTIES_VERSION,
         );
-        if version > ((2 << 16) | (0 << 8)) {
+        if version > (2 << 16) {
             pr_err!("Unsupported NVMe version: {:#X}", version);
             return Err(());
         }
@@ -465,7 +465,7 @@ impl PciDeviceDriver for NvmeManager {
         }
         let command_id = nvme_manager.submit_create_submission_command(
             io_submission_queue_physical_address,
-            num_of_submission_queue_entries as u16,
+            num_of_submission_queue_entries,
             0x01,
             0x01,
             0,
@@ -557,7 +557,7 @@ impl PciDeviceDriver for NvmeManager {
         }
 
         let _ = free_pages!(identify_info_virtual_address);
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -634,20 +634,14 @@ impl NvmeManager {
     }
 
     fn add_name_space(&mut self, name_space: NameSpace) {
-        assert!(
-            self.namespace_list
-                .last()
-                .and_then(|n| Some(n.id))
-                .unwrap_or(0)
-                < name_space.id
-        );
+        assert!(self.namespace_list.last().map(|n| n.id).unwrap_or(0) < name_space.id);
         self.namespace_list.push(name_space);
     }
 
     pub fn setup_interrupt(&mut self, pci_dev: &PciDevice) -> Result<(), ()> {
         let interrupt_id = setup_msi_or_msi_x(pci_dev, nvme_handler, None, true)?;
         unsafe { NVME_LIST.push_back((interrupt_id, self as *mut _)) };
-        return Ok(());
+        Ok(())
     }
 
     fn _read_completion_queue_head_doorbell(
@@ -702,16 +696,16 @@ impl NvmeManager {
         queue.submission_current_pointer = next_pointer;
         let command_id = queue.next_command_id;
         queue.next_command_id += 1;
-        return command_id;
+        command_id
     }
 
     fn submit_admin_command(&mut self, command: [u32; 16]) -> u16 {
-        return Self::_submit_command(
+        Self::_submit_command(
             self.controller_properties_base_address,
             self.stride,
             &mut self.admin_queue,
             command,
-        );
+        )
     }
 
     fn _wait_completion_of_command_by_spin(
@@ -737,7 +731,7 @@ impl NvmeManager {
             }
             time += 1;
         }
-        return Err(());
+        Err(())
     }
 
     fn wait_completion_of_admin_command_by_spin(
@@ -786,14 +780,13 @@ impl NvmeManager {
         get_cpu_manager_cluster()
             .run_queue
             .sleep_current_thread(Some(irq), TaskStatus::Interruptible)
-            .or_else(|e| {
+            .map_err(|e| {
                 pr_err!("Failed to sleep: {:#?}", e);
                 let _ = kfree!(wait_list);
-                Err(())
             })?;
         let result = wait_list.result;
         let _ = kfree!(wait_list);
-        return Ok(result);
+        Ok(result)
     }
 
     fn _take_completed_command(
@@ -822,15 +815,15 @@ impl NvmeManager {
             queue,
             queue.completion_current_pointer,
         );
-        return data;
+        data
     }
 
     fn take_completed_admin_command(&mut self) -> [u32; 4] {
-        return Self::_take_completed_command(
+        Self::_take_completed_command(
             &mut self.admin_queue,
             self.controller_properties_base_address,
             self.stride,
-        );
+        )
     }
 
     fn submit_identify_command(
@@ -847,7 +840,7 @@ impl NvmeManager {
                 output_physical_address.to_usize() as u64
         };
         command[10] = cns as u32;
-        return self.submit_admin_command(command);
+        self.submit_admin_command(command)
     }
 
     fn submit_create_completion_command(
@@ -866,7 +859,7 @@ impl NvmeManager {
         };
         command[10] = ((queue_size as u32 - 1) << 16) | (queue_id as u32);
         command[11] = ((interrupt_vector as u32) << 16) | ((interrupts_enabled as u32) << 1) | 1;
-        return self.submit_admin_command(command);
+        self.submit_admin_command(command)
     }
 
     fn submit_create_submission_command(
@@ -885,7 +878,7 @@ impl NvmeManager {
         };
         command[10] = ((queue_size as u32 - 1) << 16) | (submission_queue_id as u32);
         command[11] = ((completion_queue_id as u32) << 16) | ((queue_priority as u32) << 1) | 1;
-        return self.submit_admin_command(command);
+        self.submit_admin_command(command)
     }
 
     fn add_io_queue(&mut self, queue: Queue) -> Result<(), ()> {
@@ -894,7 +887,7 @@ impl NvmeManager {
             return Err(());
         }
         self.io_queue_list.push(queue);
-        return Ok(());
+        Ok(())
     }
 
     pub const fn is_command_successful(result: &[u32; 4]) -> bool {
@@ -944,7 +937,7 @@ impl NvmeManager {
             return Err(());
         }
         let name_space_number_of_lba_blocks =
-            unsafe { *((identify_info_virtual_address.to_usize() + 0) as *const u64) };
+            unsafe { *(identify_info_virtual_address.to_usize() as *const u64) };
         let formatted_lba_size =
             unsafe { *((identify_info_virtual_address.to_usize() + 26) as *const u8) };
         let lba_index =
@@ -962,11 +955,11 @@ impl NvmeManager {
         let _ = get_kernel_manager_cluster()
             .kernel_memory_manager
             .free(identify_info_virtual_address);
-        return Ok(NameSpace {
+        Ok(NameSpace {
             id: name_space_id,
             number_of_lba_blocks: name_space_number_of_lba_blocks,
             lba_block_size_exp,
-        });
+        })
     }
 
     fn _read_data_lba(
@@ -1108,7 +1101,7 @@ impl NvmeManager {
         if let Some(v) = pre_list_virtual_address {
             let _ = free_pages!(v);
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn interrupt_handler(&mut self) {
@@ -1178,12 +1171,7 @@ fn write_mmio<T: Sized>(base: VAddress, offset: usize, data: T) {
 static mut NVME_LIST: LinkedList<(usize, *mut NvmeManager)> = LinkedList::new();
 
 fn nvme_handler(index: usize) -> bool {
-    if let Some(nvme) = unsafe {
-        NVME_LIST
-            .iter()
-            .find(|x| (**x).0 == index)
-            .and_then(|x| Some(x.1.clone()))
-    } {
+    if let Some(nvme) = unsafe { NVME_LIST.iter().find(|x| x.0 == index).map(|x| x.1) } {
         unsafe { &mut *(nvme) }.interrupt_handler();
         true
     } else {

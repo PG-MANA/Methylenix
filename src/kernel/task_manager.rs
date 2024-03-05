@@ -160,7 +160,6 @@ impl TaskManager {
         self.kernel_process = kernel_process;
         self.idle_thread = idle_thread;
         drop(_lock);
-        return;
     }
 
     /// Init idle thread for additional processors.
@@ -180,7 +179,6 @@ impl TaskManager {
         let _lock = forked_thread.lock.lock();
         run_queue.set_idle_thread(forked_thread);
         drop(_lock);
-        return;
     }
 
     /// Fork `thread` and create `ThreadEntry`.
@@ -201,7 +199,7 @@ impl TaskManager {
             entry_address,
             stack_size,
         )?;
-        new_thread.fork_data(&thread, new_context);
+        new_thread.fork_data(thread, new_context);
         drop(_original_thread_lock);
         let parent_process = new_thread.get_process_mut();
         let _process_lock = parent_process
@@ -209,7 +207,7 @@ impl TaskManager {
             .try_lock()
             .or(Err(TaskError::ThreadLockError))?;
         parent_process.add_thread(new_thread)?;
-        return Ok(new_thread);
+        Ok(new_thread)
     }
 
     /// Create kernel thread and set into kernel process.
@@ -225,9 +223,8 @@ impl TaskManager {
     ) -> Result<&'static mut ThreadEntry, TaskError> {
         let _lock = self.lock.lock();
         let result = try {
-            let mut main_thread = unsafe { &mut *self.idle_thread };
-            let forked_thread =
-                self.fork_system_thread(&mut main_thread, entry_address, stack_size)?;
+            let main_thread = unsafe { &mut *self.idle_thread };
+            let forked_thread = self.fork_system_thread(main_thread, entry_address, stack_size)?;
             let _forked_thread_lock = forked_thread.lock.lock();
             forked_thread
                 .set_priority_level(KernelSchedulingClass::get_custom_priority(kernel_priority));
@@ -239,7 +236,7 @@ impl TaskManager {
         };
 
         drop(_lock);
-        return result;
+        result
     }
 
     /// Fork current thread and create new thread.
@@ -277,7 +274,7 @@ impl TaskManager {
                 }
             }
         }
-        return Ok(forked_thread);
+        Ok(forked_thread)
     }
 
     /// Fork current thread and create new thread with an argument
@@ -302,7 +299,7 @@ impl TaskManager {
             .get_context()
             .set_function_call_arguments(&[argument as u64]);
         drop(_thread_lock);
-        return Ok(thread);
+        Ok(thread)
     }
 
     pub fn create_user_process(
@@ -350,7 +347,7 @@ impl TaskManager {
                 pr_err!("Failed to free the MemoryManager: {:?}", e);
             }
         }
-        return result;
+        result
     }
 
     pub fn create_user_thread(
@@ -398,7 +395,7 @@ impl TaskManager {
         if let Err(e) = &result {
             pr_err!("Failed to create a thread for user: {:?}", e);
         }
-        return result;
+        result
     }
 
     pub fn delete_user_process(
@@ -429,7 +426,7 @@ impl TaskManager {
 
         /* Delete all thread */
         while let Some(thread) = target_process.take_thread()? {
-            let mut _lock = thread.lock.lock();
+            let _lock = thread.lock.lock();
             if thread.get_task_status() != TaskStatus::Stopped {
                 pr_err!("Thread is not stopped.");
                 return Err(TaskError::InvalidProcessEntry);
@@ -476,7 +473,7 @@ impl TaskManager {
         self.process_entry_pool
             .free(unsafe { &mut *(target_process as *mut _) });
         drop(_self_lock);
-        return Ok(());
+        Ok(())
     }
 
     pub fn get_context_manager(&self) -> &ContextManager {
@@ -518,13 +515,13 @@ impl TaskManager {
         }
 
         /* Add into Current CPU */
-        let result = get_cpu_manager_cluster().run_queue.add_thread(thread);
-        return result;
+
+        get_cpu_manager_cluster().run_queue.add_thread(thread)
     }
 
     /// Set `thread` to `RunQueueManager`.
     ///
-    /// This function sets `thread` to `RunQueueManager`(it may different cpu's).
+    /// This function sets `thread` to `RunQueueManager`(it may be different cpu's).
     /// This does not check `ThreadEntry::sleep_list`.
     ///
     /// `thread` must be unlocked.
@@ -532,6 +529,6 @@ impl TaskManager {
         let _lock = self.lock.lock();
         let result = self.add_thread_into_run_queue(thread);
         drop(_lock);
-        return result;
+        result
     }
 }

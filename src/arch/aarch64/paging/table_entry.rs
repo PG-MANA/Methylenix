@@ -51,7 +51,7 @@ impl TableEntry {
     }
 
     pub const fn is_validated(&self) -> bool {
-        !((self.0 & 0b11) == 0b00)
+        (self.0 & 0b11) != 0b00
     }
 
     pub const fn is_table_descriptor(&self) -> bool {

@@ -56,7 +56,7 @@ impl AcpiTable for GtdtManager {
         }
         self.base_address = remap_table!(vm_address, gtdt.length);
 
-        return Ok(());
+        Ok(())
     }
 }
 

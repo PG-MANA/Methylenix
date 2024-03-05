@@ -102,7 +102,7 @@ impl ContextData {
         data.registers.elr = entry_address as u64;
         data.registers.spsr = SPSR_M_EL0T;
         data.registers.sp = stack as u64;
-        if arguments.len() > 0 {
+        if !arguments.is_empty() {
             data.registers.x0 = arguments[0] as u64;
         }
         if arguments.len() > 1 {
@@ -129,7 +129,7 @@ impl ContextData {
         if arguments.len() > 8 {
             pr_err!("Too many arguments.");
         }
-        return data;
+        data
     }
     /// Create ContextData for system from 'original_context'.
     ///
@@ -139,33 +139,33 @@ impl ContextData {
         forked_data.registers.sp = stack as u64;
         forked_data.registers.elr = entry_address as u64;
         forked_data.registers.spsr = original_context.registers.spsr;
-        return forked_data;
+        forked_data
     }
 
     pub fn set_function_call_arguments(&mut self, arguments: &[u64]) {
-        if arguments.len() > 0 {
-            self.registers.x0 = arguments[0] as u64;
+        if !arguments.is_empty() {
+            self.registers.x0 = arguments[0];
         }
         if arguments.len() > 1 {
-            self.registers.x1 = arguments[1] as u64;
+            self.registers.x1 = arguments[1];
         }
         if arguments.len() > 2 {
-            self.registers.x2 = arguments[2] as u64;
+            self.registers.x2 = arguments[2];
         }
         if arguments.len() > 3 {
-            self.registers.x3 = arguments[3] as u64;
+            self.registers.x3 = arguments[3];
         }
         if arguments.len() > 4 {
-            self.registers.x4 = arguments[4] as u64;
+            self.registers.x4 = arguments[4];
         }
         if arguments.len() > 5 {
-            self.registers.x5 = arguments[5] as u64;
+            self.registers.x5 = arguments[5];
         }
         if arguments.len() > 6 {
-            self.registers.x6 = arguments[6] as u64;
+            self.registers.x6 = arguments[6];
         }
         if arguments.len() > 7 {
-            self.registers.x7 = arguments[7] as u64;
+            self.registers.x7 = arguments[7];
         }
         if arguments.len() > 8 {
             pr_err!("Too many arguments.");

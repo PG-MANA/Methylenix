@@ -62,7 +62,7 @@ impl AcpiTable for SpcrManager {
         }
         self.base_address = remap_table!(vm_address, spcr.length);
 
-        return Ok(());
+        Ok(())
     }
 }
 

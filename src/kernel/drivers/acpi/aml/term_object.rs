@@ -2,6 +2,7 @@
 //! ACPI Machine Language Term Objects
 //!
 #![allow(dead_code)]
+
 use super::data_object::{
     try_parse_argument_object, try_parse_local_object, ComputationalData, DataObject,
 };
@@ -43,8 +44,7 @@ impl TermList {
         if self.is_end_of_stream() {
             Ok(None)
         } else {
-            TermObj::parse(&mut self.stream, &self.current_scope, evaluator)
-                .and_then(|o| Ok(Some(o)))
+            TermObj::parse(&mut self.stream, &self.current_scope, evaluator).map(Some)
         }
     }
 }
@@ -65,27 +65,19 @@ impl TermObj {
     ) -> Result<Self, AmlError> {
         ignore_invalid_type_error!(
             NamespaceModifierObject::try_parse(stream, current_scope),
-            |o| {
-                return Ok(Self::NamespaceModifierObj(o));
-            }
+            |o| { Ok(Self::NamespaceModifierObj(o)) }
         );
         ignore_invalid_type_error!(
             NamedObject::try_parse(stream, current_scope, evaluator),
-            |o: NamedObject| {
-                return Ok(Self::NamedObj(o));
-            }
+            |o: NamedObject| { Ok(Self::NamedObj(o)) }
         );
         ignore_invalid_type_error!(
             StatementOpcode::try_parse(stream, current_scope, evaluator),
-            |o| {
-                return Ok(Self::StatementOpcode(o));
-            }
+            |o| { Ok(Self::StatementOpcode(o)) }
         );
         ignore_invalid_type_error!(
             ExpressionOpcode::try_parse(stream, current_scope, evaluator),
-            |o| {
-                return Ok(Self::ExpressionOpcode(o));
-            }
+            |o| { Ok(Self::ExpressionOpcode(o)) }
         );
         Err(AmlError::InvalidType)
     }
@@ -107,21 +99,19 @@ impl TermArg {
     ) -> Result<Self, AmlError> {
         /* println!("TermArg: {:#X}", stream.peek_byte()?); */
         ignore_invalid_type_error!(try_parse_local_object(stream), |n| {
-            return Ok(Self::LocalObj(n));
+            Ok(Self::LocalObj(n))
         });
         ignore_invalid_type_error!(try_parse_argument_object(stream), |n| {
-            return Ok(Self::ArgObj(n));
+            Ok(Self::ArgObj(n))
         });
         ignore_invalid_type_error!(DataObject::try_parse(stream, current_scope), |d| {
-            return Ok(Self::DataObject(d));
+            Ok(Self::DataObject(d))
         });
         ignore_invalid_type_error!(
             ExpressionOpcode::try_parse(stream, current_scope, evaluator),
-            |o| {
-                return Ok(Self::ExpressionOpcode(Box::new(o)));
-            }
+            |o| { Ok(Self::ExpressionOpcode(Box::new(o))) }
         );
-        return Err(AmlError::InvalidType);
+        Err(AmlError::InvalidType)
     }
 
     pub fn parse_integer(
@@ -181,14 +171,14 @@ impl TermArgList {
         evaluator: &mut Evaluator,
     ) -> Result<Self, AmlError> {
         let mut term_arg_list = Self {
-            list: Vec::with_capacity(argument_count as usize),
+            list: Vec::with_capacity(argument_count),
         };
         for _ in 0..argument_count {
             term_arg_list
                 .list
                 .push(TermArg::try_parse(stream, current_scope, evaluator)?);
         }
-        return Ok(term_arg_list);
+        Ok(term_arg_list)
     }
 }
 

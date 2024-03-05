@@ -18,6 +18,7 @@ pub const FILE_PERMISSION_WRITE: u8 = 1 << 1;
 
 #[repr(transparent)]
 struct FakeDriver {}
+
 static mut FAKE_DRIVER: FakeDriver = FakeDriver {};
 
 impl FileOperationDriver for FakeDriver {
@@ -117,7 +118,7 @@ impl<'a> File<'a> {
     pub fn new_invalid() -> Self {
         Self {
             descriptor: FileDescriptor::new(0, 0, 0),
-            driver: unsafe { &mut FAKE_DRIVER },
+            driver: unsafe { &mut *core::ptr::addr_of_mut!(FAKE_DRIVER) },
         }
     }
 

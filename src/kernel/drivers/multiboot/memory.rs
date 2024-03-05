@@ -51,8 +51,8 @@ pub struct EfiMemoryMapInfo {
 impl MemoryMapInfo {
     pub fn new(map: &MultibootTagMemoryMap) -> Self {
         Self {
-            num_of_entries: ((map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
-                / map.entry_size as usize),
+            num_of_entries: (map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
+                / map.entry_size as usize,
             address: map as *const MultibootTagMemoryMap as usize
                 + mem::size_of::<MultibootTagMemoryMap>(),
             entry_size: map.entry_size as usize,
@@ -79,8 +79,8 @@ impl Iterator for MemoryMapInfo {
 impl EfiMemoryMapInfo {
     pub fn new(map: &MultibootTagEfiMemoryMap) -> Self {
         Self {
-            num_of_entries: ((map.size as usize - mem::size_of::<MultibootTagEfiMemoryMap>())
-                / map.descriptor_size as usize),
+            num_of_entries: (map.size as usize - mem::size_of::<MultibootTagEfiMemoryMap>())
+                / map.descriptor_size as usize,
             address: map as *const MultibootTagEfiMemoryMap as usize
                 + mem::size_of::<MultibootTagMemoryMap>(),
             entry_size: map.descriptor_size as usize,

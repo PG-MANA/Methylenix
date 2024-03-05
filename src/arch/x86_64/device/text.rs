@@ -67,7 +67,7 @@ impl TextDriver {
         self.height = frame_buffer_info.height as usize;
         self.cursor.front_color = 0xb; /* Bright Cyan */
         self.clear_screen();
-        return true;
+        true
     }
 
     /// Delete all text on the screen.
@@ -94,7 +94,7 @@ impl TextDriver {
         if self.address != 0 {
             match io_remap!(
                 PAddress::new(self.address),
-                MSize::new(self.width * self.height * 2 as usize),
+                MSize::new(self.width * self.height * 2),
                 MemoryPermissionFlags::data(),
                 MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS
             ) {
@@ -111,7 +111,7 @@ impl TextDriver {
 
     /// Delete first line and move the other lines to each above.
     ///
-    /// If self.address == 0(not set up), this function does nothing.
+    /// If `self.address == 0(not set up)`, this function does nothing.
     fn scroll_line(&mut self) {
         use core::ptr::{copy, write_bytes};
         if self.address == 0 {
@@ -181,7 +181,7 @@ impl TextBufferDriver for TextDriver {
                         }
                     } else {
                         self.cursor.character -= 1;
-                        self.put_char(' ' as u8);
+                        self.put_char(b' ');
                     }
                 }
                 _ => {
@@ -202,6 +202,6 @@ impl TextBufferDriver for TextDriver {
                 (self.cursor.line * self.width + self.cursor.character) as u16,
             );
         }
-        return true;
+        true
     }
 }

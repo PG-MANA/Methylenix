@@ -100,7 +100,7 @@ impl AcpiEventManager {
                     if !self
                         .gpe1_manager
                         .as_ref()
-                        .and_then(|m| Some(m.enable_gpe(ec_gpe)))
+                        .map(|m| m.enable_gpe(ec_gpe))
                         .unwrap_or(false)
                     {
                         return false;
@@ -110,7 +110,7 @@ impl AcpiEventManager {
                 }
             }
         }
-        return true;
+        true
     }
 
     pub fn clear_gpe_status_bit(&self, gpe: usize) {
@@ -183,7 +183,7 @@ impl AcpiEventManager {
         if self.pm1b_event_block != 0 {
             self.write_pm1_b_enable(self.pm1b_enabled_event);
         }
-        return true;
+        true
     }
 
     pub fn find_occurred_fixed_event(&self) -> Option<AcpiFixedEvent> {
@@ -202,7 +202,7 @@ impl AcpiEventManager {
     pub fn sci_handler(&self) {
         if let Some(acpi_event) = self.find_occurred_fixed_event() {
             let work = WorkList::new(AcpiEventManager::acpi_fixed_event_worker, acpi_event as _);
-            if let Err(_) = get_cpu_manager_cluster().work_queue.add_work(work) {
+            if get_cpu_manager_cluster().work_queue.add_work(work).is_err() {
                 pr_err!("Failed to add work for ACPI FixedEvent({:?})", acpi_event);
             }
             if !get_kernel_manager_cluster()
@@ -226,16 +226,24 @@ impl AcpiEventManager {
                         .get_embedded_controller()
                         .unwrap()
                         .read_query();
-                    if let Err(_) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
-                        AcpiEventManager::acpi_query_event_worker,
-                        query as _,
-                    )) {
+                    if get_cpu_manager_cluster()
+                        .work_queue
+                        .add_work(WorkList::new(
+                            AcpiEventManager::acpi_query_event_worker,
+                            query as _,
+                        ))
+                        .is_err()
+                    {
                         pr_err!("Failed to add work for ACPI Query({:#X})", query);
                     }
-                } else if let Err(_) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
-                    AcpiEventManager::acpi_gpe_worker,
-                    gpe_number as _,
-                )) {
+                } else if get_cpu_manager_cluster()
+                    .work_queue
+                    .add_work(WorkList::new(
+                        AcpiEventManager::acpi_gpe_worker,
+                        gpe_number as _,
+                    ))
+                    .is_err()
+                {
                     pr_err!("Failed to add work for ACPI GPE({:#X})", gpe_number);
                 }
                 self.gpe0_manager.clear_status_bit(gpe_number);
@@ -246,10 +254,14 @@ impl AcpiEventManager {
         if let Some(ec) = &get_kernel_manager_cluster().acpi_device_manager.ec {
             let query = ec.read_query();
             if query != 0 {
-                if let Err(_) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
-                    AcpiEventManager::acpi_query_event_worker,
-                    query as _,
-                )) {
+                if get_cpu_manager_cluster()
+                    .work_queue
+                    .add_work(WorkList::new(
+                        AcpiEventManager::acpi_query_event_worker,
+                        query as _,
+                    ))
+                    .is_err()
+                {
                     pr_err!("Failed to add work for ACPI Query({:#X})", query);
                 }
                 return;
@@ -268,7 +280,7 @@ impl AcpiEventManager {
         if self.pm1b_event_block != 0 {
             self.write_pm1_b_status(event as u16);
         }
-        return true;
+        true
     }
 
     pub fn acpi_fixed_event_worker(event: usize) {

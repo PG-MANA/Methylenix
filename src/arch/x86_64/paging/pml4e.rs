@@ -38,11 +38,7 @@ impl PML4E {
     }
 
     fn get_bit(&self, bit: u64) -> bool {
-        if (self.flags & bit) == 0 {
-            false
-        } else {
-            true
-        }
+        (self.flags & bit) != 0
     }
 
     pub fn is_address_set(&self) -> bool {
@@ -122,7 +118,7 @@ impl PagingEntry for PML4E {
 
     fn get_address(&self) -> Option<PAddress> {
         if self.is_address_set() {
-            Some(((self.flags & 0x000F_FFFF_FFFF_F000) as usize).into())
+            Some(PAddress::new((self.flags & 0x000F_FFFF_FFFF_F000) as usize))
         } else {
             None
         }

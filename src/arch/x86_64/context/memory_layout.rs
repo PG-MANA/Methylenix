@@ -27,31 +27,22 @@ const CANONICAL_AREA_LOW: RangeInclusive<VAddress> =
 pub const CANONICAL_AREA_HIGH: RangeInclusive<VAddress> =
     VAddress::new(0xffff_8000_0000_0000)..=VAddress::new(0xffff_ffff_ffff_ffff);
 
-const _: () = assert();
-
-#[allow(dead_code)]
-const fn assert() {
-    if (KERNEL_MAP_START_ADDRESS & ((1usize << 39) - 1)) != 0 {
+pub const fn check_memory_layout() {
+    // TODO: const trait
+    if (KERNEL_MAP_START_ADDRESS.to_usize() & ((1usize << 39) - 1)) != 0 {
         panic!("KERNEL_MAP_START_ADDRESS is not pml4 aligned.");
     }
-    if (DIRECT_MAP_START_ADDRESS & ((1usize << 39) - 1)) != 0 {
+    // TODO: const trait
+    if (DIRECT_MAP_START_ADDRESS.to_usize() & ((1usize << 39) - 1)) != 0 {
         panic!("KERNEL_MAP_START_ADDRESS is not pml4 aligned.");
     }
 }
 
 pub fn is_address_canonical(start_address: VAddress, end_address: VAddress) -> bool {
     if CANONICAL_AREA_LOW.contains(&start_address) {
-        if CANONICAL_AREA_LOW.contains(&end_address) {
-            true
-        } else {
-            false
-        }
-    } else if CANONICAL_AREA_HIGH.contains(&start_address)
-        && CANONICAL_AREA_HIGH.contains(&end_address)
-    {
-        true
+        CANONICAL_AREA_LOW.contains(&end_address)
     } else {
-        false
+        CANONICAL_AREA_HIGH.contains(&start_address) && CANONICAL_AREA_HIGH.contains(&end_address)
     }
 }
 

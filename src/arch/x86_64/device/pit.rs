@@ -36,7 +36,7 @@ impl PitManager {
 
     /// Init PIT as reload_value is 0xffff.
     ///
-    /// After calling this function, the count down of the PIT will start immediately.
+    /// After calling this function, the count-down of the PIT will start immediately.
     pub fn init(&mut self) {
         let _lock = self.lock.lock();
         unsafe {

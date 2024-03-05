@@ -78,12 +78,12 @@ pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
         return false;
     }
     set_manger(acpi_manager, device_manager);
-    return true;
+    true
 }
 
 /// Init AcpiManager and AcpiEventManager with parsing AML
 ///
-/// This function will setup some devices like power button.
+/// This function will set up some devices like power button.
 /// They will call malloc, therefore this function should be called after init of kernel_memory_manager
 pub fn init_acpi_later() -> bool {
     let mut acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
@@ -121,7 +121,7 @@ pub fn init_acpi_later() -> bool {
     get_kernel_manager_cluster()
         .acpi_event_manager
         .enable_gpes();
-    return true;
+    true
 }
 
 /// Init PciManager without scanning all bus
@@ -149,13 +149,13 @@ pub fn init_pci_early() -> bool {
         pr_err!("Failed to build PCI device tree: {:?}", e);
         return false;
     }
-    return true;
+    true
 }
 
 /// Init PciManager with scanning all bus
 pub fn init_pci_later() -> bool {
     get_kernel_manager_cluster().pci_manager.setup_devices();
-    return true;
+    true
 }
 
 /// Init global timer
@@ -245,7 +245,7 @@ pub fn draw_boot_logo() {
     }
     drop(bgrt_manager);
 
-    let original_map_size = MSize::from(54);
+    let original_map_size = MSize::new(54);
     let result = io_remap!(
         boot_logo_physical_address.unwrap(),
         original_map_size,
@@ -266,7 +266,6 @@ pub fn draw_boot_logo() {
         boot_logo_physical_address.unwrap().to_usize(),
         boot_logo_address
     );
-    drop(boot_logo_physical_address);
 
     if unsafe { *((boot_logo_address + 30) as *const u32) } != 0 {
         pr_info!("Boot logo is compressed");
@@ -281,7 +280,7 @@ pub fn draw_boot_logo() {
         ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
 
     let result = mremap!(
-        boot_logo_address.into(),
+        VAddress::new(boot_logo_address),
         original_map_size,
         MSize::new(
             (aligned_bitmap_width * bitmap_height as usize * (bitmap_color_depth as usize >> 3))

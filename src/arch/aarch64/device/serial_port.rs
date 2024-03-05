@@ -28,7 +28,7 @@ fn dummy_wait_buffer(_: usize) -> bool {
 }
 
 fn dummy_interrupt_setup(_: usize, _: u32, _: fn(usize) -> bool) -> bool {
-    return false;
+    false
 }
 
 struct SerialPortDeviceEntry {
@@ -52,6 +52,12 @@ pub struct SerialPortManager {
     interrupt_enable:
         fn(base_address: usize, interrupt_id: u32, handler: fn(usize) -> bool) -> bool,
     wait_buffer: fn(base_address: usize) -> bool,
+}
+
+impl Default for SerialPortManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SerialPortManager {
@@ -87,7 +93,7 @@ impl SerialPortManager {
         let base_address = base_address.unwrap();
         for e in &SERIAL_PORT_DEVICES {
             if spcr_manager.get_interface_type() == e.interface_type {
-                match io_remap!(
+                return match io_remap!(
                     PAddress::new(base_address),
                     PAGE_SIZE,
                     MemoryPermissionFlags::data(),
@@ -100,16 +106,16 @@ impl SerialPortManager {
                         self.wait_buffer = e.wait_buffer;
                         self.getc_func = e.getc_func;
                         self.interrupt_enable = e.interrupt_enable;
-                        return true;
+                        true
                     }
                     Err(e) => {
                         pr_err!("Failed to map the Serial Port area: {:?}", e);
-                        return false;
+                        false
                     }
-                }
+                };
             }
         }
-        return false;
+        false
     }
 
     pub fn init_with_dtb(&mut self) -> bool {
@@ -124,7 +130,7 @@ impl SerialPortManager {
                         && dtb_manager.is_node_operational(&info)
                     {
                         if let Some((address, size)) = dtb_manager.read_reg_property(&info, 0) {
-                            match io_remap!(
+                            return match io_remap!(
                                 PAddress::new(address),
                                 MSize::new(size),
                                 MemoryPermissionFlags::data(),
@@ -135,13 +141,13 @@ impl SerialPortManager {
                                     self.putc_func = e.putc_func;
                                     self.wait_buffer = e.wait_buffer;
                                     self.getc_func = e.getc_func;
-                                    return true;
+                                    true
                                 }
                                 Err(e) => {
                                     pr_err!("Failed to map the Serial Port area: {:?}", e);
-                                    return false;
+                                    false
                                 }
-                            }
+                            };
                         } else {
                             pr_err!("No address available");
                         }
@@ -150,7 +156,7 @@ impl SerialPortManager {
                 previous = Some(info);
             }
         }
-        return false;
+        false
     }
 
     pub fn setup_interrupt(&self) -> bool {
@@ -169,7 +175,7 @@ impl SerialPortManager {
                 .input_from_interrupt_handler(c);
             return true;
         }
-        return false;
+        false
     }
 
     pub fn send_str(&mut self, s: &str) {

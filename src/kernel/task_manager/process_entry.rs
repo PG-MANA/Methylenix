@@ -28,7 +28,8 @@ pub struct ProcessEntry {
     status: ProcessStatus,
     memory_manager: *mut MemoryManager,
     process_id: usize,
-    parent: *mut ProcessEntry, /* kernel process has invalid pointer */
+    parent: *mut ProcessEntry,
+    /* kernel process has invalid pointer */
     num_of_thread: usize,
     single_thread: Option<*mut ThreadEntry>,
     privilege_level: u8,
@@ -140,7 +141,7 @@ impl ProcessEntry {
             let _prev_lock = tail.lock.try_lock().or(Err(TaskError::ThreadLockError))?;
             self.thread.insert_tail(&mut thread.t_list);
         }
-        return Ok(());
+        Ok(())
     }
 
     fn update_next_thread_id(&mut self) {
@@ -167,7 +168,7 @@ impl ProcessEntry {
         let _lock = self.lock.lock();
         let m = self.memory_manager;
         drop(_lock);
-        return m;
+        m
     }
 
     /// Search the thread from [Self::thread]
@@ -223,7 +224,7 @@ impl ProcessEntry {
             self.set_thread_into_thread_list(thread, None)?;
         }
         self.num_of_thread += 1;
-        return Ok(());
+        Ok(())
     }
 
     /// Remove `thread` from ThreadList.
@@ -253,7 +254,7 @@ impl ProcessEntry {
             self.thread.remove(&mut thread.t_list);
         }
         self.num_of_thread -= 1;
-        return Ok(());
+        Ok(())
     }
 
     pub fn take_thread(&mut self) -> Result<Option<&mut ThreadEntry>, TaskError> {
@@ -285,7 +286,7 @@ impl ProcessEntry {
         } else {
             Some(self.file_vec_lock.lock())
         };
-        let result = self.files.get(index).and_then(|f| Some(f.clone()));
+        let result = self.files.get(index).cloned();
         drop(_lock);
         result
     }

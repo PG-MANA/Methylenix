@@ -128,7 +128,7 @@ impl EfiSystemTable {
         if self.efi_table_header.signature != Self::EFI_SYSTEM_TABLE_SIGNATURE {
             return false;
         }
-        return true;
+        true
     }
 
     pub const fn get_console_output_protocol(&self) -> *const EfiSimpleTextOutputProtocol {

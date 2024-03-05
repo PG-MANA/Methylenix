@@ -28,6 +28,6 @@ impl TextDriver {
 
 impl TextBufferDriver for TextDriver {
     fn puts(&mut self, _: &str) -> bool {
-        return true;
+        true
     }
 }

@@ -51,13 +51,11 @@ impl VirtualMemoryObject {
         assert!(self.is_disabled());
         target_object.reference_count += 1;
         self.object = VirtualMemoryObjectType::Shadow(target_object);
-        return;
     }
 
     pub fn unset_shared_object(&mut self, target_object: &mut Self) {
         target_object.reference_count -= 1;
         self.object = VirtualMemoryObjectType::None;
-        return;
     }
 
     pub fn get_shared_object(&self) -> Option<&'static mut Self> {
@@ -132,7 +130,7 @@ impl VirtualMemoryObject {
                 }
             }
         }
-        return None;
+        None
     }
 
     pub fn get_vm_page_mut(&mut self, p_index: MIndex) -> Option<&mut VirtualMemoryPage> {
@@ -143,7 +141,7 @@ impl VirtualMemoryObject {
                 }
             }
         }
-        return None;
+        None
     }
 
     pub fn remove_vm_page(
@@ -160,6 +158,6 @@ impl VirtualMemoryObject {
                 }
             }
         }
-        return None;
+        None
     }
 }

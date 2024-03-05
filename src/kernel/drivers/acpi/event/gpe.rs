@@ -62,7 +62,7 @@ impl GpeManager {
         let mut target = read_io_byte(self.gpe_block + self.gpe_count + port_index);
         target |= 1 << bit_index;
         write_io_byte(self.gpe_block + self.gpe_count + port_index, target);
-        return true;
+        true
     }
 
     pub fn clear_status_bit(&self, gpe: usize) -> bool {
@@ -81,7 +81,7 @@ impl GpeManager {
         if (((read_io_byte(self.gpe_block + port_index)) >> bit_index) & 1) != 0 {
             pr_warn!("Failed to clear StatusBit(GPE:{:#X})", gpe);
         }
-        return true;
+        true
     }
 
     pub fn find_general_purpose_event(&self, skip_gpe: Option<usize>) -> Option<usize> {
@@ -89,16 +89,16 @@ impl GpeManager {
             return None;
         }
         let mut bit = skip_gpe
-            .and_then(|g| Some((g - self.base_number) & !0b111))
+            .map(|g| (g - self.base_number) & !0b111)
             .unwrap_or(self.base_number);
         let start = skip_gpe
-            .and_then(|g| Some(self.gpe_block + ((g - self.base_number) & !0b111)))
+            .map(|g| self.gpe_block + ((g - self.base_number) & !0b111))
             .unwrap_or(self.gpe_block);
         for port in start..(self.gpe_block + self.gpe_count) {
             let mut status = read_io_byte(port) & read_io_byte(port + self.gpe_count);
             if status != 0 {
                 bit += status.trailing_zeros() as usize;
-                if skip_gpe.and_then(|g| Some(bit > g)).unwrap_or(true) {
+                if skip_gpe.map(|g| bit > g).unwrap_or(true) {
                     return Some(bit);
                 } else {
                     let mut remaining_bits = 8 - status.trailing_zeros() as usize - 1;
@@ -118,6 +118,6 @@ impl GpeManager {
                 bit += 8;
             }
         }
-        return None;
+        None
     }
 }

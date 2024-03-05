@@ -233,10 +233,10 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
         if c == 'x' {
             loop {
                 c = stream.peek_byte()? as char;
-                if '0' <= c && c <= '9' {
+                if c.is_ascii_digit() {
                     val <<= 4; /* val *= 0x10 */
                     val += c as usize - 0x30/* '0' */;
-                } else if 'a' <= c && c <= 'f' {
+                } else if ('a'..='f').contains(&c) {
                     val <<= 4; /* val *= 0x10 */
                     val += c as usize - 0x61/* 'a' */ + 0xa;
                 } else {
@@ -251,10 +251,10 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
         } else if c == 'X' {
             loop {
                 c = stream.peek_byte()? as char;
-                if '0' <= c && c <= '9' {
+                if c.is_ascii_digit() {
                     val <<= 4; /* val *= 0x10 */
                     val += c as usize - 0x30/* '0' */;
-                } else if 'A' <= c && c <= 'F' {
+                } else if ('A'..='F').contains(&c) {
                     val <<= 4; /* val *= 0x10 */
                     val += c as usize - 0x41/* 'A' */ + 0xa;
                 } else {
@@ -269,7 +269,7 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
         } else {
             loop {
                 c = stream.peek_byte()? as char;
-                if '0' <= c && c <= '7' {
+                if ('0'..='7').contains(&c) {
                     val <<= 3; /* val *= 0o10 */
                     val += c as usize - 0x30 /* '0' */;
                 } else {
@@ -285,7 +285,7 @@ pub fn parse_integer(stream: &mut AmlStream) -> Result<AcpiInt, AmlError> {
     } else {
         loop {
             c = stream.peek_byte()? as char;
-            if '0' <= c && c <= '9' {
+            if c.is_ascii_digit() {
                 val *= 10;
                 val += c as usize - 0x30/* '0' */;
             } else {

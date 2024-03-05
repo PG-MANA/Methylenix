@@ -2,6 +2,7 @@
 //! ACPI Machine Language Named Objects
 //!
 #![allow(dead_code)]
+
 use super::data_object::PkgLength;
 use super::name_object::NameString;
 use super::opcode;
@@ -27,10 +28,9 @@ impl BankField {
         let pkg_length = PkgLength::parse(stream)?;
         let mut bank_field_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         bank_field_stream.change_size(pkg_length.actual_length)?;
-        let region_name = NameString::parse(&mut bank_field_stream, Some(&current_scope))?;
-        let bank_name = NameString::parse(&mut bank_field_stream, Some(&current_scope))?;
+        let region_name = NameString::parse(&mut bank_field_stream, Some(current_scope))?;
+        let bank_name = NameString::parse(&mut bank_field_stream, Some(current_scope))?;
         let bank_value = TermArg::parse_integer(&mut bank_field_stream, current_scope, evaluator)?;
         let field_flags = bank_field_stream.read_byte()?;
         let field_list = FieldList::new(bank_field_stream, current_scope)?;
@@ -263,7 +263,6 @@ impl PowerRes {
         let pkg_length = PkgLength::parse(stream)?;
         let mut power_res_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         power_res_stream.change_size(pkg_length.actual_length)?;
 
         let name = NameString::parse(&mut power_res_stream, Some(current_scope))?;
@@ -295,9 +294,8 @@ impl Device {
         let pkg_length = PkgLength::parse(stream)?;
         let mut device_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream);
         device_stream.change_size(pkg_length.actual_length)?;
-        let device_name = NameString::parse(&mut device_stream, Some(&current_scope))?;
+        let device_name = NameString::parse(&mut device_stream, Some(current_scope))?;
         let term_list = TermList::new(device_stream, device_name.clone());
         Ok(Self {
             device_name,
@@ -326,7 +324,6 @@ impl ThermalZone {
         let pkg_length = PkgLength::parse(stream)?;
         let mut thermal_zone_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         thermal_zone_stream.change_size(pkg_length.actual_length)?;
 
         let name = NameString::parse(&mut thermal_zone_stream, Some(current_scope))?;
@@ -352,9 +349,8 @@ impl Method {
         let pkg_length = PkgLength::parse(stream)?;
         let mut method_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         method_stream.change_size(pkg_length.actual_length)?;
-        let name = NameString::parse(&mut method_stream, Some(&current_scope))?;
+        let name = NameString::parse(&mut method_stream, Some(current_scope))?;
         let method_flags = method_stream.read_byte()?;
         let term_list = TermList::new(method_stream, name.clone());
         Ok(Self {
@@ -390,9 +386,8 @@ impl Field {
         let pkg_length = PkgLength::parse(stream)?;
         let mut field_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         field_stream.change_size(pkg_length.actual_length)?;
-        let region_name = NameString::parse(&mut field_stream, Some(&current_scope))?;
+        let region_name = NameString::parse(&mut field_stream, Some(current_scope))?;
         let field_flags = field_stream.read_byte()?;
         let field_list = FieldList::new(field_stream, current_scope)?;
         Ok(Self {
@@ -445,8 +440,10 @@ impl Field {
 
 #[derive(Debug, Clone)]
 pub struct IndexField {
-    index_register_name: NameString, /* The register(ByteField) to send access index */
-    data_register_name: NameString,  /* The register(ByteField) to read/write data.*/
+    index_register_name: NameString,
+    /* The register(ByteField) to send access index */
+    data_register_name: NameString,
+    /* The register(ByteField) to read/write data.*/
     field_flags: u8,
     field_list: FieldList,
 }
@@ -460,10 +457,9 @@ impl IndexField {
         let pkg_length = PkgLength::parse(stream)?;
         let mut index_field_stream = stream.clone();
         stream.seek(pkg_length.actual_length)?;
-        drop(stream); /* Avoid using this */
         index_field_stream.change_size(pkg_length.actual_length)?;
-        let index_register_name = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
-        let data_register_name = NameString::parse(&mut index_field_stream, Some(&current_scope))?;
+        let index_register_name = NameString::parse(&mut index_field_stream, Some(current_scope))?;
+        let data_register_name = NameString::parse(&mut index_field_stream, Some(current_scope))?;
         let field_flags = index_field_stream.read_byte()?;
         let field_list = FieldList::new(index_field_stream, current_scope)?;
         Ok(Self {

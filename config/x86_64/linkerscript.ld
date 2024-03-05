@@ -12,10 +12,6 @@ SECTIONS {
     KEEP(*(.header.*)) /*使われてないとリンクされなくなるので*/
   }
 
-  .note : ALIGN(4) {
-    *(.note)
-  }
-
   .boot32 : ALIGN(8) {
     *(.text.32)
     *(.data.32)

@@ -55,10 +55,12 @@ impl VirtualMemoryManager {
     }
 
     pub fn is_kernel_virtual_memory_manager(&self) -> bool {
-        self as *const _
-            == &get_kernel_manager_cluster()
+        core::ptr::eq(
+            self,
+            &get_kernel_manager_cluster()
                 .kernel_memory_manager
-                .virtual_memory_manager as *const _
+                .virtual_memory_manager,
+        )
     }
 
     pub fn clone_kernel_area(
@@ -79,7 +81,7 @@ impl VirtualMemoryManager {
         }
         self.lock.unlock();
         kernel_virtual_memory_manager.lock.unlock();
-        return Ok(());
+        Ok(())
     }
 
     pub fn init_system(
@@ -113,7 +115,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::PagingError(e));
         }
         self.lock.unlock();
-        return Ok(());
+        Ok(())
     }
 
     #[inline]
@@ -140,7 +142,7 @@ impl VirtualMemoryManager {
                 return Err(MemoryError::NotAligned);
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn setup_direct_mapped_area(
@@ -214,7 +216,7 @@ impl VirtualMemoryManager {
             pm_manager,
         );
         self.lock.unlock();
-        return result;
+        result
     }
 
     /// Allocate the available virtual address and return inserted VirtualMemoryEntry
@@ -240,7 +242,7 @@ impl VirtualMemoryManager {
 
         let result = self.insert_vm_map_entry_into_list(entry, option);
         self.lock.unlock();
-        return result;
+        result
     }
 
     /// Map virtual_address to physical_address with size.
@@ -297,7 +299,7 @@ impl VirtualMemoryManager {
             pr_err!("Failed to insert pages into vm_entry: {:?}", e);
         }
         self.lock.unlock();
-        return result;
+        result
     }
 
     fn _update_page_table_with_vm_entry(
@@ -350,16 +352,16 @@ impl VirtualMemoryManager {
                             return Err(u_e);
                         }
                         if !is_shared_object {
-                            target_object
-                                .get_vm_page_mut(unassociate_i)
-                                .and_then(|p| Some(p.inactivate()));
+                            if let Some(p) = target_object.get_vm_page_mut(unassociate_i) {
+                                p.inactivate()
+                            }
                         }
                     }
                     return Err(e);
                 }
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn map_address(
@@ -381,7 +383,7 @@ impl VirtualMemoryManager {
             pm_manager,
         );
         self.lock.unlock();
-        return result;
+        result
     }
 
     fn _map_address(
@@ -545,7 +547,7 @@ impl VirtualMemoryManager {
         self.lock.lock();
         let result = self._free_address(vm_entry, pm_manager);
         self.lock.unlock();
-        return result;
+        result
     }
 
     fn _free_address(
@@ -662,7 +664,7 @@ impl VirtualMemoryManager {
             .system_memory_manager
             .free_vm_entry(vm_entry);
 
-        return Ok(());
+        Ok(())
     }
 
     /// Allocate VirtualMemoryEntry from the pool and chain it into [`Self::vm_entry`]
@@ -699,10 +701,7 @@ impl VirtualMemoryManager {
             };
             break;
         }
-        if let Err(e) = vm_entry {
-            return Err(e);
-        }
-        let vm_entry = vm_entry.unwrap();
+        let vm_entry = vm_entry?;
         *vm_entry = source;
         if self.vm_entry.is_empty() {
             self.vm_entry.insert_head(&mut vm_entry.list);
@@ -725,7 +724,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::InternalError);
         }
         self.adjust_vm_entries();
-        return Ok(vm_entry);
+        Ok(vm_entry)
     }
 
     /// Insert pages into VirtualMemoryEntry without applying PageManager.
@@ -782,16 +781,13 @@ impl VirtualMemoryManager {
                 };
                 break;
             }
-            if let Err(e) = vm_page {
-                return Err(e);
-            }
-            let vm_page = vm_page.unwrap();
+            let vm_page = vm_page?;
             *vm_page = VirtualMemoryPage::new(current_physical_address, p_index);
             vm_page.set_page_status(vm_entry.get_memory_option_flags());
             vm_page.activate();
             vm_entry.get_object_mut().add_vm_page(p_index, vm_page);
         }
-        return Ok(());
+        Ok(())
     }
 
     pub(super) fn share_memory_with_user(
@@ -905,7 +901,7 @@ impl VirtualMemoryManager {
             return Err(e);
         }
         user_vm_manager.lock.unlock();
-        return Ok(());
+        Ok(())
     }
 
     fn map_address_into_page_table(
@@ -925,7 +921,7 @@ impl VirtualMemoryManager {
             option,
         )?;
         self._update_paging(virtual_address);
-        return Ok(());
+        Ok(())
     }
 
     fn map_address_into_page_table_with_size(
@@ -949,7 +945,7 @@ impl VirtualMemoryManager {
         for i in MIndex::new(0)..size.to_index() {
             self._update_paging(virtual_address + i.to_offset());
         }
-        return Ok(());
+        Ok(())
     }
 
     fn unassociate_address(
@@ -961,7 +957,7 @@ impl VirtualMemoryManager {
         self.page_manager
             .unassociate_address(virtual_address, pm_manager, false)?;
         self._update_paging(virtual_address);
-        return Ok(());
+        Ok(())
     }
 
     fn unassociate_address_with_size(
@@ -980,7 +976,7 @@ impl VirtualMemoryManager {
         for i in MIndex::new(0)..size.to_index() {
             self._update_paging(virtual_address + i.to_offset());
         }
-        return Ok(());
+        Ok(())
     }
 
     fn try_expand_vm_entry(
@@ -1037,7 +1033,7 @@ impl VirtualMemoryManager {
             pr_err!("Failed to update paging table to expanded area: {:?}", e);
             return false;
         }
-        return true;
+        true
     }
 
     pub fn resize_memory_mapping(
@@ -1113,7 +1109,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::PagingError(e));
         }
         self.lock.unlock();
-        return Ok(());
+        Ok(())
     }
 
     pub fn get_physical_address_list(
@@ -1148,12 +1144,9 @@ impl VirtualMemoryManager {
     }
 
     fn _find_entry(&self, vm_address: VAddress) -> Option<&'static VirtualMemoryEntry> {
-        for e in unsafe { self.vm_entry.iter(offset_of!(VirtualMemoryEntry, list)) } {
-            if e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address {
-                return Some(e);
-            }
-        }
-        None
+        unsafe { self.vm_entry.iter(offset_of!(VirtualMemoryEntry, list)) }.find(|&e| {
+            e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address
+        })
     }
 
     fn find_entry_mut(&mut self, vm_address: VAddress) -> Option<&'static mut VirtualMemoryEntry> {
@@ -1206,16 +1199,16 @@ impl VirtualMemoryManager {
                 &(e.get_vm_start_address()..=e.get_vm_end_address()),
             ) {
                 assert!(unsafe { e.list.get_next(OFFSET) }
-                    .and_then(|n| Some(!Self::is_overlapped(
+                    .map(|n| !Self::is_overlapped(
                         &(available_start_address..=end_address),
-                        &(n.get_vm_start_address()..=n.get_vm_end_address())
-                    )))
+                        &(n.get_vm_start_address()..=n.get_vm_end_address()),
+                    ))
                     .unwrap_or(true));
                 assert!(unsafe { e.list.get_prev(OFFSET) }
-                    .and_then(|p| Some(!Self::is_overlapped(
+                    .map(|p| !Self::is_overlapped(
                         &(available_start_address..=end_address),
-                        &(p.get_vm_start_address()..=p.get_vm_end_address())
-                    )))
+                        &(p.get_vm_start_address()..=p.get_vm_end_address()),
+                    ))
                     .unwrap_or(true));
 
                 return Some(available_start_address);
@@ -1237,8 +1230,8 @@ impl VirtualMemoryManager {
     fn is_overlapped<T: Address>(range_1: &RangeInclusive<T>, range_2: &RangeInclusive<T>) -> bool {
         range_1.contains(range_2.start())
             || range_1.contains(range_2.end())
-            || range_2.contains(&range_1.start())
-            || range_2.contains(&range_1.end())
+            || range_2.contains(range_1.start())
+            || range_2.contains(range_1.end())
     }
 
     pub fn dump_memory_manager(

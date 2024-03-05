@@ -1,8 +1,8 @@
 //!
 //! Fixed ACPI Description Table
 //!
-//! This manager contains the information of FADT
-//! FADT has the information about ACPI PowerManagement Timer.
+//! This manager contains the information of FADT.
+//! It has the information about ACPI PowerManagement Timer.
 
 use super::super::device::pm_timer::AcpiPmTimer;
 use super::super::GenericAddress;
@@ -89,7 +89,7 @@ impl AcpiTable for FadtManager {
         let fadt_vm_address = remap_table!(vm_address, fadt.length);
         self.base_address = fadt_vm_address;
 
-        return Ok(());
+        Ok(())
     }
 }
 

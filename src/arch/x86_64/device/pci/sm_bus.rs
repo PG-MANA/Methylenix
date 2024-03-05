@@ -80,7 +80,7 @@ impl PciDeviceDriver for SmbusManager {
         /* Clear Interrupt Disable and enable I/O Space */
         write_pci!(
             Self::PCI_CMD,
-            (read_pci!(Self::PCI_CMD, 4) | Self::IO_SPACE_ENABLE) & !(Self::INTERRUPT_DISABLE)
+            (read_pci!(Self::PCI_CMD, 4) | Self::IO_SPACE_ENABLE) & !Self::INTERRUPT_DISABLE
         );
 
         /* Set SMBus Host Enable Bit */
@@ -115,7 +115,7 @@ impl PciDeviceDriver for SmbusManager {
                 Self::SMBUS_INTERRUPT,
             );
         }
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -144,5 +144,5 @@ impl SmbusManager {
 
 fn smbus_handler(_: usize) -> bool {
     pr_info!("Interrupted from SMBus.(Currently, do nothing.)");
-    return true;
+    true
 }

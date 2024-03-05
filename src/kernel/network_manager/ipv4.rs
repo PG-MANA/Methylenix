@@ -144,9 +144,8 @@ impl DefaultIpv4Packet {
     pub(super) fn set_fragment_offset(&mut self, fragment_offset: u16) {
         assert_eq!(fragment_offset & 0b111, 0);
         assert!((fragment_offset >> 3) <= 0x1fff);
-        self.fragment_offset = ((u16::from_be(self.fragment_offset) & !0x1fff)
-            | (fragment_offset >> 3) as u16)
-            .to_be();
+        self.fragment_offset =
+            ((u16::from_be(self.fragment_offset) & !0x1fff) | (fragment_offset >> 3)).to_be();
     }
 
     pub(super) const fn get_ttl(&self) -> u8 {
@@ -226,7 +225,7 @@ pub(super) fn create_default_ipv4_header(
     ipv4_packet.set_sender_ip_address(sender_ipv4_address);
     ipv4_packet.set_destination_ip_address(destination_ipv4_address);
     ipv4_packet.set_checksum();
-    return Ok(());
+    Ok(())
 }
 
 pub fn get_default_ttl() -> u8 {

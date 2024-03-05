@@ -25,7 +25,7 @@ fn acpi_event_handler(_: usize) -> bool {
     get_kernel_manager_cluster()
         .acpi_event_manager
         .sci_handler();
-    return true;
+    true
 }
 
 #[inline]

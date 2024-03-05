@@ -350,28 +350,28 @@ impl AmlVariable {
                         let mut original_data = unsafe { *(write_address as *const u8) };
                         original_data &= !(bit_mask as u8) << adjusted_bit_index;
                         original_data |=
-                            ((data.to_int()? & (bit_mask as usize)) << adjusted_bit_index) as u8;
+                            ((data.to_int()? & (bit_mask)) << adjusted_bit_index) as u8;
                         unsafe { *(write_address as *mut u8) = original_data };
                     }
                     2 => {
                         let mut original_data = unsafe { *(write_address as *const u16) };
                         original_data &= !(bit_mask as u16) << adjusted_bit_index;
                         original_data |=
-                            ((data.to_int()? & (bit_mask as usize)) << adjusted_bit_index) as u16;
+                            ((data.to_int()? & (bit_mask)) << adjusted_bit_index) as u16;
                         unsafe { *(write_address as *mut u16) = original_data };
                     }
                     4 => {
                         let mut original_data = unsafe { *(write_address as *const u32) };
                         original_data &= !(bit_mask as u32) << adjusted_bit_index;
                         original_data |=
-                            ((data.to_int()? & (bit_mask as usize)) << adjusted_bit_index) as u32;
+                            ((data.to_int()? & (bit_mask)) << adjusted_bit_index) as u32;
                         unsafe { *(write_address as *mut u32) = original_data };
                     }
                     8 => {
                         let mut original_data = unsafe { *(write_address as *const u64) };
                         original_data &= !(bit_mask as u64) << adjusted_bit_index;
                         original_data |=
-                            ((data.to_int()? & (bit_mask as usize)) << adjusted_bit_index) as u64;
+                            ((data.to_int()? & (bit_mask)) << adjusted_bit_index) as u64;
                         unsafe { *(write_address as *mut u64) = original_data };
                     }
                     _ => {
@@ -799,7 +799,7 @@ impl AmlVariable {
         } else {
             pr_err!("Invalid Data Type: {:?} <- {:?}", self, data);
         }
-        return Err(AmlError::InvalidOperation);
+        Err(AmlError::InvalidOperation)
     }
 
     pub fn read_buffer_with_index(&self, index: usize) -> Result<Self, AmlError> {
@@ -1034,7 +1034,7 @@ impl AmlVariable {
             num_of_bits,
             result
         );
-        return result;
+        result
     }
 
     fn write_memory(
@@ -1155,7 +1155,7 @@ impl AmlVariable {
         {
             pr_warn!("Failed to free memory map: {:?}", e);
         }
-        return result;
+        result
     }
 
     fn read_pci(
@@ -1314,8 +1314,7 @@ impl AmlVariable {
                     4,
                 )
                 .or(Err(AmlError::InvalidOperation))?;
-            let buffer =
-                (read_data & !(bit_mask as u32)) | (write_data as u32 & bit_mask as u32) as u32;
+            let buffer = (read_data & !(bit_mask as u32)) | (write_data as u32 & bit_mask as u32);
             get_kernel_manager_cluster()
                 .pci_manager
                 .write_data_by_device_number(
@@ -1331,7 +1330,7 @@ impl AmlVariable {
             write_data >>= 32;
         }
 
-        return Ok(());
+        Ok(())
     }
 
     fn read_embedded_controller(address: u8) -> Result<u8, AmlError> {

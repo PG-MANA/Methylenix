@@ -26,7 +26,7 @@ impl AcpiPmTimer {
 impl Timer for AcpiPmTimer {
     fn get_count(&self) -> usize {
         let mut result = read_io_dword(self.port as _);
-        if self.is_32_bit_counter == false {
+        if !self.is_32_bit_counter {
             result &= 0xffffff;
         }
         result as usize
@@ -55,7 +55,7 @@ impl Timer for AcpiPmTimer {
 
         if self.is_32_bit_counter {
             result
-        } else if overflow == false {
+        } else if !overflow {
             if result <= 0xffffff {
                 result
             } else {

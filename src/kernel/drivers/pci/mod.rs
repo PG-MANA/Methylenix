@@ -80,14 +80,14 @@ impl PciManager {
         for bus in start_bus..=end_bus {
             self.build_device_tree_bus(bus)?;
         }
-        return Ok(());
+        Ok(())
     }
 
     fn build_device_tree_bus(&mut self, bus: u8) -> Result<(), ()> {
         for device in 0..32 {
             self.build_device_tree_device(bus, device)?;
         }
-        return Ok(());
+        Ok(())
     }
 
     fn build_device_tree_device(&mut self, bus: u8, device: u8) -> Result<(), ()> {
@@ -117,7 +117,7 @@ impl PciManager {
             self.device_list.push(pci_dev);
         }
 
-        return Ok(());
+        Ok(())
     }
 
     pub fn read_data(&self, pci_dev: &PciDevice, offset: u32, size: u8) -> Result<u32, ()> {
@@ -129,11 +129,11 @@ impl PciManager {
 
         let byte_offset = (offset & 0b11) as u8;
         assert!(byte_offset + size <= 4);
-        return Ok(if size == 4 {
+        Ok(if size == 4 {
             data
         } else {
             (data >> (byte_offset << 3)) & ((1 << (size << 3)) - 1)
-        });
+        })
     }
 
     pub fn write_data(&self, pci_dev: &PciDevice, offset: u32, data: u32) -> Result<(), ()> {
@@ -159,7 +159,7 @@ impl PciManager {
                 return self.read_data(e, offset, size);
             }
         }
-        return Err(());
+        Err(())
     }
 
     pub fn write_data_by_device_number(
@@ -175,16 +175,15 @@ impl PciManager {
                 return self.write_data(e, offset, data);
             }
         }
-        return Err(());
+        Err(())
     }
 
     pub fn read_vendor_id(&self, pci_dev: &PciDevice) -> Result<u16, ()> {
-        self.read_data(pci_dev, 0, 2).and_then(|d| Ok(d as u16))
+        self.read_data(pci_dev, 0, 2).map(|d| d as u16)
     }
 
     pub fn read_header_type(&self, pci_dev: &PciDevice) -> Result<u8, ()> {
-        self.read_data(pci_dev, 0xc + 2, 1)
-            .and_then(|d| Ok(d as u8))
+        self.read_data(pci_dev, 0xc + 2, 1).map(|d| d as u8)
     }
 
     pub fn read_class_code(&self, pci_dev: &PciDevice) -> Result<ClassCode, ()> {

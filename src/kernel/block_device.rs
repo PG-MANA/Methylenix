@@ -98,7 +98,7 @@ impl BlockDeviceManager {
         let size = unsafe { &*self.device_list[device_id].driver }
             .get_lba_block_size(&self.device_list[device_id].info);
         drop(_lock);
-        return size;
+        size
     }
 }
 

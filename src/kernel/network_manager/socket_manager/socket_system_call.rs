@@ -48,6 +48,10 @@ struct NetworkSocketDriver {}
 
 static mut NETWORK_SOCKET_DRIVER: NetworkSocketDriver = NetworkSocketDriver {};
 
+fn get_socket_driver_mut() -> &'static mut NetworkSocketDriver {
+    unsafe { &mut *core::ptr::addr_of_mut!(NETWORK_SOCKET_DRIVER) }
+}
+
 pub fn create_socket(
     domain_number: u64,
     socket_type_number: u64,
@@ -86,22 +90,22 @@ pub fn create_socket(
         Ok(socket) => match kmalloc!(Socket, socket) {
             Ok(d) => Ok(File::new(
                 FileDescriptor::new(d as *mut _ as usize, DEVICE_ID_INVALID, 0),
-                unsafe { &mut NETWORK_SOCKET_DRIVER },
+                get_socket_driver_mut(),
             )),
             Err(err) => {
                 pr_err!("Failed to allocate memory: {:?}", err);
-                return Err(());
+                Err(())
             }
         },
         Err(err) => {
             pr_err!("Failed to create socket: {:?}", err);
-            return Err(());
+            Err(())
         }
     }
 }
 
 pub fn bind_socket(file: &mut File, sock_addr: &SockAddr) -> Result<(), ()> {
-    if file.get_driver_address() != unsafe { &mut NETWORK_SOCKET_DRIVER as *mut _ as usize } {
+    if file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
         pr_err!("Invalid file descriptor");
         return Err(());
     }
@@ -125,7 +129,7 @@ pub fn bind_socket(file: &mut File, sock_addr: &SockAddr) -> Result<(), ()> {
             let our_address = if sock_addr_in.sin_addr == INADDR_ANY {
                 IPV4_ADDRESS_ANY
             } else {
-                u32::from_be_bytes(sock_addr_in.sin_addr.clone())
+                u32::from_be_bytes(sock_addr_in.sin_addr)
             };
             let port = u16::from_be(sock_addr_in.sin_port);
             *ipv4_info = Ipv4ConnectionInfo::new(our_address, IPV4_ADDRESS_ANY);
@@ -142,11 +146,11 @@ pub fn bind_socket(file: &mut File, sock_addr: &SockAddr) -> Result<(), ()> {
             unimplemented!()
         }
     }
-    return Ok(());
+    Ok(())
 }
 
 pub fn listen_socket(file: &mut File, _max_connection: usize) -> Result<(), ()> {
-    if file.get_driver_address() != unsafe { &mut NETWORK_SOCKET_DRIVER as *mut _ as usize } {
+    if file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
         pr_err!("Invalid file descriptor");
         return Err(());
     }
@@ -164,7 +168,7 @@ pub fn listen_socket(file: &mut File, _max_connection: usize) -> Result<(), ()> 
         Ok(_) => {
             *file = File::new(
                 FileDescriptor::new(file_descriptor.get_data(), DEVICE_ID_VALID, 0),
-                unsafe { &mut NETWORK_SOCKET_DRIVER },
+                get_socket_driver_mut(),
             );
             Ok(())
         }
@@ -175,8 +179,8 @@ pub fn listen_socket(file: &mut File, _max_connection: usize) -> Result<(), ()> 
     }
 }
 
-pub fn accept<'a>(file: &'a mut File) -> Result<(File<'static>, SockAddr), ()> {
-    if file.get_driver_address() != unsafe { &mut NETWORK_SOCKET_DRIVER as *mut _ as usize } {
+pub fn accept(file: &mut File) -> Result<(File<'static>, SockAddr), ()> {
+    if file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
         pr_err!("Invalid file descriptor");
         return Err(());
     }
@@ -221,13 +225,13 @@ pub fn accept<'a>(file: &'a mut File) -> Result<(File<'static>, SockAddr), ()> {
                     DEVICE_ID_VALID,
                     FILE_PERMISSION_READ | FILE_PERMISSION_WRITE,
                 ),
-                unsafe { &mut NETWORK_SOCKET_DRIVER },
+                get_socket_driver_mut(),
             );
             Ok((accepted_file, sock_addr))
         }
         Err(err) => {
             pr_err!("Failed to accept socket: {:?}", err);
-            return Err(());
+            Err(())
         }
     }
 }
@@ -239,8 +243,7 @@ pub fn recv_from(
     flags: usize,
     sock_addr: Option<&SockAddr>,
 ) -> Result<MSize, ()> {
-    if socket_file.get_driver_address() != unsafe { &mut NETWORK_SOCKET_DRIVER as *mut _ as usize }
-    {
+    if socket_file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
         pr_err!("Invalid file descriptor");
         return Err(());
     } else if !socket_file.is_readable() {
@@ -289,8 +292,7 @@ pub fn send_to(
     flags: usize,
     sock_addr: Option<&SockAddr>,
 ) -> Result<MSize, ()> {
-    if socket_file.get_driver_address() != unsafe { &mut NETWORK_SOCKET_DRIVER as *mut _ as usize }
-    {
+    if socket_file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
         pr_err!("Invalid file descriptor");
         return Err(());
     } else if !socket_file.is_writable() {
@@ -364,14 +366,12 @@ impl FileOperationDriver for NetworkSocketDriver {
         let socket = unsafe { &mut *(descriptor.get_data() as *mut Socket) };
         if descriptor.get_device_index() == DEVICE_ID_INVALID {
             let _ = kfree!(socket);
-        } else {
-            if let Err(err) = get_kernel_manager_cluster()
-                .network_manager
-                .get_socket_manager()
-                .close_socket(socket)
-            {
-                pr_err!("Failed to close socket: {:?}", err);
-            }
+        } else if let Err(err) = get_kernel_manager_cluster()
+            .network_manager
+            .get_socket_manager()
+            .close_socket(socket)
+        {
+            pr_err!("Failed to close socket: {:?}", err);
         }
     }
 }

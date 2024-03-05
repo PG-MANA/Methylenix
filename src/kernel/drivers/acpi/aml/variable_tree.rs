@@ -74,7 +74,7 @@ impl AmlVariableTree {
                 .unwrap()
                 .iter()
                 .find(|n| n.name == target_scope)
-                .and_then(|c| Some(c.clone())); /* For Mutex */
+                .cloned(); /* For Mutex */
             if let Some(c) = result {
                 self.current = c;
             } else {
@@ -89,7 +89,7 @@ impl AmlVariableTree {
             }
         } else {
             pr_err!("Invalid Scope Name: {:?}", scope);
-            return Err(AmlError::InvalidName(scope.clone()));
+            Err(AmlError::InvalidName(scope.clone()))
         }
     }
 
@@ -159,9 +159,7 @@ impl AmlVariableTree {
         v: &Vec<(NameString, Arc<Mutex<AmlVariable>>)>,
         single_name: &NameString,
     ) -> Option<Arc<Mutex<AmlVariable>>> {
-        v.iter()
-            .find(|e| &e.0 == single_name)
-            .and_then(|e| Some(e.1.clone()))
+        v.iter().find(|e| &e.0 == single_name).map(|e| e.1.clone())
     }
 
     fn _find_data_from_child_scope(
@@ -177,15 +175,15 @@ impl AmlVariableTree {
         } else {
             let child_scope = name
                 .get_element_as_name_string(current_index)
-                .and_then(|e| Some(e.get_full_name_path(&scope.name, true)))
-                .unwrap_or_else(|| NameString::root());
+                .map(|e| e.get_full_name_path(&scope.name, true))
+                .unwrap_or_else(NameString::root);
             let child = scope
                 .children
                 .lock()
                 .unwrap()
                 .iter()
                 .find(|e| e.name == child_scope)
-                .and_then(|c| Some(c.clone()));
+                .cloned();
             if let Some(c) = child {
                 Self::_find_data_from_child_scope(c, name, current_index + 1)
             } else {
@@ -253,6 +251,6 @@ impl AmlVariableTree {
             .lock()
             .unwrap()
             .push((name, d.clone()));
-        return Ok(d);
+        Ok(d)
     }
 }

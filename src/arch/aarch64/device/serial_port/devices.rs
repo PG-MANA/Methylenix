@@ -56,7 +56,7 @@ fn pl011_wait(base_address: usize) -> bool {
         time_out -= 1;
         core::hint::spin_loop();
     }
-    return true;
+    true
 }
 
 fn pl011_setup_interrupt(
@@ -90,7 +90,7 @@ fn pl011_setup_interrupt(
             read_volatile((base_address + PL011_UARTIMSC) as *const u16) | PL011_UARTIMSC_RXIM,
         );
     }
-    return true;
+    true
 }
 
 /// PL011
@@ -120,5 +120,5 @@ fn meson_gx_wait(base_address: usize) -> bool {
         time_out -= 1;
         core::hint::spin_loop();
     }
-    return false;
+    false
 }

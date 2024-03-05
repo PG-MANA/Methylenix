@@ -196,7 +196,7 @@ impl PhysicalMemoryManager {
             self.chain_entry_to_free_list(new_entry, None);
         }
         self.free_memory_size -= size;
-        return Ok(());
+        Ok(())
     }
 
     fn define_free_memory(
@@ -408,7 +408,7 @@ impl PhysicalMemoryManager {
                 self.memory_size = self.free_memory_size;
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     fn unchain_entry_from_free_list(&mut self, entry: &mut MemoryEntry) {
@@ -445,9 +445,7 @@ impl PhysicalMemoryManager {
                 self.free_list[new_order.to_usize()] = Some(entry as *mut _);
             } else {
                 loop {
-                    if let Some(next_entry) =
-                        list_entry.list_next.and_then(|n| Some(unsafe { &mut *n }))
-                    {
+                    if let Some(next_entry) = list_entry.list_next.map(|n| unsafe { &mut *n }) {
                         if next_entry.get_size() >= entry.get_size() {
                             list_entry.list_next = Some(entry as *mut _);
                             entry.list_prev = Some(list_entry as *mut _);
@@ -546,7 +544,7 @@ impl PhysicalMemoryManager {
                 );
             }
         }
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -643,7 +641,7 @@ impl MemoryEntry {
     }
 
     pub fn is_first_entry(&self) -> bool {
-        self.previous == None
+        self.previous.is_none()
     }
 
     pub fn unchain_from_freelist(&mut self) {
@@ -677,7 +675,7 @@ impl Iterator for FreeListIter {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(address) = self.entry {
             let entry = unsafe { &*(address as *mut MemoryEntry) };
-            self.entry = entry.list_next.and_then(|e| Some(e as *const _)); /* ATTENTION: get **free_list's** next */
+            self.entry = entry.list_next.map(|e| e as *const _); /* ATTENTION: get **free_list's** next */
             Some(entry)
         } else {
             None
@@ -689,7 +687,7 @@ impl Iterator for FreeListIterMut {
     type Item = &'static mut MemoryEntry;
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(address) = self.entry {
-            let entry = unsafe { &mut *(address as *mut MemoryEntry) };
+            let entry = unsafe { &mut *(address) };
             self.entry = entry.list_next; /* ATTENTION: get **free_list's** next */
             Some(entry)
         } else {

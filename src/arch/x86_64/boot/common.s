@@ -16,35 +16,49 @@
 
 .align  0x1000
 /* PAGE DIRECTORY (8byte * 512) * 4 */
+.type   pd, %object
+.size   pd, 0x4000
 pd:
 .skip   0x4000
 
 /* PAGE DIRECTORY POINTER TABLE (8byte * 512[4 entries are used]) */
+.type   pdpt, %object
+.size   pdpt, 0x1000
 pdpt:
 .skip   0x1000
 
 /* PML4 (8byte * 512[1 entry is used]) */
+.type   pml4, %object
+.size   pml4, 0x1000
 pml4:
 .skip   0x1000
 
-.align   16
+.align  16
+.type   gdtr_64bit_0, %object
 gdtr_64bit_0:
-  .word    gdt_end - gdt - 1                  /* The byte size of descriptors */
-  .quad    gdt - KERNEL_MAP_START_ADDRESS
+  .word gdt_end - gdt - 1                  /* The byte size of descriptors */
+  .quad gdt - KERNEL_MAP_START_ADDRESS
+.size   gdtr_64bit_0, . - gdtr_64bit_0
 
-.align   16
+.align  16
+.type   gdtr_64bit_1, %object
 gdtr_64bit_1:
-  .word    gdt_end - gdt - 1                  /* The byte size of descriptors */
-  .quad    gdt
+  .word gdt_end - gdt - 1                  /* The byte size of descriptors */
+  .quad gdt
+.size   gdtr_64bit_1, . - gdtr_64bit_1
 
 .section .data
 
-.align   16
+.align  16
 /* OS STACK */
+.type   os_stack, %object
+.size   os_stack, OS_STACK_SIZE
 os_stack:
 .skip   OS_STACK_SIZE
 
-.align   16
+.align  16
+.type   gdt, %object
+.size   gdt, gdt_end - gdt
 gdt:
     /* NULL DESCRIPTOR */
     .quad    0
@@ -76,6 +90,8 @@ gdt_end:
 
 .align   16
 
+.type   tss, %object
+.size   tss, tss_end - tss
 tss:
   .rept     25
     .long    0

@@ -194,7 +194,7 @@ pub fn setup_cpu_manager_cluster(
 
 /// Init APs
 ///
-/// This function will setup multiple processors by using ACPI
+/// This function will set up multiple processors by using ACPI
 /// This is in the development
 pub fn init_multiple_processors_ap() {
     /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
@@ -215,7 +215,7 @@ pub fn init_multiple_processors_ap() {
     let apic_id_list_iter = madt_manager.find_apic_id_list();
 
     /* Set BSP Local APIC ID into cpu_manager */
-    let mut cpu_manager = get_cpu_manager_cluster();
+    let cpu_manager = get_cpu_manager_cluster();
     let bsp_apic_id = get_cpu_manager_cluster()
         .interrupt_manager
         .get_local_apic_manager()
@@ -256,7 +256,7 @@ pub fn init_multiple_processors_ap() {
         .expect("Failed to alloc stack for AP");
     unsafe {
         *(physical_address_to_direct_map(PAddress::new(
-            (&mut ap_os_stack_address as *mut _ as usize) - ap_entry_address
+            (core::ptr::addr_of_mut!(ap_os_stack_address) as usize) - ap_entry_address
                 + boot_address.to_usize(),
         ))
         .to_usize() as *mut u64) =

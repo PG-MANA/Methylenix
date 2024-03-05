@@ -33,7 +33,7 @@ impl<'a> Iterator for PathInfoIter<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.s.len() == 0 {
+        if self.s.is_empty() {
             return None;
         }
         let mut index = 0;
@@ -47,6 +47,6 @@ impl<'a> Iterator for PathInfoIter<'a> {
         }
         let (c, n) = self.s.split_at(index);
         self.s = n;
-        return Some(c);
+        Some(c)
     }
 }

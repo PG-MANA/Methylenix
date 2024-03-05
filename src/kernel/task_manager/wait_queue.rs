@@ -47,7 +47,7 @@ impl WaitQueue {
         } else {
             self.list.insert_head(&mut thread.sleep_list)
         }
-        return Ok(());
+        Ok(())
     }
 
     /// Add the thread to WaitQueue.
@@ -82,7 +82,7 @@ impl WaitQueue {
         } else {
             InterruptManager::restore_local_irq(interrupt_flag);
         }
-        return result;
+        result
     }
 
     pub fn wakeup_one(&mut self) -> Result<(), TaskError> {
@@ -113,7 +113,7 @@ impl WaitQueue {
                 .task_manager
                 .wake_up_thread(thread)?;
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {

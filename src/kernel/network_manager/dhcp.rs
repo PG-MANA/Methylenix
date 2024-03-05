@@ -136,7 +136,7 @@ pub fn create_dhcp_discover_packet(
         DHCP_CLIENT_IDENTIFIER_ETHERNET_MAC_ADDRESS_OFFSET + mac_address.inner().len(),
         DHCP_TERMINATE,
     );
-    return buffer;
+    buffer
 }
 
 pub fn create_dhcp_request_packet(
@@ -232,7 +232,7 @@ pub fn create_dhcp_request_packet(
         DHCP_TERMINATE,
     );
 
-    return buffer;
+    buffer
 }
 
 pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {

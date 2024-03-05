@@ -94,8 +94,8 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
         physical_memory_manager.add_memory_entry_pool(
-            &MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as *const _ as usize,
-            mem::size_of_val(&MEMORY_FOR_PHYSICAL_MEMORY_MANAGER),
+            core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER) as usize,
+            mem::size_of_val(&*core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)),
         );
     }
 
@@ -128,7 +128,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
             "[{:#016X}~{:#016X}] {}",
             entry.physical_start,
             MSize::new((entry.number_of_pages as usize) << 12)
-                .to_end_address(PAddress::new(entry.physical_start as usize))
+                .to_end_address(PAddress::new(entry.physical_start))
                 .to_usize(),
             entry.memory_type
         );
@@ -210,11 +210,11 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
         ))
         .to_usize(),
     );
-    boot_information.font_address = boot_information.font_address.and_then(|a| {
-        Some((
+    boot_information.font_address = boot_information.font_address.map(|a| {
+        (
             (physical_address_to_direct_map(PAddress::new(a.0)).to_usize()),
             a.1,
-        ))
+        )
     });
 
     /* Apply paging */
@@ -296,23 +296,21 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
 ///
 /// This function does not enable the interrupt.
 pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
-    if acpi_available {
-        if get_kernel_manager_cluster()
+    if acpi_available
+        && get_kernel_manager_cluster()
             .serial_port_manager
             .init_with_acpi()
-        {
-            return true;
-        }
+    {
+        return true;
     }
-    if dtb_available {
-        if get_kernel_manager_cluster()
+    if dtb_available
+        && get_kernel_manager_cluster()
             .serial_port_manager
             .init_with_dtb()
-        {
-            return true;
-        }
+    {
+        return true;
     }
-    return false;
+    false
 }
 
 /// Init AcpiManager without parsing AML
@@ -357,7 +355,7 @@ pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -
         return false;
     }
     set_manger(acpi_manager, device_manager);
-    return true;
+    true
 }
 
 /// Init Device Tree Blob Manager
@@ -394,7 +392,7 @@ pub fn init_dtb(boot_information: &BootInformation) -> bool {
         get_kernel_manager_cluster().arch_depend_data.dtb_manager,
         dtb_manager
     );
-    return true;
+    true
 }
 
 pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: bool) {
@@ -539,7 +537,7 @@ pub fn init_task(main_process: fn() -> !, idle_process: fn() -> !) {
 
 /// Init APs
 ///
-/// This function will setup multiple processors by using ACPI
+/// This function will set up multiple processors by using ACPI
 /// This is in the development
 pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
     if !acpi_available {
