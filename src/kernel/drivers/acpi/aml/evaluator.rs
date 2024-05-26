@@ -1809,7 +1809,7 @@ impl Evaluator {
                 if locked_obj.is_constant_data() {
                     if let AmlVariable::ConstData(c) = *locked_obj {
                         let result = AmlVariable::ConstData(ConstData::from_usize(
-                            c.to_int().overflowing_sub(1).0,
+                            c.to_int().wrapping_sub(1),
                             c.get_byte_size(),
                         )?);
                         locked_obj.write(result.clone())?;
@@ -1822,7 +1822,7 @@ impl Evaluator {
                     let constant_data = locked_obj.get_constant_data()?;
                     if let AmlVariable::ConstData(c) = constant_data {
                         let result = AmlVariable::ConstData(ConstData::from_usize(
-                            c.to_int().overflowing_sub(1).0,
+                            c.to_int().wrapping_sub(1),
                             c.get_byte_size(),
                         )?);
                         locked_obj.write(result.clone())?;
@@ -1841,7 +1841,7 @@ impl Evaluator {
                 if locked_obj.is_constant_data() {
                     if let AmlVariable::ConstData(c) = *locked_obj {
                         let result = AmlVariable::ConstData(ConstData::from_usize(
-                            c.to_int().overflowing_add(1).0,
+                            c.to_int().wrapping_add(1),
                             c.get_byte_size(),
                         )?);
                         locked_obj.write(result.clone())?;
@@ -1854,7 +1854,7 @@ impl Evaluator {
                     let constant_data = locked_obj.get_constant_data()?;
                     if let AmlVariable::ConstData(c) = constant_data {
                         let result = AmlVariable::ConstData(ConstData::from_usize(
-                            c.to_int().overflowing_add(1).0,
+                            c.to_int().wrapping_add(1),
                             c.get_byte_size(),
                         )?);
                         locked_obj.write(result.clone())?;

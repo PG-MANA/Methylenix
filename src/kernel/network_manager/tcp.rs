@@ -791,12 +791,9 @@ pub(super) fn tcp_ipv4_segment_handler(
             their_port: segment_info.get_their_port(),
             window_size: segment_info.get_window_size(),
             available_window_size: segment_info.get_window_size(),
-            expected_arrival_sequence_number: segment_info
-                .get_sequence_number()
-                .overflowing_add(1)
-                .0,
-            next_sequence_number: sequence_number.overflowing_add(1).0,
-            last_sent_acknowledge_number: segment_info.get_sequence_number().overflowing_add(1).0,
+            expected_arrival_sequence_number: segment_info.get_sequence_number().wrapping_add(1),
+            next_sequence_number: sequence_number.wrapping_add(1),
+            last_sent_acknowledge_number: segment_info.get_sequence_number().wrapping_add(1),
             receive_buffer_list: LinkedList::new(),
             send_buffer_list: PtrLinkedList::new(),
         };
@@ -935,7 +932,7 @@ fn ipv4_tcp_fin_handler(
     }
     if should_send_ack {
         session_info.last_sent_acknowledge_number =
-            segment_info.get_sequence_number().overflowing_add(1).0;
+            segment_info.get_sequence_number().wrapping_add(1);
         let reply_segment_info = TcpSegmentInfo {
             sender_port: segment_info.get_destination_port(),
             destination_port: segment_info.get_sender_port(),
@@ -956,8 +953,7 @@ fn ipv4_tcp_fin_handler(
             pr_err!("Failed to send ACK: {:?}", err);
             Err(err)
         } else {
-            session_info.next_sequence_number =
-                session_info.next_sequence_number.overflowing_add(1).0;
+            session_info.next_sequence_number = session_info.next_sequence_number.wrapping_add(1);
             Ok(is_socket_active)
         }
     } else {
@@ -1112,8 +1108,7 @@ pub(super) fn close_tcp_session(
                     unimplemented!()
                 }
             }
-            session_info.next_sequence_number =
-                session_info.next_sequence_number.overflowing_add(1).0;
+            session_info.next_sequence_number = session_info.next_sequence_number.wrapping_add(1);
             if session_info.get_status() == TcpSessionStatus::OpenOppositeClosed {
                 session_info.set_status(TcpSessionStatus::ClosingOppositeClosed);
             } else {
