@@ -37,7 +37,7 @@ pub struct KernelManagerCluster {
     pub system_memory_manager: SystemMemoryManager,
     pub serial_port_manager: SerialPortManager,
     pub task_manager: TaskManager,
-    pub kernel_tty_manager: TtyManager, /*SerialPortManager has mutex process inner*/
+    pub kernel_tty_manager: [TtyManager; TtyManager::NUMBER_OF_KERNEL_TTY],
     pub block_device_manager: BlockDeviceManager,
     pub network_manager: NetworkManager,
     pub file_manager: FileManager,
@@ -47,7 +47,7 @@ pub struct KernelManagerCluster {
     pub pci_manager: PciManager,
     pub global_timer_manager: GlobalTimerManager,
     pub boot_strap_cpu_manager: CpuManagerCluster,
-    pub cpu_list: PtrLinkedList<CpuManagerCluster>, /* may be changed */
+    pub cpu_list: PtrLinkedList<CpuManagerCluster>,
     pub arch_depend_data: ArchDependedKernelManagerCluster,
 }
 

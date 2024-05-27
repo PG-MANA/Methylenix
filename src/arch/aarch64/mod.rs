@@ -6,6 +6,7 @@
 
 mod boot_info;
 pub mod context;
+
 pub mod device {
     pub mod acpi;
     pub mod cpu;
@@ -14,6 +15,7 @@ pub mod device {
     pub mod serial_port;
     pub mod text;
 }
+
 mod initialization;
 pub mod interrupt;
 pub mod paging;
@@ -56,17 +58,21 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
 
     /* Initialize Kernel TTY (Early) */
     init_struct!(
-        get_kernel_manager_cluster().kernel_tty_manager,
+        get_kernel_manager_cluster().kernel_tty_manager[0],
         TtyManager::new()
     );
     init_struct!(
-        get_kernel_manager_cluster().graphic_manager,
-        GraphicManager::new()
+        get_kernel_manager_cluster().kernel_tty_manager[1],
+        TtyManager::new()
     );
+
+    /* Init Early Serial Port */
     init_struct!(
         get_kernel_manager_cluster().serial_port_manager,
         SerialPortManager::new()
     );
+    get_kernel_manager_cluster().kernel_tty_manager[0]
+        .open(&get_kernel_manager_cluster().serial_port_manager);
 
     /* Setup BSP cpu manager */
     init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
@@ -75,7 +81,6 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     )));
 
     /* Initialize Memory System */
-
     let boot_information = init_memory_by_boot_information(boot_information);
 
     /* Initialize ACPI and DTB */
@@ -89,6 +94,10 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     init_serial_port(acpi_available, dtb_available);
 
     /* Initialize Graphic */
+    init_struct!(
+        get_kernel_manager_cluster().graphic_manager,
+        GraphicManager::new()
+    );
     if let Some(graphic_info) = &boot_information.graphic_info {
         get_kernel_manager_cluster()
             .graphic_manager
@@ -108,8 +117,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
             );
         }
     }
-    get_kernel_manager_cluster()
-        .kernel_tty_manager
+    get_kernel_manager_cluster().kernel_tty_manager[1]
         .open(&get_kernel_manager_cluster().graphic_manager);
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);

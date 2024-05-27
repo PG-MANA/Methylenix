@@ -94,7 +94,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
         physical_memory_manager.add_memory_entry_pool(
-            core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER) as usize,
+            core::ptr::addr_of_mut!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER) as usize,
             mem::size_of_val(&*core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)),
         );
     }
@@ -301,16 +301,16 @@ pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
             .serial_port_manager
             .init_with_acpi()
     {
-        return true;
-    }
-    if dtb_available
+        true
+    } else if dtb_available
         && get_kernel_manager_cluster()
             .serial_port_manager
             .init_with_dtb()
     {
-        return true;
+        true
+    } else {
+        false
     }
-    false
 }
 
 /// Init AcpiManager without parsing AML

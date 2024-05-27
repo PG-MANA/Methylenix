@@ -16,7 +16,6 @@ use crate::arch::target_arch::device::text::TextDriver;
 
 use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::kernel::drivers::multiboot::FrameBufferInfo;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, VAddress};
 use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
 use crate::kernel::tty::Writer;
@@ -184,9 +183,6 @@ impl GraphicManager {
     }
 
     pub fn puts(&self, string: &str, foreground_color: u32, background_color: u32) -> bool {
-        get_kernel_manager_cluster()
-            .serial_port_manager
-            .send_str(string);
         let _lock = if let Ok(l) = self.lock.try_lock() {
             l
         } else {
@@ -248,7 +244,6 @@ impl Writer for GraphicManager {
         use core::str;
         if let Ok(s) = str::from_utf8(buf.split_at(size_to_write).0) {
             if self.puts(s, foreground_color, background_color) {
-                //適当
                 Ok(())
             } else {
                 Err(fmt::Error {})

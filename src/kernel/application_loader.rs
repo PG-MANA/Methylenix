@@ -364,21 +364,19 @@ pub fn load_and_execute(
     let _ = kfree!(head_data, head_read_size);
 
     /* Add stdout/stdin */
+    use crate::kernel::tty;
     process.add_file(
-        get_kernel_manager_cluster()
-            .kernel_tty_manager
+        get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
             .open_tty_as_file(FILE_PERMISSION_READ)
             .unwrap(),
     ); /* stdin */
     process.add_file(
-        get_kernel_manager_cluster()
-            .kernel_tty_manager
+        get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
             .open_tty_as_file(FILE_PERMISSION_WRITE)
             .unwrap(),
     ); /* stderr */
     process.add_file(
-        get_kernel_manager_cluster()
-            .kernel_tty_manager
+        get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
             .open_tty_as_file(FILE_PERMISSION_WRITE)
             .unwrap(),
     ); /* stderr */
