@@ -1,18 +1,12 @@
 OUTPUT_FORMAT(elf64-aarch64)
-ENTRY(_boot_main)
+ENTRY(boot_main)
 
 __ALIGN_SIZE = 0x1000;
 __KERNEL_MAP_START_ADDRESS = 0xffffff8000000000;
 
 SECTIONS {
 
-  . = 0x100000 + SIZEOF_HEADERS;
-
-  .note : ALIGN(4) {
-    *(.note)
-  }
-
-  . += __KERNEL_MAP_START_ADDRESS;
+  . = __KERNEL_MAP_START_ADDRESS;
   . = ALIGN(__ALIGN_SIZE);
   .text : AT(ADDR(.text) - __KERNEL_MAP_START_ADDRESS) {
     *(.text .text.*)

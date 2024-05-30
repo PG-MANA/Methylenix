@@ -28,20 +28,6 @@ pub const SMC_PSCI_CPU_ON: u64 = 0xC4000003;
 //pub const ID_AA64MMFR0_EL1_PA_RANGE_OFFSET: u64 = 0;
 //pub const ID_AA64MMFR0_EL1_PA_RANGE: u64 = 0b1111 << ID_AA64MMFR0_EL1_PA_RANGE_OFFSET;
 
-#[no_mangle]
-#[naked]
-pub unsafe extern "C" fn _boot_main() {
-    asm!("
-        adr x8, {}
-        add x8, x8, {}
-        mov sp, x8
-        b   boot_main
-    ",
-    sym crate::arch::target_arch::KERNEL_INITIAL_STACK,
-    const crate::arch::target_arch::KERNEL_INITIAL_STACK_SIZE,
-    options(noreturn));
-}
-
 #[inline(always)]
 pub unsafe fn enable_interrupt() {
     asm!("      dsb ish
@@ -370,7 +356,7 @@ pub unsafe fn smc_0(
 #[allow(unused_variables)]
 pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
     asm!(
-        "
+    "
             ldp  x1, x2, [x0, #(8 * 34)]
             msr  elr_el1, x1
             msr  spsr_el1, x2
@@ -403,9 +389,9 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
             ldp  x0,  x1, [x0, #(16 * 0)]
             eret
     ",
-        m = const SPSR_M,
-        el0 = const SPSR_M_EL0T,
-        options(noreturn)
+    m = const SPSR_M,
+    el0 = const SPSR_M_EL0T,
+    options(noreturn)
     )
 }
 
@@ -458,6 +444,7 @@ global_asm!(
 .global     ap_entry, ap_entry_end
 .section    .text
 .type       ap_entry, %function
+.align      2
 ap_entry:
     mrs x2, CurrentEL
     lsr x2, x2, 2
@@ -492,6 +479,7 @@ ap_entry:
     msr sctlr_el1, x5
     mov sp, x7
     br  x8
+.align  4
 ap_entry_end:
 .size   ap_entry, ap_entry_end - ap_entry
 "

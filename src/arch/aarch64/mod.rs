@@ -49,8 +49,6 @@ pub struct ArchDependedCpuManagerCluster {
 }
 
 pub const TARGET_ARCH_NAME: &str = "aarch64";
-const KERNEL_INITIAL_STACK_SIZE: usize = 0x40000;
-static mut KERNEL_INITIAL_STACK: [u8; KERNEL_INITIAL_STACK_SIZE] = [0; KERNEL_INITIAL_STACK_SIZE];
 
 #[no_mangle]
 extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
