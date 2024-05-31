@@ -5,15 +5,18 @@
 //! This allows nullptr for accessing Physical Address:0
 //!
 
+use core::ptr::NonNull;
+
 pub struct PoolAllocator<T> {
     linked_count: usize,
     object_size: usize,
-    head: Option<*mut FreeList>,
+    head: Option<NonNull<FreeList>>,
+    offset: usize,
     phantom: core::marker::PhantomData<T>,
 }
 
 struct FreeList {
-    next: Option<*mut FreeList>,
+    next: Option<NonNull<FreeList>>,
 }
 
 /// PoolAllocator
@@ -21,32 +24,36 @@ struct FreeList {
 /// This allocator is FILO(First In Last Out) to increase the probability of cache-hit.
 impl<T> PoolAllocator<T> {
     const fn size_check() {
-        if core::mem::size_of::<T>() < core::mem::size_of::<FreeList>() {
-            panic!("PoolAllocator can process the struct bigger than FreeList only.");
-            /* static_assert */
+        use core::mem::{align_of, size_of};
+        let mut object_size = size_of::<T>();
+        if object_size < align_of::<T>() {
+            object_size = align_of::<T>();
         }
+        let mut list_size = size_of::<FreeList>();
+        if (object_size & (align_of::<FreeList>() - 1)) != 0 {
+            list_size += align_of::<FreeList>() - (object_size & (align_of::<FreeList>() - 1));
+        }
+        assert!(
+            object_size >= list_size,
+            "PoolAllocator can process the struct bigger than FreeList only."
+        );
     }
 
     pub const fn new() -> Self {
+        use core::mem::{align_of, size_of};
         const { Self::size_check() };
-        Self {
-            linked_count: 0,
-            object_size: core::mem::size_of::<T>(),
-            head: None,
-            phantom: core::marker::PhantomData,
+        let mut object_size = size_of::<T>();
+        if object_size < align_of::<T>() {
+            object_size = align_of::<T>();
         }
-    }
-
-    pub const fn new_with_align(align: usize) -> Self {
-        const { Self::size_check() };
-        let size = if align < core::mem::size_of::<T>() {
-            core::mem::size_of::<T>()
-        } else {
-            align
-        };
         Self {
             linked_count: 0,
-            object_size: size,
+            object_size,
+            offset: if (object_size & (align_of::<FreeList>() - 1)) != 0 {
+                align_of::<FreeList>() - (object_size & (align_of::<FreeList>() - 1))
+            } else {
+                0
+            },
             head: None,
             phantom: core::marker::PhantomData,
         }
@@ -56,11 +63,16 @@ impl<T> PoolAllocator<T> {
         self.linked_count
     }
 
-    pub unsafe fn add_pool(&mut self, pool_address: usize, pool_size: usize) {
-        let mut address = pool_address;
+    pub unsafe fn add_pool(&mut self, mut pool_address: usize, mut pool_size: usize) {
+        if (pool_address & (core::mem::align_of::<T>() - 1)) != 0 {
+            let padding =
+                core::mem::align_of::<T>() - (pool_address & (core::mem::align_of::<T>() - 1));
+            pool_address += padding;
+            pool_size -= padding;
+        }
         for _ in 0..(pool_size / self.object_size) {
-            self.free_ptr(address as *mut T);
-            address += self.object_size;
+            self.free_ptr(pool_address as *mut T);
+            pool_address += self.object_size;
         }
     }
 
@@ -72,11 +84,11 @@ impl<T> PoolAllocator<T> {
         if self.linked_count == 0 {
             return Err(());
         }
-        //assert!(self.head.is_some());
-        let e = self.head.unwrap();
-        self.head = unsafe { (*e).next };
+        assert!(self.head.is_some());
+        let mut e = self.head.unwrap();
+        self.head = unsafe { e.as_mut().next };
         self.linked_count -= 1;
-        Ok(e as usize as *mut T)
+        Ok((e.as_ptr() as usize - self.offset) as *mut T)
     }
 
     pub fn free(&mut self, target: &'static mut T) {
@@ -86,9 +98,10 @@ impl<T> PoolAllocator<T> {
     pub fn free_ptr(&mut self, target: *mut T) {
         /* Do not use target after free */
         assert!(self.linked_count < usize::MAX);
-        let e = target as usize as *mut FreeList;
+        let e = (target as usize + self.offset) as *mut FreeList;
         unsafe { (*e).next = self.head };
-        self.head = Some(e);
+        self.head = NonNull::new(e);
+        assert!(self.head.is_some());
         self.linked_count += 1;
     }
 }

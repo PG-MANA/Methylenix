@@ -31,9 +31,9 @@ pub struct GlobalSlabAllocator<T> {
 impl<T> SlabAllocator<T> {
     const DEFAULT_ALLOC_ORDER: MPageOrder = MPageOrder::new(2);
 
-    pub const fn new(align: usize) -> Self {
+    pub const fn new() -> Self {
         Self {
-            allocator: PoolAllocator::new_with_align(align),
+            allocator: PoolAllocator::new(),
         }
     }
 
@@ -72,9 +72,9 @@ impl<T> SlabAllocator<T> {
 }
 
 impl<T> LocalSlabAllocator<T> {
-    pub const fn new(align: usize) -> Self {
+    pub const fn new() -> Self {
         Self {
-            slab_allocator: SlabAllocator::new(align),
+            slab_allocator: SlabAllocator::new(),
         }
     }
 
@@ -107,10 +107,10 @@ impl<T> LocalSlabAllocator<T> {
 }
 
 impl<T> GlobalSlabAllocator<T> {
-    pub const fn new(align: usize) -> Self {
+    pub const fn new() -> Self {
         Self {
             lock: IrqSaveSpinLockFlag::new(),
-            slab_allocator: SlabAllocator::new(align),
+            slab_allocator: SlabAllocator::new(),
         }
     }
 

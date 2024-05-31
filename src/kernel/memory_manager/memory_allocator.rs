@@ -33,13 +33,13 @@ impl SizeAllocator {
 
     const fn new() -> Self {
         Self {
-            size_64: LocalSlabAllocator::new(0),
-            size_128: LocalSlabAllocator::new(0),
-            size_256: LocalSlabAllocator::new(0),
-            size_512: LocalSlabAllocator::new(0),
-            size_1024: LocalSlabAllocator::new(0),
-            size_2048: LocalSlabAllocator::new(0),
-            size_4096: LocalSlabAllocator::new(0),
+            size_64: LocalSlabAllocator::new(),
+            size_128: LocalSlabAllocator::new(),
+            size_256: LocalSlabAllocator::new(),
+            size_512: LocalSlabAllocator::new(),
+            size_1024: LocalSlabAllocator::new(),
+            size_2048: LocalSlabAllocator::new(),
+            size_4096: LocalSlabAllocator::new(),
         }
     }
 

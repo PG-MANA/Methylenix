@@ -44,7 +44,7 @@ impl WorkQueue {
 
     pub fn init_work_queue(&mut self, task_manager: &mut TaskManager) {
         self.work_queue = PtrLinkedList::new();
-        self.work_pool = LocalSlabAllocator::new(0);
+        self.work_pool = LocalSlabAllocator::new();
 
         self.work_pool
             .init()
@@ -63,7 +63,7 @@ impl WorkQueue {
 
     pub fn init_cpu_work_queue(&mut self, task_manager: &mut TaskManager) {
         self.work_queue = PtrLinkedList::new();
-        self.work_pool = LocalSlabAllocator::new(0);
+        self.work_pool = LocalSlabAllocator::new();
 
         self.work_pool
             .init()

@@ -40,8 +40,6 @@ pub struct ProcessEntry {
 }
 
 impl ProcessEntry {
-    pub const PROCESS_ENTRY_ALIGN: usize = 0;
-
     fn new() -> Self {
         Self {
             p_list: PtrLinkedListNode::new(),

@@ -89,8 +89,8 @@ impl TaskManager {
             kernel_process: core::ptr::null_mut(),
             idle_thread: core::ptr::null_mut(),
             context_manager: ContextManager::new(),
-            process_entry_pool: GlobalSlabAllocator::new(ProcessEntry::PROCESS_ENTRY_ALIGN),
-            thread_entry_pool: GlobalSlabAllocator::new(ThreadEntry::THREAD_ENTRY_ALIGN),
+            process_entry_pool: GlobalSlabAllocator::new(),
+            thread_entry_pool: GlobalSlabAllocator::new(),
             p_list: PtrLinkedList::new(),
             next_process_id: 1,
         }
