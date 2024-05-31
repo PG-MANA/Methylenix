@@ -267,15 +267,16 @@ pub fn draw_boot_logo() {
         boot_logo_address
     );
 
-    if unsafe { *((boot_logo_address + 30) as *const u32) } != 0 {
+    use core::ptr::read_unaligned;
+    if unsafe { read_unaligned((boot_logo_address + 30) as *const u32) } != 0 {
         pr_info!("Boot logo is compressed");
         free_mapped_address(boot_logo_address);
         return;
     }
-    let file_offset = unsafe { *((boot_logo_address + 10) as *const u32) };
-    let bitmap_width = unsafe { *((boot_logo_address + 18) as *const u32) };
-    let bitmap_height = unsafe { *((boot_logo_address + 22) as *const u32) };
-    let bitmap_color_depth = unsafe { *((boot_logo_address + 28) as *const u16) };
+    let file_offset = unsafe { read_unaligned((boot_logo_address + 10) as *const u32) };
+    let bitmap_width = unsafe { read_unaligned((boot_logo_address + 18) as *const u32) };
+    let bitmap_height = unsafe { read_unaligned((boot_logo_address + 22) as *const u32) };
+    let bitmap_color_depth = unsafe { read_unaligned((boot_logo_address + 28) as *const u16) };
     let aligned_bitmap_width =
         ((bitmap_width as usize * (bitmap_color_depth as usize / 8) - 1) & !3) + 4;
 
@@ -309,7 +310,6 @@ pub fn draw_boot_logo() {
     let buffer_size = get_kernel_manager_cluster()
         .graphic_manager
         .get_frame_buffer_size();
-    let boot_logo_offset = boot_logo_offset;
     let offset_x = if boot_logo_offset.0 + bitmap_width as usize > buffer_size.0 {
         (buffer_size.0 - bitmap_width as usize) / 2
     } else {
