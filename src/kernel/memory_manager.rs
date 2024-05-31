@@ -167,6 +167,8 @@ impl MemoryManager {
         ) {
             Ok(address) => {
                 self._clone_kernel_memory_pages_if_needed()?;
+                self.virtual_memory_manager
+                    .update_paging(address, order.to_offset());
                 Ok((address, physical_address))
             }
             Err(e) => {
@@ -260,6 +262,8 @@ impl MemoryManager {
         }
 
         self._clone_kernel_memory_pages_if_needed()?;
+        self.virtual_memory_manager
+            .update_paging(vm_start_address, size);
         Ok(vm_start_address)
     }
 
@@ -274,6 +278,7 @@ impl MemoryManager {
             return Err(e);
         }
         self._clone_kernel_memory_pages_if_needed()?;
+        /* TLB will be updated by Virtual Memory Manager */
         Ok(())
         /* Freeing Physical Memory will be done by Virtual Memory Manager, if it is needed. */
     }
@@ -356,6 +361,8 @@ impl MemoryManager {
         )?;
 
         self._clone_kernel_memory_pages_if_needed()?;
+        self.virtual_memory_manager
+            .update_paging(virtual_address, size);
 
         Ok(virtual_address + (physical_address - aligned_physical_address))
     }
@@ -381,6 +388,8 @@ impl MemoryManager {
         )?;
 
         self._clone_kernel_memory_pages_if_needed()?;
+        self.virtual_memory_manager
+            .update_paging(new_virtual_address, new_size);
 
         Ok(new_virtual_address + (old_virtual_address - aligned_virtual_address))
     }

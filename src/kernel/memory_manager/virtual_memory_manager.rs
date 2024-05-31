@@ -176,12 +176,18 @@ impl VirtualMemoryManager {
         self.lock.unlock();
     }
 
-    fn _update_paging(&self /*Not necessary*/, address: VAddress) {
-        PageManager::update_page_cache(address);
+    fn _update_paging(&self, address: VAddress, range: MSize) {
+        PageManager::update_page_cache(address, range);
     }
 
-    pub fn update_paging(&self /*Not necessary*/, address: VAddress) {
-        self._update_paging(address);
+    pub fn update_paging(&self, address: VAddress, range: MSize) {
+        self.lock.lock();
+        self._update_paging(address, range);
+        self.lock.unlock();
+    }
+
+    fn _update_paging_all(&self) {
+        PageManager::update_page_cache_all();
     }
 
     /// Allocate the virtual address and map the given physical address
@@ -469,10 +475,6 @@ impl VirtualMemoryManager {
                     .free_vm_entry(vm_entry);
                 return Err(e);
             }
-            /* TODO: check the page_table is used currently. */
-            for i in MIndex::new(0)..size.to_index() {
-                self.update_paging(vm_start_address + i.to_offset());
-            }
         } else {
             for i in MIndex::new(0)..size.to_index() {
                 if let Err(e) = self.map_address_into_page_table(
@@ -506,8 +508,6 @@ impl VirtualMemoryManager {
                         .free_vm_entry(vm_entry);
                     return Err(e);
                 }
-                /* TODO: check the page_table is used currently. */
-                self.update_paging(vm_start_address + i.to_offset());
             }
         }
         Ok(vm_start_address)
@@ -657,6 +657,7 @@ impl VirtualMemoryManager {
                 }
             }
         }
+        self._update_paging(vm_entry.get_vm_start_address(), vm_entry.get_size());
         self.vm_entry.remove(&mut vm_entry.list);
         self.adjust_vm_entries();
         vm_entry.set_disabled();
@@ -920,7 +921,6 @@ impl VirtualMemoryManager {
             permission,
             option,
         )?;
-        self._update_paging(virtual_address);
         Ok(())
     }
 
@@ -942,9 +942,6 @@ impl VirtualMemoryManager {
             permission,
             option,
         )?;
-        for i in MIndex::new(0)..size.to_index() {
-            self._update_paging(virtual_address + i.to_offset());
-        }
         Ok(())
     }
 
@@ -956,7 +953,6 @@ impl VirtualMemoryManager {
         assert!(self.lock.is_locked());
         self.page_manager
             .unassociate_address(virtual_address, pm_manager, false)?;
-        self._update_paging(virtual_address);
         Ok(())
     }
 
@@ -973,9 +969,6 @@ impl VirtualMemoryManager {
             pm_manager,
             true,
         )?;
-        for i in MIndex::new(0)..size.to_index() {
-            self._update_paging(virtual_address + i.to_offset());
-        }
         Ok(())
     }
 
@@ -1108,6 +1101,7 @@ impl VirtualMemoryManager {
             pr_err!("Failed to free page table: {:?}", e);
             return Err(MemoryError::PagingError(e));
         }
+        self._update_paging_all();
         self.lock.unlock();
         Ok(())
     }

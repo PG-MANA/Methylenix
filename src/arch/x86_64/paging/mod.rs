@@ -27,10 +27,7 @@ use crate::arch::target_arch::context::memory_layout::{
 };
 use crate::arch::target_arch::device::cpu;
 
-//use crate::kernel::kernel_memory_manager::physical_memory_manager::PhysicalMemoryManager;
-use crate::kernel::memory_manager::data_type::{
-    Address, MOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
-};
+use crate::kernel::memory_manager::data_type::*;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 
 /// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
@@ -806,12 +803,17 @@ impl PageManager {
 
     /// Delete the paging cache of the target address and update it.
     ///
-    /// This function operates invpg.
-    pub fn update_page_cache(virtual_address: VAddress) {
-        unsafe {
-            cpu::invlpg(virtual_address.to_usize());
+    /// This function operates invlpg.
+    pub fn update_page_cache(virtual_address: VAddress, range: MSize) {
+        for i in MIndex::new(0)..range.to_index() {
+            unsafe { cpu::invlpg((virtual_address + i.to_offset()).to_usize()) };
         }
     }
+
+    /// Delete all TLBs
+    ///
+    /// This function operates nothing
+    pub fn update_page_cache_all() {}
 
     /// Dump paging table
     ///

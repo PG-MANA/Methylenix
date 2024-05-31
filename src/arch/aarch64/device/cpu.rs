@@ -168,14 +168,84 @@ pub unsafe fn set_mair(mair: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn tlbi_va(target: u64) {
-    asm!("
-            dsb ishst
-            tlbi vale1is,{:x}
-            dsb ish
-            ",
-            in(reg) (target >> 12),
-    );
+pub unsafe fn tlbi_vaae1is(target: u64) {
+    data_barrier();
+    asm!("tlbi vaae1is, {:x}", in(reg) target >> 12);
+    data_barrier();
+    instruction_barrier();
+}
+
+#[inline(always)]
+pub unsafe fn tlbi_vmalle1is() {
+    data_barrier();
+    asm!("tlbi vmalle1is");
+    data_barrier();
+    instruction_barrier();
+}
+
+#[inline(always)]
+pub fn data_barrier() {
+    unsafe { asm!("dsb sy") };
+}
+
+#[inline(always)]
+pub fn instruction_barrier() {
+    unsafe { asm!("isb") };
+}
+
+pub fn flush_data_cache() {
+    let clidr: u64;
+    data_barrier();
+    unsafe { asm!("mrs {:x}, clidr_el1", out(reg) clidr) };
+    /* Check All Cache Type */
+    for cache_level in 0..7 {
+        let ccsidr: u64;
+        let cache_type = (clidr >> (3 * cache_level)) & 0b111;
+        match cache_type {
+            0b000 => {
+                break; /* No Cache, Ignore the rest */
+            }
+            0b001 => {
+                continue; /* Instruction Cache Only */
+            }
+            0b010 | 0b011 | 0b100 => { /* Has data cache */ }
+            _ => {
+                /* Unknown Cache Type */
+                continue;
+            }
+        }
+        unsafe {
+            asm!("msr csselr_el1, {:x}\nisb\nmrs {:x}, ccsidr_el1",
+            in(reg) cache_level << 1,
+            out(reg) ccsidr)
+        };
+        let num_sets = (ccsidr & ((1 << 27) - 1)) >> 13;
+        let associativity = (ccsidr & ((1 << 13) - 1)) >> 3;
+        let line_size = ccsidr & 0b111;
+        let a = (associativity as u32).leading_zeros();
+        let l = line_size + 4;
+        for set in 0..=num_sets {
+            for way in 0..=associativity {
+                unsafe {
+                    asm!("dc cisw, {:x}", in(reg) (way << a) | (set << l) | (cache_level << 1))
+                };
+            }
+        }
+    }
+    data_barrier();
+    unsafe { asm!("msr csselr_el1, {:x}", in(reg) 0) };
+}
+
+pub fn flush_all_cache() {
+    unsafe { asm!("isb") };
+    unsafe { asm!("ic ialluis") };
+    flush_data_cache();
+}
+
+#[inline(always)]
+pub fn synchronize() {
+    flush_data_cache();
+    unsafe { asm!("isb") };
 }
 
 #[inline(always)]
