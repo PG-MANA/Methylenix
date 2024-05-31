@@ -2,6 +2,7 @@
 //! Mutex(Spin Lock version)
 //!
 
+use crate::arch::target_arch::device::cpu::synchronize;
 use crate::arch::target_arch::interrupt::{InterruptManager, StoredIrqData};
 
 use core::cell::UnsafeCell;
@@ -61,6 +62,7 @@ impl SpinLockFlag {
     }
 
     pub fn try_lock(&self) -> Result<SpinLockFlagHolder, ()> {
+        synchronize(self.flag.as_ptr() as usize);
         if self
             .flag
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -75,6 +77,7 @@ impl SpinLockFlag {
     }
 
     pub fn try_lock_weak(&self) -> Result<SpinLockFlagHolder, ()> {
+        synchronize(self.flag.as_ptr() as usize);
         if self
             .flag
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -113,6 +116,7 @@ impl SpinLockFlag {
 
 impl Drop for SpinLockFlagHolder {
     fn drop(&mut self) {
+        synchronize(self.flag as usize);
         unsafe { &*self.flag }.store(false, Ordering::Release);
     }
 }
@@ -126,6 +130,7 @@ impl IrqSaveSpinLockFlag {
 
     pub fn try_lock(&self) -> Result<IrqSaveSpinLockFlagHolder, ()> {
         let irq = InterruptManager::save_and_disable_local_irq();
+        synchronize(self.flag.as_ptr() as usize);
         if self
             .flag
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -143,6 +148,7 @@ impl IrqSaveSpinLockFlag {
 
     pub fn try_lock_weak(&self) -> Result<IrqSaveSpinLockFlagHolder, ()> {
         let irq = InterruptManager::save_and_disable_local_irq();
+        synchronize(self.flag.as_ptr() as usize);
         if self
             .flag
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -184,6 +190,7 @@ impl IrqSaveSpinLockFlag {
 impl Drop for IrqSaveSpinLockFlagHolder {
     fn drop(&mut self) {
         unsafe {
+            synchronize(self.flag as usize);
             (*self.flag).store(false, Ordering::Release);
             InterruptManager::restore_local_irq_by_reference(&self.irq);
         }
@@ -200,6 +207,7 @@ impl ClassicIrqSaveSpinLockFlag {
 
     pub fn try_lock(&self) -> Result<(), ()> {
         let irq = InterruptManager::save_and_disable_local_irq();
+        synchronize(self.flag.as_ptr() as usize);
         if self
             .flag
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -215,6 +223,7 @@ impl ClassicIrqSaveSpinLockFlag {
 
     pub fn try_lock_weak(&self) -> Result<(), ()> {
         let irq = InterruptManager::save_and_disable_local_irq();
+        synchronize(self.flag.as_ptr() as usize);
         if self
             .flag
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -242,6 +251,7 @@ impl ClassicIrqSaveSpinLockFlag {
     pub fn unlock(&self) {
         assert!(self.is_locked());
         let irq = unsafe { self.irq.get().read().assume_init_read() };
+        synchronize(self.flag.as_ptr() as usize);
         self.flag.store(false, Ordering::Release);
         InterruptManager::restore_local_irq(irq);
     }

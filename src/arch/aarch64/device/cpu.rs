@@ -193,7 +193,13 @@ pub fn instruction_barrier() {
     unsafe { asm!("isb") };
 }
 
-pub fn flush_data_cache() {
+pub fn flush_data_cache(virtual_address: usize) {
+    data_barrier();
+    unsafe { asm!("dc civac, {:x}", in(reg) virtual_address) };
+    instruction_barrier();
+}
+
+pub fn flush_data_cache_all() {
     let clidr: u64;
     data_barrier();
     unsafe { asm!("mrs {:x}, clidr_el1", out(reg) clidr) };
@@ -239,13 +245,12 @@ pub fn flush_data_cache() {
 pub fn flush_all_cache() {
     unsafe { asm!("isb") };
     unsafe { asm!("ic ialluis") };
-    flush_data_cache();
+    flush_data_cache_all();
 }
 
 #[inline(always)]
-pub fn synchronize() {
-    flush_data_cache();
-    unsafe { asm!("isb") };
+pub fn synchronize(target_virtual_address: usize) {
+    flush_data_cache(target_virtual_address);
 }
 
 #[inline(always)]

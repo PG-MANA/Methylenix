@@ -45,6 +45,19 @@ pub unsafe fn hlt() {
 }
 
 #[inline(always)]
+pub fn synchronize(_: usize) {}
+
+#[inline(always)]
+pub fn flush_data_cache_all() {
+    unsafe { asm!("wbinvd") }
+}
+
+#[inline(always)]
+pub fn flush_data(_: usize) {
+    flush_data_cache_all()
+}
+
+#[inline(always)]
 pub unsafe fn out_byte(port: u16, data: u8) {
     asm!("out dx, al", in("dx") port, in("al") data);
 }
