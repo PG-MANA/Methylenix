@@ -23,7 +23,7 @@ use super::system_memory_manager::SystemMemoryManager;
 use super::MemoryError;
 
 use crate::arch::target_arch::context::memory_layout::{
-    get_direct_map_max_size, get_direct_map_start_address, DIRECT_MAP_BASE_ADDRESS,
+    get_direct_map_base_address, get_direct_map_size, get_direct_map_start_address,
     MALLOC_END_ADDRESS, MALLOC_START_ADDRESS, MAP_END_ADDRESS, MAP_START_ADDRESS,
     USER_STACK_END_ADDRESS, USER_STACK_START_ADDRESS,
 };
@@ -84,18 +84,14 @@ impl VirtualMemoryManager {
         Ok(())
     }
 
-    pub fn init_system(
-        &mut self,
-        max_physical_address: PAddress,
-        pm_manager: &mut PhysicalMemoryManager,
-    ) {
+    pub fn init_system(&mut self, pm_manager: &mut PhysicalMemoryManager) {
         self.lock.lock();
         /* Set up page_manager */
         self.page_manager
             .init(pm_manager)
             .expect("Cannot init PageManager");
 
-        self.setup_direct_mapped_area(max_physical_address, pm_manager);
+        self.setup_direct_mapped_area(pm_manager);
         self.lock.unlock();
     }
 
@@ -145,29 +141,29 @@ impl VirtualMemoryManager {
         Ok(())
     }
 
-    fn setup_direct_mapped_area(
-        &mut self,
-        max_physical_address: PAddress,
-        pm_manager: &mut PhysicalMemoryManager,
-    ) {
+    fn setup_direct_mapped_area(&mut self, pm_manager: &mut PhysicalMemoryManager) {
         assert!(self.lock.is_locked());
-        let aligned_map_size = MSize::new(
-            ((max_physical_address - DIRECT_MAP_BASE_ADDRESS).to_usize() - 1) & PAGE_MASK,
-        ) + PAGE_SIZE;
+        let start_virtual_address = get_direct_map_start_address();
+        let start_physical_address = get_direct_map_base_address();
+        let map_size = get_direct_map_size();
         pr_debug!(
-            "Map {} ~ {}",
-            get_direct_map_start_address(),
-            aligned_map_size.to_end_address(get_direct_map_start_address())
+            "Direct map: VA [{:#016X} ~ {:#016X}] => PA: [{:#016X} ~ {:#016X}] (Size: {:#X})",
+            start_virtual_address.to_usize(),
+            map_size.to_end_address(start_virtual_address).to_usize(),
+            start_physical_address.to_usize(),
+            map_size.to_end_address(start_physical_address).to_usize(),
+            map_size.to_usize()
         );
         self.map_address_into_page_table_with_size(
-            DIRECT_MAP_BASE_ADDRESS,
-            get_direct_map_start_address(),
-            get_direct_map_max_size().min(aligned_map_size),
+            start_physical_address,
+            start_virtual_address,
+            map_size,
             MemoryPermissionFlags::new(true, true, true, false),
             MemoryOptionFlags::KERNEL,
             pm_manager,
         )
         .expect("Failed to map physical memory");
+        self._update_paging_all();
     }
 
     pub fn flush_paging(&mut self) {

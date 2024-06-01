@@ -5,12 +5,8 @@
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 
-/// DIRECT_MAP_START_ADDRESS is also defined in boot_loader
-//pub const DIRECT_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_0000_0000_0000);
-pub const DIRECT_MAP_END_ADDRESS: VAddress = VAddress::new(0xffff_ff1f_ffff_ffff);
-pub const DIRECT_MAP_BASE_ADDRESS: PAddress = PAddress::new(0);
-//pub const DIRECT_MAP_MAX_SIZE: MSize =
-//    DIRECT_MAP_END_ADDRESS - DIRECT_MAP_START_ADDRESS + MSize::new(1);
+const DIRECT_MAP_END_ADDRESS: VAddress = VAddress::new(0xffff_ff1f_ffff_ffff);
+const DIRECT_MAP_BASE_ADDRESS: PAddress = PAddress::new(0);
 pub const MALLOC_START_ADDRESS: VAddress = VAddress::new(0xffff_ff20_0000_0000);
 pub const MALLOC_END_ADDRESS: VAddress = VAddress::new(0xffff_ff4f_ffff_ffff);
 pub const MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_ff50_0000_0000);
@@ -25,11 +21,15 @@ pub const USER_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff);
 pub static mut DIRECT_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_0000_0000_0000);
 pub static mut HIGH_MEMORY_START_ADDRESS: VAddress = VAddress::new(0xffff_0000_0000_0000);
 
+pub const fn get_direct_map_base_address() -> PAddress {
+    DIRECT_MAP_BASE_ADDRESS
+}
+
 pub fn get_direct_map_start_address() -> VAddress {
     unsafe { DIRECT_MAP_START_ADDRESS }
 }
 
-pub fn get_direct_map_max_size() -> MSize {
+pub fn get_direct_map_size() -> MSize {
     DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS } + MSize::new(1)
 }
 
