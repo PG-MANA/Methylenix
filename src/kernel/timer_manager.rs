@@ -184,7 +184,7 @@ impl LocalTimerManager {
     pub fn new() -> Self {
         Self {
             timer_list: PtrLinkedList::new(),
-            timer_list_pool: LocalSlabAllocator::new(0),
+            timer_list_pool: LocalSlabAllocator::new(),
             last_processed_timeout: GlobalTimerManager::TICK_INITIAL_VALUE,
             source_timer: None,
         }

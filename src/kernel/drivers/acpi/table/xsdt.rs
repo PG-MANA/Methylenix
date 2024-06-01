@@ -21,6 +21,7 @@ use crate::kernel::memory_manager::data_type::{
 use crate::kernel::memory_manager::{free_pages, io_remap};
 
 use core::mem::MaybeUninit;
+use core::ptr::read_unaligned;
 
 pub struct XsdtManager {
     base_address: VAddress,
@@ -52,15 +53,15 @@ impl XsdtManager {
             }
         };
 
-        if unsafe { *(xsdt_vm_address.to_usize() as *const [u8; 4]) } != *b"XSDT" {
+        if unsafe { read_unaligned(xsdt_vm_address.to_usize() as *const [u8; 4]) } != *b"XSDT" {
             pr_err!("Invalid XSDT Signature");
             return Err(());
         }
-        if unsafe { *((xsdt_vm_address.to_usize() + 8) as *const u8) } != 1 {
+        if unsafe { read_unaligned((xsdt_vm_address.to_usize() + 8) as *const u8) } != 1 {
             pr_err!("Not supported XSDT version");
             return Err(());
         }
-        let xsdt_size = unsafe { *((xsdt_vm_address.to_usize() + 4) as *const u32) };
+        let xsdt_size = unsafe { read_unaligned((xsdt_vm_address.to_usize() + 4) as *const u32) };
         let xsdt_vm_address = remap_table!(xsdt_vm_address, xsdt_size);
         self.base_address = xsdt_vm_address;
 
@@ -83,11 +84,13 @@ impl XsdtManager {
             };
             pr_info!(
                 "{}",
-                core::str::from_utf8(unsafe { &*(vm_address.to_usize() as *const [u8; 4]) })
-                    .unwrap_or("----")
+                core::str::from_utf8(unsafe {
+                    &read_unaligned(vm_address.to_usize() as *const [u8; 4])
+                })
+                .unwrap_or("----")
             );
 
-            match unsafe { *(vm_address.to_usize() as *const [u8; 4]) } {
+            match unsafe { read_unaligned(vm_address.to_usize() as *const [u8; 4]) } {
                 FadtManager::SIGNATURE => {
                     let mut fadt_manager = FadtManager::new();
                     if let Err(e) = fadt_manager.init(vm_address) {
@@ -186,7 +189,8 @@ impl XsdtManager {
             ); /* To drop Mutex Lock */
 
             if let Ok(vm_address) = result {
-                if unsafe { &*(vm_address.to_usize() as *const [u8; 4]) } == &SsdtManager::SIGNATURE
+                if unsafe { read_unaligned(vm_address.to_usize() as *const [u8; 4]) }
+                    == SsdtManager::SIGNATURE
                 {
                     let mut ssdt_manager = SsdtManager::new();
                     let result = ssdt_manager.init(vm_address);
@@ -220,13 +224,13 @@ impl XsdtManager {
     }
 
     fn get_length(&self) -> usize {
-        unsafe { *((self.base_address.to_usize() + 4) as *const u32) as usize }
+        unsafe { read_unaligned((self.base_address.to_usize() + 4) as *const u32) as usize }
     }
 
     fn get_entry(&self, index: usize) -> Option<PAddress> {
         if (self.get_length() - 0x24) >> 3 > index {
             Some(PAddress::new(unsafe {
-                *((self.base_address.to_usize() + 0x24 + index * 8) as *const u64)
+                read_unaligned((self.base_address.to_usize() + 0x24 + index * 8) as *const u64)
             } as usize))
         } else {
             None
@@ -255,9 +259,11 @@ impl XsdtManager {
         while let Some(entry_physical_address) = self.get_entry(index) {
             if is_direct_mapped(entry_physical_address) {
                 if unsafe {
-                    &*(physical_address_to_direct_map(entry_physical_address).to_usize()
-                        as *const [u8; 4])
-                } == signature
+                    read_unaligned(
+                        physical_address_to_direct_map(entry_physical_address).to_usize()
+                            as *const [u8; 4],
+                    )
+                } == *signature
                 {
                     return Some(map_table!(entry_physical_address));
                 }

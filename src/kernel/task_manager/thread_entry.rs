@@ -15,7 +15,8 @@ use core::ptr::NonNull;
 
 /// ThreadEntry's method does not lock `Self::lock`, **the caller must lock it**.
 pub struct ThreadEntry {
-    pub(super) t_list: PtrLinkedListNode<Self>, /* All thread in process */
+    pub(super) t_list: PtrLinkedListNode<Self>,
+    /* All thread in process */
     pub(super) run_list: PtrLinkedListNode<Self>,
     pub(super) sleep_list: PtrLinkedListNode<Self>,
     pub(super) lock: SpinLockFlag,
@@ -31,7 +32,6 @@ pub struct ThreadEntry {
 }
 
 impl ThreadEntry {
-    pub const THREAD_ENTRY_ALIGN: usize = 0;
     pub const FLAG_LOCAL_THREAD: u8 = 1;
 
     fn new(

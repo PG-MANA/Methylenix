@@ -9,6 +9,8 @@ use super::{AcpiTable, OptionalAcpiTable};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
+use core::ptr::read_unaligned;
+
 #[repr(C, packed)]
 struct MADT {
     signature: [u8; 4],
@@ -121,16 +123,16 @@ impl MadtManager {
         let mut pointer = 0usize;
         while pointer < length {
             let record_base = base_address.to_usize() + pointer;
-            let record_type = unsafe { *(record_base as *const u8) };
-            let record_length = unsafe { *((record_base + 1) as *const u8) };
+            let record_type = unsafe { read_unaligned(record_base as *const u8) };
+            let record_length = unsafe { read_unaligned((record_base + 1) as *const u8) };
 
             if record_type == 0x0B
-                && (unsafe { *((record_base + 68) as *const u64) } == target_mpidr)
-                && (unsafe { *((record_base + 12) as *const u8) } & 1) != 0
+                && (unsafe { read_unaligned((record_base + 68) as *const u64) } == target_mpidr)
+                && (unsafe { read_unaligned((record_base + 12) as *const u8) } & 1) != 0
             {
                 return Some(GenericInterruptControllerCpuInfo {
-                    acpi_processor_uid: unsafe { *((record_base + 8) as *const u32) },
-                    gicr_base_address: unsafe { *((record_base + 60) as *const u64) },
+                    acpi_processor_uid: unsafe { read_unaligned((record_base + 8) as *const u32) },
+                    gicr_base_address: unsafe { read_unaligned((record_base + 60) as *const u64) },
                 });
             }
             pointer += record_length as usize;
@@ -149,13 +151,15 @@ impl MadtManager {
         let mut pointer = 0usize;
         while pointer < length {
             let record_base = base_address.to_usize() + pointer;
-            let record_type = unsafe { *(record_base as *const u8) };
-            let record_length = unsafe { *((record_base + 1) as *const u8) };
+            let record_type = unsafe { read_unaligned(record_base as *const u8) };
+            let record_length = unsafe { read_unaligned((record_base + 1) as *const u8) };
 
             if record_type == 0x0C {
                 return Some(GenericInterruptDistributorInfo {
-                    base_address: unsafe { *((record_base + 8) as *const u64) as usize },
-                    version: unsafe { *((record_base + 20) as *const u8) },
+                    base_address: unsafe {
+                        read_unaligned((record_base + 8) as *const u64) as usize
+                    },
+                    version: unsafe { read_unaligned((record_base + 20) as *const u8) },
                 });
             }
             pointer += record_length as usize;
@@ -175,13 +179,17 @@ impl MadtManager {
         let mut pointer = 0usize;
         while pointer < length {
             let record_base = base_address.to_usize() + pointer;
-            let record_type = unsafe { *(record_base as *const u8) };
-            let record_length = unsafe { *((record_base + 1) as *const u8) };
+            let record_type = unsafe { read_unaligned(record_base as *const u8) };
+            let record_length = unsafe { read_unaligned((record_base + 1) as *const u8) };
 
             if record_type == 0x0E {
                 return Some(GenericInterruptRedistributorInfo {
-                    discovery_range_base_address: unsafe { *((record_base + 4) as *const u64) },
-                    discovery_range_length: unsafe { *((record_base + 12) as *const u32) },
+                    discovery_range_base_address: unsafe {
+                        read_unaligned((record_base + 4) as *const u64)
+                    },
+                    discovery_range_length: unsafe {
+                        read_unaligned((record_base + 12) as *const u32)
+                    },
                 });
             }
             pointer += record_length as usize;
@@ -212,23 +220,23 @@ impl Iterator for LocalApicIdIter {
             return None;
         }
         let record_base = (self.base_address + self.pointer).to_usize();
-        let record_type = unsafe { *(record_base as *const u8) };
-        let record_length = unsafe { *((record_base + 1) as *const u8) };
+        let record_type = unsafe { read_unaligned(record_base as *const u8) };
+        let record_length = unsafe { read_unaligned((record_base + 1) as *const u8) };
 
         self.pointer += MSize::new(record_length as usize);
         match record_type {
             0 => {
-                if (unsafe { *((record_base + 4) as *const u32) } & 1) == 1 {
+                if (unsafe { read_unaligned((record_base + 4) as *const u32) } & 1) == 1 {
                     /* Enabled */
-                    Some(unsafe { *((record_base + 3) as *const u8) } as u32)
+                    Some(unsafe { read_unaligned((record_base + 3) as *const u8) } as u32)
                 } else {
                     self.next()
                 }
             }
             9 => {
-                if (unsafe { *((record_base + 8) as *const u32) } & 1) == 1 {
+                if (unsafe { read_unaligned((record_base + 8) as *const u32) } & 1) == 1 {
                     /* Enabled */
-                    Some(unsafe { *((record_base + 4) as *const u32) })
+                    Some(unsafe { read_unaligned((record_base + 4) as *const u32) })
                 } else {
                     self.next()
                 }
@@ -246,14 +254,14 @@ impl Iterator for GicCpuIter {
             return None;
         }
         let record_base = (self.base_address + self.pointer).to_usize();
-        let record_type = unsafe { *(record_base as *const u8) };
-        let record_length = unsafe { *((record_base + 1) as *const u8) };
+        let record_type = unsafe { read_unaligned(record_base as *const u8) };
+        let record_length = unsafe { read_unaligned((record_base + 1) as *const u8) };
         self.pointer += MSize::new(record_length as usize);
         match record_type {
             0x0B => {
-                if (unsafe { *((record_base + 12) as *const u8) } & 1) != 0 {
+                if (unsafe { read_unaligned((record_base + 12) as *const u8) } & 1) != 0 {
                     /* Enabled */
-                    Some(unsafe { *((record_base + 68) as *const u64) })
+                    Some(unsafe { read_unaligned((record_base + 68) as *const u64) })
                 } else {
                     self.next()
                 }

@@ -50,7 +50,11 @@ pub fn get_direct_map_start_address() -> VAddress {
     DIRECT_MAP_START_ADDRESS
 }
 
-pub fn get_direct_map_max_size() -> MSize {
+pub const fn get_direct_map_base_address() -> PAddress {
+    DIRECT_MAP_BASE_ADDRESS
+}
+
+pub fn get_direct_map_size() -> MSize {
     DIRECT_MAP_MAX_SIZE
 }
 

@@ -286,10 +286,13 @@ impl FrameBufferManager {
                             + ((height_pointer + offset_y) * self.frame_buffer_width
                                 + offset_x
                                 + width_pointer)
-                                * screen_depth_byte) as *mut u32) = *((buffer
-                            + (size_y - height_pointer - 1) * bitmap_aligned_bitmap_width_pointer
-                            + width_pointer * bitmap_depth_byte)
-                            as *const u32);
+                                * screen_depth_byte) as *mut u32) = core::ptr::read_unaligned(
+                            (buffer
+                                + (size_y - height_pointer - 1)
+                                    * bitmap_aligned_bitmap_width_pointer
+                                + width_pointer * bitmap_depth_byte)
+                                as *const u32,
+                        );
                     }
                 }
             }
@@ -303,11 +306,12 @@ impl FrameBufferManager {
                                 + width_pointer)
                                 * screen_depth_byte) as *mut u32;
                         *dot &= 0x000000ff;
-                        *dot |= *((buffer
-                            + (size_y - height_pointer) * bitmap_aligned_bitmap_width_pointer
-                            + width_pointer * bitmap_depth_byte)
-                            as *const u32)
-                            & 0xffffff;
+                        *dot |= core::ptr::read_unaligned(
+                            (buffer
+                                + (size_y - height_pointer) * bitmap_aligned_bitmap_width_pointer
+                                + width_pointer * bitmap_depth_byte)
+                                as *const u32,
+                        ) & 0xffffff;
                     }
                 }
             }

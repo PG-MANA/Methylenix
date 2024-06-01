@@ -4,10 +4,9 @@
 
 use crate::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::efi::EfiSystemTable;
-use crate::ELF_64_HEADER_SIZE;
 
 pub struct BootInformation {
-    pub elf_header_buffer: [u8; ELF_64_HEADER_SIZE],
+    pub elf_header_buffer: [u8; core::mem::size_of::<crate::elf::Elf64Header>()],
     pub elf_program_header_address: usize,
     pub efi_system_table: EfiSystemTable,
     pub graphic_info: Option<GraphicInfo>,

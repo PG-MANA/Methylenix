@@ -16,9 +16,7 @@ use crate::arch::target_arch::context::memory_layout::{
 };
 use crate::arch::target_arch::device::cpu;
 
-use crate::kernel::memory_manager::data_type::{
-    Address, MOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
-};
+use crate::kernel::memory_manager::data_type::*;
 use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
 
 /// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
@@ -124,6 +122,7 @@ impl PageManager {
             HIGH_MEMORY_START_ADDRESS = VAddress::new(((1 << t1sz) - 1) << (64 - t1sz));
             DIRECT_MAP_START_ADDRESS = HIGH_MEMORY_START_ADDRESS;
             cpu::set_tcr(tcr_el1);
+            cpu::instruction_barrier();
         }
         Ok(())
     }
@@ -732,16 +731,36 @@ impl PageManager {
     /// [`init`]: #method.init
     pub fn flush_page_table(&mut self) {
         if let Some(t) = self.page_table {
+            cpu::flush_data_cache_all();
             unsafe { cpu::set_ttbr0(direct_map_to_physical_address(t).to_usize() as u64) };
+            unsafe { cpu::tlbi_vmalle1is() };
         }
     }
 
     /// Delete the paging cache of the target address and update it.
     ///
-    /// This function operates invpg.
-    pub fn update_page_cache(_virtual_address: VAddress) {
-        /* TODO: inspect why hangs up when exec tlbi on QEMU */
-        //unsafe { cpu::tlbi_va((virtual_address & PAGE_MASK) as u64) }
+    /// This function operates tlbi vaelis.
+    pub fn update_page_cache(virtual_address: VAddress, range: MSize) {
+        if range.to_index().to_usize() > 16 {
+            Self::update_page_cache_all()
+        } else {
+            cpu::flush_data_cache_all();
+            for i in MIndex::new(0)..range.to_index() {
+                unsafe {
+                    cpu::tlbi_vaae1is(
+                        ((virtual_address & PAGE_MASK) + i.to_offset().to_usize()) as u64,
+                    )
+                }
+            }
+        }
+    }
+
+    /// Delete all TLBs
+    ///
+    /// This function operates tlbi vmalle1is.
+    pub fn update_page_cache_all() {
+        cpu::flush_data_cache_all();
+        unsafe { cpu::tlbi_vmalle1is() };
     }
 
     fn _dump_table(

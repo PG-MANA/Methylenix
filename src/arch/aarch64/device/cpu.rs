@@ -28,20 +28,6 @@ pub const SMC_PSCI_CPU_ON: u64 = 0xC4000003;
 //pub const ID_AA64MMFR0_EL1_PA_RANGE_OFFSET: u64 = 0;
 //pub const ID_AA64MMFR0_EL1_PA_RANGE: u64 = 0b1111 << ID_AA64MMFR0_EL1_PA_RANGE_OFFSET;
 
-#[no_mangle]
-#[naked]
-pub unsafe extern "C" fn _boot_main() {
-    asm!("
-        adr x8, {}
-        add x8, x8, {}
-        mov sp, x8
-        b   boot_main
-    ",
-    sym crate::arch::target_arch::KERNEL_INITIAL_STACK,
-    const crate::arch::target_arch::KERNEL_INITIAL_STACK_SIZE,
-    options(noreturn));
-}
-
 #[inline(always)]
 pub unsafe fn enable_interrupt() {
     asm!("      dsb ish
@@ -182,14 +168,89 @@ pub unsafe fn set_mair(mair: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn tlbi_va(target: u64) {
-    asm!("
-            dsb ishst
-            tlbi vale1is,{:x}
-            dsb ish
-            ",
-            in(reg) (target >> 12),
-    );
+pub unsafe fn tlbi_vaae1is(target: u64) {
+    data_barrier();
+    asm!("tlbi vaae1is, {:x}", in(reg) target >> 12);
+    data_barrier();
+    instruction_barrier();
+}
+
+#[inline(always)]
+pub unsafe fn tlbi_vmalle1is() {
+    data_barrier();
+    asm!("tlbi vmalle1is");
+    data_barrier();
+    instruction_barrier();
+}
+
+#[inline(always)]
+pub fn data_barrier() {
+    unsafe { asm!("dsb sy") };
+}
+
+#[inline(always)]
+pub fn instruction_barrier() {
+    unsafe { asm!("isb") };
+}
+
+pub fn flush_data_cache(virtual_address: usize) {
+    data_barrier();
+    unsafe { asm!("dc civac, {:x}", in(reg) virtual_address) };
+    instruction_barrier();
+}
+
+pub fn flush_data_cache_all() {
+    let clidr: u64;
+    data_barrier();
+    unsafe { asm!("mrs {:x}, clidr_el1", out(reg) clidr) };
+    /* Check All Cache Type */
+    for cache_level in 0..7 {
+        let ccsidr: u64;
+        let cache_type = (clidr >> (3 * cache_level)) & 0b111;
+        match cache_type {
+            0b000 => {
+                break; /* No Cache, Ignore the rest */
+            }
+            0b001 => {
+                continue; /* Instruction Cache Only */
+            }
+            0b010 | 0b011 | 0b100 => { /* Has data cache */ }
+            _ => {
+                /* Unknown Cache Type */
+                continue;
+            }
+        }
+        unsafe {
+            asm!("msr csselr_el1, {:x}\nisb\nmrs {:x}, ccsidr_el1",
+            in(reg) cache_level << 1,
+            out(reg) ccsidr)
+        };
+        let num_sets = (ccsidr & ((1 << 27) - 1)) >> 13;
+        let associativity = (ccsidr & ((1 << 13) - 1)) >> 3;
+        let line_size = ccsidr & 0b111;
+        let a = (associativity as u32).leading_zeros();
+        let l = line_size + 4;
+        for set in 0..=num_sets {
+            for way in 0..=associativity {
+                unsafe {
+                    asm!("dc cisw, {:x}", in(reg) (way << a) | (set << l) | (cache_level << 1))
+                };
+            }
+        }
+    }
+    data_barrier();
+    unsafe { asm!("msr csselr_el1, {:x}", in(reg) 0) };
+}
+
+pub fn flush_all_cache() {
+    unsafe { asm!("isb") };
+    unsafe { asm!("ic ialluis") };
+    flush_data_cache_all();
+}
+
+#[inline(always)]
+pub fn synchronize(target_virtual_address: usize) {
+    flush_data_cache(target_virtual_address);
 }
 
 #[inline(always)]
@@ -370,7 +431,7 @@ pub unsafe fn smc_0(
 #[allow(unused_variables)]
 pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
     asm!(
-        "
+    "
             ldp  x1, x2, [x0, #(8 * 34)]
             msr  elr_el1, x1
             msr  spsr_el1, x2
@@ -403,9 +464,9 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
             ldp  x0,  x1, [x0, #(16 * 0)]
             eret
     ",
-        m = const SPSR_M,
-        el0 = const SPSR_M_EL0T,
-        options(noreturn)
+    m = const SPSR_M,
+    el0 = const SPSR_M_EL0T,
+    options(noreturn)
     )
 }
 
@@ -458,6 +519,7 @@ global_asm!(
 .global     ap_entry, ap_entry_end
 .section    .text
 .type       ap_entry, %function
+.align      2
 ap_entry:
     mrs x2, CurrentEL
     lsr x2, x2, 2
@@ -492,6 +554,7 @@ ap_entry:
     msr sctlr_el1, x5
     mov sp, x7
     br  x8
+.align  4
 ap_entry_end:
 .size   ap_entry, ap_entry_end - ap_entry
 "

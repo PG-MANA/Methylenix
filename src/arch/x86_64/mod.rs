@@ -55,11 +55,22 @@ pub extern "C" fn multiboot_main(
         cpu::enable_fs_gs_base();
     }
 
-    /* Set SerialPortManager(send only) for early debug */
+    /* Initialize Kernel TTY (Early) */
+    init_struct!(
+        get_kernel_manager_cluster().kernel_tty_manager[0],
+        TtyManager::new()
+    );
+    init_struct!(
+        get_kernel_manager_cluster().kernel_tty_manager[1],
+        TtyManager::new()
+    );
+    /* Initialize Serial Port */
     init_struct!(
         get_kernel_manager_cluster().serial_port_manager,
         SerialPortManager::new(0x3F8 /* COM1 */)
     );
+    get_kernel_manager_cluster().kernel_tty_manager[0]
+        .open(&get_kernel_manager_cluster().serial_port_manager);
 
     /* Load the multiboot information */
     let multiboot_information = MultiBootInformation::new(mbi_address, true);
@@ -70,7 +81,7 @@ pub extern "C" fn multiboot_main(
         &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
     )));
 
-    /* Init Graphic & TTY (for panic!) */
+    /* Init Graphic */
     init_struct!(
         get_kernel_manager_cluster().graphic_manager,
         GraphicManager::new()
@@ -79,12 +90,7 @@ pub extern "C" fn multiboot_main(
         .graphic_manager
         .init_by_multiboot_information(&multiboot_information.framebuffer_info);
     get_kernel_manager_cluster().graphic_manager.clear_screen();
-    init_struct!(
-        get_kernel_manager_cluster().kernel_tty_manager,
-        TtyManager::new()
-    );
-    get_kernel_manager_cluster()
-        .kernel_tty_manager
+    get_kernel_manager_cluster().kernel_tty_manager[1]
         .open(&get_kernel_manager_cluster().graphic_manager);
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
@@ -170,29 +176,7 @@ fn main_arch_depend_initialization_process() -> ! {
 }
 
 #[no_mangle]
-pub extern "C" fn directboot_main(
-    _info_address: usize,      /* DirectBoot Start Information */
-    _kernel_code_segment: u16, /* Current segment is 8 */
-    _user_code_segment: u16,
-    _user_data_segment: u16,
-) -> ! {
-    init_struct!(
-        get_kernel_manager_cluster().serial_port_manager,
-        SerialPortManager::new(0x3F8 /* COM1 */)
-    );
-    get_kernel_manager_cluster()
-        .serial_port_manager
-        .send_str("Booted from DirectBoot\n");
-    loop {
-        unsafe {
-            cpu::halt();
-        }
-    }
-}
-
-#[no_mangle]
 pub extern "C" fn unknown_boot_main() -> ! {
-    SerialPortManager::new(0x3F8).send_str("Unknown Boot System!");
     loop {
         unsafe { cpu::halt() };
     }

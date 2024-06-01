@@ -7,7 +7,7 @@ use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
 use crate::arch::target_arch::{
     context::memory_layout::{kernel_area_to_physical_address, KERNEL_MAP_START_ADDRESS},
-    paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE},
+    paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE},
 };
 
 use crate::kernel::{
@@ -48,7 +48,6 @@ pub fn init_memory_by_multiboot_information(
             mem::size_of_val(&*core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)),
         );
     }
-    let mut max_available_address = 0;
     for entry in multiboot_information.memory_map_info.clone() {
         if entry.m_type == 1 {
             /* Available memory */
@@ -59,10 +58,6 @@ pub fn init_memory_by_multiboot_information(
                     true,
                 )
                 .expect("Failed to free available memory");
-            if max_available_address < (entry.addr + entry.length) as usize {
-                max_available_address =
-                    ((((entry.addr + entry.length) as usize) - 1) & PAGE_MASK) + PAGE_SIZE_USIZE;
-            }
         }
         let area_name = match entry.m_type {
             1 => "Available",
@@ -162,10 +157,7 @@ pub fn init_memory_by_multiboot_information(
 
     /* Set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
-    virtual_memory_manager.init_system(
-        PAddress::new(max_available_address),
-        &mut physical_memory_manager,
-    );
+    virtual_memory_manager.init_system(&mut physical_memory_manager);
     init_struct!(
         get_kernel_manager_cluster().system_memory_manager,
         SystemMemoryManager::new(physical_memory_manager)

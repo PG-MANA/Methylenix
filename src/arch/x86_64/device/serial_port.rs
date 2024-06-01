@@ -7,6 +7,7 @@ use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::tty::Writer;
 
 /// SerialPortManager
 ///
@@ -15,7 +16,6 @@ use crate::kernel::sync::spin_lock::SpinLockFlag;
 pub struct SerialPortManager {
     port: u16,
     write_lock: SpinLockFlag,
-    enabled: bool,
 }
 
 impl SerialPortManager {
@@ -29,7 +29,6 @@ impl SerialPortManager {
         Self {
             port: io_port,
             write_lock: SpinLockFlag::new(),
-            enabled: true,
         }
     }
 
@@ -64,14 +63,14 @@ impl SerialPortManager {
     ///
     /// If serial port is full or unusable, this function tries 0xFF times and fallback.
     pub fn send(&mut self, data: u8) {
-        if self.port == 0 || !self.enabled {
+        if self.port == 0 {
             return;
         }
         let _lock = self.write_lock.lock();
         self._send(data);
     }
 
-    fn _send(&mut self, data: u8) {
+    fn _send(&self, data: u8) -> bool {
         let mut timeout: usize = 0xFFFF;
         while timeout > 0 {
             if self.is_completed_transmitter() {
@@ -80,31 +79,10 @@ impl SerialPortManager {
             timeout -= 1;
         }
         if timeout == 0 {
-            self.enabled = false;
-            return;
+            return false;
         }
-        unsafe {
-            out_byte(self.port, data);
-        }
-    }
-
-    /// Send a string.
-    ///
-    /// This function sends str by calling [`send`] by each byte.
-    /// If serial port is full or unusable, this function **may take long time**.
-    ///
-    /// [`send`]: #method.send
-    pub fn send_str(&mut self, s: &str) {
-        if self.port == 0 || !self.enabled {
-            return;
-        }
-        let _lock = self.write_lock.lock();
-        for c in s.bytes() {
-            if c as char == '\n' {
-                self._send(b'\r');
-            }
-            self._send(c);
-        }
+        unsafe { out_byte(self.port, data) };
+        true
     }
 
     /// Read a 8bit-data from serial port.
@@ -123,9 +101,9 @@ impl SerialPortManager {
     /// First, this will get data from serial port controller, and push it into FIFO.
     /// Currently, this wakes the main process up.
     fn int_handler24_main(_: usize) -> bool {
-        get_kernel_manager_cluster()
-            .kernel_tty_manager
-            .input_from_interrupt_handler(get_kernel_manager_cluster().serial_port_manager.read());
+        crate::kernel::tty::TtyManager::input_from_interrupt_handler(
+            get_kernel_manager_cluster().serial_port_manager.read(),
+        );
         true
     }
 
@@ -133,5 +111,29 @@ impl SerialPortManager {
     #[inline]
     fn is_completed_transmitter(&self) -> bool {
         (unsafe { in_byte(self.port + 5) } & 0x40) != 0
+    }
+}
+
+impl Writer for SerialPortManager {
+    fn write(
+        &self,
+        buf: &[u8],
+        size_to_write: usize,
+        _foreground_color: u32,
+        _background_color: u32,
+    ) -> core::fmt::Result {
+        let _lock = self.write_lock.lock();
+        if self.port == 0 {
+            return Err(core::fmt::Error {});
+        }
+        for c in buf[0..size_to_write].iter() {
+            if *c as char == '\n' && !self._send(b'\r') {
+                return Err(core::fmt::Error {});
+            }
+            if !self._send(*c) {
+                return Err(core::fmt::Error {});
+            }
+        }
+        Ok(())
     }
 }

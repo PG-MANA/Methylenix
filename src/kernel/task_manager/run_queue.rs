@@ -58,7 +58,7 @@ impl RunQueue {
             expired_list: PtrLinkedList::new(),
             idle_thread: core::ptr::null_mut(),
             running_thread: None,
-            run_list_allocator: LocalSlabAllocator::new(0),
+            run_list_allocator: LocalSlabAllocator::new(),
             should_recheck_priority: false,
             should_reschedule: false,
             number_of_threads: 0,

@@ -13,6 +13,7 @@ use crate::kernel::task_manager::wait_queue::WaitQueue;
 use crate::kernel::task_manager::work_queue::WorkList;
 
 use core::fmt;
+use core::fmt::Write;
 use core::mem::MaybeUninit;
 
 pub struct TtyManager {
@@ -35,9 +36,43 @@ pub trait Writer {
     ) -> fmt::Result;
 }
 
+macro_rules! kprint {
+    () => ($crate::kernel::tty::kernel_print(format_args!("")));
+    ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args!($fmt, $($arg)*)));
+}
+
+macro_rules! kprintln {
+    () => ($crate::kernel::tty::kernel_print(format_args!("\n")));
+    ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args!("{}\n", format_args!($fmt))));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args!("{}\n", format_args!($fmt, $($arg)*))));
+}
+
+macro_rules! pr_debug {
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(7, format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(7, format_args!($fmt, $($arg)*)));
+}
+
+macro_rules! pr_info {
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(6, format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(6, format_args!($fmt, $($arg)*)));
+}
+
+macro_rules! pr_warn {
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(4, format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(4, format_args!($fmt, $($arg)*)));
+}
+
+macro_rules! pr_err {
+    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt)));
+    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt, $($arg)*)));
+}
+
 impl TtyManager {
     const DEFAULT_INPUT_BUFFER_SIZE: usize = 512;
     const DEFAULT_OUTPUT_BUFFER_SIZE: usize = 512;
+    pub const NUMBER_OF_KERNEL_TTY: usize = 2;
+    pub const DEFAULT_KERNEL_TTY: usize = 1;
 
     pub const fn new() -> Self {
         Self {
@@ -52,13 +87,14 @@ impl TtyManager {
     }
 
     fn input_into_fifo(data: usize) {
-        let s = &mut get_kernel_manager_cluster().kernel_tty_manager;
-        let _lock = s.input_lock.lock();
-        if s.input_queue.enqueue(data as u8) {
-            #[allow(unused_must_use)]
-            if let Err(e) = s.input_wait_queue.wakeup_all() {
-                use core::fmt::Write;
-                writeln!(s, "Failed to wakeup sleeping threads: {:?}", e);
+        /* Temporary Implementation */
+        for tty in &mut get_kernel_manager_cluster().kernel_tty_manager {
+            let _lock = tty.input_lock.lock();
+            if tty.input_queue.enqueue(data as u8) {
+                if let Err(e) = tty.input_wait_queue.wakeup_all() {
+                    drop(_lock);
+                    pr_err!("Failed to wakeup sleeping threads: {:?}", e);
+                }
             }
         }
     }
@@ -72,10 +108,8 @@ impl TtyManager {
             return None;
         }
         drop(_lock);
-        #[allow(unused_must_use)]
         if let Err(e) = self.input_wait_queue.add_current_thread() {
-            use core::fmt::Write;
-            writeln!(self, "Cannot wakeup sleeping threads. Error: {:?}\n", e);
+            pr_err!("Cannot wakeup sleeping threads. Error: {:?}\n", e);
         }
         self.getc(false)
     }
@@ -90,12 +124,10 @@ impl TtyManager {
         }
     }
 
-    pub fn input_from_interrupt_handler(&mut self, c: u8) {
+    pub fn input_from_interrupt_handler(c: u8) {
         let work = WorkList::new(Self::input_into_fifo, c as usize);
-        #[allow(unused_must_use)]
         if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(work) {
-            use core::fmt::Write;
-            writeln!(self, "Failed to add work for key event: {:?}", e);
+            pr_err!("Failed to add work for key event: {:?}", e);
         }
     }
 
@@ -138,18 +170,23 @@ impl TtyManager {
             buffer[pointer] = e;
             pointer += 1;
             if pointer == Self::DEFAULT_OUTPUT_BUFFER_SIZE {
-                self.output_driver.unwrap().write(
-                    &buffer,
-                    pointer,
-                    self.text_color.0,
-                    self.text_color.1,
-                )?;
+                self.output_driver
+                    .unwrap()
+                    .write(&buffer, pointer, self.text_color.0, self.text_color.1)
+                    .or_else(|err| {
+                        self.output_driver = None;
+                        Err(err)
+                    })?;
                 pointer = 0;
             }
         }
         self.output_driver
             .unwrap()
             .write(&buffer, pointer, self.text_color.0, self.text_color.1)
+            .or_else(|err| {
+                self.output_driver = None;
+                Err(err)
+            })
     }
 
     fn change_font_color(
@@ -170,7 +207,7 @@ impl TtyManager {
     }
 }
 
-impl fmt::Write for TtyManager {
+impl Write for TtyManager {
     fn write_str(&mut self, string: &str) -> fmt::Result {
         self.puts(string)
     }
@@ -226,12 +263,11 @@ impl FileOperationDriver for TtyManager {
 }
 
 pub fn kernel_print(args: fmt::Arguments) {
-    use core::fmt::Write;
-    let r = get_kernel_manager_cluster()
-        .kernel_tty_manager
-        .write_fmt(args);
-    if r.is_err() {
-        //panic!("Cannot write a string");
+    for tty in &mut get_kernel_manager_cluster().kernel_tty_manager {
+        if tty.output_driver.is_none() {
+            continue;
+        }
+        let _ = tty.write_fmt(args);
     }
 }
 
@@ -248,45 +284,14 @@ pub fn print_debug_message(level: usize, args: fmt::Arguments) {
     };
     let file = Location::caller().file(); //THINKING: filename only
     let line = Location::caller().line();
-    let original_color = get_kernel_manager_cluster()
-        .kernel_tty_manager
-        .change_font_color(level.1 .0, level.1 .1);
-    kernel_print(format_args!("{} {}:{} | {}\n", level.0, file, line, args));
-    if let Some(c) = original_color {
-        get_kernel_manager_cluster()
-            .kernel_tty_manager
-            .change_font_color(c.0, c.1);
+    for tty in &mut get_kernel_manager_cluster().kernel_tty_manager {
+        if tty.output_driver.is_none() {
+            continue;
+        }
+        let original_color = tty.change_font_color(level.1 .0, level.1 .1);
+        let _ = tty.write_fmt(format_args!("{} {}:{} | {}\n", level.0, file, line, args));
+        if let Some(c) = original_color {
+            tty.change_font_color(c.0, c.1);
+        }
     }
-}
-
-macro_rules! kprint {
-    () => ($crate::kernel::tty::kernel_print(format_args!("")));
-    ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args!($fmt)));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args!($fmt, $($arg)*)));
-}
-
-macro_rules! kprintln {
-    () => ($crate::kernel::tty::kernel_print(format_args!("\n")));
-    ($fmt:expr) => ($crate::kernel::tty::kernel_print(format_args!("{}\n", format_args!($fmt))));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::kernel_print(format_args!("{}\n", format_args!($fmt, $($arg)*))));
-}
-
-macro_rules! pr_debug {
-    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(7, format_args!($fmt)));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(7, format_args!($fmt, $($arg)*)));
-}
-
-macro_rules! pr_info {
-    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(6, format_args!($fmt)));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(6, format_args!($fmt, $($arg)*)));
-}
-
-macro_rules! pr_warn {
-    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(4, format_args!($fmt)));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(4, format_args!($fmt, $($arg)*)));
-}
-
-macro_rules! pr_err {
-    ($fmt:expr) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt)));
-    ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt, $($arg)*)));
 }

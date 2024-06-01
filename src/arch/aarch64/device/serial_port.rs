@@ -13,6 +13,9 @@ use crate::kernel::memory_manager::data_type::{
 };
 use crate::kernel::memory_manager::io_remap;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::tty::Writer;
+
+use core::fmt;
 
 /// Dummy putc Function
 fn dummy_putc(_: usize, _: u8) {}
@@ -170,27 +173,35 @@ impl SerialPortManager {
     fn interrupt_handler(_: usize) -> bool {
         let serial_manager = &get_kernel_manager_cluster().serial_port_manager;
         if let Some(c) = (serial_manager.getc_func)(serial_manager.base_address) {
-            get_kernel_manager_cluster()
-                .kernel_tty_manager
-                .input_from_interrupt_handler(c);
-            return true;
+            crate::kernel::tty::TtyManager::input_from_interrupt_handler(c);
+            true
+        } else {
+            false
         }
-        false
     }
+}
 
-    pub fn send_str(&mut self, s: &str) {
+impl Writer for SerialPortManager {
+    fn write(
+        &self,
+        buf: &[u8],
+        size_to_write: usize,
+        _foreground_color: u32,
+        _background_color: u32,
+    ) -> fmt::Result {
         let _lock = self.lock.lock();
-        for e in s.as_bytes() {
+        for e in buf[0..size_to_write].iter() {
             if !(self.wait_buffer)(self.base_address) {
-                return;
+                return Err(fmt::Error {});
             }
             if *e == b'\n' {
                 (self.putc_func)(self.base_address, b'\r');
                 if !(self.wait_buffer)(self.base_address) {
-                    return;
+                    return Err(fmt::Error {});
                 }
             }
             (self.putc_func)(self.base_address, *e);
         }
+        Ok(())
     }
 }

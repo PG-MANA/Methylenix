@@ -1,6 +1,6 @@
 [package]
 name = "methylenix_loader"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["PG_MANA <pg_mana@taprix.org>"]
 description = "The boot loader for Methylenix"
 keywords = ["bootloader", "boot-loader", "seccamp", "security-camp"]

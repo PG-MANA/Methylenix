@@ -50,12 +50,6 @@ pub struct Elf64ProgramHeader {
     p_align: u64,
 }
 
-pub struct Elf64ProgramHeaderIter {
-    pointer: usize,
-    size: u16,
-    remaining: u16,
-}
-
 pub struct Elf64ProgramHeaderIterMut<'a> {
     pointer: usize,
     size: u16,
@@ -104,14 +98,6 @@ impl Elf64Header {
         self.e_phentsize
     }
 
-    pub fn get_program_header_iter(&self, base_address: usize) -> Elf64ProgramHeaderIter {
-        Elf64ProgramHeaderIter {
-            pointer: base_address,
-            size: self.get_program_header_entry_size(),
-            remaining: self.get_num_of_program_header(),
-        }
-    }
-
     pub fn get_program_header_iter_mut<'a>(
         &self,
         base_address: &'a mut [u8],
@@ -122,21 +108,6 @@ impl Elf64Header {
             size: self.get_program_header_entry_size(),
             remaining: self.get_num_of_program_header(),
             phantom: PhantomData,
-        }
-    }
-}
-
-impl Iterator for Elf64ProgramHeaderIter {
-    type Item = &'static Elf64ProgramHeader;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            None
-        } else {
-            let r = unsafe { &*(self.pointer as *const Elf64ProgramHeader) };
-            self.pointer += self.size as usize;
-            self.remaining -= 1;
-            Some(r)
         }
     }
 }

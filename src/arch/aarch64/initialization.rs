@@ -7,12 +7,7 @@
 
 use crate::arch::target_arch::{
     boot_info::BootInformation,
-    context::{
-        memory_layout::{
-            get_direct_map_max_size, physical_address_to_direct_map, DIRECT_MAP_BASE_ADDRESS,
-        },
-        ContextManager,
-    },
+    context::{memory_layout::physical_address_to_direct_map, ContextManager},
     device::{
         cpu,
         generic_timer::{GenericTimer, SystemCounter},
@@ -94,7 +89,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
         physical_memory_manager.add_memory_entry_pool(
-            core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER) as usize,
+            core::ptr::addr_of_mut!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER) as usize,
             mem::size_of_val(&*core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)),
         );
     }
@@ -136,10 +131,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
 
     /* Set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
-    virtual_memory_manager.init_system(
-        DIRECT_MAP_BASE_ADDRESS + get_direct_map_max_size(),
-        &mut physical_memory_manager,
-    );
+    virtual_memory_manager.init_system(&mut physical_memory_manager);
     init_struct!(
         get_kernel_manager_cluster().system_memory_manager,
         SystemMemoryManager::new(physical_memory_manager)
@@ -175,19 +167,28 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
             get_physical_memory_manager(),
         ) {
             Ok(address) => {
-                if address == VAddress::new(virtual_address) {
-                    continue;
-                }
-                pr_err!(
+                assert_eq!(
+                    address,
+                    VAddress::new(virtual_address),
                     "Virtual Address is different from Physical Address: V:{:#X} P:{:#X}",
                     address.to_usize(),
                     virtual_address
                 );
             }
             Err(e) => {
-                pr_err!("Mapping ELF Section was failed: {:?}", e);
+                panic!("Mapping ELF Section was failed: {:?}", e);
             }
         };
+        pr_info!(
+            "VA: [{:#016X}~{:#016X}] => PA: [{:#016X}~{:#016X}] (R: {}, W: {}, E: {})",
+            virtual_address,
+            virtual_address + aligned_size.to_usize(),
+            physical_address,
+            physical_address + aligned_size.to_usize(),
+            permission.is_readable(),
+            permission.is_writable(),
+            permission.is_executable()
+        );
     }
 
     /* Set up Memory Manager */
@@ -197,13 +198,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     );
 
     /* Adjust Memory Pointer */
-    boot_information.memory_info.efi_memory_map_address = physical_address_to_direct_map(
-        PAddress::new(boot_information.memory_info.efi_memory_map_address),
-    )
-    .to_usize();
-    boot_information.elf_program_header_address =
-        physical_address_to_direct_map(PAddress::new(boot_information.elf_program_header_address))
-            .to_usize();
+    /* `efi_memory_map_address` and `elf_program_header_address` are already direct mapped. */
     boot_information.efi_system_table.set_configuration_table(
         physical_address_to_direct_map(PAddress::new(
             boot_information.efi_system_table.get_configuration_table(),
@@ -222,12 +217,12 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
         .kernel_memory_manager
         .set_paging_table();
 
-    /* Set up Kernel Memory Alloc Manager */
+    /* Set up Kernel Memory Allocator */
     let mut memory_allocator = MemoryAllocator::new();
     memory_allocator
         .init()
         .expect("Failed to init MemoryAllocator");
-    get_cpu_manager_cluster().memory_allocator = memory_allocator;
+    init_struct!(get_cpu_manager_cluster().memory_allocator, memory_allocator);
 
     boot_information
 }
@@ -301,16 +296,16 @@ pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
             .serial_port_manager
             .init_with_acpi()
     {
-        return true;
-    }
-    if dtb_available
+        true
+    } else if dtb_available
         && get_kernel_manager_cluster()
             .serial_port_manager
             .init_with_dtb()
     {
-        return true;
+        true
+    } else {
+        false
     }
-    false
 }
 
 /// Init AcpiManager without parsing AML
