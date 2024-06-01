@@ -105,7 +105,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     /* Free usable memory area */
     while entry_base_address
         < (boot_information.memory_info.efi_memory_map_address
-            + boot_information.memory_info.efi_memory_map_size)
+        + boot_information.memory_info.efi_memory_map_size)
     {
         let entry = unsafe { &*(entry_base_address as *const EfiMemoryDescriptor) };
         entry_base_address += boot_information.memory_info.efi_descriptor_size;
@@ -175,19 +175,28 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
             get_physical_memory_manager(),
         ) {
             Ok(address) => {
-                if address == VAddress::new(virtual_address) {
-                    continue;
-                }
-                pr_err!(
+                assert_eq!(
+                    address,
+                    VAddress::new(virtual_address),
                     "Virtual Address is different from Physical Address: V:{:#X} P:{:#X}",
                     address.to_usize(),
                     virtual_address
                 );
             }
             Err(e) => {
-                pr_err!("Mapping ELF Section was failed: {:?}", e);
+                panic!("Mapping ELF Section was failed: {:?}", e);
             }
         };
+        pr_info!(
+            "[{:#016X}~{:#016X}] => [{:#016X}~{:#016X}] (R: {}, W: {}, E: {})",
+            virtual_address,
+            virtual_address + aligned_size.to_usize(),
+            physical_address,
+            physical_address + aligned_size.to_usize(),
+            permission.is_readable(),
+            permission.is_writable(),
+            permission.is_executable()
+        );
     }
 
     /* Set up Memory Manager */
@@ -197,18 +206,12 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     );
 
     /* Adjust Memory Pointer */
-    boot_information.memory_info.efi_memory_map_address = physical_address_to_direct_map(
-        PAddress::new(boot_information.memory_info.efi_memory_map_address),
-    )
-    .to_usize();
-    boot_information.elf_program_header_address =
-        physical_address_to_direct_map(PAddress::new(boot_information.elf_program_header_address))
-            .to_usize();
+    /* `efi_memory_map_address` and `elf_program_header_address` are already direct mapped. */
     boot_information.efi_system_table.set_configuration_table(
         physical_address_to_direct_map(PAddress::new(
             boot_information.efi_system_table.get_configuration_table(),
         ))
-        .to_usize(),
+            .to_usize(),
     );
     boot_information.font_address = boot_information.font_address.map(|a| {
         (
@@ -222,7 +225,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
         .kernel_memory_manager
         .set_paging_table();
 
-    /* Set up Kernel Memory Alloc Manager */
+    /* Set up Kernel Memory Allocator */
     let mut memory_allocator = MemoryAllocator::new();
     memory_allocator
         .init()
@@ -298,14 +301,14 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
 pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
     if acpi_available
         && get_kernel_manager_cluster()
-            .serial_port_manager
-            .init_with_acpi()
+        .serial_port_manager
+        .init_with_acpi()
     {
         true
     } else if dtb_available
         && get_kernel_manager_cluster()
-            .serial_port_manager
-            .init_with_dtb()
+        .serial_port_manager
+        .init_with_dtb()
     {
         true
     } else {
@@ -571,7 +574,7 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
         MemoryPermissionFlags::data(),
         MemoryOptionFlags::KERNEL
     )
-    .expect("Failed to allocate memory for AP");
+        .expect("Failed to allocate memory for AP");
     /* Copy boot code for application processors */
     assert!(
         (ap_entry_end_address - ap_entry_address) <= PAGE_SIZE_USIZE,
