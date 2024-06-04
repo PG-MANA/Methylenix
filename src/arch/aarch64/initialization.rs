@@ -12,7 +12,7 @@ use crate::arch::target_arch::{
         cpu,
         generic_timer::{GenericTimer, SystemCounter},
     },
-    interrupt::{gic::GicManager, InterruptManager},
+    interrupt::{gic::GicDistributor, InterruptManager},
     paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
@@ -44,6 +44,7 @@ use crate::kernel::{
     timer_manager::LocalTimerManager,
 };
 
+use crate::kernel::drivers::acpi::table::madt::MadtManager;
 use core::mem;
 use core::sync::atomic::AtomicBool;
 
@@ -236,14 +237,13 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
     get_cpu_manager_cluster().interrupt_manager.init();
 
     if acpi_available {
-        if let Some(mut gic_manager) =
-            GicManager::new_with_acpi(&get_kernel_manager_cluster().acpi_manager.lock().unwrap())
-        {
+        let acpi_manager = &get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+        if let Ok(mut gic_manager) = GicDistributor::new_with_acpi(acpi_manager) {
             if !gic_manager.init_generic_interrupt_distributor() {
                 panic!("Failed to init GIC");
             }
             let cpu_redistributor = gic_manager
-                .init_redistributor()
+                .init_redistributor(Some(acpi_manager))
                 .expect("Failed to init GIC Redistributor");
             init_struct!(
                 get_cpu_manager_cluster()
@@ -261,28 +261,7 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
     }
 
     if dtb_available {
-        if let Some(mut gic_manager) =
-            GicManager::new_with_dtb(&get_kernel_manager_cluster().arch_depend_data.dtb_manager)
-        {
-            if !gic_manager.init_generic_interrupt_distributor() {
-                panic!("Failed to init GIC");
-            }
-            let cpu_redistributor = gic_manager
-                .init_redistributor()
-                .expect("Failed to init GIC Redistributor");
-            init_struct!(
-                get_cpu_manager_cluster()
-                    .arch_depend_data
-                    .gic_redistributor_manager,
-                cpu_redistributor
-            );
-            init_struct!(
-                get_kernel_manager_cluster().arch_depend_data.gic_manager,
-                gic_manager
-            );
-            get_cpu_manager_cluster().interrupt_manager.init_ipi();
-            return;
-        }
+        unimplemented!("GIC initialization with DTB is not supported.");
     }
     panic!("GIC is not available");
 }
@@ -447,16 +426,16 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
                     if interrupts.len() >= 3 * 2 {
                         pr_debug!(
                             "Generic Timer: {}",
-                            if interrupts[3] == GicManager::DTB_GIC_PPI {
+                            if interrupts[3] == GicDistributor::DTB_GIC_PPI {
                                 "PPI"
-                            } else if interrupts[3] == GicManager::DTB_GIC_SPI {
+                            } else if interrupts[3] == GicDistributor::DTB_GIC_SPI {
                                 "SPI"
                             } else {
                                 "Unknown"
                             }
                         );
-                        let interrupt_id = if interrupts[3] == GicManager::DTB_GIC_SPI {
-                            interrupts[4] + GicManager::DTB_GIC_SPI_INTERRUPT_ID_OFFSET
+                        let interrupt_id = if interrupts[3] == GicDistributor::DTB_GIC_SPI {
+                            interrupts[4] + GicDistributor::DTB_GIC_SPI_INTERRUPT_ID_OFFSET
                         } else {
                             interrupts[4]
                         };
@@ -539,17 +518,17 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
         unimplemented!()
     }
     /* Get available Local APIC IDs from ACPI */
-    let madt_manager = get_kernel_manager_cluster()
-        .arch_depend_data
-        .gic_manager
-        .get_madt_manager();
-    if madt_manager.is_none() {
+    let Some(madt_manager) = get_kernel_manager_cluster()
+        .acpi_manager
+        .lock()
+        .unwrap()
+        .get_table_manager()
+        .get_table_manager::<MadtManager>()
+    else {
         pr_info!("ACPI does not have MADT.");
         return;
-    }
-    let mpidr_list_iter = madt_manager
-        .unwrap()
-        .get_generic_interrupt_controller_cpu_info_iter();
+    };
+    let mpidr_list_iter = madt_manager.get_generic_interrupt_controller_cpu_info_iter();
 
     /* Set BSP Local APIC ID into cpu_manager */
 
@@ -676,7 +655,9 @@ pub extern "C" fn ap_boot_main() -> ! {
     let cpu_redistributor = get_kernel_manager_cluster()
         .arch_depend_data
         .gic_manager
-        .init_redistributor()
+        .init_redistributor(Some(
+            &get_kernel_manager_cluster().acpi_manager.lock().unwrap(),
+        ))
         .expect("Failed to init GIC Redistributor");
     init_struct!(
         get_cpu_manager_cluster()

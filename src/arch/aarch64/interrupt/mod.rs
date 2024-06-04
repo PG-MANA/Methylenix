@@ -3,10 +3,12 @@
 //!
 
 pub mod gic;
+mod gicv2;
+mod gicv3;
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::interrupt::gic::{GicManager, GicV3Group};
+use crate::arch::target_arch::interrupt::gic::GicDistributor;
 
 use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
@@ -34,6 +36,11 @@ pub struct InterruptManager {
 
 pub struct StoredIrqData {
     daif: u64,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum InterruptGroup {
+    NonSecureEl1,
 }
 
 impl InterruptManager {
@@ -87,7 +94,7 @@ impl InterruptManager {
         function: fn(usize) -> bool,
         interrupt_id: u32,
         priority_level: u8,
-        group: Option<GicV3Group>,
+        group: Option<InterruptGroup>,
         is_level_trigger: bool,
     ) -> Result<usize, ()> {
         if interrupt_id as usize >= unsafe { INTERRUPT_HANDLER.len() } {
@@ -96,7 +103,7 @@ impl InterruptManager {
         }
         let _self_lock = self.lock.lock();
         let _lock = unsafe { INTERRUPT_HANDLER_LOCK.lock() };
-        let group = group.unwrap_or(GicV3Group::NonSecureEl1);
+        let group = group.unwrap_or(InterruptGroup::NonSecureEl1);
         let handler_address = unsafe { INTERRUPT_HANDLER[interrupt_id as usize] };
         if handler_address != 0 {
             if handler_address == function as *const fn(usize) as usize {
@@ -120,12 +127,6 @@ impl InterruptManager {
             let redistributor = &mut get_cpu_manager_cluster()
                 .arch_depend_data
                 .gic_redistributor_manager;
-            if !redistributor.is_available() {
-                drop(_lock);
-                drop(_self_lock);
-                pr_err!("GIC Redistributor is not enabled.");
-                return Err(());
-            }
             redistributor.set_priority(interrupt_id, priority_level);
             redistributor.set_group(interrupt_id, group);
             redistributor.set_trigger_mode(interrupt_id, is_level_trigger);
@@ -167,7 +168,7 @@ impl InterruptManager {
         /* Setup SPI */
         let gic_distributor = &get_kernel_manager_cluster().arch_depend_data.gic_manager;
         gic_distributor.set_priority(interrupt_id, priority_level.unwrap_or(MSI_DEFAULT_PRIORITY));
-        gic_distributor.set_group(interrupt_id, GicV3Group::NonSecureEl1);
+        gic_distributor.set_group(interrupt_id, InterruptGroup::NonSecureEl1);
         gic_distributor.set_routing(interrupt_id, false, unsafe { cpu::get_mpidr() });
         gic_distributor.set_trigger_mode(interrupt_id, is_level_trigger);
         gic_distributor.set_enable(interrupt_id, true);
@@ -207,17 +208,12 @@ impl InterruptManager {
 
     pub fn send_reschedule_ipi(&self, cpu_id: usize) {
         /* cpu_id is mpidr */
-        let affinity_0 = (cpu_id & 0xff) as u64;
-        let affinity_1 = ((cpu_id >> 8) & 0xff) as u64;
-        let affinity_2 = ((cpu_id >> 16) & 0xff) as u64;
-        let affinity_3 = ((cpu_id >> 32) & 0xff) as u64;
-
-        let icc_sgi1r = (affinity_3 << 48)
-            | (affinity_2 << 32)
-            | ((Self::RESCHEDULE_SGI as u64) << 24)
-            | (affinity_1 << 16)
-            | affinity_0;
-        unsafe { cpu::set_icc_sgi1r_el1(icc_sgi1r) };
+        let _lock = self.lock.lock();
+        get_kernel_manager_cluster()
+            .arch_depend_data
+            .gic_manager
+            .send_sgi(cpu_id, Self::RESCHEDULE_SGI);
+        drop(_lock);
     }
 
     #[allow(dead_code)]
@@ -226,15 +222,11 @@ impl InterruptManager {
         true
     }
 
-    fn send_eoi(&self, index: u32, group: GicV3Group) {
-        let redistributor = &mut get_cpu_manager_cluster()
+    fn send_eoi(&self, index: u32, group: InterruptGroup) {
+        get_cpu_manager_cluster()
             .arch_depend_data
-            .gic_redistributor_manager;
-        if !redistributor.is_available() {
-            pr_err!("Failed to send EOI: Redistributor is not available");
-            return;
-        }
-        redistributor.send_eoi(index, group);
+            .gic_redistributor_manager
+            .send_eoi(index, group)
     }
 
     /// IRQ/FIQ Handler
@@ -260,12 +252,8 @@ impl InterruptManager {
         let redistributor = &get_cpu_manager_cluster()
             .arch_depend_data
             .gic_redistributor_manager;
-        if !redistributor.is_available() {
-            pr_err!("GIC Redistributor is not available");
-            return;
-        }
         let (index, group) = redistributor.get_acknowledge();
-        if index == GicManager::INTERRUPT_ID_INVALID {
+        if index == GicDistributor::INTERRUPT_ID_INVALID {
             return;
         }
         let _lock = unsafe { INTERRUPT_HANDLER_LOCK.lock() };

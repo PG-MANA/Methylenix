@@ -71,7 +71,7 @@ impl AcpiTable for MadtManager {
     fn init(&mut self, vm_address: VAddress) -> Result<(), ()> {
         /* vm_address must be accessible */
         let madt = unsafe { &*(vm_address.to_usize() as *const MADT) };
-        if madt.revision > 4 {
+        if madt.revision > 5 {
             pr_err!("Not supported MADT version: {}", madt.revision);
         }
         self.base_address = remap_table!(vm_address, madt.length);
