@@ -95,7 +95,7 @@ impl GicV2Distributor {
     ) -> Option<VAddress> {
         if let Some(madt) = madt {
             if let Some(info) = madt.find_generic_interrupt_controller_cpu_interface(
-                cpu::mpidr_to_affinity(unsafe { cpu::get_mpidr() }),
+                cpu::mpidr_to_affinity(cpu::get_mpidr()),
             ) {
                 match io_remap!(
                     PAddress::new(info.gicr_base_address as usize),

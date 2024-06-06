@@ -74,7 +74,7 @@ pub fn setup_cpu_manager_cluster(
     get_kernel_manager_cluster()
         .cpu_list
         .insert_tail(&mut cpu_manager.list);
-    cpu_manager.cpu_id = cpu::mpidr_to_affinity(unsafe { cpu::get_mpidr() }) as usize;
+    cpu_manager.cpu_id = cpu::mpidr_to_affinity(cpu::get_mpidr()) as usize;
     cpu_manager
 }
 
@@ -560,28 +560,28 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
             ap_entry_end_address - ap_entry_address,
         )
     };
+    cpu::flush_data_cache_all();
 
     /* Allocate and set temporary stack */
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
     let stack = alloc_pages!(stack_size.to_order(None).to_page_order())
         .expect("Failed to alloc stack for AP");
-    let boot_data = unsafe {
-        [
-            cpu::get_tcr(),
-            cpu::get_ttbr1(),
-            cpu::get_sctlr(),
-            cpu::get_mair(),
-            (stack + stack_size).to_usize() as u64,
-            ap_boot_main as *const fn() as usize as u64,
-        ]
-    };
+    let boot_data = [
+        cpu::get_tcr(),
+        cpu::get_ttbr1(),
+        cpu::get_sctlr(),
+        cpu::get_mair(),
+        (stack + stack_size).to_usize() as u64,
+        ap_boot_main as *const fn() as usize as u64,
+    ];
 
     unsafe {
         *((virtual_address.to_usize() + (ap_entry_end_address - ap_entry_address)) as *mut _) =
             boot_data
     };
+    cpu::flush_data_cache_all();
 
-    let bsp_mpidr = unsafe { cpu::mpidr_to_affinity(cpu::get_mpidr()) };
+    let bsp_mpidr = cpu::mpidr_to_affinity(cpu::get_mpidr());
 
     let mut num_of_cpu = 1usize;
 

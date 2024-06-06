@@ -88,7 +88,7 @@ impl SystemCounter {
         if self.base_address_type == SystemCounterBaseAddressType::Invalid
             || self.current_frequency == 0
         {
-            unsafe { cpu::get_cntfrq() as usize }
+            cpu::get_cntfrq() as usize
         } else {
             self.current_frequency as usize
         }
@@ -186,7 +186,7 @@ impl GenericTimer {
 
 impl Timer for GenericTimer {
     fn get_count(&self) -> usize {
-        unsafe { cpu::get_cntpct() as usize }
+        cpu::get_cntpct() as usize
     }
 
     fn get_frequency_hz(&self) -> usize {

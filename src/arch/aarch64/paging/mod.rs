@@ -95,7 +95,7 @@ impl PageManager {
     ///
     /// This function must be called only once on boot time.
     pub fn init(&mut self, _: &mut PhysicalMemoryManager) -> Result<(), PagingError> {
-        let mut mair = unsafe { cpu::get_mair() };
+        let mut mair = cpu::get_mair();
         for i in 0..=8 {
             if i == 8 {
                 /* Not Found */
@@ -115,7 +115,7 @@ impl PageManager {
                 | (MAIR_DEVICE_MEMORY_ATTRIBUTE << (MAIR_DEVICE_MEMORY_INDEX << 3))
         };
         unsafe { cpu::set_mair(mair) };
-        let mut tcr_el1 = unsafe { cpu::get_tcr() };
+        let mut tcr_el1 = cpu::get_tcr();
         let t1sz = (tcr_el1 & cpu::TCR_EL1_T1SZ) >> cpu::TCR_EL1_T1SZ_OFFSET;
         tcr_el1 = tcr_el1 & !(cpu::TCR_EL1_T0SZ) | (t1sz << cpu::TCR_EL1_T0SZ_OFFSET);
         unsafe {
@@ -158,18 +158,14 @@ impl PageManager {
         virtual_address: VAddress,
     ) -> Result<(VAddress, u8), PagingError> {
         if (virtual_address.to_usize() & (1 << (u64::BITS - 1))) != 1 {
-            unsafe {
-                Ok((
-                    physical_address_to_direct_map(PAddress::new(
-                        (cpu::get_ttbr1() & TTBR1_TABLE_ADDRESS_MASK) as usize,
-                    )),
-                    Self::txsz_to_initial_shift_level(cpu::get_t1sz()),
-                ))
-            }
+            Ok((
+                physical_address_to_direct_map(PAddress::new(
+                    (cpu::get_ttbr1() & TTBR1_TABLE_ADDRESS_MASK) as usize,
+                )),
+                Self::txsz_to_initial_shift_level(cpu::get_t1sz()),
+            ))
         } else if let Some(t) = self.page_table {
-            Ok((t, unsafe {
-                Self::txsz_to_initial_shift_level(cpu::get_t0sz())
-            }))
+            Ok((t, Self::txsz_to_initial_shift_level(cpu::get_t0sz())))
         } else {
             Err(PagingError::EntryIsNotFound)
         }
@@ -746,11 +742,7 @@ impl PageManager {
         } else {
             cpu::flush_data_cache_all();
             for i in MIndex::new(0)..range.to_index() {
-                unsafe {
-                    cpu::tlbi_vaae1is(
-                        ((virtual_address & PAGE_MASK) + i.to_offset().to_usize()) as u64,
-                    )
-                }
+                cpu::tlbi_vaae1is(((virtual_address & PAGE_MASK) + i.to_offset().to_usize()) as u64)
             }
         }
     }

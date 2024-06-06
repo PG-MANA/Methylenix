@@ -137,7 +137,7 @@ impl GicV3Distributor {
             } else {
                 unreachable!()
             };
-            let self_affinity = cpu::mpidr_to_packed_affinity(unsafe { cpu::get_mpidr() });
+            let self_affinity = cpu::mpidr_to_packed_affinity(cpu::get_mpidr());
             while pointer < (self.interrupt_redistributor_discovery_length as usize) {
                 let base = discovery_base.to_usize() + pointer;
                 if unsafe { *((base + GicV3Redistributor::GICR_TYPER_AFFINITY) as *const u32) }
@@ -154,7 +154,7 @@ impl GicV3Distributor {
             None
         } else if let Some(madt) = madt {
             if let Some(info) = madt.find_generic_interrupt_controller_cpu_interface(
-                cpu::mpidr_to_affinity(unsafe { cpu::get_mpidr() }),
+                cpu::mpidr_to_affinity(cpu::get_mpidr()),
             ) {
                 match io_remap!(
                     PAddress::new(info.gicr_base_address as usize),
@@ -341,7 +341,7 @@ impl GicV3Redistributor {
 
     fn init(&mut self) -> bool {
         unsafe { cpu::set_icc_sre(cpu::get_icc_sre() | Self::ICC_SRE_SRE) };
-        if (unsafe { cpu::get_icc_sre() } & Self::ICC_SRE_SRE) == 0 {
+        if (cpu::get_icc_sre() & Self::ICC_SRE_SRE) == 0 {
             pr_err!("GICv3 or later with System Registers is disabled.");
             return false;
         }
@@ -451,10 +451,7 @@ impl GicV3Redistributor {
     }*/
 
     pub fn get_acknowledge(&self) -> (u32, InterruptGroup) {
-        (
-            unsafe { cpu::get_icc_iar1() as u32 },
-            InterruptGroup::NonSecureEl1,
-        )
+        (cpu::get_icc_iar1() as u32, InterruptGroup::NonSecureEl1)
     }
 
     pub fn send_eoi(&self, index: u32, group: InterruptGroup) {
