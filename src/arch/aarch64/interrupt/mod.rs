@@ -149,7 +149,7 @@ impl InterruptManager {
             let gic_distributor = &get_kernel_manager_cluster().arch_depend_data.gic_manager;
             gic_distributor.set_priority(interrupt_id, priority_level);
             gic_distributor.set_group(interrupt_id, group);
-            gic_distributor.set_routing(interrupt_id, false, unsafe { cpu::get_mpidr() });
+            gic_distributor.set_routing_to_this(interrupt_id, false);
             gic_distributor.set_trigger_mode(interrupt_id, is_level_trigger);
             gic_distributor.set_enable(interrupt_id, true);
         } else {
@@ -185,7 +185,7 @@ impl InterruptManager {
         let gic_distributor = &get_kernel_manager_cluster().arch_depend_data.gic_manager;
         gic_distributor.set_priority(interrupt_id, priority_level.unwrap_or(MSI_DEFAULT_PRIORITY));
         gic_distributor.set_group(interrupt_id, InterruptGroup::NonSecureEl1);
-        gic_distributor.set_routing(interrupt_id, false, unsafe { cpu::get_mpidr() });
+        gic_distributor.set_routing_to_this(interrupt_id, false);
         gic_distributor.set_trigger_mode(interrupt_id, is_level_trigger);
         gic_distributor.set_enable(interrupt_id, true);
         let (address, data) = gic_distributor.get_pending_register_address_and_data(interrupt_id);

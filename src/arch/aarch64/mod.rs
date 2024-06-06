@@ -46,6 +46,7 @@ pub struct ArchDependedKernelManagerCluster {
 pub struct ArchDependedCpuManagerCluster {
     generic_timer: GenericTimer,
     gic_redistributor_manager: GicRedistributor,
+    cpu_interface_number: u8,
 }
 
 pub const TARGET_ARCH_NAME: &str = "aarch64";
@@ -74,8 +75,8 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
 
     /* Setup BSP cpu manager */
     init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
-    setup_cpu_manager_cluster(Some(VAddress::new(
-        &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
+    setup_cpu_manager_cluster(Some(VAddress::from(
+        &get_kernel_manager_cluster().boot_strap_cpu_manager as *const _,
     )));
 
     /* Initialize Memory System */

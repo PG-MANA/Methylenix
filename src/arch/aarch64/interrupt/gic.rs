@@ -101,10 +101,10 @@ impl GicDistributor {
         }
     }
 
-    pub fn set_routing(&self, interrupt_id: u32, is_routing_mode: bool, mpidr: u64) {
+    pub fn set_routing_to_this(&self, interrupt_id: u32, is_routing_mode: bool) {
         match self {
-            GicDistributor::GicV2(d) => d.set_routing(interrupt_id, is_routing_mode, mpidr),
-            GicDistributor::GicV3(d) => d.set_routing(interrupt_id, is_routing_mode, mpidr),
+            GicDistributor::GicV2(d) => d.set_routing_to_this(interrupt_id),
+            GicDistributor::GicV3(d) => d.set_routing_to_this(interrupt_id, is_routing_mode),
         }
     }
 

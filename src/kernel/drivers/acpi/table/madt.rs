@@ -49,8 +49,10 @@ pub struct GenericInterruptDistributorInfo {
 }
 
 pub struct GenericInterruptControllerCpuInfo {
+    pub cpu_interface_number: u32,
     #[allow(dead_code)]
     pub acpi_processor_uid: u32,
+    pub physical_address: u32,
     pub gicr_base_address: u64,
 }
 
@@ -125,13 +127,16 @@ impl MadtManager {
             let record_base = base_address.to_usize() + pointer;
             let record_type = unsafe { read_unaligned(record_base as *const u8) };
             let record_length = unsafe { read_unaligned((record_base + 1) as *const u8) };
-
             if record_type == 0x0B
                 && (unsafe { read_unaligned((record_base + 68) as *const u64) } == target_mpidr)
                 && (unsafe { read_unaligned((record_base + 12) as *const u8) } & 1) != 0
             {
                 return Some(GenericInterruptControllerCpuInfo {
+                    cpu_interface_number: unsafe {
+                        read_unaligned((record_base + 4) as *const u32)
+                    },
                     acpi_processor_uid: unsafe { read_unaligned((record_base + 8) as *const u32) },
+                    physical_address: unsafe { read_unaligned((record_base + 32) as *const u32) },
                     gicr_base_address: unsafe { read_unaligned((record_base + 60) as *const u64) },
                 });
             }

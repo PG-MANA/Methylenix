@@ -241,7 +241,7 @@ impl GicV3Distributor {
         );
     }
 
-    pub fn set_routing(&self, interrupt_id: u32, is_routing_mode: bool, mpidr: u64) {
+    pub fn set_routing_to_this(&self, interrupt_id: u32, is_routing_mode: bool) {
         if is_routing_mode {
             unimplemented!()
         } else {
@@ -251,7 +251,7 @@ impl GicV3Distributor {
                         + Self::GICD_IROUTER
                         + (interrupt_id as usize) * core::mem::size_of::<u64>())
                         as *mut u64,
-                    cpu::mpidr_to_affinity(mpidr),
+                    cpu::mpidr_to_affinity(cpu::get_mpidr()),
                 )
             }
         }

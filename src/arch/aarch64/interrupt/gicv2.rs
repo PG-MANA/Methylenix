@@ -7,6 +7,7 @@ use super::InterruptGroup;
 use crate::arch::target_arch::device::cpu;
 
 use crate::kernel::drivers::acpi::table::madt::{GenericInterruptDistributorInfo, MadtManager};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
@@ -97,8 +98,11 @@ impl GicV2Distributor {
             if let Some(info) = madt.find_generic_interrupt_controller_cpu_interface(
                 cpu::mpidr_to_affinity(cpu::get_mpidr()),
             ) {
+                get_cpu_manager_cluster()
+                    .arch_depend_data
+                    .cpu_interface_number = info.cpu_interface_number as u8;
                 match io_remap!(
-                    PAddress::new(info.gicr_base_address as usize),
+                    PAddress::new(info.physical_address as usize),
                     GIC_V2_REDISTRIBUTOR_MEMORY_MAP_SIZE,
                     MemoryPermissionFlags::data(),
                     MemoryOptionFlags::DEVICE_MEMORY
@@ -168,13 +172,12 @@ impl GicV2Distributor {
         );
     }
 
-    pub fn set_routing(&self, interrupt_id: u32, is_routing_mode: bool, mpidr: u64) {
-        if is_routing_mode {
-            pr_err!("Routing mode is not supported.");
-            return;
-        }
-        if mpidr >= 8 {
-            pr_err!("Invalid CPU interface {mpidr}.");
+    pub fn set_routing_to_this(&self, interrupt_id: u32) {
+        let cpu_id = get_cpu_manager_cluster()
+            .arch_depend_data
+            .cpu_interface_number;
+        if cpu_id >= 8 {
+            pr_err!("Invalid CPU interface {cpu_id}.");
             return;
         }
         let register_index = ((interrupt_id >> 2) as usize) * core::mem::size_of::<u32>();
@@ -183,7 +186,7 @@ impl GicV2Distributor {
             Self::GICD_ITARGETSR + register_index,
             (self.read_register(Self::GICD_ITARGETSR + register_index)
                 & !(0xFF << register_offset))
-                | ((1 << mpidr) << register_offset),
+                | ((1 << cpu_id) << register_offset),
         );
     }
 
