@@ -36,11 +36,16 @@ static mut DIRECT_MAP_START_ADDRESS: usize = 0;
 const DIRECT_MAP_END_ADDRESS: usize = 0xffff_ff1f_ffff_ffff;
 
 #[no_mangle]
-extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSystemTable) {
-    assert!(!system_table.is_null());
+extern "efiapi" fn efi_main(
+    main_handle: EfiHandle,
+    system_table: *const EfiSystemTable,
+) -> efi::EfiStatus {
+    if system_table.is_null() {
+        return (1 << (usize::BITS - 1)) | 21;
+    }
     let system_table = unsafe { &*system_table };
     if !system_table.verify() {
-        panic!("Failed to verify the EFI System Table.");
+        return (1 << (usize::BITS - 1)) | 21;
     }
     unsafe { BOOT_SERVICES = system_table.get_boot_services() };
 
@@ -80,7 +85,7 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
     )
     .expect("Failed to setup direct map");
     println!(
-        "DIRECT_MAP_START_ADDRESS: {:#X} ~ {:#X}(Physical Address: {:#X} ~ {:#X})",
+        "DIRECT_MAP: VA: [{:#016X}~{:#016X}] => PA: [{:#016X}~{:#016X}]",
         unsafe { DIRECT_MAP_START_ADDRESS },
         DIRECT_MAP_END_ADDRESS,
         0,
@@ -123,14 +128,14 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
 
     adjust_boot_info(boot_info);
 
-    if unsafe { cpu::get_current_el() >> 2 } == 2 {
-        if (unsafe { cpu::get_id_aa64mmfr1_el1() } & (0b1111 << 8)) != (1 << 8) {
+    if cpu::get_current_el() >> 2 == 2 {
+        if (cpu::get_id_aa64mmfr1_el1() & (0b1111 << 8)) != (1 << 8) {
             unsafe { cpu::jump_to_el1() };
         } else {
             /* Enable E2H*/
             println!("TODO: Enable E2H");
-            /* Enabling E2H hangs up... */
-            /*unsafe {
+            /* TODO: Enabling E2H hangs up... */
+            unsafe {
                 cpu::set_hcr_el2(
                     cpu::get_hcr_el2()
                         | (1 << 34)
@@ -140,9 +145,7 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
                         | (1 << 4)
                         | (1 << 3),
                 )
-            };*/
-
-            unsafe { cpu::jump_to_el1() };
+            };
         }
     }
 
@@ -176,19 +179,15 @@ extern "efiapi" fn efi_main(main_handle: EfiHandle, system_table: *const EfiSyst
 }
 
 fn dump_system() {
-    let el = unsafe { cpu::get_current_el() >> 2 };
+    let el = cpu::get_current_el() >> 2;
     println!("CurrentEL: {el}");
-    println!("SCTLR_EL1: {:#X}", unsafe { cpu::get_sctlr_el1() });
-    println!("ID_AA64MMFR0_EL1: {:#X}", unsafe {
-        cpu::get_id_aa64mmfr0_el1()
-    });
-    println!("ID_AA64MMFR1_EL1: {:#X}", unsafe {
-        cpu::get_id_aa64mmfr1_el1()
-    });
+    println!("SCTLR_EL1: {:#X}", cpu::get_sctlr_el1());
+    println!("ID_AA64MMFR0_EL1: {:#X}", cpu::get_id_aa64mmfr0_el1());
+    println!("ID_AA64MMFR1_EL1: {:#X}", cpu::get_id_aa64mmfr1_el1());
     if el == 2 {
-        println!("TCR_EL2: {:#X}", unsafe { cpu::get_tcr_el2() });
+        println!("TCR_EL2: {:#X}", cpu::get_tcr_el2());
     } else {
-        println!("TCR_EL1: {:#X}", unsafe { cpu::get_tcr_el1() });
+        println!("TCR_EL1: {:#X}", cpu::get_tcr_el1());
     }
 }
 
@@ -339,7 +338,7 @@ fn load_kernel(
     }) {
         if entry.get_segment_type() != ELF_PROGRAM_HEADER_SEGMENT_LOAD {
             println!(
-                "Segment({{ PA: {:#X}, VA: {:#X}}}) will not be loaded.",
+                "Segment({{PA: {:#016X}, VA: {:#016X}}}) will not be loaded.",
                 entry.get_physical_address(),
                 entry.get_virtual_address()
             );
@@ -402,7 +401,7 @@ fn load_kernel(
         .expect("Failed to map kernel");
 
         println!(
-            "PA: {:#X}, VA: {:#X}, MS: {:#X}, FS: {:#X}, FO: {:#X}, AL: {:#X}, R:{}, W: {}, E:{}",
+            "PA: {:#016X}, {:#016X}, MS: {:#X}, FS: {:#X}, FO: {:#X}, AL: {:#X}, R: {}, W: {}, E: {}",
             entry.get_physical_address(),
             entry.get_virtual_address(),
             entry.get_memory_size(),
@@ -415,7 +414,7 @@ fn load_kernel(
         );
     }
 
-    println!("Entry Point: {:#X}", elf_header.get_entry_point());
+    println!("Entry Point: {:#016X}", elf_header.get_entry_point());
 
     /* Close handlers */
     let _ = (file_protocol.close)(file_protocol);

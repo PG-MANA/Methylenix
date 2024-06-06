@@ -70,7 +70,7 @@ pub fn get_direct_map_start_address() -> usize {
 }
 
 pub fn init_paging(top_level_page_table: usize) {
-    let pa_range = unsafe { get_id_aa64mmfr0_el1() & 0b1111 };
+    let pa_range = get_id_aa64mmfr0_el1() & 0b1111;
     let pa_range = if pa_range > 4 {
         44 + 4 * (pa_range as u8 - 4)
     } else {
@@ -79,8 +79,8 @@ pub fn init_paging(top_level_page_table: usize) {
     let minimum_txsz = (32 - (pa_range - 32)).max(unsafe { MINIMUM_TXSZ });
 
     let mut tcr_el1 = 0u64;
-    if unsafe { get_current_el() >> 2 } == 2 && unsafe { get_hcr_el2() & (1 << 34) } == 0 {
-        let original_tcr_el2 = unsafe { get_tcr_el2() };
+    if (get_current_el() >> 2) == 2 && (get_hcr_el2() & (1 << 34)) == 0 {
+        let original_tcr_el2 = get_tcr_el2();
         /* PS */
         tcr_el1 |= ((original_tcr_el2 & (0b111 << 16)) >> 16) << 32;
         /* TG0 */
@@ -94,7 +94,7 @@ pub fn init_paging(top_level_page_table: usize) {
         /* T0SZ */
         tcr_el1 |= original_tcr_el2 & 0b111111;
     } else {
-        let original_tcr_el1 = unsafe { get_tcr_el1() };
+        let original_tcr_el1 = get_tcr_el1();
         /* IPS */
         tcr_el1 |= original_tcr_el1 & (0b111 << 32);
         /* TG0 */
@@ -121,12 +121,12 @@ pub fn init_paging(top_level_page_table: usize) {
     unsafe { core::ptr::write_bytes(top_level_page_table as *mut u8, 0, PAGE_SIZE) };
     flush_data_cache();
 
-    let mut sctlr_el1 = unsafe { get_sctlr_el1() };
+    let mut sctlr_el1 = get_sctlr_el1();
     /* Enable I, SA, C, M*/
     sctlr_el1 |= (1 << 12) | (1 << 3) | (1 << 2) | 1;
     sctlr_el1 &= !((1 << 3) | (1 << 1));
 
-    let mut mair_el1 = unsafe { get_mair_el1() };
+    let mut mair_el1 = get_mair_el1();
     for i in 0..8 {
         if (mair_el1 & 0xff) == 0xff {
             unsafe { MAIR_INDEX = i };
