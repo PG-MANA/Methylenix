@@ -4,6 +4,8 @@
 
 use crate::arch::target_arch::device::cpu::{flush_data_cache_all, synchronize};
 
+use crate::kernel::memory_manager::data_type::VAddress;
+
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -46,9 +48,9 @@ impl<T: ?Sized> RwLock<T> {
     }
 
     pub fn try_read(&self) -> Result<RwLockReadGuard<'_, T>, ()> {
-        synchronize(self.write_locked.as_ptr() as usize);
+        synchronize(VAddress::from(self.write_locked.as_ptr()));
         if !self.write_locked.load(Ordering::Relaxed) {
-            synchronize(self.readers.as_ptr() as usize);
+            synchronize(VAddress::from(self.readers.as_ptr()));
             if self
                 .readers
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
@@ -79,13 +81,13 @@ impl<T: ?Sized> RwLock<T> {
     }
 
     pub fn try_write(&self) -> Result<RwLockWriteGuard<'_, T>, ()> {
-        synchronize(self.write_locked.as_ptr() as usize);
+        synchronize(VAddress::from(self.write_locked.as_ptr()));
         if self
             .write_locked
             .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
             .is_ok()
         {
-            synchronize(self.readers.as_ptr() as usize);
+            synchronize(VAddress::from(self.readers.as_ptr()));
             if self.readers.load(Ordering::Relaxed) != 0 {
                 self.write_locked.store(false, Ordering::Relaxed);
                 return Err(());
@@ -108,7 +110,7 @@ impl<T: ?Sized> Deref for RwLockReadGuard<'_, T> {
 
 impl<'a, T: ?Sized> Drop for RwLockReadGuard<'_, T> {
     fn drop(&mut self) {
-        synchronize(self.readers.as_ptr() as usize);
+        synchronize(VAddress::from(self.readers.as_ptr()));
         if self.readers.fetch_sub(1, Ordering::SeqCst) == 0 {
             panic!("RwLock was broken!");
         }
@@ -132,7 +134,7 @@ impl<T: ?Sized> DerefMut for RwLockWriteGuard<'_, T> {
 impl<'a, T: ?Sized> Drop for RwLockWriteGuard<'_, T> {
     fn drop(&mut self) {
         flush_data_cache_all();
-        synchronize(self.write_locked.as_ptr() as usize);
+        synchronize(VAddress::from(self.write_locked.as_ptr()));
         self.write_locked.store(false, Ordering::Release);
     }
 }

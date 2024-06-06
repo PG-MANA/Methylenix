@@ -7,6 +7,8 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
+
 use core::arch::{asm, global_asm};
 
 const DAIF_IRQ: u64 = 1 << 7;
@@ -193,9 +195,9 @@ pub fn instruction_barrier() {
     unsafe { asm!("isb") };
 }
 
-pub fn flush_data_cache(virtual_address: usize) {
+pub fn flush_data_cache(virtual_address: VAddress) {
     data_barrier();
-    unsafe { asm!("dc civac, {:x}", in(reg) virtual_address) };
+    unsafe { asm!("dc civac, {:x}", in(reg) (virtual_address.to_usize())) };
     instruction_barrier();
 }
 
@@ -243,13 +245,13 @@ pub fn flush_data_cache_all() {
 }
 
 pub fn flush_all_cache() {
-    unsafe { asm!("isb") };
+    instruction_barrier();
     unsafe { asm!("ic ialluis") };
     flush_data_cache_all();
 }
 
 #[inline(always)]
-pub fn synchronize(target_virtual_address: usize) {
+pub fn synchronize(target_virtual_address: VAddress) {
     flush_data_cache(target_virtual_address);
 }
 

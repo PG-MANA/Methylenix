@@ -107,7 +107,7 @@ impl TcpSessionInfo {
                 .take_first_entry(offset_of!(TcpSendDataBufferHeader, list))
         } {
             if !e.buffer_length.is_zero() {
-                let _ = kfree!(VAddress::new(e as *const _ as usize), e.buffer_length);
+                let _ = kfree!(VAddress::from(e as *const _), e.buffer_length);
             }
         }
     }
@@ -687,7 +687,7 @@ pub(super) fn ipv4_tcp_ack_handler(
 
             session_info.send_buffer_list.remove(&mut first_entry.list);
             let _ = kfree!(
-                VAddress::new(first_entry as *const _ as usize),
+                VAddress::from(first_entry as *const _),
                 first_entry.buffer_length
             );
             return Ok(true);
@@ -711,10 +711,7 @@ pub(super) fn ipv4_tcp_ack_handler(
                     }
 
                     session_info.send_buffer_list.remove(&mut entry.list);
-                    let _ = kfree!(
-                        VAddress::new(entry as *const _ as usize),
-                        entry.buffer_length
-                    );
+                    let _ = kfree!(VAddress::from(entry as *const _), entry.buffer_length);
                     return Ok(true);
                 }
             }

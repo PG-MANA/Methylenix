@@ -12,7 +12,7 @@ use crate::arch::target_arch::interrupt::gic::GicDistributor;
 
 use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::Address;
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use core::arch::global_asm;
@@ -61,6 +61,16 @@ impl InterruptManager {
         extern "C" {
             fn interrupt_vector();
         }
+        // Reinitialize
+        use crate::kernel::collections::init_struct;
+        use core::ptr::{addr_of, addr_of_mut};
+        unsafe {
+            init_struct!(
+                *addr_of_mut!(INTERRUPT_HANDLER_LOCK),
+                IrqSaveSpinLockFlag::new()
+            )
+        };
+        cpu::synchronize(VAddress::from(unsafe { addr_of!(INTERRUPT_HANDLER_LOCK) }));
         let _lock = self.lock.lock();
         unsafe { cpu::set_vbar(interrupt_vector as *const fn() as usize as u64) };
     }
@@ -120,6 +130,9 @@ impl InterruptManager {
             unsafe {
                 INTERRUPT_HANDLER[interrupt_id as usize] = function as *const fn(usize) as usize
             };
+            cpu::synchronize(VAddress::from(
+                &unsafe { INTERRUPT_HANDLER[interrupt_id as usize] } as *const _,
+            ));
         }
 
         if interrupt_id < 32 {
@@ -160,6 +173,9 @@ impl InterruptManager {
         for i in 32..unsafe { INTERRUPT_HANDLER.len() } {
             if unsafe { INTERRUPT_HANDLER[i] } == 0 {
                 unsafe { INTERRUPT_HANDLER[i] = function as *const fn() as usize };
+                cpu::synchronize(VAddress::from(
+                    &unsafe { INTERRUPT_HANDLER[interrupt_id as usize] } as *const _,
+                ));
                 interrupt_id = i as u32;
                 break;
             }

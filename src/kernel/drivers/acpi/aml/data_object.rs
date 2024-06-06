@@ -220,7 +220,7 @@ impl PkgLength {
 
 pub fn parse_integer_from_buffer(buffer: &[u8]) -> Result<AcpiInt, AmlError> {
     parse_integer(&mut AmlStream::new(
-        VAddress::new(buffer.as_ptr() as usize),
+        VAddress::from(buffer.as_ptr()),
         MSize::new(buffer.len()),
     ))
 }

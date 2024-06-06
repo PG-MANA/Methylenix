@@ -276,7 +276,7 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
         .get_socket_manager()
         .send_socket(
             socket,
-            VAddress::new(&buffer as *const _ as usize),
+            VAddress::from(&buffer as *const _),
             MSize::new(buffer.len()),
         )
         .and_then(|sent| {
@@ -303,7 +303,7 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
         .get_socket_manager()
         .read_socket(
             socket,
-            VAddress::new(buffer.as_ptr() as usize),
+            VAddress::from(buffer.as_ptr()),
             MSize::new(DHCP_PACKET_SIZE),
             true,
         );
@@ -355,7 +355,7 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
         .get_socket_manager()
         .send_socket(
             socket,
-            VAddress::new(&buffer as *const _ as usize),
+            VAddress::from(&buffer as *const _),
             MSize::new(buffer.len()),
         )
         .and_then(|sent| {
@@ -381,7 +381,7 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
         .get_socket_manager()
         .read_socket(
             socket,
-            VAddress::new(buffer.as_ptr() as usize),
+            VAddress::from(buffer.as_ptr()),
             MSize::new(DHCP_PACKET_SIZE),
             true,
         );
