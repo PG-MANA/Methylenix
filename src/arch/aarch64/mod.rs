@@ -25,7 +25,7 @@ use self::boot_info::BootInformation;
 use self::device::generic_timer::{GenericTimer, SystemCounter};
 use self::device::serial_port::SerialPortManager;
 use self::initialization::*;
-use self::interrupt::gic::{GicManager, GicRedistributorManager};
+use self::interrupt::gic::{GicDistributor, GicRedistributor};
 
 use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
@@ -40,12 +40,13 @@ use crate::kernel::tty::TtyManager;
 pub struct ArchDependedKernelManagerCluster {
     dtb_manager: DtbManager,
     system_counter: SystemCounter,
-    gic_manager: GicManager,
+    gic_manager: GicDistributor,
 }
 
 pub struct ArchDependedCpuManagerCluster {
     generic_timer: GenericTimer,
-    gic_redistributor_manager: GicRedistributorManager,
+    gic_redistributor_manager: GicRedistributor,
+    cpu_interface_number: u8,
 }
 
 pub const TARGET_ARCH_NAME: &str = "aarch64";
@@ -74,8 +75,8 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
 
     /* Setup BSP cpu manager */
     init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
-    setup_cpu_manager_cluster(Some(VAddress::new(
-        &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
+    setup_cpu_manager_cluster(Some(VAddress::from(
+        &get_kernel_manager_cluster().boot_strap_cpu_manager as *const _,
     )));
 
     /* Initialize Memory System */

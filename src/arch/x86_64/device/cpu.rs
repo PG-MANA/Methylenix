@@ -7,6 +7,8 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
+use crate::kernel::memory_manager::data_type::VAddress;
+
 use core::arch::asm;
 
 #[inline(always)]
@@ -45,7 +47,7 @@ pub unsafe fn hlt() {
 }
 
 #[inline(always)]
-pub fn synchronize(_: usize) {}
+pub fn synchronize(_: VAddress) {}
 
 #[inline(always)]
 pub fn flush_data_cache_all() {
@@ -53,7 +55,7 @@ pub fn flush_data_cache_all() {
 }
 
 #[inline(always)]
-pub fn flush_data(_: usize) {
+pub fn flush_data_cache(_: VAddress) {
     flush_data_cache_all()
 }
 

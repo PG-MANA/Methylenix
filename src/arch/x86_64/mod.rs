@@ -77,8 +77,8 @@ pub extern "C" fn multiboot_main(
 
     /* Setup BSP CPU Manager Cluster */
     init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
-    setup_cpu_manager_cluster(Some(VAddress::new(
-        &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _ as usize,
+    setup_cpu_manager_cluster(Some(VAddress::from(
+        &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _,
     )));
 
     /* Init Graphic */

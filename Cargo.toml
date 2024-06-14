@@ -1,6 +1,6 @@
 [package]
 name = "methylenix"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["PG_MANA <pg_mana@taprix.org>"]
 description = "The OS written in Rust"
 keywords = ["os", "operating-system", "kernel", "seccamp", "security-camp"]

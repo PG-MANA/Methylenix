@@ -42,7 +42,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         if let Err(e) = get_cpu_manager_cluster()
             .memory_allocator
-            .kfree(VAddress::new(ptr as usize), layout_to_size(layout))
+            .kfree(VAddress::from(ptr), layout_to_size(layout))
         {
             pr_err!("Cannot dealloc memory for {:?}. Error: {:?}", layout, e);
         }

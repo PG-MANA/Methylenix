@@ -228,7 +228,7 @@ impl EthernetDeviceManager {
             PAGE_SIZE,
             target_mac_address,
             ether_type,
-            VAddress::new(data.as_ptr() as usize),
+            VAddress::from(data.as_ptr()),
             MSize::new(data.len()),
         );
         if let Err(e) = result {

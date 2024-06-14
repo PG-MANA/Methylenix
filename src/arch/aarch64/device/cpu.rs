@@ -7,6 +7,8 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
+use crate::kernel::memory_manager::data_type::{Address, VAddress};
+
 use core::arch::{asm, global_asm};
 
 const DAIF_IRQ: u64 = 1 << 7;
@@ -65,9 +67,9 @@ pub unsafe fn save_daif_and_disable_irq_fiq() -> u64 {
 }
 
 #[inline(always)]
-pub unsafe fn get_daif() -> u64 {
+pub fn get_daif() -> u64 {
     let result: u64;
-    asm!("mrs {:x}, daif", out(reg) result);
+    unsafe { asm!("mrs {:x}, daif", out(reg) result) };
     result
 }
 
@@ -101,9 +103,9 @@ pub fn is_interrupt_enabled() -> bool {
 }
 
 #[inline(always)]
-pub unsafe fn get_cpu_base_address() -> usize {
+pub fn get_cpu_base_address() -> usize {
     let result: usize;
-    asm!("mrs {:x}, tpidr_el1", out(reg) result);
+    unsafe { asm!("mrs {:x}, tpidr_el1", out(reg) result) };
     result
 }
 
@@ -113,9 +115,9 @@ pub unsafe fn set_cpu_base_address(address: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn get_ttbr1() -> u64 {
+pub fn get_ttbr1() -> u64 {
     let result: u64;
-    asm!("mrs {:x}, ttbr1_el1", out(reg) result);
+    unsafe { asm!("mrs {:x}, ttbr1_el1", out(reg) result) };
     result
 }
 
@@ -134,9 +136,9 @@ pub unsafe fn get_id_aa64mmfr0() -> u64 {
 */
 
 #[inline(always)]
-pub unsafe fn get_tcr() -> u64 {
+pub fn get_tcr() -> u64 {
     let result: u64;
-    asm!("mrs {:x}, tcr_el1", out(reg) result);
+    unsafe { asm!("mrs {:x}, tcr_el1", out(reg) result) };
     result
 }
 
@@ -146,20 +148,20 @@ pub unsafe fn set_tcr(tcr: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn get_t0sz() -> u64 {
+pub fn get_t0sz() -> u64 {
     (get_tcr() & TCR_EL1_T0SZ) >> TCR_EL1_T0SZ_OFFSET
 }
 
 #[inline(always)]
-pub unsafe fn get_t1sz() -> u64 {
+pub fn get_t1sz() -> u64 {
     (get_tcr() & TCR_EL1_T1SZ) >> TCR_EL1_T1SZ_OFFSET
 }
 
 #[inline(always)]
-pub unsafe fn get_mair() -> u64 {
-    let r: u64;
-    asm!("mrs {:x}, mair_el1", out(reg) r);
-    r
+pub fn get_mair() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, mair_el1", out(reg) result) };
+    result
 }
 
 #[inline(always)]
@@ -168,9 +170,9 @@ pub unsafe fn set_mair(mair: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn tlbi_vaae1is(target: u64) {
+pub fn tlbi_vaae1is(target: u64) {
     data_barrier();
-    asm!("tlbi vaae1is, {:x}", in(reg) target >> 12);
+    unsafe { asm!("tlbi vaae1is, {:x}", in(reg) target >> 12) };
     data_barrier();
     instruction_barrier();
 }
@@ -178,7 +180,7 @@ pub unsafe fn tlbi_vaae1is(target: u64) {
 #[inline(always)]
 pub unsafe fn tlbi_vmalle1is() {
     data_barrier();
-    asm!("tlbi vmalle1is");
+    unsafe { asm!("tlbi vmalle1is") };
     data_barrier();
     instruction_barrier();
 }
@@ -193,9 +195,9 @@ pub fn instruction_barrier() {
     unsafe { asm!("isb") };
 }
 
-pub fn flush_data_cache(virtual_address: usize) {
+pub fn flush_data_cache(virtual_address: VAddress) {
     data_barrier();
-    unsafe { asm!("dc civac, {:x}", in(reg) virtual_address) };
+    unsafe { asm!("dc civac, {:x}", in(reg) (virtual_address.to_usize())) };
     instruction_barrier();
 }
 
@@ -243,13 +245,13 @@ pub fn flush_data_cache_all() {
 }
 
 pub fn flush_all_cache() {
-    unsafe { asm!("isb") };
+    instruction_barrier();
     unsafe { asm!("ic ialluis") };
     flush_data_cache_all();
 }
 
 #[inline(always)]
-pub fn synchronize(target_virtual_address: usize) {
+pub fn synchronize(target_virtual_address: VAddress) {
     flush_data_cache(target_virtual_address);
 }
 
@@ -259,31 +261,31 @@ pub unsafe fn set_vbar(address: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn get_sctlr() -> u64 {
-    let r: u64;
-    asm!("mrs {:x}, sctlr_el1", out(reg) r);
-    r
+pub fn get_sctlr() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, sctlr_el1", out(reg) result) };
+    result
 }
 
 #[inline(always)]
-pub unsafe fn get_icc_sre() -> u64 {
-    let r: u64;
-    asm!("mrs {:x}, icc_sre_el1", out(reg) r);
-    r
+pub fn get_icc_sre() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, icc_sre_el1", out(reg) result) };
+    result
 }
 
 #[inline(always)]
-pub unsafe fn get_icc_hppir1() -> u64 {
-    let r: u64;
-    asm!("mrs {:x}, icc_hppir1_el1", out(reg) r);
-    r
+pub fn get_icc_hppir1() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, icc_hppir1_el1", out(reg) result) };
+    result
 }
 
 #[inline(always)]
-pub unsafe fn get_icc_iar1() -> u64 {
-    let r: u64;
-    asm!("mrs {:x}, icc_iar1_el1", out(reg) r);
-    r
+pub fn get_icc_iar1() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, icc_iar1_el1", out(reg) result) };
+    result
 }
 
 #[inline(always)]
@@ -332,28 +334,26 @@ pub unsafe fn set_icc_sgi1r_el1(icc_sgi1r: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn get_cntcr() -> u64 {
-    let r: u64;
-    asm!("
-            isb
-            mrs {:x}, cntcr_el1", out(reg) r);
-    r
+pub fn get_cntcr() -> u64 {
+    let result: u64;
+    instruction_barrier();
+    unsafe { asm!("mrs {:x}, cntcr_el1", out(reg) result) };
+    result
 }
 
 #[inline(always)]
-pub unsafe fn get_cntpct() -> u64 {
-    let r: u64;
-    asm!("
-            isb
-            mrs {:x}, cntpct_el0", out(reg) r);
-    r
+pub fn get_cntpct() -> u64 {
+    let result: u64;
+    instruction_barrier();
+    unsafe { asm!("mrs {:x}, cntpct_el0", out(reg) result) };
+    result
 }
 
 #[inline(always)]
-pub unsafe fn get_cntfrq() -> u64 {
-    let r: u64;
-    asm!("mrs {:x}, cntfrq_el0", out(reg) r);
-    r
+pub fn get_cntfrq() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, cntfrq_el0", out(reg) result) };
+    result
 }
 
 #[inline(always)]
@@ -367,14 +367,14 @@ pub unsafe fn set_cntp_tval(cntp_tval: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn get_mpidr() -> u64 {
-    let r: u64;
-    asm!("mrs {:x}, mpidr_el1", out(reg) r);
-    r
+pub fn get_mpidr() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, mpidr_el1", out(reg) result) };
+    result
 }
 
 pub const fn mpidr_to_affinity(mpidr: u64) -> u64 {
-    mpidr & !((1 << 31) | (1 << 30))
+    mpidr & !((1 << 31) | (1 << 30) | (1 << 24))
 }
 
 pub const fn mpidr_to_packed_affinity(mpidr: u64) -> u32 {
@@ -536,6 +536,7 @@ ap_entry:
     orr x2, x2, (1 << 31)
     orr x2, x2, (1 << 19)
     msr hcr_el2, x2
+    isb
     eret
 
 1:
@@ -543,6 +544,7 @@ ap_entry:
     mrs x6, DAIF
     orr x6, x6, (1 << 6) | (1 << 7)
     msr DAIF, x6
+    isb
     adr x2, ap_entry_end
     ldp x3, x4, [x2, #(16 * 0)] /* x3: TCR_EL1, x4: TTBR1_EL1 */
     ldp x5, x6, [x2, #(16 * 1)] /* x5: SCTLR_EL1, x6: MAIR_EL1 */
@@ -553,6 +555,7 @@ ap_entry:
     msr mair_el1, x6
     msr sctlr_el1, x5
     mov sp, x7
+    isb
     br  x8
 .align  4
 ap_entry_end:

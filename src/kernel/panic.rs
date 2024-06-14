@@ -2,36 +2,43 @@
 //! Panic Handler
 //!
 
-use crate::arch::target_arch::device::cpu;
-
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 
-use core::panic;
-
 #[panic_handler]
-#[no_mangle]
-pub fn panic(info: &panic::PanicInfo) -> ! {
-    let location = info.location();
-    let message = info.message();
-
-    kprintln!("\n!!!! Kernel panic !!!!\n---- Debug information ----");
-    if location.is_some() && message.is_some() {
+pub fn panic(info: &core::panic::PanicInfo) -> ! {
+    kprintln!("\n!!!! Kernel panic !!!!");
+    if let Some(location) = info.location() {
         kprintln!(
-            "Line {} in {}\nMessage: {}",
-            location.unwrap().line(),
-            location.unwrap().file(),
-            message.unwrap()
+            "{}:{}: {}",
+            location.file(),
+            location.line(),
+            info.message()
         );
+    } else {
+        kprintln!("{}", info.message());
     }
+
     get_kernel_manager_cluster()
         .kernel_memory_manager
         .dump_memory_manager();
 
-    kprintln!("---- End of Debug information ----\nSystem will be halt.");
+    kprintln!("---- End of Debug information ----");
+
+    /* Write twice */
+    if let Some(location) = info.location() {
+        kprintln!(
+            "{}:{}: {}",
+            location.file(),
+            location.line(),
+            info.message()
+        );
+    } else {
+        kprintln!("{}", info.message());
+    }
 
     loop {
         unsafe {
-            cpu::halt();
+            crate::arch::target_arch::device::cpu::halt();
         }
     }
 }

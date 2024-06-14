@@ -233,6 +233,18 @@ impl<T: Sized> From<VAddress> for *const T {
     }
 }
 
+impl<T: Sized> From<*const T> for VAddress {
+    fn from(val: *const T) -> Self {
+        VAddress::new(val as usize)
+    }
+}
+
+impl<T: Sized> From<*mut T> for VAddress {
+    fn from(val: *mut T) -> Self {
+        VAddress::new(val as usize)
+    }
+}
+
 impl Sub<Self> for VAddress {
     type Output = MSize;
     fn sub(self, rhs: Self) -> Self::Output {

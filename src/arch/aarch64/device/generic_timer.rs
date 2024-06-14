@@ -3,7 +3,7 @@
 //!
 
 use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::interrupt::gic::GicV3Group;
+use crate::arch::target_arch::interrupt::InterruptGroup;
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
@@ -88,7 +88,7 @@ impl SystemCounter {
         if self.base_address_type == SystemCounterBaseAddressType::Invalid
             || self.current_frequency == 0
         {
-            unsafe { cpu::get_cntfrq() as usize }
+            cpu::get_cntfrq() as usize
         } else {
             self.current_frequency as usize
         }
@@ -131,7 +131,7 @@ impl GenericTimer {
                 interrupt_id,
                 Self::TIMER_PRIORITY,
                 if self.is_non_secure_timer {
-                    Some(GicV3Group::NonSecureEl1)
+                    Some(InterruptGroup::NonSecureEl1)
                 } else {
                     unimplemented!()
                 },
@@ -186,7 +186,7 @@ impl GenericTimer {
 
 impl Timer for GenericTimer {
     fn get_count(&self) -> usize {
-        unsafe { cpu::get_cntpct() as usize }
+        cpu::get_cntpct() as usize
     }
 
     fn get_frequency_hz(&self) -> usize {

@@ -176,7 +176,7 @@ impl Pff2FontManager {
             x_offset: i16::from_be_bytes(pff2_font_data.x_offset),
             y_offset: i16::from_be_bytes(pff2_font_data.y_offset),
             device_width: i16::from_be_bytes(pff2_font_data.device_width),
-            bitmap_address: VAddress::new(&(pff2_font_data.bitmap) as *const u8 as usize),
+            bitmap_address: VAddress::from(&(pff2_font_data.bitmap) as *const u8),
         }
     }
 
