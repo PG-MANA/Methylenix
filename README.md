@@ -71,7 +71,7 @@ make iso
 # created bin/img/boot.iso
 ```
 
-なおビルド済みのisoイメージは https://repo.taprix.org/pg_mana/methylenix/iso/ にあります。
+なおビルド済みのイメージは https://repo.taprix.org/pg_mana/methylenix/images/x86_64 にあります。
 
 ### AArch64
 ```shell
@@ -80,6 +80,9 @@ cd Methylenix
 make TARGET_ARCH=aarch64
 # created bin/EFI/BOOT/
 ```
+
+なおビルド済みのイメージは https://repo.taprix.org/pg_mana/methylenix/images/aarch64/ にあります。
+
 
 ## 実行
 ### x86_64
