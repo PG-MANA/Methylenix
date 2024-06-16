@@ -142,9 +142,7 @@ impl<'a> File<'a> {
     }
 
     pub fn get_driver_address(&self) -> usize {
-        (self.driver as *const dyn FileOperationDriver)
-            .to_raw_parts()
-            .0 as usize
+        (self.driver as *const dyn FileOperationDriver).addr()
     }
 
     pub fn read(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, FileError> {
