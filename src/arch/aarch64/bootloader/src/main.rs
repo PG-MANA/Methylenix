@@ -1,8 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(const_maybe_uninit_uninit_array)]
-#![feature(maybe_uninit_array_assume_init)]
-#![feature(maybe_uninit_uninit_array)]
 
 #[macro_use]
 mod print;
@@ -15,14 +12,13 @@ mod paging;
 
 use self::boot_information::*;
 use self::efi::{
+    EFI_PAGE_MASK, EFI_PAGE_SIZE, EFI_SUCCESS, EfiBootServices, EfiHandle, EfiSystemTable,
     protocol::{file_protocol::*, graphics_output_protocol::*, loaded_image_protocol::*},
-    EfiBootServices, EfiHandle, EfiSystemTable, EFI_PAGE_MASK, EFI_PAGE_SIZE, EFI_SUCCESS,
 };
-use self::elf::{Elf64Header, ELF_MACHINE_AA64, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
+use self::elf::{ELF_MACHINE_AA64, ELF_PROGRAM_HEADER_SEGMENT_LOAD, Elf64Header};
 use self::paging::*;
 
 use core::arch::asm;
-use core::mem::MaybeUninit;
 use core::panic;
 
 static mut BOOT_SERVICES: *const EfiBootServices = core::ptr::null();
@@ -35,7 +31,7 @@ const KERNEL_STACK_PAGES: usize = 64;
 static mut DIRECT_MAP_START_ADDRESS: usize = 0;
 const DIRECT_MAP_END_ADDRESS: usize = 0xffff_ff1f_ffff_ffff;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "efiapi" fn efi_main(
     main_handle: EfiHandle,
     system_table: *const EfiSystemTable,
@@ -229,7 +225,7 @@ fn load_kernel(
     let mut loaded_image_protocol: *const EfiLoadedImageProtocol = core::ptr::null();
     let mut simple_file_protocol: *const EfiSimpleFileProtocol = core::ptr::null();
     let mut file_protocol: *const EfiFileProtocol = core::ptr::null();
-    let mut kernel_path: [MaybeUninit<u16>; KERNEL_PATH.len() + 1] = MaybeUninit::uninit_array();
+    let mut kernel_path: [u16; KERNEL_PATH.len() + 1] = [0; KERNEL_PATH.len() + 1];
 
     /* Open loaded_image_protocol */
     let r = (boot_service.open_protocol)(
@@ -269,14 +265,13 @@ fn load_kernel(
     let root_directory = unsafe { &*root_directory };
 
     /* Open the kernel file */
-    for (i, e) in KERNEL_PATH.encode_utf16().enumerate() {
-        kernel_path[i].write(e);
+    for (i, e) in kernel_path.iter_mut().zip(KERNEL_PATH.encode_utf16()) {
+        *i = e;
     }
-    kernel_path[KERNEL_PATH.len()].write(0);
     let r = (root_directory.open)(
         root_directory,
         &mut file_protocol,
-        unsafe { MaybeUninit::array_assume_init(kernel_path) }.as_ptr(),
+        kernel_path.as_ptr(),
         EFI_FILE_MODE_READ,
         0,
     );
@@ -433,7 +428,7 @@ fn load_font_file(
     let mut loaded_image_protocol: *const EfiLoadedImageProtocol = core::ptr::null();
     let mut simple_file_protocol: *const EfiSimpleFileProtocol = core::ptr::null();
     let mut file_protocol: *const EfiFileProtocol = core::ptr::null();
-    let mut font_path: [MaybeUninit<u16>; FONT_PATH.len() + 1] = MaybeUninit::uninit_array();
+    let mut font_path: [u16; FONT_PATH.len() + 1] = [0; FONT_PATH.len() + 1];
 
     boot_info.font_address = None;
 
@@ -477,15 +472,14 @@ fn load_font_file(
     let root_directory = unsafe { &*root_directory };
 
     /* Open the font file */
-    for (i, e) in FONT_PATH.encode_utf16().enumerate() {
-        font_path[i].write(e);
+    for (i, e) in font_path.iter_mut().zip(FONT_PATH.encode_utf16()) {
+        *i = e;
     }
-    font_path[FONT_PATH.len()].write(0);
 
     let r = (root_directory.open)(
         root_directory,
         &mut file_protocol,
-        unsafe { MaybeUninit::array_assume_init(font_path) }.as_ptr(),
+        font_path.as_ptr(),
         EFI_FILE_MODE_READ,
         0,
     );
@@ -561,7 +555,6 @@ fn detect_graphics(boot_service: &EfiBootServices) -> Option<GraphicInfo> {
 }
 
 #[panic_handler]
-#[no_mangle]
 pub fn panic(p: &panic::PanicInfo) -> ! {
     println!("{p}");
     loop {

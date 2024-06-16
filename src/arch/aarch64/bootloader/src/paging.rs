@@ -173,7 +173,7 @@ fn _associate_address(
             | (1 << 10/* AF */)
             | (0b11 << 8/* Inner Shareable */)
             | (((!permission.is_writable() as u64) << 1) << 6)
-            | unsafe { MAIR_INDEX as u64 } << 2
+            | (unsafe { MAIR_INDEX as u64 } << 2)
             | 0b11;
 
         while *pages > 0 && index < NUM_OF_ENTRIES_IN_PAGE_TABLE {
@@ -259,7 +259,7 @@ fn _associate_direct_map_address(
             | (1 << 10/* AF */)
             | (0b11 << 8/* Inner Shareable */)
             | (((!permission.is_writable() as u64) << 1) << 6)
-            | unsafe { MAIR_INDEX as u64 } << 2
+            | (unsafe { MAIR_INDEX as u64 } << 2)
             | 0b01;
 
         while *size > 0 && index < NUM_OF_ENTRIES_IN_PAGE_TABLE {

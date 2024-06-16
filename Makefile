@@ -2,7 +2,12 @@
 NAME = methylenix
 
 TARGET_ARCH ?= x86_64
-RUST_TARGET = $(TARGET_ARCH)-unknown-none
+
+ifeq ($(TARGET_ARCH), x86_64)
+	RUST_TARGET = x86_64-unknown-none
+else ifeq ($(TARGET_ARCH), aarch64)
+	RUST_TARGET = aarch64-unknown-none-softfloat
+endif
 
 ## Directory Settings
 SRC = src/

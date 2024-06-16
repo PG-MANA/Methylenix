@@ -59,7 +59,7 @@ pub struct Elf64ProgramHeaderIterMut<'a> {
 
 impl Elf64Header {
     pub unsafe fn from_ptr(address: &[u8]) -> Result<&Self, ()> {
-        let s = &*(address.as_ptr() as *const Self);
+        let s = unsafe { &*(address.as_ptr() as *const Self) };
         if s.e_ident[0..4] != ELF_MAGIC
             || s.e_ident[4] != ELF_CLASS
             || s.e_ident[6] != ELF_HEADER_VERSION

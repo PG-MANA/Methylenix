@@ -1,8 +1,8 @@
 [package]
 name = "methylenix_loader"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["PG_MANA <pg_mana@taprix.org>"]
 description = "The boot loader for Methylenix"
 keywords = ["bootloader", "boot-loader", "seccamp", "security-camp"]
 license = "Apache-2.0"
-edition = "2021"
+edition = "2024"

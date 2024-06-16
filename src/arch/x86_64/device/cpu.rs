@@ -9,7 +9,7 @@ use crate::arch::target_arch::context::context_data::ContextData;
 
 use crate::kernel::memory_manager::data_type::VAddress;
 
-use core::arch::asm;
+use core::arch::{asm, naked_asm};
 
 #[inline(always)]
 pub unsafe fn sti() {
@@ -282,7 +282,7 @@ pub unsafe fn set_fs_base(address: u64) {
 #[naked]
 #[allow(unused_variables)]
 pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
-    asm!(
+    naked_asm!(
         "
                 cli
                 fxrstor [rdi]
@@ -335,8 +335,7 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 mov     rax, [rdi + 512]
                 mov     rdi, [rdi + 512 + 8 *  6]
                 iretq
-                ",
-        options(noreturn)
+                "
     );
 }
 

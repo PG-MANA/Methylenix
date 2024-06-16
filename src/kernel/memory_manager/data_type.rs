@@ -133,7 +133,7 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl Sub<MSize> for $t {
+        impl const Sub<MSize> for $t {
             type Output = Self;
             #[inline]
             fn sub(self, rhs: MSize) -> Self::Output {
@@ -465,11 +465,16 @@ impl SubAssign for MIndex {
 
 impl Step for MIndex {
     #[inline]
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
         if start.0 <= end.0 {
-            Some(end.0 - start.0)
+            let r = end.0.overflowing_sub(start.0);
+            if r.1 {
+                (usize::MAX, None)
+            } else {
+                (r.0, Some(r.0))
+            }
         } else {
-            None
+            (0, None)
         }
     }
 

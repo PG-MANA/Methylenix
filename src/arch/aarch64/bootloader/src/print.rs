@@ -2,10 +2,11 @@
 //! println with EfiOutputService
 //!
 
-use crate::efi::{protocol::simple_text_output_protocol::EfiSimpleTextOutputProtocol, EFI_SUCCESS};
+use crate::efi::{EFI_SUCCESS, protocol::simple_text_output_protocol::EfiSimpleTextOutputProtocol};
 
 use core::fmt;
 use core::fmt::Write;
+use core::ptr::addr_of_mut;
 
 struct Printer {
     p: *const EfiSimpleTextOutputProtocol,
@@ -56,11 +57,11 @@ impl Write for Printer {
 }
 
 pub fn init(output_service: *const EfiSimpleTextOutputProtocol) {
-    unsafe { PRINTER.p = output_service };
+    unsafe { addr_of_mut!(PRINTER.p).write(output_service) };
 }
 
 pub fn print(args: fmt::Arguments) {
-    let _ = unsafe { PRINTER.write_fmt(args) };
+    let _ = unsafe { (*addr_of_mut!(PRINTER)).write_fmt(args) };
 }
 
 #[macro_export]

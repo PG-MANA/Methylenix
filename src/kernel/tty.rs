@@ -202,7 +202,7 @@ impl TtyManager {
         Some(old)
     }
 
-    pub fn open_tty_as_file(&'static mut self, permission: u8) -> Result<File, ()> {
+    pub fn open_tty_as_file(&'static mut self, permission: u8) -> Result<File<'static>, ()> {
         Ok(File::new(FileDescriptor::new(0, 0, permission), self))
     }
 }

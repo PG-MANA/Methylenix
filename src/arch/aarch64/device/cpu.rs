@@ -9,7 +9,7 @@ use crate::arch::target_arch::context::context_data::ContextData;
 
 use crate::kernel::memory_manager::data_type::{Address, VAddress};
 
-use core::arch::{asm, global_asm};
+use core::arch::{asm, global_asm, naked_asm};
 
 const DAIF_IRQ: u64 = 1 << 7;
 const DAIF_FIQ: u64 = 1 << 6;
@@ -430,7 +430,7 @@ pub unsafe fn smc_0(
 #[naked]
 #[allow(unused_variables)]
 pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
-    asm!(
+    naked_asm!(
     "
             ldp  x1, x2, [x0, #(8 * 34)]
             msr  elr_el1, x1
@@ -465,8 +465,7 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
             eret
     ",
     m = const SPSR_M,
-    el0 = const SPSR_M_EL0T,
-    options(noreturn)
+    el0 = const SPSR_M_EL0T
     )
 }
 

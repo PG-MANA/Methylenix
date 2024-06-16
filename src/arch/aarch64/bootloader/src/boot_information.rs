@@ -2,8 +2,8 @@
 //! BootInformation to pass the kernel
 //!
 
-use crate::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::efi::EfiSystemTable;
+use crate::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 
 pub struct BootInformation {
     pub elf_header_buffer: [u8; core::mem::size_of::<crate::elf::Elf64Header>()],
