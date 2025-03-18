@@ -290,23 +290,23 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
                 mov     ds, ax
                 mov     rax, [rdi + 512 + 8 * 16]
                 cmp     ax, 0
-                je      1f
+                je      2f
                 mov     fs, ax
-1:
+2:
                 mov     rax, [rdi + 512 + 8 * 17]
                 wrfsbase    rax
                 mov     rax, [rdi + 512 + 8 * 18]
                 cmp     ax,  0
-                je      2f
+                je      3f
                 mov     gs, ax
-2:
+3:
                 mov     rax, cs
                 cmp     [rdi + 512 + 8 * 24], rax // Compare current CS and next CS
-                je      3f
+                je      4f
                 mov     rax, [rdi + 512 + 8 * 19]
                 swapgs
                 wrgsbase    rax
-3:
+4:
                 mov     rax, [rdi + 512 + 8 * 20]
                 mov     es, ax
 
@@ -393,13 +393,13 @@ pub unsafe extern "C" fn task_switch(
                 mov     [rsi + 512 + 8 * 23], rax   // RFLAGS
                 mov     rax, cs
                 mov     [rsi + 512 + 8 * 24], rax
-                lea     rax, [rip + 1f]
+                lea     rax, [rip + 2f]
                 mov     [rsi + 512 + 8 * 25], rax   // RIP
                 //mov     rax, cr3
                 mov     [rsi + 512 + 8 * 26], rax
 
                 jmp     {}
-                1:
+                2:
                 ",
     sym run_task,
     in("rdi") next_context_data_address,
