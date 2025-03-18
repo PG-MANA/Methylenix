@@ -10,8 +10,6 @@ use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages};
 
-use core::mem::MaybeUninit;
-
 const FAT32_SIGNATURE: [u8; 8] = [b'F', b'A', b'T', b'3', b'2', b' ', b' ', b' '];
 
 const BYTES_PER_SECTOR_OFFSET: usize = 11;
@@ -351,7 +349,7 @@ impl Fat32Driver {
                     pointer += DIRECTORY_ENTRY_SIZE;
                     continue;
                 }
-                let mut entry_name: [u8; 12] = [0; u8];
+                let mut entry_name: [u8; 12] = [0; 12];
                 entry_name[0] = if directory_name[0] == 0x05 {
                     0xe5
                 } else {
@@ -363,7 +361,7 @@ impl Fat32Driver {
                         continue;
                     }
                     if index == 8 {
-                        entry_name[p].write(b'.');
+                        entry_name[p] = b'.';
                         p += 1;
                     }
                     entry_name[p] = directory_name[index];
@@ -469,7 +467,7 @@ impl Fat32Driver {
                         continue;
                     }
                     if index == 8 {
-                        entry_name[p].write(b'.');
+                        entry_name[p] = b'.';
                         p += 1;
                     }
                     entry_name[p] = directory_name[index];

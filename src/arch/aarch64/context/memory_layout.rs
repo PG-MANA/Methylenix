@@ -21,7 +21,7 @@ pub const USER_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff);
 pub static mut DIRECT_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_0000_0000_0000);
 pub static mut HIGH_MEMORY_START_ADDRESS: VAddress = VAddress::new(0xffff_0000_0000_0000);
 
-pub const fn get_direct_map_base_address() -> PAddress {
+pub fn get_direct_map_base_address() -> PAddress {
     DIRECT_MAP_BASE_ADDRESS
 }
 

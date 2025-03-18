@@ -133,7 +133,7 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl const Sub<MSize> for $t {
+        impl Sub<MSize> for $t {
             type Output = Self;
             #[inline]
             fn sub(self, rhs: MSize) -> Self::Output {

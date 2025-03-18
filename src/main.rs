@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(alloc_error_handler)]
+#![feature(const_ops)]
 #![feature(const_trait_impl)]
 #![feature(linked_list_cursors)]
 #![feature(maybe_uninit_array_assume_init)]
