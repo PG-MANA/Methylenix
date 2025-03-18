@@ -57,20 +57,16 @@ impl SocketManager {
     /// Self::active_list\[(1 << Self:::SOCKET_LIST_ORDER\]
     const SOCKET_LIST_ORDER: usize = 4;
 
-    pub fn new() -> Self {
-        use core::mem::MaybeUninit;
-        let mut active_socket: [MaybeUninit<SocketListEntry>; 1 << Self::SOCKET_LIST_ORDER] =
-            MaybeUninit::uninit_array();
-        for e in &mut active_socket {
-            e.write(SocketListEntry {
-                lock: SpinLockFlag::new(),
-                list: PtrLinkedList::new(),
-            });
-        }
+    pub const fn new() -> Self {
         Self {
             listening_socket_lock: SpinLockFlag::new(),
             listening_socket: PtrLinkedList::new(),
-            active_socket: unsafe { MaybeUninit::array_assume_init(active_socket) },
+            active_socket: [const {
+                SocketListEntry {
+                    lock: SpinLockFlag::new(),
+                    list: PtrLinkedList::new(),
+                }
+            }; 1 << Self::SOCKET_LIST_ORDER],
         }
     }
 

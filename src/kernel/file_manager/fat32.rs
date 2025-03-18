@@ -351,12 +351,12 @@ impl Fat32Driver {
                     pointer += DIRECTORY_ENTRY_SIZE;
                     continue;
                 }
-                let mut entry_name: [MaybeUninit<u8>; 12] = MaybeUninit::uninit_array();
-                entry_name[0].write(if directory_name[0] == 0x05 {
+                let mut entry_name: [u8; 12] = [0; u8];
+                entry_name[0] = if directory_name[0] == 0x05 {
                     0xe5
                 } else {
                     directory_name[0]
-                });
+                };
                 let mut p = 1;
                 for index in 1..11 {
                     if directory_name[index] == b' ' {
@@ -366,10 +366,9 @@ impl Fat32Driver {
                         entry_name[p].write(b'.');
                         p += 1;
                     }
-                    entry_name[p].write(directory_name[index]);
+                    entry_name[p] = directory_name[index];
                     p += 1;
                 }
-                let entry_name = unsafe { MaybeUninit::array_assume_init(entry_name) };
                 let entry_name_ascii = core::str::from_utf8(&entry_name[0..p]).unwrap_or("N/A");
                 let file_size = u32::from_le(unsafe { *((entry_base + 28) as *const u32) });
 
@@ -458,12 +457,12 @@ impl Fat32Driver {
                     pointer += DIRECTORY_ENTRY_SIZE;
                     continue;
                 }
-                let mut entry_name: [MaybeUninit<u8>; 12] = MaybeUninit::uninit_array();
-                entry_name[0].write(if directory_name[0] == 0x05 {
+                let mut entry_name: [u8; 12] = [0; 12];
+                entry_name[0] = if directory_name[0] == 0x05 {
                     0xe5
                 } else {
                     directory_name[0]
-                });
+                };
                 let mut p = 1;
                 for index in 1..11 {
                     if directory_name[index] == b' ' {
@@ -473,10 +472,9 @@ impl Fat32Driver {
                         entry_name[p].write(b'.');
                         p += 1;
                     }
-                    entry_name[p].write(directory_name[index]);
+                    entry_name[p] = directory_name[index];
                     p += 1;
                 }
-                let entry_name = unsafe { MaybeUninit::array_assume_init(entry_name) };
                 let entry_name_ascii = core::str::from_utf8(&entry_name[0..p]).unwrap_or("N/A");
                 let file_size = u32::from_le(unsafe { *((entry_base + 28) as *const u32) });
 

@@ -13,8 +13,6 @@ use super::namespace_modifier_object::NamespaceModifierObject;
 use super::statement_opcode::StatementOpcode;
 use super::{AcpiInt, AmlError, AmlStream, Evaluator};
 
-use crate::ignore_invalid_type_error;
-
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 

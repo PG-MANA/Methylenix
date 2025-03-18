@@ -10,7 +10,7 @@ use super::opcode;
 use super::term_object::{MethodInvocation, TermArg};
 use super::{AcpiInt, AmlError, AmlStream, DataRefObject, Evaluator};
 
-use crate::ignore_invalid_type_error;
+use core::mem::MaybeUninit;
 
 #[derive(Debug, Clone)]
 pub struct Package {
@@ -499,9 +499,8 @@ impl ExpressionOpcode {
                     Ok(Self::DefLoad((name, target)))
                 }
                 opcode::LOAD_TABLE_OP => {
-                    use core::mem::MaybeUninit;
                     stream.seek(2)?;
-                    let mut table: [MaybeUninit<TermArg>; 6] = MaybeUninit::uninit_array();
+                    let mut table: [MaybeUninit<TermArg>; 6] = [const { MaybeUninit::uninit() }; 6];
                     for e in &mut table {
                         /* Using this style instead of Iter */
                         e.write(TermArg::try_parse(stream, current_scope, evaluator)?);

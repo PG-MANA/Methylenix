@@ -261,9 +261,11 @@ impl Evaluator {
     pub(super) fn init_local_variables_and_argument_variables(
     ) -> (LocalVariables, ArgumentVariables) {
         let mut local_variables: [MaybeUninit<Arc<Mutex<AmlVariable>>>;
-            Self::NUMBER_OF_LOCAL_VARIABLES] = MaybeUninit::uninit_array();
+            Self::NUMBER_OF_LOCAL_VARIABLES] =
+            [const { MaybeUninit::uninit() }; Self::NUMBER_OF_LOCAL_VARIABLES];
         let mut argument_variables: [MaybeUninit<Arc<Mutex<AmlVariable>>>;
-            Self::NUMBER_OF_ARGUMENT_VARIABLES] = MaybeUninit::uninit_array();
+            Self::NUMBER_OF_ARGUMENT_VARIABLES] =
+            [const { MaybeUninit::uninit() }; Self::NUMBER_OF_ARGUMENT_VARIABLES];
 
         let uninitialized_data = Arc::new(Mutex::new(AmlVariable::Uninitialized));
 
@@ -2677,12 +2679,8 @@ impl Evaluator {
             return Err(AmlError::InvalidOperation);
         }
 
-        let mut arguments: [MaybeUninit<AmlVariable>; Self::NUMBER_OF_ARGUMENT_VARIABLES] =
-            MaybeUninit::uninit_array();
-        for e in arguments.iter_mut() {
-            e.write(AmlVariable::Uninitialized);
-        }
-        let mut arguments = unsafe { MaybeUninit::array_assume_init(arguments) };
+        let mut arguments: [AmlVariable; Self::NUMBER_OF_ARGUMENT_VARIABLES] =
+            [const { AmlVariable::Uninitialized }; Self::NUMBER_OF_ARGUMENT_VARIABLES];
 
         for (destination, source) in arguments
             .iter_mut()

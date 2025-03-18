@@ -14,6 +14,16 @@ use self::evaluator::Evaluator;
 pub use self::name_object::NameString;
 use self::term_object::TermList;
 
+macro_rules! ignore_invalid_type_error {
+    ($f:expr, $ok_stmt:expr) => {
+        match $f {
+            Ok(t) => return $ok_stmt(t),
+            Err(AmlError::InvalidType) => { /* Ignore */ }
+            Err(e) => return Err(e),
+        };
+    };
+}
+
 pub(super) mod aml_variable;
 mod data_object;
 pub(super) mod evaluator;
@@ -58,17 +68,6 @@ pub enum AmlError {
 pub enum ResourceData {
     Irq(u8),
     Interrupt(usize),
-}
-
-#[macro_export]
-macro_rules! ignore_invalid_type_error {
-    ($f:expr, $ok_stmt:expr) => {
-        match $f {
-            Ok(t) => return $ok_stmt(t),
-            Err(AmlError::InvalidType) => { /* Ignore */ }
-            Err(e) => return Err(e),
-        };
-    };
 }
 
 impl AmlInterpreter {

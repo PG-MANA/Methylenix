@@ -7,7 +7,6 @@ use super::name_object::NameString;
 use super::opcode;
 use super::{AcpiInt, AmlError, AmlStream};
 
-use crate::ignore_invalid_type_error;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 #[derive(Clone, Debug)]

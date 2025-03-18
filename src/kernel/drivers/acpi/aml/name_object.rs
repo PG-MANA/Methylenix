@@ -7,8 +7,6 @@ use super::expression_opcode;
 use super::opcode;
 use super::{AmlError, AmlStream, Evaluator};
 
-use crate::ignore_invalid_type_error;
-
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
