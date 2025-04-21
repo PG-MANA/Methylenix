@@ -5,7 +5,6 @@
 #![feature(const_trait_impl)]
 #![feature(linked_list_cursors)]
 #![feature(maybe_uninit_array_assume_init)]
-#![feature(naked_functions)]
 #![feature(step_trait)]
 #![feature(try_blocks)]
 

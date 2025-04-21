@@ -279,9 +279,9 @@ pub unsafe fn set_fs_base(address: u64) {
 /// This function is called from ContextManager.
 /// Set all registers from context_data and jump context_data.rip.
 /// This function assume 1st argument is passed by "rdi" and 2nd is passed by "rsi"
-#[naked]
+#[unsafe(naked)]
 #[allow(unused_variables)]
-pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
+pub extern "C" fn run_task(context_data_address: *const ContextData) {
     naked_asm!(
         "
                 cli
