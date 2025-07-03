@@ -33,6 +33,10 @@ pub struct I210Manager {
 
 static mut I210_LIST: LinkedList<(usize, *mut I210Manager)> = LinkedList::new();
 
+fn get_device_list() -> &'static mut LinkedList<(usize, *mut I210Manager)> {
+    unsafe { (&raw mut I210_LIST).as_mut().unwrap() }
+}
+
 impl PciDeviceDriver for I210Manager {
     const BASE_CLASS_CODE: u8 = 0x02;
     const SUB_CLASS_CODE: u8 = 0x00;
@@ -333,7 +337,7 @@ impl PciDeviceDriver for I210Manager {
             .add_ethernet_device(descriptor);
 
         if let Ok(interrupt_id) = setup_msi_or_msi_x(pci_dev, i210_handler, None, false) {
-            unsafe { I210_LIST.push_back((interrupt_id, manager as *mut _)) };
+            get_device_list().push_back((interrupt_id, manager as *mut _));
             write_mmio(controller_base_address, Self::IMC_OFFSET, u32::MAX);
             /* Clear Interrupt  Status */
             let _ = read_mmio::<u32>(controller_base_address, Self::ICR_OFFSET);
@@ -642,7 +646,7 @@ impl I210Manager {
 }
 
 fn i210_handler(index: usize) -> bool {
-    if let Some(i210) = unsafe { I210_LIST.iter().find(|x| x.0 == index).map(|x| x.1) } {
+    if let Some(i210) = get_device_list().iter().find(|x| x.0 == index).map(|x| x.1) {
         unsafe { &mut *(i210) }.interrupt_handler();
         true
     } else {

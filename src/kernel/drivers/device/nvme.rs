@@ -29,6 +29,12 @@ use core::mem::offset_of;
 use alloc::collections::LinkedList;
 use alloc::vec::Vec;
 
+static mut NVME_LIST: LinkedList<(usize, *mut NvmeManager)> = LinkedList::new();
+
+fn get_device_list() -> &'static mut LinkedList<(usize, *mut NvmeManager)> {
+    unsafe { (&raw mut NVME_LIST).as_mut().unwrap() }
+}
+
 pub struct NvmeManager {
     controller_properties_base_address: VAddress,
     #[allow(dead_code)]
@@ -1172,10 +1178,8 @@ fn write_mmio<T: Sized>(base: VAddress, offset: usize, data: T) {
     unsafe { core::ptr::write_volatile((base.to_usize() + offset) as *mut T, data) }
 }
 
-static mut NVME_LIST: LinkedList<(usize, *mut NvmeManager)> = LinkedList::new();
-
 fn nvme_handler(index: usize) -> bool {
-    if let Some(nvme) = unsafe { NVME_LIST.iter().find(|x| x.0 == index).map(|x| x.1) } {
+    if let Some(nvme) = get_device_list().iter().find(|x| x.0 == index).map(|x| x.1) {
         unsafe { &mut *(nvme) }.interrupt_handler();
         true
     } else {
