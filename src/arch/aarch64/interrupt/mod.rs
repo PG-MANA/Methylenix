@@ -17,8 +17,18 @@ use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use core::arch::global_asm;
 
-static mut INTERRUPT_HANDLER: [usize; u8::MAX as _] = [0usize; u8::MAX as _];
-static mut INTERRUPT_HANDLER_LOCK: IrqSaveSpinLockFlag = IrqSaveSpinLockFlag::new();
+struct InterruptInformation {
+    lock: IrqSaveSpinLockFlag,
+    handlers: [usize; u8::MAX as _],
+}
+static mut INTERRUPT_INFO: InterruptInformation = InterruptInformation {
+    lock: IrqSaveSpinLockFlag::new(),
+    handlers: [0usize; u8::MAX as _],
+};
+
+fn get_interrupt_info_mut() -> &'static mut InterruptInformation {
+    unsafe { (&raw mut INTERRUPT_INFO).as_mut().unwrap() }
+}
 
 const INTERRUPT_FROM_IRQ: u64 = cpu::SPSR_I;
 const INTERRUPT_FROM_FIQ: u64 = cpu::SPSR_F;
@@ -61,17 +71,6 @@ impl InterruptManager {
         unsafe extern "C" {
             fn interrupt_vector();
         }
-        // Reinitialize
-        use crate::kernel::collections::init_struct;
-        use core::ptr::{addr_of, addr_of_mut};
-        unsafe {
-            init_struct!(
-                *addr_of_mut!(INTERRUPT_HANDLER_LOCK),
-                IrqSaveSpinLockFlag::new()
-            )
-        };
-        cpu::synchronize(VAddress::from(unsafe { addr_of!(INTERRUPT_HANDLER_LOCK) }));
-        let _lock = self.lock.lock();
         unsafe { cpu::set_vbar(interrupt_vector as *const fn() as usize as u64) };
     }
 
@@ -79,7 +78,6 @@ impl InterruptManager {
         unsafe extern "C" {
             fn interrupt_vector();
         }
-        let _lock = self.lock.lock();
         unsafe { cpu::set_vbar(interrupt_vector as *const fn() as usize as u64) };
     }
 
@@ -107,14 +105,15 @@ impl InterruptManager {
         group: Option<InterruptGroup>,
         is_level_trigger: bool,
     ) -> Result<usize, ()> {
-        if interrupt_id as usize >= unsafe { INTERRUPT_HANDLER.len() } {
+        let interrupt_info = get_interrupt_info_mut();
+        if interrupt_id as usize >= interrupt_info.handlers.len() {
             pr_err!("Invalid interrupt id: {:#X}", interrupt_id);
             return Err(());
         }
         let _self_lock = self.lock.lock();
-        let _lock = unsafe { INTERRUPT_HANDLER_LOCK.lock() };
+        let _lock = interrupt_info.lock.lock();
         let group = group.unwrap_or(InterruptGroup::NonSecureEl1);
-        let handler_address = unsafe { INTERRUPT_HANDLER[interrupt_id as usize] };
+        let handler_address = interrupt_info.handlers[interrupt_id as usize];
         if handler_address != 0 {
             if handler_address == function as *const fn(usize) as usize {
                 if interrupt_id > 31 {
@@ -127,11 +126,9 @@ impl InterruptManager {
                 return Err(());
             }
         } else {
-            unsafe {
-                INTERRUPT_HANDLER[interrupt_id as usize] = function as *const fn(usize) as usize
-            };
+            interrupt_info.handlers[interrupt_id as usize] = function as *const fn(usize) as usize;
             cpu::synchronize(VAddress::from(
-                &unsafe { INTERRUPT_HANDLER[interrupt_id as usize] } as *const _,
+                &interrupt_info.handlers[interrupt_id as usize] as *const _,
             ));
         }
 
@@ -167,15 +164,14 @@ impl InterruptManager {
         is_level_trigger: bool,
     ) -> Result<MsiInfo, ()> {
         /* TODO: support ITS */
+        let interrupt_info = get_interrupt_info_mut();
         let _self_lock = self.lock.lock();
-        let _lock = unsafe { INTERRUPT_HANDLER_LOCK.lock() };
+        let _lock = interrupt_info.lock.lock();
         let mut interrupt_id = 0u32;
-        for i in 32..unsafe { INTERRUPT_HANDLER.len() } {
-            if unsafe { INTERRUPT_HANDLER[i] } == 0 {
-                unsafe { INTERRUPT_HANDLER[i] = function as *const fn() as usize };
-                cpu::synchronize(VAddress::from(
-                    &unsafe { INTERRUPT_HANDLER[interrupt_id as usize] } as *const _,
-                ));
+        for (i, e) in interrupt_info.handlers[32..].iter_mut().enumerate() {
+            if *e == 0 {
+                *e = function as *const fn() as usize;
+                cpu::synchronize(VAddress::from(e as *const _));
                 interrupt_id = i as u32;
                 break;
             }
@@ -271,10 +267,7 @@ impl InterruptManager {
         if index == GicDistributor::INTERRUPT_ID_INVALID {
             return;
         }
-        let _lock = unsafe { INTERRUPT_HANDLER_LOCK.lock() };
-        let address = unsafe { INTERRUPT_HANDLER[index as usize] };
-        drop(_lock);
-
+        let address = get_interrupt_info_mut().handlers[index as usize];
         if address != 0 {
             if unsafe {
                 (core::mem::transmute::<usize, fn(usize) -> bool>(address))(index as usize)

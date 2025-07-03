@@ -176,7 +176,7 @@ pub fn setup_msi_x(
         *((msi_x_target_address + 8) as *mut u32) = (info.message_data & u32::MAX as u64) as u32;
         *((msi_x_target_address + 12) as *mut u32) = 0;
     }
-    let _ = free_pages!(msi_x_table_address);
+    bug_on_err!(free_pages!(msi_x_table_address));
 
     get_kernel_manager_cluster().pci_manager.write_data(
         pci_dev,

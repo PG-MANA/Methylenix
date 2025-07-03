@@ -37,13 +37,23 @@ pub struct StoredIrqData {
     r_flags: u64,
 }
 
-static mut INTERRUPT_HANDLER: [usize; IDT_MAX - IDT_DEVICE_MIN + 1] =
-    [0usize; IDT_MAX - IDT_DEVICE_MIN + 1];
-static mut IRQ_IS_LEVEL_TRIGGER: [u8; NUM_OF_IRQ / u8::BITS as usize] =
-    [0; NUM_OF_IRQ / u8::BITS as usize];
+struct InterruptInformation {
+    lock: IrqSaveSpinLockFlag,
+    handlers: [usize; IDT_MAX - IDT_DEVICE_MIN + 1],
+    is_level_triggered: [u8; NUM_OF_IRQ / u8::BITS as usize],
+    idt: [GateDescriptor; IDT_MAX + 1],
+}
 
-static mut IDT_LOCK: IrqSaveSpinLockFlag = IrqSaveSpinLockFlag::new();
-static mut IDT: [GateDescriptor; IDT_MAX + 1] = [GateDescriptor::invalid(); IDT_MAX + 1];
+static mut INTERRUPT_INFO: InterruptInformation = InterruptInformation {
+    lock: IrqSaveSpinLockFlag::new(),
+    handlers: [0; IDT_MAX - IDT_DEVICE_MIN + 1],
+    is_level_triggered: [0; NUM_OF_IRQ / u8::BITS as usize],
+    idt: [GateDescriptor::invalid(); IDT_MAX + 1],
+};
+
+fn get_interrupt_info_mut() -> &'static mut InterruptInformation {
+    unsafe { (&raw mut INTERRUPT_INFO).as_mut().unwrap() }
+}
 
 /// InterruptManager has no SpinLockFlag, When you use this, be careful of Mutex.
 ///
@@ -105,18 +115,19 @@ impl InterruptManager {
         let irq_handler_entry_size = (irq_handler_list_end as *const fn() as usize
             - irq_handler_list_address)
             / (IDT_MAX - IDT_DEVICE_MIN + 1);
-        let _lock = unsafe { IDT_LOCK.lock() };
-        for i in IDT_DEVICE_MIN..=IDT_MAX {
-            unsafe {
-                IDT[i] = GateDescriptor::new(
-                    irq_handler_list_address + irq_handler_entry_size * (i - IDT_DEVICE_MIN),
-                    self.kernel_cs,
-                    IstIndex::TaskSwitch as u8,
-                    0,
-                )
-            };
+        let interrupt_info = get_interrupt_info_mut();
+        let _lock = interrupt_info.lock.lock();
+        for (i, e) in interrupt_info.idt[IDT_DEVICE_MIN..=IDT_MAX]
+            .iter_mut()
+            .enumerate()
+        {
+            *e = GateDescriptor::new(
+                irq_handler_list_address + irq_handler_entry_size * i,
+                self.kernel_cs,
+                IstIndex::TaskSwitch as u8,
+                0,
+            );
         }
-        drop(_lock);
     }
 
     /// Setup Interrupt Stack Table.
@@ -207,7 +218,7 @@ impl InterruptManager {
     unsafe fn flush(&self) {
         let idtr = idt::DescriptorTableRegister {
             limit: InterruptManager::LIMIT_IDT,
-            offset: core::ptr::addr_of!(IDT) as u64,
+            offset: &get_interrupt_info_mut().idt as *const _ as u64,
         };
         unsafe { cpu::lidt(&idtr as *const _ as usize) };
     }
@@ -255,19 +266,22 @@ impl InterruptManager {
             }
         }
         let _self_lock = self.lock.lock();
-        let _lock = unsafe { IDT_LOCK.lock() };
-        let handler_index = if let Some(i) = index {
+        let interrupt_info = get_interrupt_info_mut();
+        let _lock = interrupt_info.lock.lock();
+        let handler_index = if let Some(i) = index
+            && i >= IDT_DEVICE_MIN
+        {
             i - IDT_DEVICE_MIN
         } else if let Some(irq) = irq {
             Self::irq_to_index(irq)
-        } else if let Some(i) = Self::search_available_handler_index() {
+        } else if let Some(i) = Self::search_available_handler_index(interrupt_info) {
             i
         } else {
             pr_err!("No available interrupt vector");
             return Err(());
         };
         let index = handler_index + IDT_DEVICE_MIN;
-        let handler_address = unsafe { INTERRUPT_HANDLER[handler_index] };
+        let handler_address = interrupt_info.handlers[handler_index];
         if handler_address != 0 {
             drop(_lock);
             drop(_self_lock);
@@ -277,17 +291,15 @@ impl InterruptManager {
             pr_err!("Index is in use.");
             return Err(());
         }
-        unsafe { INTERRUPT_HANDLER[handler_index] = function as *const fn(usize) as usize };
+        interrupt_info.handlers[handler_index] = function as *const fn(usize) as usize;
         let type_attr: u8 = 0xe | (privilege_level & 0x3) << 5 | 1 << 7;
-        unsafe { IDT[index].set_type_attributes(type_attr) };
+        interrupt_info.idt[index].set_type_attributes(type_attr);
         if let Some(irq) = irq {
             let irq_index = irq >> 3;
             let irq_offset = irq & 0b111;
-            unsafe {
-                IRQ_IS_LEVEL_TRIGGER[irq_index as usize] =
-                    (IRQ_IS_LEVEL_TRIGGER[irq_index as usize] & !(1 << irq_offset))
-                        | ((is_level_trigger as u8) << irq_offset)
-            };
+            interrupt_info.is_level_triggered[irq_index as usize] =
+                (interrupt_info.is_level_triggered[irq_index as usize] & !(1 << irq_offset))
+                    | ((is_level_trigger as u8) << irq_offset);
             drop(_lock);
             drop(_self_lock);
             get_kernel_manager_cluster()
@@ -326,8 +338,9 @@ impl InterruptManager {
         })
     }
 
-    fn search_available_handler_index() -> Option<usize> {
-        for (index, e) in unsafe { INTERRUPT_HANDLER.iter().enumerate() } {
+    fn search_available_handler_index(info: &InterruptInformation) -> Option<usize> {
+        assert!(info.lock.is_locked());
+        for (index, e) in info.handlers.iter().enumerate() {
             if index + IDT_DEVICE_MIN < IDT_AVAILABLE_MIN {
                 continue;
             }
@@ -441,14 +454,16 @@ impl InterruptManager {
     ///
     /// This function calls `schedule` if needed.
     extern "C" fn main_interrupt_handler(context_data: u64, index: usize) {
-        let address = unsafe { INTERRUPT_HANDLER[index - IDT_DEVICE_MIN] };
+        let address = get_interrupt_info_mut().handlers[index - IDT_DEVICE_MIN];
 
         if address != 0 {
             if unsafe { core::mem::transmute::<usize, fn(usize) -> bool>(address)(index) } {
                 if let Some(irq) = Self::index_to_irq(index) {
                     let irq_index = irq >> 3;
                     let irq_offset = irq & 0b111;
-                    if unsafe { IRQ_IS_LEVEL_TRIGGER[irq_index as usize] & (1 << irq_offset) } != 0
+                    if get_interrupt_info_mut().is_level_triggered[irq_index as usize]
+                        & (1 << irq_offset)
+                        != 0
                     {
                         get_cpu_manager_cluster()
                             .interrupt_manager
