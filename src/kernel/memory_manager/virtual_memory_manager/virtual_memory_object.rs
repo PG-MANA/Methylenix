@@ -77,27 +77,30 @@ impl VirtualMemoryObject {
             if list.is_empty() {
                 assert_eq!(self.linked_page, 0);
                 let _lock = vm_page.lock.lock();
-                list.insert_head(&mut vm_page.list);
-            } else if unsafe { list.get_first_entry(OFFSET) }
-                .unwrap()
-                .get_p_index()
-                > p_index
+                unsafe { list.insert_head(&mut vm_page.list) };
+            } else if let Some(first) = list.get_first_entry(OFFSET).map(|e| unsafe { &*e })
+                && first.get_p_index() > p_index
             {
                 let _lock = vm_page.lock.lock();
-                let _first_entry_lock =
-                    unsafe { list.get_first_entry(OFFSET) }.unwrap().lock.lock();
-                list.insert_head(&mut vm_page.list);
+                let _first_entry_lock = first.lock.lock();
+                unsafe { list.insert_head(&mut vm_page.list) };
             } else {
-                for e in unsafe { list.iter_mut(OFFSET) } {
+                let mut curosor = unsafe { list.cursor_front_mut(OFFSET) };
+                while let Some(e) = curosor.current().map(|e| unsafe { &mut *e }) {
                     if p_index < e.get_p_index() {
                         let _lock = vm_page.lock.lock();
-                        let _prev_lock = unsafe { e.list.get_prev(OFFSET) }.unwrap().lock.lock();
-                        list.insert_before(&mut e.list, &mut vm_page.list);
-                    } else if !e.list.has_next() {
-                        let _lock = vm_page.lock.lock();
-                        let _prev_lock = e.lock.lock();
-                        list.insert_tail(&mut vm_page.list);
+                        let prev = unsafe { &*e.list.get_prev(OFFSET).unwrap() };
+                        let _prev_lock = prev.lock.lock();
+                        unsafe { curosor.insert_before(&mut vm_page.list) };
+                        break;
                     }
+                    unsafe { curosor.move_next() };
+                }
+                if !curosor.is_valid() {
+                    let _lock = vm_page.lock.lock();
+                    let prev = list.get_last_entry(OFFSET).map(|e| unsafe { &*e }).unwrap();
+                    let _prev_lock = prev.lock.lock();
+                    unsafe { list.insert_tail(&mut vm_page.list) };
                 }
             }
             self.linked_page += 1;
@@ -107,7 +110,7 @@ impl VirtualMemoryObject {
             let mut list = PtrLinkedList::<VirtualMemoryPage>::new();
             let _lock = vm_page.lock.lock();
             vm_page.set_p_index(p_index);
-            list.insert_head(&mut vm_page.list);
+            unsafe { list.insert_head(&mut vm_page.list) };
 
             self.object = VirtualMemoryObjectType::Page(list);
             self.linked_page = 1;
@@ -149,13 +152,15 @@ impl VirtualMemoryObject {
         p_index: MIndex,
     ) -> Option<&'static mut VirtualMemoryPage /*removed page*/> {
         if let VirtualMemoryObjectType::Page(list) = &mut self.object {
-            for e in unsafe { list.iter_mut(offset_of!(VirtualMemoryPage, list)) } {
+            let mut cursor = unsafe { list.cursor_front_mut(offset_of!(VirtualMemoryPage, list)) };
+            while let Some(e) = cursor.current().map(|e| unsafe { &mut *e }) {
                 if e.get_p_index() == p_index {
-                    list.remove(&mut e.list);
+                    unsafe { cursor.remove_current() };
                     return Some(e);
                 } else if e.get_p_index() > p_index {
                     break;
                 }
+                unsafe { cursor.move_next() };
             }
         }
         None

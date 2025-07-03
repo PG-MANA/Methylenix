@@ -47,6 +47,43 @@ pub struct VirtualMemoryManager {
     page_manager: PageManager,
 }
 
+macro_rules! find_vm_entry {
+    ($s:expr,$addr:expr) => {
+        unsafe { $s.vm_entry.iter(offset_of!(VirtualMemoryEntry, list)) }
+            .find(|&e| e.get_vm_start_address() <= $addr && e.get_vm_end_address() >= $addr)
+    };
+}
+
+macro_rules! find_vm_entry_mut {
+    ($s:expr,$addr:expr) => {
+        unsafe { $s.vm_entry.iter_mut(offset_of!(VirtualMemoryEntry, list)) }
+            .find(|e| e.get_vm_start_address() <= $addr && e.get_vm_end_address() >= $addr)
+            .map(|e| unsafe { &mut *(e as *mut VirtualMemoryEntry) })
+    };
+}
+
+macro_rules! find_previous_vm_entry_mut {
+    ($s:expr,$addr:expr) => {{
+        let mut prev = None;
+        const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
+        for e in unsafe { $s.vm_entry.iter_mut(OFFSET) } {
+            if e.get_vm_start_address() > $addr {
+                prev = e.list.get_prev_mut(OFFSET).map(|e| unsafe { &mut *e });
+                break;
+            } else if !e.list.has_next() && e.get_vm_end_address() < $addr {
+                prev = Some(unsafe { &mut *(e as *mut VirtualMemoryEntry) });
+            }
+        }
+        prev
+    }};
+}
+
+impl Default for VirtualMemoryManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VirtualMemoryManager {
     pub const fn new() -> Self {
         Self {
@@ -722,7 +759,7 @@ impl VirtualMemoryManager {
                 .unwrap()
                 .get_vm_start_address()
         {
-            self.vm_entry.insert_head(&mut vm_entry.list);
+            unsafe { self.vm_entry.insert_head(&mut vm_entry.list) };
         } else {
             pr_err!("Cannot insert Virtual Memory Entry.");
             return Err(MemoryError::InternalError);
@@ -813,14 +850,12 @@ impl VirtualMemoryManager {
             }
             user_vm_manager.lock.unlock();
         }
-        let vm_entry = self.find_entry_mut(kernel_virtual_address);
-        if vm_entry.is_none() {
+        let Some(kernel_vm_entry) = find_vm_entry_mut!(self, kernel_virtual_address) else {
             pr_err!("{} is not found.", kernel_virtual_address);
             self.lock.unlock();
             user_vm_manager.lock.unlock();
             return Err(MemoryError::InvalidAddress);
-        }
-        let kernel_vm_entry = vm_entry.unwrap();
+        };
         /* Assume user_virtual_address is usable. */
         let user_vm_map_entry = VirtualMemoryEntry::new(
             user_virtual_address,
@@ -894,7 +929,7 @@ impl VirtualMemoryManager {
             user_vm_map_entry
                 .get_object_mut()
                 .unset_shared_object(shared_vm_object);
-            user_vm_manager.vm_entry.remove(&mut user_vm_map_entry.list);
+            unsafe { user_vm_manager.vm_entry.remove(&mut user_vm_map_entry.list) };
             user_vm_manager.adjust_vm_entries();
             user_vm_map_entry.set_disabled();
             get_kernel_manager_cluster()
@@ -986,11 +1021,12 @@ impl VirtualMemoryManager {
         if old_size >= new_size {
             return true;
         }
-        if let Some(next_entry) =
-            unsafe { vm_entry.list.get_next(offset_of!(VirtualMemoryEntry, list)) }
+        if let Some(next_entry) = vm_entry
+            .list
+            .get_next(offset_of!(VirtualMemoryEntry, list))
+            .map(|e| unsafe { &*e })
         {
-            let next_entry_start_address =
-                unsafe { &*(next_entry as *const VirtualMemoryEntry) }.get_vm_start_address();
+            let next_entry_start_address = next_entry.get_vm_start_address();
             if new_size.to_end_address(vm_entry.get_vm_start_address()) >= next_entry_start_address
             {
                 return false;
@@ -1047,7 +1083,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::InvalidAddress); /* Is it ok? */
         }
         self.lock.lock();
-        if let Some(vm_entry) = self.find_entry_mut(virtual_address) {
+        if let Some(vm_entry) = find_vm_entry_mut!(self, virtual_address) {
             if !vm_entry.get_memory_option_flags().is_io_map() {
                 self.lock.unlock();
                 pr_err!("Not mapped entry.");
@@ -1093,8 +1129,13 @@ impl VirtualMemoryManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         self.lock.lock();
-        for e in unsafe { self.vm_entry.iter_mut(offset_of!(VirtualMemoryEntry, list)) } {
+        while let Some(e) = self
+            .vm_entry
+            .get_last_entry_mut(offset_of!(VirtualMemoryEntry, list))
+            .map(|e| unsafe { &mut *e })
+        {
             if let Err(e) = self._free_address(e, pm_manager) {
+                /* TODO: recovery */
                 self.lock.unlock();
                 return Err(e);
             }
@@ -1121,7 +1162,7 @@ impl VirtualMemoryManager {
             number_of_pages = MIndex::new(list_buffer.len());
         }
         self.lock.lock();
-        if let Some(vm_entry) = self._find_entry(virtual_address) {
+        if let Some(vm_entry) = find_vm_entry!(self, virtual_address) {
             let mut n = 0;
             for index in offset..(offset + number_of_pages) {
                 if let Some(p) = vm_entry.get_object().get_vm_page(index) {
@@ -1138,36 +1179,6 @@ impl VirtualMemoryManager {
             pr_err!("Entry is not found.");
             Err(MemoryError::InvalidAddress)
         }
-    }
-
-    fn _find_entry(&self, vm_address: VAddress) -> Option<&'static VirtualMemoryEntry> {
-        unsafe { self.vm_entry.iter(offset_of!(VirtualMemoryEntry, list)) }.find(|&e| {
-            e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address
-        })
-    }
-
-    fn find_entry_mut(&mut self, vm_address: VAddress) -> Option<&'static mut VirtualMemoryEntry> {
-        for e in unsafe { self.vm_entry.iter_mut(offset_of!(VirtualMemoryEntry, list)) } {
-            if e.get_vm_start_address() <= vm_address && e.get_vm_end_address() >= vm_address {
-                return Some(e);
-            }
-        }
-        None
-    }
-
-    fn find_previous_entry_mut(
-        &mut self,
-        vm_address: VAddress,
-    ) -> Option<&'static mut VirtualMemoryEntry> {
-        const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
-        for e in unsafe { self.vm_entry.iter_mut(OFFSET) } {
-            if e.get_vm_start_address() > vm_address {
-                return unsafe { e.list.get_prev_mut(OFFSET) };
-            } else if !e.list.has_next() && e.get_vm_end_address() < vm_address {
-                return Some(e);
-            }
-        }
-        None
     }
 
     fn find_usable_memory_area(&self, size: MSize, option: MemoryOptionFlags) -> Option<VAddress> {
@@ -1195,18 +1206,30 @@ impl VirtualMemoryManager {
                 &(available_start_address..=end_address),
                 &(e.get_vm_start_address()..=e.get_vm_end_address()),
             ) {
-                assert!(unsafe { e.list.get_next(OFFSET) }
-                    .map(|n| !Self::is_overlapped(
-                        &(available_start_address..=end_address),
-                        &(n.get_vm_start_address()..=n.get_vm_end_address()),
-                    ))
-                    .unwrap_or(true));
-                assert!(unsafe { e.list.get_prev(OFFSET) }
-                    .map(|p| !Self::is_overlapped(
-                        &(available_start_address..=end_address),
-                        &(p.get_vm_start_address()..=p.get_vm_end_address()),
-                    ))
-                    .unwrap_or(true));
+                assert!(
+                    e.list
+                        .get_next(OFFSET)
+                        .map(|n| {
+                            let n = unsafe { &*n };
+                            !Self::is_overlapped(
+                                &(available_start_address..=end_address),
+                                &(n.get_vm_start_address()..=n.get_vm_end_address()),
+                            )
+                        })
+                        .unwrap_or(true)
+                );
+                assert!(
+                    e.list
+                        .get_prev(OFFSET)
+                        .map(|p| {
+                            let p = unsafe { &*p };
+                            !Self::is_overlapped(
+                                &(available_start_address..=end_address),
+                                &(p.get_vm_start_address()..=p.get_vm_end_address()),
+                            )
+                        })
+                        .unwrap_or(true)
+                );
 
                 return Some(available_start_address);
             }
@@ -1248,10 +1271,14 @@ impl VirtualMemoryManager {
         }
         let offset = offset_of!(VirtualMemoryEntry, list);
         self.lock.lock();
-        let mut entry = unsafe { self.vm_entry.get_first_entry(offset) }.unwrap();
+        let mut entry = self
+            .vm_entry
+            .get_first_entry(offset)
+            .map(|e| unsafe { &*e })
+            .unwrap();
         loop {
             if entry.get_vm_start_address() < start || entry.get_vm_end_address() > end {
-                let next = unsafe { entry.list.get_next(offset) };
+                let next = entry.list.get_next(offset).map(|e| unsafe { &*e });
                 if next.is_none() {
                     break;
                 }
@@ -1287,7 +1314,7 @@ impl VirtualMemoryManager {
                 l
             } else {
                 pr_warn!("Failed to lock object");
-                let next = unsafe { entry.list.get_next(offset) };
+                let next = entry.list.get_next(offset).map(|e| unsafe { &*e });
                 if next.is_none() {
                     break;
                 }
@@ -1335,7 +1362,7 @@ impl VirtualMemoryManager {
                     last_address.to_usize()
                 );
             }
-            let next = unsafe { entry.list.get_next(offset) };
+            let next = entry.list.get_next(offset).map(|e| unsafe { &*e });
             if next.is_none() {
                 break;
             }

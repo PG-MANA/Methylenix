@@ -4,16 +4,18 @@
 
 use super::{AddressPrinter, InternetType, LinkType, NetworkError, ipv4};
 
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::collections::{init_struct, ring_buffer::Ringbuffer};
+use crate::kernel::collections::{
+    init_struct,
+    linked_list::GeneralLinkedList,
+    ptr_linked_list::{PtrLinkedList, PtrLinkedListNode},
+    ring_buffer::Ringbuffer,
+};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
 use crate::kernel::memory_manager::{kfree, kmalloc};
 
 use core::mem::offset_of;
 use core::ptr::copy_nonoverlapping;
-
-use alloc::collections::LinkedList;
 
 pub const IPV4_PROTOCOL_TCP: u8 = 0x06;
 pub const MAX_SEGMENT_SIZE: usize = 1460;
@@ -60,7 +62,7 @@ pub struct TcpSessionInfo {
     expected_arrival_sequence_number: u32,
     next_sequence_number: u32,
     last_sent_acknowledge_number: u32,
-    receive_buffer_list: LinkedList<TcpReceiveDataBuffer>,
+    receive_buffer_list: GeneralLinkedList<TcpReceiveDataBuffer>,
     send_buffer_list: PtrLinkedList<TcpSendDataBufferHeader>,
 }
 
@@ -75,7 +77,7 @@ impl TcpSessionInfo {
             expected_arrival_sequence_number: 0,
             next_sequence_number: 0,
             last_sent_acknowledge_number: 0,
-            receive_buffer_list: LinkedList::new(),
+            receive_buffer_list: GeneralLinkedList::new(),
             send_buffer_list: PtrLinkedList::new(),
         }
     }
@@ -97,14 +99,28 @@ impl TcpSessionInfo {
     }
 
     fn free_buffer(&mut self) {
-        while let Some(e) = self.receive_buffer_list.pop_front() {
-            if !e.data_length.is_zero() {
-                let _ = kfree!(e.allocated_data_base, e.data_length);
+        loop {
+            match self.receive_buffer_list.pop_front() {
+                Ok(Some(e)) => {
+                    if !e.data_length.is_zero() {
+                        let _ = kfree!(e.allocated_data_base, e.data_length);
+                    }
+                }
+                Ok(None) => {
+                    break;
+                }
+                Err((err, e)) => {
+                    pr_warn!("Failed to free buffer: {:?}", err);
+                    if !e.data_length.is_zero() {
+                        let _ = kfree!(e.allocated_data_base, e.data_length);
+                    }
+                }
             }
         }
         while let Some(e) = unsafe {
             self.send_buffer_list
                 .take_first_entry(offset_of!(TcpSendDataBufferHeader, list))
+                .map(|e| &mut *e)
         } {
             if !e.buffer_length.is_zero() {
                 let _ = kfree!(VAddress::from(e as *const _), e.buffer_length);
@@ -638,7 +654,7 @@ pub(super) fn send_tcp_ipv4_data(
             .next_sequence_number
             .overflowing_add(send_size.to_usize() as u32)
             .0;
-        session_info.send_buffer_list.insert_tail(&mut header.list);
+        unsafe { session_info.send_buffer_list.insert_tail(&mut header.list) };
         *data_size -= send_size;
         *data_address += send_size;
         session_info.available_window_size -= send_size.to_usize() as u16;
@@ -668,11 +684,11 @@ pub(super) fn ipv4_tcp_ack_handler(
         }
         return Ok(true);
     }
-    if let Some(first_entry) = unsafe {
-        session_info
-            .send_buffer_list
-            .get_first_entry_mut(offset_of!(TcpSendDataBufferHeader, list))
-    } {
+    if let Some(first_entry) = session_info
+        .send_buffer_list
+        .get_first_entry_mut(offset_of!(TcpSendDataBufferHeader, list))
+        .map(|e| unsafe { &mut *e })
+    {
         let expected_ack = first_entry
             .sequence_number
             .overflowing_add(first_entry.payload_size)
@@ -684,7 +700,7 @@ pub(super) fn ipv4_tcp_ack_handler(
                 session_info.available_window_size = session_info.window_size;
             }
 
-            session_info.send_buffer_list.remove(&mut first_entry.list);
+            unsafe { session_info.send_buffer_list.remove(&mut first_entry.list) };
             let _ = kfree!(
                 VAddress::from(first_entry as *const _),
                 first_entry.buffer_length
@@ -697,22 +713,23 @@ pub(super) fn ipv4_tcp_ack_handler(
                 segment_info.get_acknowledgement_number()
             );
 
-            for entry in unsafe {
+            let mut cursor = unsafe {
                 session_info
                     .send_buffer_list
-                    .iter_mut(offset_of!(TcpSendDataBufferHeader, list))
-            } {
+                    .cursor_front_mut(offset_of!(TcpSendDataBufferHeader, list))
+            };
+            while let Some(entry) = cursor.current().map(|e| unsafe { &*e }) {
                 let expected_ack = entry.sequence_number.overflowing_add(entry.payload_size).0;
                 if segment_info.get_acknowledgement_number() == expected_ack {
                     session_info.available_window_size += first_entry.payload_size as u16;
                     if session_info.available_window_size > session_info.window_size {
                         session_info.available_window_size = session_info.window_size;
                     }
-
-                    session_info.send_buffer_list.remove(&mut entry.list);
+                    unsafe { cursor.remove_current() };
                     let _ = kfree!(VAddress::from(entry as *const _), entry.buffer_length);
                     return Ok(true);
                 }
+                unsafe { cursor.move_next() };
             }
         }
     }
@@ -790,7 +807,7 @@ pub(super) fn tcp_ipv4_segment_handler(
             expected_arrival_sequence_number: segment_info.get_sequence_number().wrapping_add(1),
             next_sequence_number: sequence_number.wrapping_add(1),
             last_sent_acknowledge_number: segment_info.get_sequence_number().wrapping_add(1),
-            receive_buffer_list: LinkedList::new(),
+            receive_buffer_list: GeneralLinkedList::new(),
             send_buffer_list: PtrLinkedList::new(),
         };
 
@@ -1002,7 +1019,7 @@ fn ipv4_tcp_data_handler(
                             return Err(NetworkError::DataOverflowed);
                         }
                         let _ = kfree!(buffer_entry.allocated_data_base, buffer_entry.data_length);
-                        cursor.remove_current();
+                        bug_on_err!(cursor.remove_current_drop());
                         continue 'outer_loop;
                     }
                     cursor.move_next();
@@ -1024,7 +1041,11 @@ fn ipv4_tcp_data_handler(
                 payload_offset,
                 payload_size,
                 sequence_number: segment_info.get_sequence_number(),
-            });
+            })
+            .map_err(|err| {
+                pr_warn!("Failed to allocate memory: {:?}", err);
+                NetworkError::MemoryError(err)
+            })?;
         should_free_data = false;
     }
     session_info.last_sent_acknowledge_number = segment_info

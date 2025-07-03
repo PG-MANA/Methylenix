@@ -5,6 +5,7 @@
 pub mod auxiliary_vector;
 pub mod fifo;
 pub mod guid;
+pub mod linked_list;
 pub mod ptr_linked_list;
 pub mod ring_buffer;
 

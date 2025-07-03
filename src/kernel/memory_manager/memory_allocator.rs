@@ -14,6 +14,8 @@ use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MemoryOptionFlags};
 
+use core::ptr::NonNull;
+
 struct SizeAllocator {
     size_64: LocalSlabAllocator<[u8; 64]>,
     size_128: LocalSlabAllocator<[u8; 128]>,
@@ -56,19 +58,33 @@ impl SizeAllocator {
 
     pub fn alloc(&mut self, size: MSize) -> Result<VAddress, MemoryError> {
         if size <= MSize::new(64) {
-            self.size_64.alloc().map(|a| VAddress::from(a.as_ptr()))
+            self.size_64
+                .alloc()
+                .map(|a| VAddress::from(a.as_ptr() as usize))
         } else if size <= MSize::new(128) {
-            self.size_128.alloc().map(|a| VAddress::from(a.as_ptr()))
+            self.size_128
+                .alloc()
+                .map(|a| VAddress::from(a.as_ptr() as usize))
         } else if size <= MSize::new(256) {
-            self.size_256.alloc().map(|a| VAddress::from(a.as_ptr()))
+            self.size_256
+                .alloc()
+                .map(|a| VAddress::from(a.as_ptr() as usize))
         } else if size <= MSize::new(512) {
-            self.size_512.alloc().map(|a| VAddress::from(a.as_ptr()))
+            self.size_512
+                .alloc()
+                .map(|a| VAddress::from(a.as_ptr() as usize))
         } else if size <= MSize::new(1024) {
-            self.size_1024.alloc().map(|a| VAddress::from(a.as_ptr()))
+            self.size_1024
+                .alloc()
+                .map(|a| VAddress::from(a.as_ptr() as usize))
         } else if size <= MSize::new(2048) {
-            self.size_2048.alloc().map(|a| VAddress::from(a.as_ptr()))
+            self.size_2048
+                .alloc()
+                .map(|a| VAddress::from(a.as_ptr() as usize))
         } else if size <= MSize::new(4096) {
-            self.size_4096.alloc().map(|a| VAddress::from(a.as_ptr()))
+            self.size_4096
+                .alloc()
+                .map(|a| VAddress::from(a.as_ptr() as usize))
         } else {
             Err(MemoryError::InvalidSize)
         }
@@ -77,25 +93,25 @@ impl SizeAllocator {
     pub fn dealloc(&mut self, address: VAddress, size: MSize) {
         if size <= MSize::new(64) {
             self.size_64
-                .free(unsafe { &mut *(address.to_usize() as *mut _) });
+                .free(NonNull::new(address.to_usize() as *mut _).unwrap());
         } else if size <= MSize::new(128) {
             self.size_128
-                .free(unsafe { &mut *(address.to_usize() as *mut _) });
+                .free(NonNull::new(address.to_usize() as *mut _).unwrap());
         } else if size <= MSize::new(256) {
             self.size_256
-                .free(unsafe { &mut *(address.to_usize() as *mut _) });
+                .free(NonNull::new(address.to_usize() as *mut _).unwrap());
         } else if size <= MSize::new(512) {
             self.size_512
-                .free(unsafe { &mut *(address.to_usize() as *mut _) });
+                .free(NonNull::new(address.to_usize() as *mut _).unwrap());
         } else if size <= MSize::new(1024) {
             self.size_1024
-                .free(unsafe { &mut *(address.to_usize() as *mut _) });
+                .free(NonNull::new(address.to_usize() as *mut _).unwrap());
         } else if size <= MSize::new(2048) {
             self.size_2048
-                .free(unsafe { &mut *(address.to_usize() as *mut _) });
+                .free(NonNull::new(address.to_usize() as *mut _).unwrap());
         } else if size <= MSize::new(4096) {
             self.size_4096
-                .free(unsafe { &mut *(address.to_usize() as *mut _) });
+                .free(NonNull::new(address.to_usize() as *mut _).unwrap());
         }
     }
 }
@@ -138,6 +154,19 @@ impl MemoryAllocator {
         } else {
             self.size_allocator.dealloc(address, size);
             Ok(())
+        }
+    }
+
+    /// [`Self::kfree`] with [`core::ptr::drop_in_place`].
+    /// Regardless of the result, `data` will be dropped
+    pub fn kfree_data<T: Sized>(&mut self, data: &mut T) -> Result<(), MemoryError> {
+        let size = MSize::new(size_of_val(data));
+        let address = VAddress::new(data as *mut _ as usize);
+        unsafe { core::ptr::drop_in_place(data) };
+        if size.is_zero() {
+            Ok(())
+        } else {
+            self.kfree(address, size)
         }
     }
 

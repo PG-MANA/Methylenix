@@ -16,6 +16,8 @@ use super::{
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
+use core::ptr::NonNull;
+
 struct SlabAllocator<T> {
     allocator: PoolAllocator<T>,
 }
@@ -53,9 +55,9 @@ impl<T> SlabAllocator<T> {
         Ok(())
     }
 
-    pub fn alloc(&mut self) -> Result<&'static mut T, MemoryError> {
+    pub fn alloc(&mut self) -> Result<NonNull<T>, MemoryError> {
         match self.allocator.alloc() {
-            Ok(e) => Ok(e),
+            Ok(e) => Ok(unsafe { NonNull::new_unchecked(e) }),
             Err(_) => {
                 self.grow_pool()?;
                 self.alloc()
@@ -63,8 +65,8 @@ impl<T> SlabAllocator<T> {
         }
     }
 
-    pub fn free(&mut self, entry: &'static mut T) {
-        self.allocator.free(entry);
+    pub fn free(&mut self, entry: NonNull<T>) {
+        self.allocator.free(entry.as_ptr());
     }
 
     pub fn len(&self) -> usize {
@@ -86,14 +88,14 @@ impl<T> LocalSlabAllocator<T> {
         result
     }
 
-    pub fn alloc(&mut self) -> Result<&'static mut T, MemoryError> {
+    pub fn alloc(&mut self) -> Result<NonNull<T>, MemoryError> {
         let irq = InterruptManager::save_and_disable_local_irq();
         let result = self.slab_allocator.alloc();
         InterruptManager::restore_local_irq(irq);
         result
     }
 
-    pub fn free(&mut self, entry: &'static mut T) {
+    pub fn free(&mut self, entry: NonNull<T>) {
         let irq = InterruptManager::save_and_disable_local_irq();
         self.slab_allocator.free(entry);
         InterruptManager::restore_local_irq(irq);
@@ -122,14 +124,14 @@ impl<T> GlobalSlabAllocator<T> {
         result
     }
 
-    pub fn alloc(&mut self) -> Result<&'static mut T, MemoryError> {
+    pub fn alloc(&mut self) -> Result<NonNull<T>, MemoryError> {
         let _lock = self.lock.lock();
         let result = self.slab_allocator.alloc();
         drop(_lock);
         result
     }
 
-    pub fn free(&mut self, entry: &'static mut T) {
+    pub fn free(&mut self, entry: NonNull<T>) {
         let _lock = self.lock.lock();
         self.slab_allocator.free(entry);
         drop(_lock);

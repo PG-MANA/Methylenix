@@ -9,22 +9,21 @@ use super::{TaskError, TaskManager, TaskStatus, ThreadEntry};
 
 use crate::arch::target_arch::interrupt::InterruptManager;
 
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::manager_cluster::get_cpu_manager_cluster;
-use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
-use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
+use crate::kernel::{
+    collections::{init_struct, linked_list::LocalSlabAllocLinkedList},
+    manager_cluster::get_cpu_manager_cluster,
+    sync::spin_lock::IrqSaveSpinLockFlag,
+};
 
 use core::mem::offset_of;
 
 pub struct WorkQueue {
     global_lock: IrqSaveSpinLockFlag,
-    work_queue: PtrLinkedList<WorkList>,
-    work_pool: LocalSlabAllocator<WorkList>,
     daemon_thread: *mut ThreadEntry,
+    work_queue: LocalSlabAllocLinkedList<WorkList>,
 }
 
 pub struct WorkList {
-    list: PtrLinkedListNode<Self>,
     worker_function: fn(usize),
     data: usize,
 }
@@ -34,7 +33,6 @@ impl WorkList {
         Self {
             worker_function,
             data,
-            list: PtrLinkedListNode::new(),
         }
     }
 }
@@ -43,10 +41,9 @@ impl WorkQueue {
     const DEFAULT_PRIORITY: u8 = 10;
 
     pub fn init_work_queue(&mut self, task_manager: &mut TaskManager) {
-        self.work_queue = PtrLinkedList::new();
-        self.work_pool = LocalSlabAllocator::new();
+        init_struct!(self.work_queue, LocalSlabAllocLinkedList::new());
 
-        self.work_pool
+        self.work_queue
             .init()
             .expect("Failed to init memory pool for WorkList");
 
@@ -62,10 +59,9 @@ impl WorkQueue {
     }
 
     pub fn init_cpu_work_queue(&mut self, task_manager: &mut TaskManager) {
-        self.work_queue = PtrLinkedList::new();
-        self.work_pool = LocalSlabAllocator::new();
+        init_struct!(self.work_queue, LocalSlabAllocLinkedList::new());
 
-        self.work_pool
+        self.work_queue
             .init()
             .expect("Failed to init memory pool for WorkList");
 
@@ -84,19 +80,11 @@ impl WorkQueue {
         /* This will be called in the interrupt handler */
         let irq = InterruptManager::save_and_disable_local_irq();
 
-        let work = match self.work_pool.alloc() {
-            Ok(work) => {
-                *work = w;
-                work.list = PtrLinkedListNode::new();
-                work
-            }
-            Err(err) => {
-                pr_err!("Failed to allocate a WorkList: {:?}", err);
-                return Err(TaskError::MemoryError(err));
-            }
-        };
+        self.work_queue.push_back(w).map_err(|err| {
+            pr_err!("Failed to allocate a WorkList: {:?}", err);
+            TaskError::MemoryError(err)
+        })?;
 
-        self.work_queue.insert_tail(&mut work.list);
         let worker_thread = unsafe { &mut *self.daemon_thread };
         let _worker_thread_lock = worker_thread.lock.lock();
         if worker_thread.get_task_status() != TaskStatus::Running {
@@ -127,15 +115,16 @@ impl WorkQueue {
                 /* Woke up */
                 continue;
             }
-            let work = unsafe {
-                manager
-                    .work_queue
-                    .take_first_entry(offset_of!(WorkList, list))
-                    .unwrap()
+            let work = match manager.work_queue.pop_front() {
+                Ok(work) => work.unwrap(),
+                Err((err, work)) => {
+                    pr_err!("Failed to free memory: {:?}", err);
+                    /* TODO: recovery */
+                    work
+                }
             };
             let work_function = work.worker_function;
             let work_data = work.data;
-            manager.work_pool.free(work);
             InterruptManager::restore_local_irq(irq);
             /* Execute the work function */
             work_function(work_data);
@@ -157,15 +146,16 @@ impl WorkQueue {
                 /* Woke up */
                 continue;
             }
-            let work = unsafe {
-                manager
-                    .work_queue
-                    .take_first_entry(offset_of!(WorkList, list))
-                    .unwrap()
+            let work = match manager.work_queue.pop_front() {
+                Ok(work) => work.unwrap(),
+                Err((err, work)) => {
+                    pr_err!("Failed to free memory: {:?}", err);
+                    /* TODO: recovery */
+                    work
+                }
             };
             let work_function = work.worker_function;
             let work_data = work.data;
-            manager.work_pool.free(work);
             drop(_lock);
             /* Execute the work function */
             work_function(work_data);

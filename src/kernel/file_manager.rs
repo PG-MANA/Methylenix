@@ -2,21 +2,24 @@
 //! File System
 //!
 
-use alloc::boxed::Box;
-use core::mem::offset_of;
-
-use crate::kernel::block_device::BlockDeviceError;
-use crate::kernel::collections::guid::Guid;
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
-use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages, kmalloc, MemoryError};
-
 use self::file_info::FileInfo;
-pub use self::path_info::PathInfo;
-pub use self::vfs::{
-    File, FileDescriptor, FileOperationDriver, FileSeekOrigin, FILE_PERMISSION_READ,
-    FILE_PERMISSION_WRITE,
+pub use self::{
+    path_info::PathInfo,
+    vfs::{
+        FILE_PERMISSION_READ, FILE_PERMISSION_WRITE, File, FileDescriptor, FileDescriptorData,
+        FileOperationDriver, FileSeekOrigin,
+    },
+};
+use crate::kernel::{
+    block_device::BlockDeviceError,
+    collections::{guid::Guid, linked_list::GeneralLinkedList},
+    manager_cluster::get_kernel_manager_cluster,
+    memory_manager::{
+        MemoryError, alloc_non_linear_pages,
+        data_type::{MOffset, MSize, VAddress},
+        free_pages,
+    },
+    sync::spin_lock::Mutex,
 };
 
 pub mod elf;
@@ -37,15 +40,14 @@ pub struct PartitionInfo {
 }
 
 pub struct Partition {
-    list: PtrLinkedListNode<Self>,
     info: PartitionInfo,
     uuid: Guid,
     driver: Box<dyn PartitionManager>,
 }
 
 pub struct FileManager {
-    partition_list: PtrLinkedList<Partition>,
-    root: FileInfo,
+    partition_list: GeneralLinkedList<Partition>,
+    root: FInfo,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -118,8 +120,8 @@ impl Default for FileManager {
 impl FileManager {
     pub fn new() -> Self {
         Self {
-            partition_list: PtrLinkedList::new(),
             root: FileInfo::new_root(false),
+            partition_list: GeneralLinkedList::new(),
         }
     }
 
@@ -152,29 +154,18 @@ impl FileManager {
                 match $fs::try_mount_file_system(&partition_info, first_block_data) {
                     Ok((driver, uuid)) => {
                         pr_debug!("Add: Partition(UUID: {uuid})");
-                        match kmalloc!(
-                            Partition,
-                            Partition {
-                                list: PtrLinkedListNode::new(),
-                                info: partition_info,
-                                uuid,
-                                driver: Box::new(driver)
-                            }
-                        ) {
-                            Ok(i) => {
-                                self.partition_list.insert_tail(&mut i.list);
-                            }
-                            Err(err) => {
-                                pr_err!("Failed to allocate partition information: {:?}", err);
-                            }
-                        }
-                        let _ = free_pages!(first_block_data);
+                        bug_on_err!(self.partition_list.push_back(Partition {
+                            info: partition_info,
+                            uuid,
+                            driver: Box::new(driver),
+                        }));
+                        bug_on_err!(free_pages!(first_block_data));
                         return;
                     }
                     Err(FileError::BadSignature) => { /* Next FS */ }
                     Err(err) => {
                         pr_err!("Failed to detect the file system: {:?}", err);
-                        let _ = free_pages!(first_block_data);
+                        bug_on_err!(free_pages!(first_block_data));
                         return;
                     }
                 }
@@ -189,13 +180,12 @@ impl FileManager {
     }
 
     pub fn mount_root(&mut self, root_uuid: Guid, is_writable: bool) {
-        for e in unsafe { self.partition_list.iter_mut(offset_of!(Partition, list)) } {
+        for e in self.partition_list.iter_mut() {
             if root_uuid == e.uuid {
                 e.driver
                     .get_root_node(&e.info, &mut self.root, is_writable)
                     .expect("Failed to create root");
                 self.root.driver = e as *mut _;
-                self.root.reference_counter = 1;
                 return;
             }
         }
@@ -204,11 +194,7 @@ impl FileManager {
 
     /// Temporary function for [`crate::kernel::initialization::mount_root_file_system`]
     pub fn get_first_uuid(&self) -> Option<Guid> {
-        unsafe {
-            self.partition_list
-                .get_first_entry(offset_of!(Partition, list))
-        }
-        .map(|p| p.uuid)
+        self.partition_list.front().map(|e| e.uuid)
     }
 
     fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<u64, FileError> {

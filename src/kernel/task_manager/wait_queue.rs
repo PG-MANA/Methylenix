@@ -35,17 +35,18 @@ impl WaitQueue {
     fn _add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(thread.lock.is_locked());
 
-        if let Some(last_thread) = unsafe {
-            self.list
-                .get_last_entry_mut(offset_of!(ThreadEntry, sleep_list))
-        } {
+        if let Some(last_thread) = self
+            .list
+            .get_last_entry_mut(offset_of!(ThreadEntry, sleep_list))
+            .map(|t| unsafe { &mut *t })
+        {
             let _last_thread_lock = last_thread
                 .lock
                 .try_lock()
                 .or(Err(TaskError::ThreadLockError))?;
-            self.list.insert_tail(&mut thread.sleep_list);
+            unsafe { self.list.insert_tail(&mut thread.sleep_list) };
         } else {
-            self.list.insert_head(&mut thread.sleep_list)
+            unsafe { self.list.insert_head(&mut thread.sleep_list) }
         }
         Ok(())
     }
@@ -87,12 +88,13 @@ impl WaitQueue {
 
     pub fn wakeup_one(&mut self) -> Result<(), TaskError> {
         let _lock = self.lock.lock();
-        if let Some(thread) = unsafe {
-            self.list
-                .get_first_entry_mut(offset_of!(ThreadEntry, sleep_list))
-        } {
+        if let Some(thread) = self
+            .list
+            .get_first_entry_mut(offset_of!(ThreadEntry, sleep_list))
+            .map(|t| unsafe { &mut *t })
+        {
             let _thread_lock = thread.lock.lock();
-            self.list.remove(&mut thread.sleep_list);
+            unsafe { self.list.remove(&mut thread.sleep_list) };
             drop(_thread_lock);
             get_kernel_manager_cluster()
                 .task_manager
@@ -105,9 +107,13 @@ impl WaitQueue {
 
     pub fn wakeup_all(&mut self) -> Result<(), TaskError> {
         let _lock = self.lock.lock();
-        for thread in unsafe { self.list.iter_mut(offset_of!(ThreadEntry, sleep_list)) } {
+        let mut cursor = unsafe {
+            self.list
+                .cursor_front_mut(offset_of!(ThreadEntry, sleep_list))
+        };
+        while let Some(thread) = cursor.current().map(|t| unsafe { &mut *t }) {
             let _thread_lock = thread.lock.lock();
-            self.list.remove(&mut thread.sleep_list);
+            unsafe { cursor.remove_current() };
             drop(_thread_lock);
             get_kernel_manager_cluster()
                 .task_manager

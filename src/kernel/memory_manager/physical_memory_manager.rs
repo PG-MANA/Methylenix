@@ -75,7 +75,7 @@ impl PhysicalMemoryManager {
     }
 
     fn create_memory_entry(&mut self) -> Result<&'static mut MemoryEntry, MemoryError> {
-        if let Ok(e) = self.memory_entry_pool.alloc() {
+        if let Ok(e) = self.memory_entry_pool.alloc().map(|e| unsafe { &mut *e }) {
             e.set_enabled();
             e.init();
             Ok(e)
@@ -164,7 +164,7 @@ impl PhysicalMemoryManager {
                 }
                 self.unchain_entry_from_free_list(entry);
                 entry.delete();
-                self.memory_entry_pool.free_ptr(entry as *mut MemoryEntry);
+                self.memory_entry_pool.free(entry);
                 if target_entry.is_some() {
                     *target_entry = None;
                 }

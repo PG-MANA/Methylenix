@@ -49,11 +49,18 @@ pub enum MemoryError {
     InternalError,
     EntryPoolRunOut,
     PagingError(PagingError),
+    AllocError(core::alloc::AllocError),
 }
 
 impl From<PagingError> for MemoryError {
     fn from(e: PagingError) -> Self {
         Self::PagingError(e)
+    }
+}
+
+impl From<core::alloc::AllocError> for MemoryError {
+    fn from(e: core::alloc::AllocError) -> Self {
+        Self::AllocError(e)
     }
 }
 
@@ -558,8 +565,7 @@ macro_rules! kmalloc {
             ))
             .and_then(|addr| {
                 use $crate::kernel::collections::init_struct;
-                use $crate::kernel::memory_manager::data_type::Address;
-                let o = unsafe { &mut *(addr.to_usize() as *mut $t) };
+                let o = unsafe { &mut *addr.to::<$t>() };
                 init_struct!(*o, $initial_value);
                 Ok(o)
             })
@@ -576,14 +582,7 @@ macro_rules! kfree {
     ($data:expr) => {
         $crate::kernel::manager_cluster::get_cpu_manager_cluster()
             .memory_allocator
-            .kfree(
-                $crate::kernel::memory_manager::data_type::VAddress::new(
-                    $data as *const _ as usize,
-                ),
-                $crate::kernel::memory_manager::data_type::MSize::new(core::mem::size_of_val(
-                    $data,
-                )),
-            )
+            .kfree_data($data)
     };
 }
 

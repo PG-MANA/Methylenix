@@ -640,7 +640,7 @@ impl NvmeManager {
 
     pub fn setup_interrupt(&mut self, pci_dev: &PciDevice) -> Result<(), ()> {
         let interrupt_id = setup_msi_or_msi_x(pci_dev, nvme_handler, None, true)?;
-        unsafe { NVME_LIST.push_back((interrupt_id, self as *mut _)) };
+        get_device_list().push_back((interrupt_id, self as *mut _));
         Ok(())
     }
 
@@ -775,7 +775,7 @@ impl NvmeManager {
             command,
         );
         wait_list.result[3] = command_id as u32;
-        queue.wait_list.insert_tail(&mut wait_list.list);
+        unsafe { queue.wait_list.insert_tail(&mut wait_list.list) };
         drop(_lock);
         get_cpu_manager_cluster()
             .run_queue
@@ -1118,18 +1118,23 @@ impl NvmeManager {
                     self.controller_properties_base_address,
                     self.stride,
                 );
-                for e in unsafe { queue.wait_list.iter_mut(offset_of!(WaitListEntry, list)) } {
+                let mut cursor = unsafe {
+                    queue
+                        .wait_list
+                        .cursor_front_mut(offset_of!(WaitListEntry, list))
+                };
+                while let Some(e) = cursor.current().map(|e| unsafe { &mut *e }) {
                     if (e.result[3] & 0xffff) == data[3] & 0xffff {
                         e.result = data;
-                        if let Err(error) = get_kernel_manager_cluster()
-                            .task_manager
-                            .wake_up_thread(e.thread)
-                        {
-                            pr_err!("Failed to wake up the thread: {:?}", error);
-                        }
-                        queue.wait_list.remove(&mut e.list);
+                        bug_on_err!(
+                            get_kernel_manager_cluster()
+                                .task_manager
+                                .wake_up_thread(e.thread)
+                        );
+                        unsafe { cursor.remove_current() };
                         break;
                     }
+                    unsafe { cursor.move_next() };
                 }
             }
         }

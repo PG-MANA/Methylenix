@@ -73,9 +73,11 @@ pub fn setup_cpu_manager_cluster(
 
     unsafe { cpu::set_cpu_base_address(cpu_manager as *const _ as u64) };
     init_struct!(cpu_manager.list, PtrLinkedListNode::new());
-    get_kernel_manager_cluster()
-        .cpu_list
-        .insert_tail(&mut cpu_manager.list);
+    unsafe {
+        get_kernel_manager_cluster()
+            .cpu_list
+            .insert_tail(&mut cpu_manager.list)
+    };
     cpu_manager.cpu_id = cpu::mpidr_to_affinity(cpu::get_mpidr()) as usize;
     cpu_manager
 }

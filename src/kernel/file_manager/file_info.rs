@@ -1,29 +1,25 @@
 //!
-//! Inode
+//! File Information containing inode number and file name
 //!
 
-use super::Partition;
-
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::sync::spin_lock::SpinLockFlag;
+use crate::kernel::{
+    collections::linked_list::GeneralLinkedList, file_manager::Partition, sync::spin_lock::Mutex,
+};
 
 use alloc::string::String;
 
 pub type InodeNumber = u64;
 
 pub struct FileInfo {
-    pub lock: SpinLockFlag,
-    pub list: PtrLinkedListNode<Self>,
     inode_number: InodeNumber,
     file_name: String,
     file_size: u64,
     pub permission_and_flags: u16,
     uid: u32,
     gid: u32,
-    pub reference_counter: usize,
     pub driver: *mut Partition,
     pub parent: *mut FileInfo,
-    pub child: PtrLinkedList<Self>,
+    pub child: GeneralLinkedList<Arc<Mutex<Self>>>,
 }
 
 impl FileInfo {
@@ -40,18 +36,15 @@ impl FileInfo {
 
     pub const fn new(parent: &mut Self) -> Self {
         Self {
-            lock: SpinLockFlag::new(),
-            list: PtrLinkedListNode::new(),
             inode_number: 0,
             file_name: String::new(),
             file_size: 0,
             permission_and_flags: 0,
             uid: 0,
             gid: 0,
-            reference_counter: 0,
             driver: core::ptr::null_mut(),
             parent,
-            child: PtrLinkedList::new(),
+            child: GeneralLinkedList::new(),
         }
     }
 
@@ -65,8 +58,6 @@ impl FileInfo {
             | Self::PERMISSION_FLAG_READ;
 
         Self {
-            lock: SpinLockFlag::new(),
-            list: PtrLinkedListNode::new(),
             inode_number: 0,
             file_name: String::new(),
             file_size: 0,
@@ -76,10 +67,9 @@ impl FileInfo {
                 | Self::FLAGS_DIRECTORY,
             uid: 0,
             gid: 0,
-            reference_counter: 0,
             driver: core::ptr::null_mut(),
             parent: core::ptr::null_mut(),
-            child: PtrLinkedList::new(),
+            child: GeneralLinkedList::new(),
         }
     }
 

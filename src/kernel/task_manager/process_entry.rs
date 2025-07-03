@@ -12,6 +12,7 @@ use crate::kernel::memory_manager::MemoryManager;
 use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
 
 use core::mem::offset_of;
+use core::ptr::NonNull;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -31,7 +32,6 @@ pub struct ProcessEntry {
     parent: *mut ProcessEntry,
     /* kernel process has invalid pointer */
     num_of_thread: usize,
-    single_thread: Option<*mut ThreadEntry>,
     privilege_level: u8,
     next_thread_id: usize,
 
@@ -53,7 +53,6 @@ impl ProcessEntry {
             process_id: 0,
             parent: core::ptr::null_mut(),
             num_of_thread: 0,
-            single_thread: None,
             privilege_level: 0,
             next_thread_id: 0,
             files: Vec::new(),
@@ -81,30 +80,21 @@ impl ProcessEntry {
         self.next_thread_id = 1;
         let _lock = self.lock.lock();
 
-        if threads.len() == 1 {
+        for i in 0..threads.len() {
             let _thread_lock = threads[0].lock.lock();
-            threads[0].set_process(self as *mut _);
-            threads[0].set_t_id(1);
-            self.single_thread = Some(threads[0] as *mut _);
+            threads[i].set_process(self as *mut _);
+            threads[i].set_t_id(self.next_thread_id);
+            drop(_thread_lock);
             self.update_next_thread_id();
-        } else {
-            self.single_thread = None;
-            for i in 0..threads.len() {
-                let _thread_lock = threads[0].lock.lock();
-                threads[i].set_process(self as *mut _);
-                threads[i].set_t_id(self.next_thread_id);
-                drop(_thread_lock);
-                self.update_next_thread_id();
-                let thread = unsafe { &mut *(threads[i] as *mut ThreadEntry) };
-                let prev = if i > 0 {
-                    Some(unsafe { &mut *(threads[i - 1] as *mut ThreadEntry) })
-                } else {
-                    None
-                };
+            let thread = unsafe { &mut *(threads[i] as *mut ThreadEntry) };
+            let prev = if i > 0 {
+                Some(unsafe { &mut *(threads[i - 1] as *mut ThreadEntry) })
+            } else {
+                None
+            };
 
-                self.set_thread_into_thread_list(thread, prev)
-                    .expect("Cannot insert thread.");
-            }
+            self.set_thread_into_thread_list(thread, prev)
+                .expect("Cannot insert thread.");
         }
     }
 
@@ -119,25 +109,27 @@ impl ProcessEntry {
     ) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());
         if self.thread.is_empty() {
-            self.thread.insert_head(&mut thread.t_list);
+            unsafe { self.thread.insert_head(&mut thread.t_list) };
         } else if let Some(prev_thread) = prev_thread {
             let _lock = thread.lock.lock();
             let _prev_lock = prev_thread
                 .lock
                 .try_lock()
                 .or(Err(TaskError::ThreadLockError))?;
-            self.thread
-                .insert_after(&mut prev_thread.t_list, &mut thread.t_list);
+            unsafe {
+                self.thread
+                    .insert_after(&mut prev_thread.t_list, &mut thread.t_list)
+            };
         } else {
             /* Current chain the last of t_list */
-            let tail = unsafe {
-                self.thread
-                    .get_last_entry_mut(offset_of!(ThreadEntry, t_list))
-                    .unwrap()
-            };
+            let tail = self
+                .thread
+                .get_last_entry_mut(offset_of!(ThreadEntry, t_list))
+                .map(|t| unsafe { &mut *t })
+                .unwrap();
             let _lock = thread.lock.lock();
             let _prev_lock = tail.lock.try_lock().or(Err(TaskError::ThreadLockError))?;
-            self.thread.insert_tail(&mut thread.t_list);
+            unsafe { self.thread.insert_tail(&mut thread.t_list) };
         }
         Ok(())
     }
@@ -178,21 +170,8 @@ impl ProcessEntry {
         if self.num_of_thread == 0 {
             return None;
         }
-        if let Some(single_thread) = self.single_thread {
-            let s_t = unsafe { &mut *single_thread };
-            if s_t.get_t_id() == t_id {
-                Some(s_t)
-            } else {
-                None
-            }
-        } else {
-            for thread in unsafe { self.thread.iter_mut(offset_of!(ThreadEntry, t_list)) } {
-                if thread.get_t_id() == t_id {
-                    return Some(thread);
-                }
-            }
-            None
-        }
+        unsafe { self.thread.iter_mut(offset_of!(ThreadEntry, t_list)) }
+            .find(|t| t.get_t_id() == t_id)
     }
 
     /// Add thread into ThreadList.
@@ -206,21 +185,7 @@ impl ProcessEntry {
         thread.set_process(self as *mut _);
         thread.set_t_id(self.next_thread_id);
         self.update_next_thread_id();
-        if self.num_of_thread == 0 {
-            assert!(self.thread.is_empty());
-            assert!(self.single_thread.is_none());
-            self.single_thread = Some(thread as *mut _)
-        } else if self.num_of_thread == 1 {
-            assert!(self.thread.is_empty());
-            assert!(self.single_thread.is_some());
-            let single_thread = unsafe { &mut *self.single_thread.take().unwrap() };
-            self.set_thread_into_thread_list(single_thread, None)?;
-            self.set_thread_into_thread_list(thread, None /* compare and set */)?;
-        } else {
-            assert!(!self.thread.is_empty());
-            assert!(self.single_thread.is_none());
-            self.set_thread_into_thread_list(thread, None)?;
-        }
+        self.set_thread_into_thread_list(thread, None)?;
         self.num_of_thread += 1;
         Ok(())
     }
@@ -235,58 +200,28 @@ impl ProcessEntry {
 
         if self.num_of_thread == 0 {
             return Err(TaskError::InvalidProcessEntry);
-        } else if self.num_of_thread == 1 {
-            assert!(self.thread.is_empty());
-            assert!(self.single_thread.is_some());
-            self.single_thread = None;
-        } else if self.num_of_thread == 2 {
-            self.thread.remove(&mut thread.t_list);
-            let single_thread = unsafe {
-                self.thread
-                    .take_first_entry(offset_of!(ThreadEntry, t_list))
-                    .unwrap()
-            };
-            assert!(self.thread.is_empty());
-            self.single_thread = Some(single_thread as *mut _);
-        } else {
-            self.thread.remove(&mut thread.t_list);
         }
+        unsafe { self.thread.remove(&mut thread.t_list) };
         self.num_of_thread -= 1;
         Ok(())
     }
 
     pub fn take_thread(&mut self) -> Result<Option<&mut ThreadEntry>, TaskError> {
         assert!(self.lock.is_locked());
-        if self.num_of_thread == 0 {
-            Ok(None)
-        } else if self.num_of_thread == 1 {
-            let single = unsafe { &mut *self.single_thread.unwrap() };
-            let _lock = single.lock.lock();
-            self.remove_thread(single)?;
-            drop(_lock);
-            Ok(Some(single))
-        } else {
-            let thread = unsafe {
-                self.thread
-                    .get_first_entry_mut(offset_of!(ThreadEntry, t_list))
-                    .unwrap()
-            };
-            let _lock = thread.lock.lock();
-            self.remove_thread(thread)?;
-            drop(_lock);
-            Ok(Some(thread))
+        match self
+            .thread
+            .get_first_entry_mut(offset_of!(ThreadEntry, t_list))
+        {
+            Some(t) => {
+                let t = unsafe { &mut *t };
+                self.remove_thread(t)?;
+                Ok(Some(t))
+            }
+            None => {
+                assert_eq!(self.num_of_thread, 0);
+                Ok(None)
+            }
         }
-    }
-
-    pub fn get_file(&self, index: usize) -> Option<Arc<Mutex<File<'static>>>> {
-        let _lock = if self.num_of_thread == 1 {
-            None
-        } else {
-            Some(self.file_vec_lock.lock())
-        };
-        let result = self.files.get(index).cloned();
-        drop(_lock);
-        result
     }
 
     pub fn add_file(&mut self, f: File<'static>) -> usize {

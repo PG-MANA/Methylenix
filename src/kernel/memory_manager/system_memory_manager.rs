@@ -204,7 +204,7 @@ impl SystemMemoryManager {
         let _lock = self.lock.lock();
         let count = self.vm_entry_pool.get_count();
         if count > Self::VM_ENTRY_RESERVE {
-            let result = self.vm_entry_pool.alloc();
+            let result = self.vm_entry_pool.alloc().map(|e| unsafe { &mut *e });
             if let Ok(e) = result {
                 if count - 1 <= Self::VM_ENTRY_LOW
                     && let Err(err) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
@@ -296,6 +296,7 @@ impl SystemMemoryManager {
             let entry = self
                 .vm_page_pool
                 .alloc()
+                .map(|e| unsafe { &mut *e })
                 .or(Err(MemoryError::EntryPoolRunOut))?;
             drop(_lock);
             return Ok(entry);
@@ -307,21 +308,17 @@ impl SystemMemoryManager {
         self.alloc_vm_page(_physical_address, is_system_memory_manager, option)
     }
 
-    pub fn free_vm_entry(&mut self, vm_entry: &'static mut VirtualMemoryEntry) {
+    pub fn free_vm_entry(&mut self, vm_entry: &mut VirtualMemoryEntry) {
         let _lock = self.lock.lock();
         self.vm_entry_pool.free(vm_entry)
     }
 
-    pub fn free_vm_object(&mut self, vm_object: &'static mut VirtualMemoryObject) {
+    pub fn free_vm_object(&mut self, vm_object: &mut VirtualMemoryObject) {
         let _lock = self.lock.lock();
         self.vm_object_pool.free(vm_object)
     }
 
-    pub fn free_vm_page(
-        &mut self,
-        vm_page: &'static mut VirtualMemoryPage,
-        _physical_address: PAddress,
-    ) {
+    pub fn free_vm_page(&mut self, vm_page: &mut VirtualMemoryPage, _physical_address: PAddress) {
         let _lock = self.lock.lock();
         self.vm_page_pool.free(vm_page)
     }

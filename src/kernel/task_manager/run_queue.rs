@@ -22,17 +22,17 @@ use crate::kernel::{
 use core::mem::offset_of;
 
 struct RunList {
+    list: PtrLinkedListNode<Self>,
     priority_level: u8,
     thread_list: PtrLinkedList<ThreadEntry>,
-    chain: PtrLinkedListNode<Self>,
 }
 
 impl RunList {
     const fn new(priority_level: u8) -> Self {
         Self {
+            list: PtrLinkedListNode::new(),
             priority_level,
             thread_list: PtrLinkedList::new(),
-            chain: PtrLinkedListNode::new(),
         }
     }
 }
@@ -47,6 +47,24 @@ pub struct RunQueue {
     should_recheck_priority: bool,
     should_reschedule: bool,
     number_of_threads: usize,
+}
+
+macro_rules! get_highest_priority_thread {
+    ($l:expr) => {{
+        use core::mem::offset_of;
+        let mut e = None;
+        for list in unsafe { $l.iter_mut(offset_of!(RunList, list)) } {
+            if let Some(t) = list
+                .thread_list
+                .get_first_entry_mut(offset_of!(ThreadEntry, run_list))
+                .map(|t| unsafe { &mut *t })
+            {
+                e = Some(t);
+                break;
+            }
+        }
+        e
+    }};
 }
 
 impl RunQueue {
@@ -78,7 +96,7 @@ impl RunQueue {
     pub fn start(&mut self) -> ! {
         let _irq = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
-        let thread = Self::get_highest_priority_thread(&mut self.run_list)
+        let thread = get_highest_priority_thread!(self.run_list)
             .unwrap_or(unsafe { &mut *self.idle_thread });
 
         thread.set_task_status(TaskStatus::Running);
@@ -106,36 +124,13 @@ impl RunQueue {
         result
     }
 
-    fn get_highest_priority_thread(
-        run_list: &mut PtrLinkedList<RunList>,
-    ) -> Option<&mut ThreadEntry> {
-        for list in unsafe { run_list.iter_mut(offset_of!(RunList, chain)) } {
-            if let Some(t) = unsafe {
-                list.thread_list
-                    .get_first_entry_mut(offset_of!(ThreadEntry, run_list))
-            } {
-                return Some(t);
-            }
-        }
-        None
-    }
-
-    fn alloc_run_list(
-        allocator: &mut LocalSlabAllocator<RunList>,
-        priority_level: u8,
-    ) -> &'static mut RunList {
-        let run_list = allocator.alloc().expect("Failed to alloc RunList");
-        *run_list = RunList::new(priority_level);
-        run_list
-    }
-
     fn remove_target_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());
         assert!(thread.lock.is_locked());
         let priority = thread.get_priority_level();
-        for list in unsafe { self.run_list.iter_mut(offset_of!(RunList, chain)) } {
+        for list in unsafe { self.run_list.iter_mut(offset_of!(RunList, list)) } {
             if list.priority_level == priority {
-                list.thread_list.remove(&mut thread.run_list);
+                unsafe { list.thread_list.remove(&mut thread.run_list) };
                 return Ok(());
             }
         }
@@ -201,7 +196,7 @@ impl RunQueue {
     }
 
     pub fn get_running_process(&mut self) -> &mut ProcessEntry {
-        unsafe { (*self.running_thread.unwrap()).get_process_mut() }
+        unsafe { &mut *(&mut *self.running_thread.unwrap()).get_process_mut() }
     }
 
     pub fn get_running_pid(&self) -> usize {
@@ -233,6 +228,16 @@ impl RunQueue {
         thread: &mut ThreadEntry,
         is_expired_list: bool,
     ) -> Result<(), TaskError> {
+        macro_rules! alloc_run_list {
+            ($a:expr, $p:expr) => {
+                $a.alloc().map(|mut r| {
+                    let r = unsafe { &mut *r.as_mut() };
+                    crate::kernel::collections::init_struct!(*r, RunList::new($p));
+                    r
+                })
+            };
+        }
+
         assert!(self.lock.is_locked());
         let priority = thread.get_priority_level();
         let target_list = if is_expired_list {
@@ -240,44 +245,56 @@ impl RunQueue {
         } else {
             &mut self.run_list
         };
-        if let Some(mut list) =
-            unsafe { target_list.get_first_entry_mut(offset_of!(RunList, chain)) }
+        if let Some(mut list) = target_list
+            .get_first_entry_mut(offset_of!(RunList, list))
+            .map(|t| unsafe { &mut *t })
         {
             loop {
                 if list.priority_level == priority {
-                    if let Some(last_entry) = unsafe {
-                        list.thread_list
-                            .get_last_entry_mut(offset_of!(ThreadEntry, run_list))
-                    } {
+                    if let Some(last_entry) = list
+                        .thread_list
+                        .get_last_entry_mut(offset_of!(ThreadEntry, run_list))
+                        .map(|t| unsafe { &mut *t })
+                    {
                         let _last_thread_lock = last_entry
                             .lock
                             .try_lock()
                             .or(Err(TaskError::ThreadLockError))?;
-                        list.thread_list.insert_tail(&mut thread.run_list);
+                        unsafe { list.thread_list.insert_tail(&mut thread.run_list) };
                     } else {
-                        list.thread_list.insert_head(&mut thread.run_list);
+                        unsafe { list.thread_list.insert_head(&mut thread.run_list) };
                     }
                     break;
                 }
                 if list.priority_level > priority {
-                    let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
-                    run_list.thread_list.insert_head(&mut thread.run_list);
-                    target_list.insert_before(&mut list.chain, &mut run_list.chain);
+                    let run_list = alloc_run_list!(self.run_list_allocator, priority)?;
+                    unsafe {
+                        run_list.thread_list.insert_head(&mut thread.run_list);
+                        target_list.insert_before(&mut list.list, &mut run_list.list);
+                    }
                     break;
                 }
-                if let Some(next) = unsafe { list.chain.get_next_mut(offset_of!(RunList, chain)) } {
+                if let Some(next) = list
+                    .list
+                    .get_next_mut(offset_of!(RunList, list))
+                    .map(|t| unsafe { &mut *t })
+                {
                     list = next;
                 } else {
-                    let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
-                    run_list.thread_list.insert_head(&mut thread.run_list);
-                    target_list.insert_tail(&mut run_list.chain);
+                    let run_list = alloc_run_list!(self.run_list_allocator, priority)?;
+                    unsafe {
+                        run_list.thread_list.insert_head(&mut thread.run_list);
+                        target_list.insert_tail(&mut run_list.list);
+                    }
                     break;
                 }
             }
         } else {
-            let run_list = Self::alloc_run_list(&mut self.run_list_allocator, priority);
-            run_list.thread_list.insert_head(&mut thread.run_list);
-            target_list.insert_head(&mut run_list.chain);
+            let run_list = alloc_run_list!(self.run_list_allocator, priority)?;
+            unsafe {
+                run_list.thread_list.insert_head(&mut thread.run_list);
+                target_list.insert_head(&mut run_list.list);
+            }
         }
 
         if !is_expired_list {
@@ -379,11 +396,11 @@ impl RunQueue {
         let _lock = lock.unwrap_or_else(|| self.lock.lock());
         let get_prev_thread_lock =
             |running_thread: &mut ThreadEntry| -> Option<SpinLockFlagHolder> {
-                if let Some(prev_thread) = unsafe {
-                    running_thread
-                        .run_list
-                        .get_prev_mut(offset_of!(ThreadEntry, run_list))
-                } {
+                if let Some(prev_thread) = running_thread
+                    .run_list
+                    .get_prev_mut(offset_of!(ThreadEntry, run_list))
+                    .map(|t| unsafe { &mut *t })
+                {
                     Some(prev_thread.lock.lock())
                 } else {
                     None
@@ -395,11 +412,11 @@ impl RunQueue {
 
         macro_rules! get_next_thread {
             () => {
-                if let Some(t) = Self::get_highest_priority_thread(&mut self.run_list) {
+                if let Some(t) = get_highest_priority_thread!(&mut self.run_list) {
                     t
                 } else {
                     core::mem::swap(&mut self.run_list, &mut self.expired_list);
-                    if let Some(t) = Self::get_highest_priority_thread(&mut self.run_list) {
+                    if let Some(t) = get_highest_priority_thread!(&mut self.run_list) {
                         t
                     } else {
                         unsafe { &mut *self.idle_thread }
@@ -407,12 +424,12 @@ impl RunQueue {
                 }
             };
         }
-        let next_thread = if let Some(next_thread) = unsafe {
-            running_thread
-                .run_list
-                .get_next_mut(offset_of!(ThreadEntry, run_list))
-        } {
-            assert_ne!(running_thread as *mut _, self.idle_thread);
+        let next_thread = if let Some(next_thread) = running_thread
+            .run_list
+            .get_next_mut(offset_of!(ThreadEntry, run_list))
+            .map(|t| unsafe { &mut *t })
+        {
+            assert!(!core::ptr::eq(running_thread, self.idle_thread));
 
             let _next_thread_lock = next_thread.lock.lock();
             let _prev_lock = get_prev_thread_lock(running_thread);
@@ -430,7 +447,7 @@ impl RunQueue {
 
             if self.should_recheck_priority {
                 self.should_recheck_priority = false;
-                Self::get_highest_priority_thread(&mut self.run_list).unwrap_or(next_thread)
+                get_highest_priority_thread!(self.run_list).unwrap_or(next_thread)
             } else {
                 next_thread
             }

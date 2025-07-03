@@ -19,9 +19,6 @@ use crate::kernel::{
     task_manager::work_queue::WorkList,
 };
 
-use core::ptr::NonNull;
-
-use alloc::collections::LinkedList;
 use alloc::vec::Vec;
 
 /*const PREAMBLE: (u8, usize) = (0b10101010, 7);
@@ -71,7 +68,7 @@ pub struct EthernetDeviceManager {
     device_list: Vec<EthernetDeviceDescriptor>,
     memory_buffer: [(VAddress, PAddress); Self::NUMBER_OF_MEMORY_BUFFER],
     number_of_memory_buffer: usize,
-    tx_list: LinkedList<TxEntry>,
+    tx_list: GeneralLinkedList<TxEntry>,
     next_id: u32,
 }
 
@@ -141,7 +138,7 @@ impl EthernetDeviceManager {
             memory_buffer: [(VAddress::new(0), PAddress::new(0)); Self::NUMBER_OF_MEMORY_BUFFER],
             number_of_memory_buffer: 0,
             device_list: Vec::new(),
-            tx_list: LinkedList::new(),
+            tx_list: GeneralLinkedList::new(),
             next_id: 0,
         }
     }
@@ -242,7 +239,11 @@ impl EthernetDeviceManager {
             length: result,
             result: 0,
         };
-        self.tx_list.push_back(entry.clone());
+        if let Err(err) = self.tx_list.push_back(entry.clone()) {
+            pr_err!("Failed to allocate memory: {:?}", err);
+            bug_on_err!(free_pages!(buffer.0));
+            return Err(NetworkError::MemoryError(err));
+        }
         self.next_id = self.next_id.overflowing_add(1).0;
         let driver = unsafe { &mut *(self.device_list[device_id].driver) };
         let info = self.device_list[device_id].info.clone();
@@ -253,9 +254,9 @@ impl EthernetDeviceManager {
             let mut cursor = self.tx_list.cursor_front_mut();
             while let Some(e) = cursor.current() {
                 if e.entry_id == assigned_id {
+                    bug_on_err!(cursor.remove_current_drop());
                     self.memory_buffer[self.number_of_memory_buffer] = buffer;
                     self.number_of_memory_buffer += 1;
-                    let _ = cursor.remove_current();
                     drop(_lock);
                     break;
                 }
@@ -298,7 +299,7 @@ impl EthernetDeviceManager {
                 }
                 s.memory_buffer[s.number_of_memory_buffer] = e.buffer;
                 s.number_of_memory_buffer += 1;
-                let _ = cursor.remove_current();
+                bug_on_err!(cursor.remove_current_drop());
                 drop(_lock);
                 break;
             }

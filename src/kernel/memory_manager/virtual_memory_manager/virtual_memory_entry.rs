@@ -60,8 +60,10 @@ impl VirtualMemoryEntry {
 
     pub fn set_vm_end_address(&mut self, new_end_address: VAddress) {
         let _lock = self.lock.lock();
-        if let Some(next_entry) =
-            unsafe { self.list.get_next(offset_of!(VirtualMemoryEntry, list)) }
+        if let Some(next_entry) = self
+            .list
+            .get_next(offset_of!(VirtualMemoryEntry, list))
+            .map(|e| unsafe { &*e })
         {
             assert!(next_entry.get_vm_start_address() > new_end_address);
         }

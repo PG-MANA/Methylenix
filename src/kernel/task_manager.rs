@@ -85,6 +85,38 @@ impl From<MemoryError> for TaskError {
     }
 }
 
+macro_rules! allocate_new_thread {
+    ($s:expr) => {
+        $s.thread_entry_pool
+            .alloc()
+            .map(|mut e| unsafe { &mut *e.as_mut() })
+    };
+}
+
+macro_rules! allocate_new_process {
+    ($s:expr) => {
+        $s.process_entry_pool
+            .alloc()
+            .map(|mut e| unsafe { &mut *e.as_mut() })
+    };
+}
+
+macro_rules! free_thread {
+    ($s:expr,$t:expr) => {
+        unsafe { core::ptr::drop_in_place($t) };
+        $s.thread_entry_pool
+            .free(core::ptr::NonNull::new($t).unwrap())
+    };
+}
+
+macro_rules! free_process {
+    ($s:expr,$p:expr) => {
+        unsafe { core::ptr::drop_in_place($p) };
+        $s.process_entry_pool
+            .free(core::ptr::NonNull::new($p).unwrap())
+    };
+}
+
 impl TaskManager {
     pub const FLAG_LOCAL_THREAD: u8 = 1;
 
@@ -124,9 +156,9 @@ impl TaskManager {
             .expect("Failed to init the ThreadEntryPool");
 
         /* Create the kernel process and threads */
-        let kernel_process = self.process_entry_pool.alloc().unwrap();
-        let main_thread = self.thread_entry_pool.alloc().unwrap();
-        let idle_thread = self.thread_entry_pool.alloc().unwrap();
+        let kernel_process = allocate_new_process!(self).unwrap();
+        let main_thread = allocate_new_thread!(self).unwrap();
+        let idle_thread = allocate_new_thread!(self).unwrap();
 
         main_thread.init(
             kernel_process,
@@ -197,7 +229,7 @@ impl TaskManager {
         stack_size: Option<MSize>,
     ) -> Result<&'static mut ThreadEntry, TaskError> {
         assert!(self.lock.is_locked());
-        let new_thread = self.thread_entry_pool.alloc()?;
+        let new_thread = allocate_new_thread!(self)?;
         let _original_thread_lock = thread.lock.lock();
         let new_context = self.context_manager.fork_system_context(
             thread.get_context(),
@@ -336,7 +368,7 @@ impl TaskManager {
                 user_memory_manager as *mut _,
                 privilege_level,
             );
-            self.p_list.insert_tail(&mut new_process.p_list);
+            unsafe { self.p_list.insert_tail(&mut new_process.p_list) };
             self.update_next_p_id();
             new_process
         };
@@ -361,33 +393,33 @@ impl TaskManager {
         assert_ne!(process.get_pid(), 0);
         let _lock = self.lock.lock();
         let result = try {
-            let new_thread = self.thread_entry_pool.alloc()?;
-            let context_data = self.get_context_manager().create_user_context(
+            let new_thread = allocate_new_thread!(self)?;
+            let context_data = match self.get_context_manager().create_user_context(
                 entry_address,
                 stack_address,
                 arguments,
-            );
-            if let Err(e) = context_data {
-                pr_err!("Failed to create thread context: {:?}", e);
-                self.thread_entry_pool.free(new_thread);
-                Err(TaskError::MemoryError(e))?;
-                unreachable!() /* To avoid compile error */
-            }
+            ) {
+                Ok(c) => c,
+                Err(err) => {
+                    pr_err!("Failed to create thread context: {:?}", err);
+                    free_thread!(self, new_thread);
+                    return Err(TaskError::MemoryError(err));
+                }
+            };
 
             new_thread.init(
                 process,
                 priority_level,
                 SchedulingClass::UserThread(UserSchedulingClass::new()),
-                context_data.unwrap(),
+                context_data,
             );
             new_thread.set_priority_level(UserSchedulingClass::get_custom_priority(priority_level));
             new_thread.set_task_status(TaskStatus::New);
             let _process_lock = process.lock.lock();
-            if let Err(e) = process.add_thread(new_thread) {
-                pr_err!("Failed to add a thread into the process: {:?}", e);
-                self.thread_entry_pool.free(new_thread);
-                Err(e)?;
-                unreachable!() /* To avoid compile error */
+            if let Err(err) = process.add_thread(new_thread) {
+                pr_err!("Failed to add a thread into the process: {:?}", err);
+                free_thread!(self, new_thread);
+                return Err(err);
             }
             new_thread
         };
@@ -429,8 +461,7 @@ impl TaskManager {
                 pr_err!("Thread is not stopped.");
                 return Err(TaskError::InvalidProcessEntry);
             }
-            self.thread_entry_pool
-                .free(unsafe { &mut *(thread as *mut _) });
+            free_thread!(self, thread);
         }
 
         /* Delete from parent */
@@ -453,12 +484,7 @@ impl TaskManager {
                 }
                 _lock = None;
             }
-            parent.children.remove(&mut target_process.siblings);
-        }
-
-        /* Delete Files */
-        while let Some(file) = target_process.remove_file_from_list_append() {
-            unsafe { file.lock().unwrap().close_ref() };
+            unsafe { parent.children.remove(&mut target_process.siblings) };
         }
 
         /* Delete Memory Manager */
@@ -466,10 +492,9 @@ impl TaskManager {
         memory_manager.free_all_allocated_memory()?;
         let _ = kfree!(memory_manager);
         let _self_lock = self.lock.lock();
-        self.p_list.remove(&mut target_process.p_list);
+        unsafe { self.p_list.remove(&mut target_process.p_list) };
         drop(_lock);
-        self.process_entry_pool
-            .free(unsafe { &mut *(target_process as *mut _) });
+        free_process!(self, target_process);
         drop(_self_lock);
         Ok(())
     }

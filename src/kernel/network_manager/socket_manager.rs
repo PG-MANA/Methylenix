@@ -118,7 +118,7 @@ impl SocketManager {
                     &s.layer_info.transport,
                 )];
                 let _lock = socket_list.lock.lock();
-                socket_list.list.insert_tail(&mut s.list);
+                unsafe { socket_list.list.insert_tail(&mut s.list) };
                 drop(_lock);
                 Ok(s)
             }
@@ -141,7 +141,7 @@ impl SocketManager {
         socket.list = PtrLinkedListNode::new();
         socket.waiting_socket = PtrLinkedList::new();
         let _lock = self.listening_socket_lock.lock();
-        self.listening_socket.insert_tail(&mut socket.list);
+        unsafe { self.listening_socket.insert_tail(&mut socket.list) };
         drop(_lock);
         Ok(())
     }
@@ -157,6 +157,7 @@ impl SocketManager {
             socket
                 .waiting_socket
                 .take_first_entry(offset_of!(Socket, list))
+                .map(|e| &mut *e)
         } {
             drop(_socket_lock);
             waiting_socket.list = PtrLinkedListNode::new();
@@ -165,7 +166,7 @@ impl SocketManager {
                 &waiting_socket.layer_info.transport,
             )];
             let _lock = socket_list.lock.lock();
-            socket_list.list.insert_tail(&mut waiting_socket.list);
+            unsafe { socket_list.list.insert_tail(&mut waiting_socket.list) };
             drop(_lock);
             /* Send ACK */
             if let TransportType::Tcp(tcp_session) = &mut waiting_socket.layer_info.transport {
@@ -350,6 +351,7 @@ impl SocketManager {
             socket
                 .waiting_socket
                 .take_first_entry(offset_of!(Socket, list))
+                .map(|e| &mut *e)
         } {
             let _child_socket_lock = child_socket.lock.lock();
             if child_socket.is_active {
@@ -588,10 +590,8 @@ impl SocketManager {
                     }
                     let child_socket = child_socket.unwrap();
                     let _socket_lock = e.lock.lock();
-                    e.waiting_socket.insert_tail(&mut child_socket.list);
-                    if let Err(err) = e.wait_queue.wakeup_all() {
-                        pr_err!("Failed to wake up threads: {:?}", err);
-                    }
+                    unsafe { e.waiting_socket.insert_tail(&mut child_socket.list) };
+                    bug_on_err!(e.wait_queue.wakeup_all());
                     drop(_socket_lock);
                     return Ok(());
                 }

@@ -11,6 +11,7 @@
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 use crate::arch::target_arch::interrupt::InterruptManager;
 
+use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
@@ -35,7 +36,7 @@ pub struct GlobalTimerManager {
 }
 
 pub struct TimerList {
-    pub(super) t_list: PtrLinkedListNode<Self>,
+    pub(super) list: PtrLinkedListNode<Self>,
     timeout: u64,
     function: fn(usize),
     data: usize,
@@ -200,53 +201,52 @@ impl LocalTimerManager {
         let current = get_kernel_manager_cluster()
             .global_timer_manager
             .get_current_tick();
+        let (timeout, is_overflowed) = GlobalTimerManager::calculate_timeout(current, wait_ms);
         let list = match self.timer_list_pool.alloc() {
-            Ok(a) => a,
-            Err(e) => {
+            Ok(mut e) => {
+                let e = unsafe { &mut *e.as_mut() };
+                init_struct!(
+                    *e,
+                    TimerList {
+                        list: PtrLinkedListNode::new(),
+                        timeout,
+                        function,
+                        data,
+                        flags: AtomicU8::new(TIMER_LIST_FLAGS_WAITING),
+                    }
+                );
+                e
+            }
+            Err(err) => {
                 InterruptManager::restore_local_irq(irq);
-                pr_err!("Failed to allocate TimerList: {:?}", e);
+                pr_err!("Failed to allocate TimerList: {:?}", err);
                 return Err(());
             }
         };
-        let is_overflowed;
-        list.data = data;
-        list.function = function;
-        (list.timeout, is_overflowed) = GlobalTimerManager::calculate_timeout(current, wait_ms);
-        list.flags = AtomicU8::new(TIMER_LIST_FLAGS_WAITING);
 
-        if let Some(e) = unsafe {
+        let mut cursor = unsafe {
             self.timer_list
-                .get_first_entry_mut(offset_of!(TimerList, t_list))
-        } {
-            let mut entry = e;
-            loop {
+                .cursor_front_mut(offset_of!(TimerList, list))
+        };
+        loop {
+            if let Some(entry) = cursor.current().map(|e| unsafe { &mut *e }) {
                 if !is_overflowed {
                     if entry.timeout >= current && entry.timeout > list.timeout {
-                        self.timer_list
-                            .insert_before(&mut entry.t_list, &mut list.t_list);
+                        unsafe { cursor.insert_before(&mut list.list) };
                         break;
                     }
                 } else if entry.timeout <= current && entry.timeout > list.timeout {
-                    self.timer_list
-                        .insert_before(&mut entry.t_list, &mut list.t_list);
+                    unsafe { cursor.insert_before(&mut list.list) };
                     break;
                 }
-                if let Some(e) = unsafe { entry.t_list.get_next_mut(offset_of!(TimerList, t_list)) }
-                {
-                    entry = e;
-                } else {
-                    self.timer_list
-                        .insert_after(&mut entry.t_list, &mut list.t_list);
-                    break;
-                }
+                unsafe { cursor.move_next() };
+            } else {
+                unsafe { cursor.insert_after(&mut list.list) };
+                break;
             }
-            InterruptManager::restore_local_irq(irq);
-            Ok(0)
-        } else {
-            self.timer_list.insert_head(&mut list.t_list);
-            InterruptManager::restore_local_irq(irq);
-            Ok(0)
         }
+        InterruptManager::restore_local_irq(irq);
+        Ok(0)
     }
 
     pub fn local_timer_handler(&mut self) {
@@ -254,11 +254,12 @@ impl LocalTimerManager {
             .global_timer_manager
             .get_current_tick();
         let is_overflowed = current_tick < self.last_processed_timeout;
-
-        while let Some(t) = unsafe {
+        let mut cursor = unsafe {
             self.timer_list
-                .get_first_entry(offset_of!(TimerList, t_list))
-        } {
+                .cursor_front_mut(offset_of!(TimerList, list))
+        };
+
+        while let Some(t) = cursor.current().map(|e| unsafe { &mut *e }) {
             if (!is_overflowed
                 && self.last_processed_timeout < t.timeout
                 && t.timeout <= current_tick)
@@ -272,18 +273,10 @@ impl LocalTimerManager {
                     Ordering::Relaxed,
                 ) {
                     if e == TIMER_LIST_FLAGS_CANCELED {
-                        self.timer_list_pool.free(unsafe {
-                            self.timer_list
-                                .take_first_entry(offset_of!(TimerList, t_list))
-                                .unwrap()
-                        });
+                        unsafe { cursor.remove_current() };
                     } else {
                         pr_err!("Unexpected flag: {:#X}", e);
-                        let _ = unsafe {
-                            self.timer_list
-                                .take_first_entry(offset_of!(TimerList, t_list))
-                                .unwrap()
-                        };
+                        unsafe { cursor.remove_current() };
                     }
                     continue;
                 }
@@ -294,11 +287,7 @@ impl LocalTimerManager {
                     pr_err!("Failed to add the work of timer_list: {:?}", e);
                     break;
                 }
-                unsafe {
-                    self.timer_list
-                        .take_first_entry(offset_of!(TimerList, t_list))
-                        .unwrap()
-                };
+                unsafe { cursor.remove_current() };
             } else {
                 self.last_processed_timeout = current_tick;
                 break;
@@ -330,6 +319,7 @@ impl LocalTimerManager {
     }
 
     fn expired_timer_list_worker(data: usize) {
+        use core::ptr::NonNull;
         let entry = unsafe { &mut *(data as *mut TimerList) };
         if let Err(e) = entry.flags.compare_exchange(
             TIMER_LIST_FLAGS_EXPIRED,
@@ -344,7 +334,7 @@ impl LocalTimerManager {
             get_cpu_manager_cluster()
                 .local_timer_manager
                 .timer_list_pool
-                .free(entry);
+                .free(NonNull::new(entry).unwrap());
             InterruptManager::restore_local_irq(irq);
             return;
         }
@@ -356,7 +346,7 @@ impl LocalTimerManager {
         get_cpu_manager_cluster()
             .local_timer_manager
             .timer_list_pool
-            .free(entry);
+            .free(NonNull::new(entry).unwrap());
         InterruptManager::restore_local_irq(irq);
     }
 }

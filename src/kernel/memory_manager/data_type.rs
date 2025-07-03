@@ -219,6 +219,10 @@ impl VAddress {
     pub const unsafe fn to_direct_mapped_p_address(&self) -> PAddress {
         PAddress::new(self.0)
     }
+
+    pub const fn to<T>(self) -> *mut T {
+        self.0 as *mut T
+    }
 }
 
 impl<T: Sized> From<VAddress> for *mut T {

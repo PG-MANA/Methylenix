@@ -186,9 +186,11 @@ pub fn setup_cpu_manager_cluster(
         )
     };
     init_struct!(cpu_manager.list, PtrLinkedListNode::new());
-    get_kernel_manager_cluster()
-        .cpu_list
-        .insert_tail(&mut cpu_manager.list);
+    unsafe {
+        get_kernel_manager_cluster()
+            .cpu_list
+            .insert_tail(&mut cpu_manager.list)
+    };
     cpu_manager
 }
 

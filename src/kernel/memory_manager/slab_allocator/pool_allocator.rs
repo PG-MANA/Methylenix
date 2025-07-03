@@ -69,16 +69,12 @@ impl<T> PoolAllocator<T> {
             pool_size -= padding;
         }
         for _ in 0..(pool_size / self.object_size) {
-            self.free_ptr(pool_address as *mut T);
+            self.free(pool_address as *mut T);
             pool_address += self.object_size;
         }
     }
 
-    pub fn alloc(&mut self) -> Result<&'static mut T, ()> {
-        self.alloc_ptr().map(|p| unsafe { &mut *p })
-    }
-
-    pub fn alloc_ptr(&mut self) -> Result<*mut T, ()> {
+    pub fn alloc(&mut self) -> Result<*mut T, ()> {
         if self.linked_count == 0 {
             return Err(());
         }
@@ -89,11 +85,7 @@ impl<T> PoolAllocator<T> {
         Ok((e.as_ptr() as usize - self.offset) as *mut T)
     }
 
-    pub fn free(&mut self, target: &'static mut T) {
-        self.free_ptr(target as *mut T)
-    }
-
-    pub fn free_ptr(&mut self, target: *mut T) {
+    pub fn free(&mut self, target: *mut T) {
         /* Do not use target after free */
         assert!(self.linked_count < usize::MAX);
         let e = (target as usize + self.offset) as *mut FreeList;
