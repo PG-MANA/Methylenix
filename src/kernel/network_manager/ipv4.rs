@@ -7,8 +7,6 @@ use super::{LinkType, NetworkError, tcp, udp};
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::kfree;
 
-use alloc::vec::Vec;
-
 const IPV4_VERSION: u8 = 0x04;
 const IPV4_DEFAULT_IHL: u8 = 0x05;
 pub const IPV4_DEFAULT_HEADER_SIZE: usize = IPV4_DEFAULT_IHL as usize * 4;
@@ -64,8 +62,6 @@ impl Ipv4ConnectionInfo {
         self.get_destination_address()
     }
 }
-
-static mut DEFAULT_IPV4_ADDRESS: Vec<u32> = Vec::new();
 
 #[allow(dead_code)]
 impl DefaultIpv4Packet {
@@ -285,19 +281,7 @@ pub(super) fn ipv4_packet_handler(
         ),
         t => {
             pr_err!("Unknown Protocol Type: {:#X}", t);
-            let _ = kfree!(allocated_data_base, data_length);
+            bug_on_err!(kfree!(allocated_data_base, data_length));
         }
     }
-}
-
-pub fn get_default_ipv4_address(device_id: usize) -> Option<u32> {
-    unsafe { DEFAULT_IPV4_ADDRESS.get(device_id) }
-        .and_then(|a| if *a == 0 { None } else { Some(*a) })
-}
-
-pub fn set_default_ipv4_address(device_id: usize, address: u32) {
-    if unsafe { DEFAULT_IPV4_ADDRESS.len() } <= device_id {
-        unsafe { DEFAULT_IPV4_ADDRESS.resize(device_id + 1, 0) };
-    }
-    unsafe { DEFAULT_IPV4_ADDRESS[device_id] = address }
 }

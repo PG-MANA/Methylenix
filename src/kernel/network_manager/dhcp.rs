@@ -433,7 +433,6 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
                     is_hex: false
                 },
             );
-            set_default_ipv4_address(device_id, offered_address);
             Ok(offered_address)
         }
         &DHCP_MESSAGE_TYPE_PNACK => {
