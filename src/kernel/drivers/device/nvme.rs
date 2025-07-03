@@ -532,11 +532,12 @@ impl PciDeviceDriver for NvmeManager {
             return Err(());
         }
 
+        let mut detected_ns = false;
         let nsid_table =
             unsafe { &*(identify_info_virtual_address.to_usize() as *const [u32; 0x1000 / 4]) };
         for nsid in nsid_table {
             if *nsid == 0 {
-                break;
+                continue;
             }
             pr_debug!("Active NSID: {:#X}", *nsid);
             match nvme_manager.detect_name_space(*nsid, false) {
@@ -553,13 +554,10 @@ impl PciDeviceDriver for NvmeManager {
             get_kernel_manager_cluster()
                 .block_device_manager
                 .add_block_device(descriptor);
+            detected_ns = true;
         }
-        if nsid_table[0] == 0 {
-            pr_err!("There is no usable name space");
-            bug_on_err!(free_pages!(identify_info_virtual_address));
-            bug_on_err!(free_pages!(admin_completion_queue_virtual_address));
-            bug_on_err!(free_pages!(admin_submission_queue_virtual_address));
-            return Ok(());
+        if !detected_ns {
+            pr_err!("There is no NameSpace");
         }
 
         bug_on_err!(free_pages!(identify_info_virtual_address));
@@ -1006,7 +1004,7 @@ impl NvmeManager {
 
         let mut command = [0u32; 16];
         command[0] = 0x02;
-        command[1] = 0x01;
+        command[1] = name_space.id;
 
         let mut pre_list_virtual_address: Option<VAddress> = None;
         let read_size = (number_of_blocks << name_space.lba_block_size_exp) as usize;
