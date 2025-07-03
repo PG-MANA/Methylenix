@@ -56,7 +56,12 @@ pub struct KernelManagerCluster<'a> {
 #[inline(always)]
 pub fn get_kernel_manager_cluster() -> &'static mut KernelManagerCluster<'static> {
     /* You must assign new struct before use the structs!! */
-    unsafe { STATIC_KERNEL_MANAGER_CLUSTER.assume_init_mut() }
+    unsafe {
+        (&raw mut STATIC_KERNEL_MANAGER_CLUSTER)
+            .as_mut()
+            .unwrap()
+            .assume_init_mut()
+    }
 }
 
 pub struct CpuManagerCluster<'a> {

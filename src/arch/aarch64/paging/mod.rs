@@ -172,11 +172,13 @@ impl PageManager {
     }
 
     fn get_canonical_address(address: VAddress) -> Result<VAddress, PagingError> {
+        let high_memory_start_address =
+            unsafe { *((&raw const HIGH_MEMORY_START_ADDRESS).as_ref().unwrap()) };
         if address.to_usize() & (1 << (u64::BITS - 1)) != 1 {
-            if address >= unsafe { HIGH_MEMORY_START_ADDRESS } {
-                Ok(unsafe {
-                    VAddress::new(address.to_usize() - HIGH_MEMORY_START_ADDRESS.to_usize())
-                })
+            if address >= high_memory_start_address {
+                Ok(VAddress::new(
+                    address.to_usize() - high_memory_start_address.to_usize(),
+                ))
             } else {
                 Err(PagingError::AddressIsNotCanonical)
             }
