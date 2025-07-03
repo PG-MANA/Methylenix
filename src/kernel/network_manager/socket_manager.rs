@@ -52,7 +52,7 @@ impl Default for SocketManager {
     }
 }
 
-impl SocketManager {
+impl<'a> SocketManager {
     const DEFAULT_SOCKET_CLOSE_TIME_OUT_MS: u64 = 10 * 1000;
     /// Self::active_list\[(1 << Self:::SOCKET_LIST_ORDER\]
     const SOCKET_LIST_ORDER: usize = 4;
@@ -104,10 +104,7 @@ impl SocketManager {
         })
     }
 
-    pub fn add_socket(
-        &'static mut self,
-        socket: Socket,
-    ) -> Result<&'static mut Socket, NetworkError> {
+    pub fn add_socket(&mut self, socket: Socket) -> Result<&'static mut Socket, NetworkError> {
         match kmalloc!(Socket, socket) {
             Ok(s) => {
                 s.is_active = true;
@@ -129,10 +126,7 @@ impl SocketManager {
         }
     }
 
-    pub fn add_listening_socket(
-        &'static mut self,
-        socket: &'static mut Socket,
-    ) -> Result<(), NetworkError> {
+    pub fn add_listening_socket(&'a mut self, socket: &'a mut Socket) -> Result<(), NetworkError> {
         match &mut socket.layer_info.transport {
             TransportType::Tcp(tcp_info) => tcp_info.set_status(tcp::TcpSessionStatus::Listening),
             TransportType::Udp(_) => { /* Do nothing */ }
@@ -147,10 +141,10 @@ impl SocketManager {
     }
 
     pub fn activate_waiting_socket(
-        &'static mut self,
-        socket: &mut Socket,
+        &mut self,
+        socket: &'a mut Socket,
         allow_sleep: bool,
-    ) -> Result<&'static mut Socket, NetworkError> {
+    ) -> Result<&'a mut Socket, NetworkError> {
         let _socket_lock = socket.lock.lock();
 
         if let Some(waiting_socket) = unsafe {
@@ -314,7 +308,7 @@ impl SocketManager {
         }
     }
 
-    pub fn close_socket(&mut self, socket: &'static mut Socket) -> Result<(), NetworkError> {
+    pub fn close_socket(&mut self, socket: &mut Socket) -> Result<(), NetworkError> {
         self._close_socket(socket)
     }
 
