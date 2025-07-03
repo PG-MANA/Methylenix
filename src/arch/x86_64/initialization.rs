@@ -164,7 +164,7 @@ pub fn init_local_timer() {
 /// Allocate CpuManager and set the self-pointer
 pub fn setup_cpu_manager_cluster(
     cpu_manager_address: Option<VAddress>,
-) -> &'static mut CpuManagerCluster {
+) -> &'static mut CpuManagerCluster<'static> {
     let cpu_manager_address = cpu_manager_address.unwrap_or_else(|| {
         /* ATTENTION: BSP must be sleeping. */
         get_kernel_manager_cluster()

@@ -43,11 +43,11 @@ pub struct TimerList {
     flags: AtomicU8,
 }
 
-pub struct LocalTimerManager {
+pub struct LocalTimerManager<'a> {
     timer_list: PtrLinkedList<TimerList>,
     timer_list_pool: LocalSlabAllocator<TimerList>,
     last_processed_timeout: u64,
-    source_timer: Option<&'static dyn Timer>,
+    source_timer: Option<&'a dyn Timer>,
 }
 
 const TIMER_LIST_FLAGS_WAITING: u8 = 0;
@@ -175,13 +175,13 @@ impl GlobalTimerManager {
     }
 }
 
-impl Default for LocalTimerManager {
+impl Default for LocalTimerManager<'_> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LocalTimerManager {
+impl<'a> LocalTimerManager<'a> {
     pub fn new() -> Self {
         Self {
             timer_list: PtrLinkedList::new(),
@@ -249,7 +249,7 @@ impl LocalTimerManager {
         Ok(0)
     }
 
-    pub fn local_timer_handler(&mut self) {
+    pub fn local_timer_handler(&'a mut self) {
         let current_tick = get_kernel_manager_cluster()
             .global_timer_manager
             .get_current_tick();
