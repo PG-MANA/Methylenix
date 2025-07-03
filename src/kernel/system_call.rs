@@ -12,7 +12,7 @@ use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::system_call;
 
-use crate::kernel::file_manager::{File, FileSeekOrigin, PathInfo, FILE_PERMISSION_READ};
+use crate::kernel::file_manager::{FILE_PERMISSION_READ, File, FileSeekOrigin, PathInfo};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::{
     Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
@@ -341,7 +341,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             let file = file.unwrap();
             let sock_addr_address = context.get_system_call_arguments(2).unwrap();
             let sock_addr_size = context.get_system_call_arguments(3).unwrap();
-            if sock_addr_size as usize != core::mem::size_of::<socket_system_call::SockAddr>() {
+            if sock_addr_size as usize != size_of::<socket_system_call::SockAddr>() {
                 pr_debug!("Unsupported the size of SockAddr: {sock_addr_size}");
                 context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
                 return;
@@ -391,7 +391,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
             //let sock_addr_address = context.get_system_call_arguments(2).unwrap();
             //let sock_addr_size_address = context.get_system_call_arguments(3).unwrap();
-            /*if sock_addr_size as usize != core::mem::size_of::<socket_system_call::SockAddr>() {
+            /*if sock_addr_size as usize != size_of::<socket_system_call::SockAddr>() {
                 pr_debug!("Unsupported the size of SockAddr: {sock_addr_size}");
                 context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
                 return;

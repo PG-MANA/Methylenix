@@ -436,7 +436,7 @@ impl NameString {
     }
 
     pub const fn from_array_const(array: &[[u8; 4]], is_absolute: bool) -> Self {
-        let array_len: usize = core::mem::size_of_val(array) / core::mem::size_of::<[u8; 4]>();
+        let array_len: usize = size_of_val(array) / size_of::<[u8; 4]>();
         if array_len > Self::NORMAL_LIMIT {
             panic!("array is bigger than NameString buffer.");
         }

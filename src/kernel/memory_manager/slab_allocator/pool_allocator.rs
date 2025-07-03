@@ -5,6 +5,7 @@
 //! This allows nullptr for accessing Physical Address:0
 //!
 
+use core::mem::align_of;
 use core::ptr::NonNull;
 
 pub struct PoolAllocator<T> {
@@ -21,10 +22,9 @@ struct FreeList {
 
 /// PoolAllocator
 ///
-/// This allocator is FILO(First In Last Out) to increase the probability of cache-hit.
+/// This allocator is FILO (First In Last Out) to increase the probability of cache-hit.
 impl<T> PoolAllocator<T> {
     const fn size_check() {
-        use core::mem::{align_of, size_of};
         let mut object_size = size_of::<T>();
         if object_size < align_of::<T>() {
             object_size = align_of::<T>();
@@ -40,8 +40,7 @@ impl<T> PoolAllocator<T> {
     }
 
     pub const fn new() -> Self {
-        use core::mem::{align_of, size_of};
-        const { Self::size_check() };
+        Self::size_check();
         let mut object_size = size_of::<T>();
         if object_size < align_of::<T>() {
             object_size = align_of::<T>();
@@ -64,9 +63,8 @@ impl<T> PoolAllocator<T> {
     }
 
     pub unsafe fn add_pool(&mut self, mut pool_address: usize, mut pool_size: usize) {
-        if (pool_address & (core::mem::align_of::<T>() - 1)) != 0 {
-            let padding =
-                core::mem::align_of::<T>() - (pool_address & (core::mem::align_of::<T>() - 1));
+        if (pool_address & (align_of::<T>() - 1)) != 0 {
+            let padding = align_of::<T>() - (pool_address & (align_of::<T>() - 1));
             pool_address += padding;
             pool_size -= padding;
         }

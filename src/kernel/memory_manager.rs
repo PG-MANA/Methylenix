@@ -26,8 +26,8 @@ use self::virtual_memory_manager::VirtualMemoryManager;
 
 use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::paging::{
-    PagingError, NEED_COPY_HIGH_MEMORY_PAGE_TABLE, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE,
-    PAGE_SIZE_USIZE,
+    NEED_COPY_HIGH_MEMORY_PAGE_TABLE, PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE,
+    PagingError,
 };
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
@@ -119,19 +119,19 @@ impl MemoryManager {
         match pm_manager.alloc(size, align_order) {
             Ok(physical_address) => Ok(physical_address),
             Err(MemoryError::EntryPoolRunOut) => {
-                if let Err(e) = Self::add_physical_memory_manager_pool(pm_manager) {
+                if let Err(err) = Self::add_physical_memory_manager_pool(pm_manager) {
                     pr_err!(
                         "Failed to add memory pool to PhysicalMemoryManager: {:?}",
-                        e
+                        err
                     );
-                    Err(e)
+                    Err(err)
                 } else {
                     Self::allocate_physical_memory(size, align_order, pm_manager)
                 }
             }
-            Err(e) => {
-                pr_err!("Failed to allocate physical memory: {:?}", e);
-                Err(e)
+            Err(err) => {
+                pr_err!("Failed to allocate physical memory: {:?}", err);
+                Err(err)
             }
         }
     }
@@ -171,11 +171,9 @@ impl MemoryManager {
                     .update_paging(address, order.to_offset());
                 Ok((address, physical_address))
             }
-            Err(e) => {
-                if let Err(e) = pm_manager.free(physical_address, size, false) {
-                    pr_err!("Failed to free physical memory: {:?}", e);
-                }
-                Err(e)
+            Err(err) => {
+                bug_on_err!(pm_manager.free(physical_address, size, false));
+                Err(err)
             }
         }
     }
@@ -236,26 +234,20 @@ impl MemoryManager {
                         )
                     {
                         pr_err!("Failed to map memory memory: {:?}", e);
-                        if let Err(e) = pm_manager.free(physical_address, PAGE_SIZE, false) {
-                            pr_err!("Failed to free physical memory: {:?}", e);
-                        }
-                        if let Err(e) = self
-                            .virtual_memory_manager
-                            .free_address_with_vm_entry(vm_entry, pm_manager)
-                        {
-                            pr_err!("Failed to free memory: {:?}", e);
-                        }
+                        bug_on_err!(pm_manager.free(physical_address, PAGE_SIZE, false));
+                        bug_on_err!(
+                            self.virtual_memory_manager
+                                .free_address_with_vm_entry(vm_entry, pm_manager)
+                        );
                         return Err(MemoryError::AllocAddressFailed);
                     }
                 }
-                Err(e) => {
-                    pr_err!("Failed to allocate physical memory: {:?}", e);
-                    if let Err(e) = self
-                        .virtual_memory_manager
-                        .free_address_with_vm_entry(vm_entry, pm_manager)
-                    {
-                        pr_err!("Failed to free memory: {:?}", e);
-                    }
+                Err(err) => {
+                    pr_err!("Failed to allocate physical memory: {:?}", err);
+                    bug_on_err!(
+                        self.virtual_memory_manager
+                            .free_address_with_vm_entry(vm_entry, pm_manager)
+                    );
                     return Err(MemoryError::AllocAddressFailed);
                 }
             }
@@ -270,12 +262,12 @@ impl MemoryManager {
     pub fn free(&mut self, address: VAddress) -> Result<(), MemoryError> {
         let pm_manager = get_physical_memory_manager();
         let aligned_vm_address = address & PAGE_MASK;
-        if let Err(e) = self
+        if let Err(err) = self
             .virtual_memory_manager
             .free_address(VAddress::new(aligned_vm_address), pm_manager)
         {
-            pr_err!("Failed to free memory: {:?}", e); /* The error of 'free_address' tends to be ignored. */
-            return Err(e);
+            pr_err!("Failed to free memory: {:?}", err); /* The error of 'free_address' tends to be ignored. */
+            return Err(err);
         }
         self._clone_kernel_memory_pages_if_needed()?;
         /* TLB will be updated by Virtual Memory Manager */
@@ -290,9 +282,9 @@ impl MemoryManager {
     ) -> Result<(), MemoryError> {
         /* initializing use only */
 
-        if let Err(e) = get_physical_memory_manager().free(address, size, false) {
-            pr_err!("Failed to free physical memory: {:?}", e);
-            Err(e)
+        if let Err(err) = get_physical_memory_manager().free(address, size, false) {
+            pr_err!("Failed to free physical memory: {:?}", err);
+            Err(err)
         } else {
             Ok(())
         }
@@ -346,7 +338,7 @@ impl MemoryManager {
         let (aligned_physical_address, aligned_size) = Self::page_align(physical_address, size);
 
         let pm_manager = get_physical_memory_manager();
-        /* TODO: check physical_address is not allocatble */
+        /* TODO: check physical_address is not allocatable */
         let option = option.unwrap_or(MemoryOptionFlags::KERNEL)
             | MemoryOptionFlags::IO_MAP
             | MemoryOptionFlags::DEVICE_MEMORY
@@ -562,7 +554,7 @@ macro_rules! kmalloc {
         $crate::kernel::manager_cluster::get_cpu_manager_cluster()
             .memory_allocator
             .kmalloc($crate::kernel::memory_manager::data_type::MSize::new(
-                core::mem::size_of::<$t>(),
+                size_of::<$t>(),
             ))
             .and_then(|addr| {
                 use $crate::kernel::collections::init_struct;

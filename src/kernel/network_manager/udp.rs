@@ -2,7 +2,7 @@
 //! UDP
 //!
 
-use super::{ipv4, InternetType, LinkType, NetworkError};
+use super::{InternetType, LinkType, NetworkError, ipv4};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
@@ -58,7 +58,7 @@ impl UdpConnectionInfo {
 impl UdpSegment {
     #[allow(dead_code)]
     pub const fn new(sender_port: u16, destination_port: u16, segment_length: u16) -> Self {
-        assert!(core::mem::size_of::<Self>() == UDP_HEADER_SIZE);
+        assert!(size_of::<Self>() == UDP_HEADER_SIZE);
         Self {
             sender_port: sender_port.to_be(),
             destination_port: destination_port.to_be(),

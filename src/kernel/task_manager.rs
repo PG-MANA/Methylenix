@@ -2,7 +2,7 @@
 //! Task Manager
 //!
 //! This manager is the frontend of task management system.
-//! Task management system has two struct, arch-independent and depend on arch.
+//! The task management system has two structs, arch-independent and depends on arch.
 
 mod process_entry;
 pub mod run_queue;
@@ -11,24 +11,29 @@ mod thread_entry;
 pub mod wait_queue;
 pub mod work_queue;
 
-use self::process_entry::ProcessEntry;
+pub use self::process_entry::ProcessEntry;
 use self::run_queue::RunQueue;
-use self::scheduling_class::{kernel::KernelSchedulingClass, SchedulingClass};
+use self::scheduling_class::{SchedulingClass, kernel::KernelSchedulingClass};
 pub use self::thread_entry::ThreadEntry;
 
-use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
+use crate::arch::target_arch::context::{ContextManager, context_data::ContextData};
 
-use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
-use crate::kernel::manager_cluster::{
-    get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster,
+use crate::kernel::{
+    collections::ptr_linked_list::PtrLinkedList,
+    manager_cluster::{CpuManagerCluster, get_cpu_manager_cluster, get_kernel_manager_cluster},
+    memory_manager::{
+        MemoryError, MemoryManager, kfree, kmalloc,
+        {
+            data_type::{MSize, VAddress},
+            slab_allocator::GlobalSlabAllocator,
+        },
+    },
+    sync::spin_lock::IrqSaveSpinLockFlag,
+    task_manager::scheduling_class::user::UserSchedulingClass,
 };
-use crate::kernel::memory_manager::data_type::{MSize, VAddress};
-use crate::kernel::memory_manager::slab_allocator::GlobalSlabAllocator;
-use crate::kernel::memory_manager::{kfree, kmalloc, MemoryError, MemoryManager};
-use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
-use crate::kernel::task_manager::scheduling_class::user::UserSchedulingClass;
 
 use core::mem::offset_of;
+use core::ptr::null_mut;
 
 pub const KERNEL_PID: usize = 0;
 
@@ -86,8 +91,8 @@ impl TaskManager {
     pub const fn new() -> Self {
         Self {
             lock: IrqSaveSpinLockFlag::new(),
-            kernel_process: core::ptr::null_mut(),
-            idle_thread: core::ptr::null_mut(),
+            kernel_process: null_mut(),
+            idle_thread: null_mut(),
             context_manager: ContextManager::new(),
             process_entry_pool: GlobalSlabAllocator::new(),
             thread_entry_pool: GlobalSlabAllocator::new(),
@@ -98,7 +103,7 @@ impl TaskManager {
 
     /// Init TaskManager
     ///
-    /// This function setups memory pools and create kernel process.
+    /// This function setups memory pools and creates a kernel process.
     /// The kernel process has two threads created with kernel_main_context and idle_context.
     /// After that, this function will set those threads into run_queue_manager.
     pub fn init(
@@ -140,7 +145,7 @@ impl TaskManager {
 
         kernel_process.init(
             KERNEL_PID,
-            core::ptr::null_mut(),
+            null_mut(),
             &mut [main_thread, idle_thread],
             memory_manager, /* should we set null? */
             0,
@@ -210,7 +215,7 @@ impl TaskManager {
         Ok(new_thread)
     }
 
-    /// Create kernel thread and set into kernel process.
+    /// Create kernel thread and set into a kernel process.
     ///
     /// This function forks `Self::idle_thread` and returns it.
     /// This will be used to make threads before RunQueue starts.
@@ -241,7 +246,7 @@ impl TaskManager {
 
     /// Fork current thread and create new thread.
     ///
-    /// This function forks current thread and adds into RunQueue if needed.
+    /// This function forks the current thread and adds into RunQueue if needed.
     /// This function assumes RunQueue::running_thread.is_some() == TRUE.
     pub fn create_kernel_thread(
         &mut self,
@@ -262,24 +267,21 @@ impl TaskManager {
         forked_thread.set_task_status(TaskStatus::New);
         forked_thread.time_slice = 5; /* Temporary */
 
-        if should_set_into_run_queue {
-            if let Err(e) = get_cpu_manager_cluster()
+        if should_set_into_run_queue
+            && let Err(err) = get_cpu_manager_cluster()
                 .run_queue
                 .add_thread(forked_thread)
-            {
-                pr_err!("Cannot add thread to RunQueue. Error: {:?}", e);
-                let process = forked_thread.get_process_mut();
-                if let Err(r_e) = process.remove_thread(forked_thread) {
-                    pr_err!("Removing thread from process was failed. Error: {:?}", r_e);
-                }
-            }
+        {
+            pr_err!("Cannot add thread to RunQueue. Error: {:?}", err);
+            let process = unsafe { &mut *forked_thread.get_process_mut() };
+            bug_on_err!(process.remove_thread(forked_thread));
         }
         Ok(forked_thread)
     }
 
     /// Fork current thread and create new thread with an argument
     ///
-    /// This function forks current thread and adds into RunQueue if needed.
+    /// This function forks the current thread and adds into RunQueue if needed.
     /// This function assumes RunQueue::running_thread.is_some() == TRUE.
     pub fn create_kernel_thread_with_argument(
         &mut self,
@@ -315,9 +317,9 @@ impl TaskManager {
                 .create_user_memory_manager()?
         ) {
             Ok(m) => m,
-            Err(e) => {
-                pr_err!("Failed to allocate MemoryManager: {:?}", e);
-                return Err(TaskError::MemoryError(e));
+            Err(err) => {
+                pr_err!("Failed to allocate MemoryManager: {:?}", err);
+                return Err(TaskError::MemoryError(err));
             }
         };
 
@@ -340,12 +342,10 @@ impl TaskManager {
         };
 
         drop(_lock);
-        if let Err(e) = &result {
-            pr_err!("Failed to create a process for user: {:?}", e);
-            let _ = user_memory_manager.free_all_allocated_memory();
-            if let Err(e) = kfree!(user_memory_manager) {
-                pr_err!("Failed to free the MemoryManager: {:?}", e);
-            }
+        if let Err(err) = &result {
+            pr_err!("Failed to create a process for user: {:?}", err);
+            bug_on_err!(user_memory_manager.free_all_allocated_memory());
+            bug_on_err!(kfree!(user_memory_manager));
         }
         result
     }
@@ -392,9 +392,7 @@ impl TaskManager {
             new_thread
         };
         drop(_lock);
-        if let Err(e) = &result {
-            pr_err!("Failed to create a thread for user: {:?}", e);
-        }
+        bug_on_err!(&result);
         result
     }
 
@@ -424,7 +422,7 @@ impl TaskManager {
             return Err(TaskError::InvalidProcessEntry);
         }
 
-        /* Delete all thread */
+        /* Delete all threads */
         while let Some(thread) = target_process.take_thread()? {
             let _lock = thread.lock.lock();
             if thread.get_task_status() != TaskStatus::Stopped {
@@ -521,7 +519,7 @@ impl TaskManager {
 
     /// Set `thread` to `RunQueueManager`.
     ///
-    /// This function sets `thread` to `RunQueueManager`(it may be different cpu's).
+    /// This function sets `thread` to `RunQueueManager`(it may be different CPU's one).
     /// This does not check `ThreadEntry::sleep_list`.
     ///
     /// `thread` must be unlocked.

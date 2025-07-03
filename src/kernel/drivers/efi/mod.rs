@@ -152,9 +152,11 @@ impl EfiSystemTable {
     }
 
     pub unsafe fn get_configuration_table_slice(&self) -> &[EfiConfigurationTable] {
-        core::slice::from_raw_parts(
-            self.get_configuration_table() as *const EfiConfigurationTable,
-            self.get_number_of_configuration_tables(),
-        )
+        unsafe {
+            core::slice::from_raw_parts(
+                self.get_configuration_table() as *const EfiConfigurationTable,
+                self.get_number_of_configuration_tables(),
+            )
+        }
     }
 }

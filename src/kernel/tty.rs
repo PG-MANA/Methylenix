@@ -2,15 +2,16 @@
 //! TTY Manager
 //!
 
-use crate::kernel::collections::fifo::Fifo;
-use crate::kernel::file_manager::{
-    File, FileDescriptor, FileError, FileOperationDriver, FileSeekOrigin,
+use crate::kernel::{
+    collections::fifo::Fifo,
+    file_manager::{
+        File, FileDescriptor, FileDescriptorData, FileError, FileOperationDriver, FileSeekOrigin,
+    },
+    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
+    memory_manager::data_type::{Address, MOffset, MSize, VAddress},
+    sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag},
+    task_manager::{wait_queue::WaitQueue, work_queue::WorkList},
 };
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
-use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, SpinLockFlag};
-use crate::kernel::task_manager::wait_queue::WaitQueue;
-use crate::kernel::task_manager::work_queue::WorkList;
 
 use core::fmt;
 use core::fmt::Write;
@@ -68,6 +69,14 @@ macro_rules! pr_err {
     ($fmt:expr, $($arg:tt)*) => ($crate::kernel::tty::print_debug_message(3, format_args!($fmt, $($arg)*)));
 }
 
+macro_rules! bug_on_err {
+    ($e:expr) => {
+        if let Err(err) = $e {
+            pr_warn!("{:?}", err);
+        }
+    };
+}
+
 impl TtyManager {
     const DEFAULT_INPUT_BUFFER_SIZE: usize = 512;
     const DEFAULT_OUTPUT_BUFFER_SIZE: usize = 512;
@@ -90,11 +99,11 @@ impl TtyManager {
         /* Temporary Implementation */
         for tty in &mut get_kernel_manager_cluster().kernel_tty_manager {
             let _lock = tty.input_lock.lock();
-            if tty.input_queue.enqueue(data as u8) {
-                if let Err(e) = tty.input_wait_queue.wakeup_all() {
-                    drop(_lock);
-                    pr_err!("Failed to wakeup sleeping threads: {:?}", e);
-                }
+            if tty.input_queue.enqueue(data as u8).is_ok()
+                && let Err(err) = tty.input_wait_queue.wakeup_all()
+            {
+                drop(_lock);
+                pr_err!("Failed to wakeup sleeping threads: {:?}", err);
             }
         }
     }
@@ -108,9 +117,7 @@ impl TtyManager {
             return None;
         }
         drop(_lock);
-        if let Err(e) = self.input_wait_queue.add_current_thread() {
-            pr_err!("Cannot wakeup sleeping threads. Error: {:?}\n", e);
-        }
+        bug_on_err!(self.input_wait_queue.add_current_thread());
         self.getc(false)
     }
 
@@ -126,9 +133,7 @@ impl TtyManager {
 
     pub fn input_from_interrupt_handler(c: u8) {
         let work = WorkList::new(Self::input_into_fifo, c as usize);
-        if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(work) {
-            pr_err!("Failed to add work for key event: {:?}", e);
-        }
+        bug_on_err!(get_cpu_manager_cluster().work_queue.add_work(work));
     }
 
     pub fn puts(&mut self, s: &str) -> fmt::Result {
@@ -140,9 +145,9 @@ impl TtyManager {
         }
 
         for c in s.bytes() {
-            if !self.output_queue.enqueue(c) {
+            if self.output_queue.enqueue(c).is_err() {
                 self._flush()?;
-                if !self.output_queue.enqueue(c) {
+                if self.output_queue.enqueue(c).is_err() {
                     return Err(fmt::Error {});
                 }
             }
@@ -288,7 +293,7 @@ pub fn print_debug_message(level: usize, args: fmt::Arguments) {
         if tty.output_driver.is_none() {
             continue;
         }
-        let original_color = tty.change_font_color(level.1 .0, level.1 .1);
+        let original_color = tty.change_font_color(level.1.0, level.1.1);
         let _ = tty.write_fmt(format_args!("{} {}:{} | {}\n", level.0, file, line, args));
         if let Some(c) = original_color {
             tty.change_font_color(c.0, c.1);

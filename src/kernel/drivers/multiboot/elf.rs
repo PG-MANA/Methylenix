@@ -24,7 +24,7 @@ pub struct ElfInfo {
 impl ElfInfo {
     pub fn new(elf: &MultibootTagElfSections) -> Self {
         Self {
-            address: (elf as *const _ as usize) + core::mem::size_of::<MultibootTagElfSections>(),
+            address: (elf as *const _ as usize) + size_of::<MultibootTagElfSections>(),
             size_of_entry: elf.entsize as usize,
             num_of_entry: elf.num as usize,
             cnt: 0,

@@ -53,8 +53,8 @@ pub mod table {
 
 use self::aml::aml_variable::{AmlPackage, AmlVariable};
 use self::aml::{AmlInterpreter, ConstData, NameString, ResourceData};
-use self::device::ec::EmbeddedController;
 use self::device::AcpiDeviceManager;
+use self::device::ec::EmbeddedController;
 use self::event::{AcpiEventManager, AcpiFixedEvent};
 use self::table::dsdt::DsdtManager;
 use self::table::fadt::FadtManager;
@@ -548,13 +548,7 @@ impl AcpiManager {
             pr_err!("AmlInterpreter is not available.");
             return Err(());
         };
-        let to_ascii = |x: u8| -> u8 {
-            if x >= 0xa {
-                x - 0xa + b'A'
-            } else {
-                x + b'0'
-            }
-        };
+        let to_ascii = |x: u8| -> u8 { if x >= 0xa { x - 0xa + b'A' } else { x + b'0' } };
 
         let edge_trigger_method_name = NameString::from_array(
             &[
@@ -589,13 +583,7 @@ impl AcpiManager {
             pr_err!("AmlInterpreter is not available.");
             return Err(());
         };
-        let to_ascii = |x: u8| -> u8 {
-            if x >= 0xa {
-                x - 0xa + b'A'
-            } else {
-                x + b'0'
-            }
-        };
+        let to_ascii = |x: u8| -> u8 { if x >= 0xa { x - 0xa + b'A' } else { x + b'0' } };
 
         let level_trigger_method_name = NameString::from_array(
             &[
@@ -630,13 +618,7 @@ impl AcpiManager {
             if let Ok(Some(mut interpreter)) =
                 interpreter.move_into_device(&EmbeddedController::HID)
             {
-                let to_ascii = |x: u8| -> u8 {
-                    if x >= 0xa {
-                        x - 0xa + b'A'
-                    } else {
-                        x + b'0'
-                    }
-                };
+                let to_ascii = |x: u8| -> u8 { if x >= 0xa { x - 0xa + b'A' } else { x + b'0' } };
 
                 let query_method_name = NameString::from_array(
                     &[[b'_', b'Q', to_ascii(query >> 4), to_ascii(query & 0xf)]],

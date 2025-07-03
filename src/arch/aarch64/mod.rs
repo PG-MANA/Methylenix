@@ -31,7 +31,7 @@ use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::dtb::DtbManager;
 pub use crate::kernel::file_manager::elf::ELF_MACHINE_AA64 as ELF_MACHINE_DEFAULT;
-use crate::kernel::graphic_manager::{font::FontType, GraphicManager};
+use crate::kernel::graphic_manager::{GraphicManager, font::FontType};
 use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
@@ -51,7 +51,7 @@ pub struct ArchDependedCpuManagerCluster {
 
 pub const TARGET_ARCH_NAME: &str = "aarch64";
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     let boot_information = unsafe { &*boot_information };
 

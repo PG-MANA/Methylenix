@@ -1,11 +1,13 @@
 //!
-//! FIFO System
+//! The FIFO Queue
 //!
 //! This FIFO is lock-free.
-//! The algorithm may be wrong... if you find a mistake, please tell me...
 
-use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use core::sync::atomic::{fence, AtomicUsize};
+use core::sync::atomic::{
+    AtomicUsize,
+    Ordering::{Acquire, Relaxed, Release},
+    fence,
+};
 
 pub struct Fifo<T: Sized + Copy, const F_SIZE: usize> {
     buf: [T; F_SIZE],
@@ -24,7 +26,7 @@ impl<T: Sized + Copy, const F_SIZE: usize> Fifo<T, F_SIZE> {
         }
     }
 
-    pub fn enqueue(&mut self, v: T) -> bool {
+    pub fn enqueue(&mut self, v: T) -> Result<(), ()> {
         loop {
             let write_pointer = self.write_pointer.load(Relaxed);
             let mut next_write_pointer = write_pointer + 1;
@@ -32,17 +34,18 @@ impl<T: Sized + Copy, const F_SIZE: usize> Fifo<T, F_SIZE> {
                 next_write_pointer = 0;
             }
             if next_write_pointer == self.read_pointer.load(Relaxed) {
-                return false;
+                return Err(());
             }
+
+            /* This operation has an ABA problem. But usually buffer_full occurs first and it is rare. */
             if self
                 .write_pointer
                 .compare_exchange(write_pointer, next_write_pointer, Acquire, Relaxed)
                 .is_ok()
-            /* This operation has ABA problem. but usually buffer_full occurs first and it is rare. */
             {
                 self.buf[write_pointer] = v;
-                fence(Release); /* may be needless */
-                return true;
+                fence(Release);
+                return Ok(());
             }
         }
     }
@@ -64,7 +67,7 @@ impl<T: Sized + Copy, const F_SIZE: usize> Fifo<T, F_SIZE> {
                 .is_ok()
             {
                 let result = self.buf[read_pointer];
-                fence(Release); /* may be needless */
+                fence(Release);
                 return Some(result);
             }
         }

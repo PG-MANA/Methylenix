@@ -4,8 +4,8 @@
 //! This manager contains the information of FADT.
 //! It has the information about ACPI PowerManagement Timer.
 
-use super::super::device::pm_timer::AcpiPmTimer;
 use super::super::GenericAddress;
+use super::super::device::pm_timer::AcpiPmTimer;
 use super::AcpiTable;
 
 use crate::kernel::memory_manager::data_type::{Address, PAddress, VAddress};

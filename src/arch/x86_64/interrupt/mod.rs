@@ -9,7 +9,7 @@ mod tss;
 use self::idt::GateDescriptor;
 use self::tss::TssManager;
 
-use crate::arch::target_arch::context::{context_data::ContextData, ContextManager};
+use crate::arch::target_arch::context::{ContextManager, context_data::ContextData};
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::device::local_apic::LocalApicManager;
 
@@ -75,7 +75,7 @@ enum IstIndex {
 }
 
 impl InterruptManager {
-    pub const LIMIT_IDT: u16 = 0x100 * (core::mem::size_of::<GateDescriptor>() as u16) - 1;
+    pub const LIMIT_IDT: u16 = 0x100 * (size_of::<GateDescriptor>() as u16) - 1;
 
     /// Create InterruptManager with invalid data.
     ///
@@ -97,7 +97,7 @@ impl InterruptManager {
     /// This function sets valid address into the descriptors between IDT_DEVICE_MIN and IDT_MAX.
     /// This function is not set them as a valid descriptor.
     fn init_idt(&mut self) {
-        extern "C" {
+        unsafe extern "C" {
             fn irq_handler_list();
             fn irq_handler_list_end();
         }
@@ -126,16 +126,17 @@ impl InterruptManager {
         let stack_size = ContextManager::DEFAULT_INTERRUPT_STACK_SIZE;
         let stack =
             alloc_non_linear_pages!(stack_size).expect("Cannot allocate stack for interrupts.");
-        assert!(self
-            .tss_manager
-            .set_ist(IstIndex::TaskSwitch as u8, (stack + stack_size).to_usize()));
+        assert!(
+            self.tss_manager
+                .set_ist(IstIndex::TaskSwitch as u8, (stack + stack_size).to_usize())
+        );
     }
 
     /// Setup RSP(for privilege level 0~2)
     ///
     /// This function allocates stack and set rsp into TSS.
     /// If allocating the stack is failed, this function will panic.
-    /// rsp must be in the range 0 ~ 2.
+    /// The rsp must be in the range 0 ~ 2.
     #[allow(dead_code)]
     fn set_rsp(&mut self, rsp: u8, stack_size: MSize) -> bool {
         let stack = alloc_pages!(stack_size.to_order(None).to_page_order())
@@ -185,7 +186,7 @@ impl InterruptManager {
         drop(_lock);
     }
 
-    /// Init Inter Processors Interrupt.
+    /// Init the Inter-Processors-Interrupt.
     ///
     /// This function makes interrupt handler for ipi.
     pub fn init_ipi(&mut self) {
@@ -208,7 +209,7 @@ impl InterruptManager {
             limit: InterruptManager::LIMIT_IDT,
             offset: core::ptr::addr_of!(IDT) as u64,
         };
-        cpu::lidt(&idtr as *const _ as usize);
+        unsafe { cpu::lidt(&idtr as *const _ as usize) };
     }
 
     /// Return using selector.
@@ -219,19 +220,17 @@ impl InterruptManager {
     /// Register interrupt handler.
     ///
     /// This function sets the function into IDT and
-    /// redirect the target interruption into this CPU (I/O APIC).
+    ///  redirects the target interruption into this CPU (I/O APIC).
     ///
     ///  * function: the handler to call when the interruption occurs
-    ///  * irq: if the target device interrupts by irq, set this argument.
-    ///         if this is some(irq), this function will call [`set_redirect`].
+    ///  * irq: If the target device interrupts by irq, set this argument.
+    ///         If this is some(irq), this function will call [`super::device::io_apic::IoApicManager::set_redirect`].
     ///  * index: the index of IDT to connect handler
     ///  * privilege_level: the ring level to allow interrupt. If you want to allow user interrupt,
     ///                     set this to 3.
     ///
     ///  If index <= 32(means CPU internal exception) or index > 0xFF(means intel reserved area),
     ///  this function will return false.
-    ///
-    ///  [`set_redirect`]: ../device/io_apic/struct.IoApicManager.html#method.set_redirect
     pub fn set_device_interrupt_function(
         &self,
         function: fn(usize) -> bool,
@@ -345,14 +344,14 @@ impl InterruptManager {
     /// The return value will be used by [`restore_local_irq`].
     /// This can be nested called.
     pub fn save_and_disable_local_irq() -> StoredIrqData {
-        let r_flags = unsafe { cpu::get_r_flags() };
+        let r_flags = cpu::get_r_flags();
         unsafe { cpu::disable_interrupt() };
         StoredIrqData { r_flags }
     }
 
     /// Restore the interrupt status before calling [`save_and_disable_local_irq`]
     ///
-    /// if the interrupt was enabled before calling [`save_and_disable_local_irq`],
+    /// If the interrupt was enabled before calling [`save_and_disable_local_irq`],
     /// this will enable interrupt, otherwise this will not change the interrupt status.
     pub fn restore_local_irq(original: StoredIrqData) {
         unsafe { cpu::set_r_flags(original.r_flags) };
@@ -360,15 +359,15 @@ impl InterruptManager {
 
     /// Restore the interrupt status with StoredIrqData reference.
     pub unsafe fn restore_local_irq_by_reference(original: &StoredIrqData) {
-        cpu::set_r_flags(original.r_flags);
+        unsafe { cpu::set_r_flags(original.r_flags) };
     }
 
-    /// Send end of interrupt to Local APIC.
+    /// Send the end of interrupt to Local APIC.
     pub fn send_eoi(&self) {
         self.local_apic.send_eoi();
     }
 
-    /// Send end of interrupt to Local APIC and also send to I/O APIC.
+    /// Send the end of interrupt to Local APIC and also send to I/O APIC.
     pub fn send_eoi_level_trigger(&self, vector: u8) {
         get_kernel_manager_cluster()
             .arch_depend_data
@@ -401,7 +400,7 @@ impl InterruptManager {
     ///
     /// write syscall settings into MSRs
     pub fn init_syscall(&self) {
-        extern "C" {
+        unsafe extern "C" {
             fn syscall_handler_entry();
         }
         unsafe { cpu::wrmsr(MSR_EFER, cpu::rdmsr(MSR_EFER) | MSR_EFER_SYSCALL_ENABLE) };

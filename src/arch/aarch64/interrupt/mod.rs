@@ -58,7 +58,7 @@ impl InterruptManager {
     }
 
     pub fn init(&mut self) {
-        extern "C" {
+        unsafe extern "C" {
             fn interrupt_vector();
         }
         // Reinitialize
@@ -76,7 +76,7 @@ impl InterruptManager {
     }
 
     pub fn init_ap(&mut self) {
-        extern "C" {
+        unsafe extern "C" {
             fn interrupt_vector();
         }
         let _lock = self.lock.lock();
@@ -200,7 +200,7 @@ impl InterruptManager {
 
     /// Save current the interrupt status and disable interrupt
     ///
-    /// This function disables interrupt and return interrupt status before disable interrupt.
+    /// This function disables interrupt and returns interrupt status before disabling interrupt.
     /// The return value will be used by [`restore_local_irq`].
     /// This can be nested called.
     pub fn save_and_disable_local_irq() -> StoredIrqData {
@@ -211,15 +211,15 @@ impl InterruptManager {
 
     /// Restore the interrupt status before calling [`save_and_disable_local_irq`]
     ///
-    /// if the interrupt was enabled before calling [`save_and_disable_local_irq`],
-    /// this will enable interrupt, otherwise this will not change the interrupt status.
+    /// If the interrupt was enabled before calling [`save_and_disable_local_irq`],
+    ///  this will enable interrupt, otherwise this will not change the interrupt status.
     pub fn restore_local_irq(original: StoredIrqData) {
         unsafe { cpu::restore_irq_fiq(original.daif) };
     }
 
     /// Restore the interrupt status with StoredIrqData reference.
     pub unsafe fn restore_local_irq_by_reference(original: &StoredIrqData) {
-        cpu::restore_irq_fiq(original.daif)
+        unsafe { cpu::restore_irq_fiq(original.daif) }
     }
 
     pub fn send_reschedule_ipi(&self, cpu_id: usize) {
@@ -246,7 +246,6 @@ impl InterruptManager {
     }
 
     /// IRQ/FIQ Handler
-    #[no_mangle]
     extern "C" fn interrupt_handler(context_data: *mut ContextData, from_mark: u64) {
         match from_mark {
             INTERRUPT_FROM_FIQ | INTERRUPT_FROM_IRQ => {
@@ -476,7 +475,7 @@ interrupt_entry:
     str    x30,      [sp, #(16 * 15)]
     mov    x29,  sp
     mov     x0, x29
-    bl      interrupt_handler
+    bl      {interrupt_handler}
     mov     sp, x29
     ldp     x2, x3,  [sp, #(16 * 1)]
     ldp     x4,  x5, [sp, #(16 * 2)]
@@ -513,10 +512,11 @@ interrupt_entry:
     eret
 .size       interrupt_entry, . - interrupt_entry
 ",
-    c = const core::mem::size_of::<ContextData>(),
+    c = const size_of::<ContextData>(),
     m = const cpu::SPSR_M,
     el0 = const cpu::SPSR_M_EL0T,
     irq_mark = const INTERRUPT_FROM_IRQ,
     fiq_mark = const INTERRUPT_FROM_FIQ,
     synchronous_lower = const INTERRUPT_FROM_SYNCHRONOUS_LOWER,
+    interrupt_handler = sym InterruptManager::interrupt_handler,
 );

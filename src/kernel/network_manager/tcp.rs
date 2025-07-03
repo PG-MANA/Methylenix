@@ -2,7 +2,7 @@
 //! TCP
 //!
 
-use super::{ipv4, AddressPrinter, InternetType, LinkType, NetworkError};
+use super::{AddressPrinter, InternetType, LinkType, NetworkError, ipv4};
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::collections::{init_struct, ring_buffer::Ringbuffer};
@@ -18,7 +18,7 @@ use alloc::collections::LinkedList;
 pub const IPV4_PROTOCOL_TCP: u8 = 0x06;
 pub const MAX_SEGMENT_SIZE: usize = 1460;
 pub const MAX_TRANSMISSION_UNIT: usize = 1500;
-pub const TCP_DEFAULT_HEADER_SIZE: usize = core::mem::size_of::<DefaultTcpSegment>();
+pub const TCP_DEFAULT_HEADER_SIZE: usize = size_of::<DefaultTcpSegment>();
 pub const TCP_PORT_ANY: u16 = 0;
 
 struct TcpReceiveDataBuffer {
@@ -167,7 +167,7 @@ struct DefaultTcpSegment {
 #[allow(dead_code)]
 impl DefaultTcpSegment {
     pub fn from_buffer(buffer: &mut [u8]) -> &mut Self {
-        assert!(buffer.len() >= core::mem::size_of::<Self>());
+        assert!(buffer.len() >= size_of::<Self>());
         unsafe { &mut *(buffer.as_mut_ptr() as usize as *mut Self) }
     }
 
@@ -375,7 +375,7 @@ impl DefaultTcpSegment {
         ];
 
         let calc_checksum = |buffer: &[u8], checksum: &mut u16| {
-            for i in 0..((buffer.len()) / core::mem::size_of::<u16>()) {
+            for i in 0..((buffer.len()) / size_of::<u16>()) {
                 let i = checksum
                     .overflowing_add(u16::from_be_bytes([buffer[2 * i], buffer[2 * i + 1]]));
                 *checksum = i.0 + (i.1 as u16);
@@ -543,8 +543,7 @@ pub(super) fn send_tcp_ipv4_data(
         let send_size = (*data_size)
             .min(MSize::new(session_info.available_window_size as usize))
             .min(MSize::new(MAX_SEGMENT_SIZE));
-        const TCP_SEND_DATA_HEADER_SIZE: MSize =
-            MSize::new(core::mem::size_of::<TcpSendDataBufferHeader>());
+        const TCP_SEND_DATA_HEADER_SIZE: MSize = MSize::new(size_of::<TcpSendDataBufferHeader>());
         const PACKET_HEADER_SIZE: MSize =
             MSize::new(TCP_DEFAULT_HEADER_SIZE + ipv4::IPV4_DEFAULT_HEADER_SIZE);
 

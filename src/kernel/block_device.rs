@@ -3,7 +3,7 @@
 //!
 //! The structures are temporary
 
-use crate::kernel::memory_manager::{data_type::VAddress, MemoryError};
+use crate::kernel::memory_manager::{MemoryError, data_type::VAddress};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use alloc::vec::Vec;

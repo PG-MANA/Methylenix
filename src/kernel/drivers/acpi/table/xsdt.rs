@@ -4,21 +4,22 @@
 //! This manager contains the information about Extended System Description Table(XSDT).
 //! XSDT is the list of tables like MADT.
 
-use super::dsdt::DsdtManager;
-use super::fadt::FadtManager;
-use super::ssdt::SsdtManager;
-use super::INITIAL_MMAP_SIZE;
-use super::{AcpiTable, OptionalAcpiTable};
+use super::{
+    AcpiTable, INITIAL_MMAP_SIZE, OptionalAcpiTable, dsdt::DsdtManager, fadt::FadtManager,
+    ssdt::SsdtManager,
+};
 
 use crate::arch::target_arch::context::memory_layout::{
     is_direct_mapped, physical_address_to_direct_map,
 };
 
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+use crate::kernel::{
+    manager_cluster::get_kernel_manager_cluster,
+    memory_manager::{
+        data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
+        free_pages, io_remap,
+    },
 };
-use crate::kernel::memory_manager::{free_pages, io_remap};
 
 use core::mem::MaybeUninit;
 use core::ptr::read_unaligned;
@@ -82,15 +83,10 @@ impl XsdtManager {
                     return Err(());
                 }
             };
-            pr_info!(
-                "{}",
-                core::str::from_utf8(unsafe {
-                    &read_unaligned(vm_address.to_usize() as *const [u8; 4])
-                })
-                .unwrap_or("----")
-            );
+            let table_name = unsafe { &read_unaligned(vm_address.to_usize() as *const [u8; 4]) };
+            pr_info!("{}", core::str::from_utf8(table_name).unwrap_or("----"));
 
-            match unsafe { read_unaligned(vm_address.to_usize() as *const [u8; 4]) } {
+            match *table_name {
                 FadtManager::SIGNATURE => {
                     let mut fadt_manager = FadtManager::new();
                     if let Err(e) = fadt_manager.init(vm_address) {

@@ -51,15 +51,9 @@ extern "efiapi" fn efi_main(
     dump_system();
 
     /* Setup BootInformation */
-    const { assert!(core::mem::size_of::<BootInformation>() <= EFI_PAGE_SIZE) };
+    const { assert!(size_of::<BootInformation>() <= EFI_PAGE_SIZE) };
     let boot_info = alloc_pages(1).expect("Failed to allocate a page for BootInformation");
-    unsafe {
-        core::ptr::write_bytes(
-            boot_info as *mut u8,
-            0,
-            core::mem::size_of::<BootInformation>(),
-        )
-    };
+    unsafe { core::ptr::write_bytes(boot_info as *mut u8, 0, size_of::<BootInformation>()) };
     let boot_info = unsafe { &mut *(boot_info as *mut BootInformation) };
     boot_info.efi_system_table = unsafe { core::mem::transmute_copy(system_table) };
 
@@ -220,7 +214,7 @@ fn load_kernel(
     boot_service: &EfiBootServices,
     boot_info: &mut BootInformation,
 ) -> usize {
-    const ELF_64_HEADER_SIZE: usize = core::mem::size_of::<Elf64Header>();
+    const ELF_64_HEADER_SIZE: usize = size_of::<Elf64Header>();
     let mut root_directory: *const EfiFileProtocol = core::ptr::null();
     let mut loaded_image_protocol: *const EfiLoadedImageProtocol = core::ptr::null();
     let mut simple_file_protocol: *const EfiSimpleFileProtocol = core::ptr::null();

@@ -82,12 +82,12 @@ pub(super) fn try_mount_file_system(
 
     let fat = match alloc_non_linear_pages!(MSize::new(lba_aligned_fat_size).page_align_up()) {
         Ok(a) => a,
-        Err(e) => {
-            pr_err!("Failed to allocate memory for FAT: {:?}", e);
-            Err(e)?
+        Err(err) => {
+            pr_err!("Failed to allocate memory for FAT: {:?}", err);
+            Err(err)?
         }
     };
-    if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
+    if let Err(err) = get_kernel_manager_cluster().block_device_manager.read_lba(
         partition_info.device_id,
         fat,
         partition_info.starting_lba
@@ -95,9 +95,9 @@ pub(super) fn try_mount_file_system(
                 / (partition_info.lba_block_size),
         (lba_aligned_fat_size as u64 / partition_info.lba_block_size).max(1),
     ) {
-        let _ = free_pages!(fat);
-        pr_err!("Failed to read FAT from disk: {:?}", e);
-        Err(e)?;
+        bug_on_err!(free_pages!(fat));
+        pr_err!("Failed to read FAT from disk: {:?}", err);
+        Err(err)?;
     }
     let fat32_driver = Fat32Driver {
         bytes_per_sector,
@@ -277,7 +277,7 @@ impl PartitionManager for Fat32Driver {
                 number_of_sectors,
             ) {
                 pr_err!("Failed to read data from disk: {:?}", err);
-                let _ = free_pages!(page_buffer);
+                bug_on_err!(free_pages!(page_buffer));
                 return Err(err);
             };
             unsafe {
@@ -287,7 +287,7 @@ impl PartitionManager for Fat32Driver {
                     read_bytes,
                 )
             };
-            let _ = free_pages!(page_buffer);
+            bug_on_err!(free_pages!(page_buffer));
             buffer_pointer += read_bytes;
             page_buffer_offset = 0;
             if length == buffer_pointer {
@@ -308,11 +308,9 @@ impl Fat32Driver {
         mut cluster: u32,
         target_entry_name: &str,
     ) -> Result<Fat32EntryInfo, FileError> {
-        let directory_list_data = match alloc_non_linear_pages!(MSize::new(
-            self.bytes_per_sector as usize
-        )
-        .page_align_up())
-        {
+        let directory_list_data = match alloc_non_linear_pages!(
+            MSize::new(self.bytes_per_sector as usize).page_align_up()
+        ) {
             Ok(a) => a,
             Err(err) => {
                 pr_err!("Failed to allocate memory for directory entries: {:?}", err);
@@ -393,7 +391,7 @@ impl Fat32Driver {
                     }
                 };
                 if compare_str(entry_name_ascii, target_entry_name) {
-                    let _ = free_pages!(directory_list_data);
+                    bug_on_err!(free_pages!(directory_list_data));
                     return Ok(Fat32EntryInfo {
                         entry_cluster,
                         attribute,
@@ -404,7 +402,7 @@ impl Fat32Driver {
 
                 pointer += DIRECTORY_ENTRY_SIZE;
             }
-            let _ = free_pages!(directory_list_data);
+            bug_on_err!(free_pages!(directory_list_data));
             if limit <= pointer {
                 if let Some(next) = self.get_next_cluster(cluster) {
                     cluster = next;
@@ -417,26 +415,24 @@ impl Fat32Driver {
     }
 
     fn list_files(&self, partition_info: &PartitionInfo, mut cluster: u32, indent: usize) {
-        let directory_list_data = match alloc_non_linear_pages!(MSize::new(
-            self.bytes_per_sector as usize
-        )
-        .page_align_up())
-        {
+        let directory_list_data = match alloc_non_linear_pages!(
+            MSize::new(self.bytes_per_sector as usize).page_align_up()
+        ) {
             Ok(a) => a,
-            Err(e) => {
-                pr_err!("Failed to allocate memory for directory entries: {:?}", e);
+            Err(err) => {
+                pr_err!("Failed to allocate memory for directory entries: {:?}", err);
                 return;
             }
         };
 
         loop {
-            if let Err(e) = self.read_sectors(
+            if let Err(err) = self.read_sectors(
                 partition_info,
                 directory_list_data,
                 self.cluster_to_sector(cluster),
                 1,
             ) {
-                pr_err!("Failed to read data from disk: {:?}", e);
+                pr_err!("Failed to read data from disk: {:?}", err);
                 return;
             }
             let limit = (self.bytes_per_sector as usize) * self.sectors_per_cluster as usize;
@@ -497,7 +493,7 @@ impl Fat32Driver {
                 }
                 pointer += DIRECTORY_ENTRY_SIZE;
             }
-            let _ = free_pages!(directory_list_data);
+            bug_on_err!(free_pages!(directory_list_data));
             if limit <= pointer {
                 if let Some(next) = self.get_next_cluster(cluster) {
                     cluster = next;
@@ -534,13 +530,8 @@ impl Fat32Driver {
     }
 
     fn get_next_cluster(&self, cluster: u32) -> Option<u32> {
-        let n = unsafe {
-            *((self.fat.to_usize() + cluster as usize * core::mem::size_of::<u32>()) as *const u32)
-        };
-        if n >= 0x0ffffff8 {
-            None
-        } else {
-            Some(n)
-        }
+        let n =
+            unsafe { *((self.fat.to_usize() + cluster as usize * size_of::<u32>()) as *const u32) };
+        if n >= 0x0ffffff8 { None } else { Some(n) }
     }
 }

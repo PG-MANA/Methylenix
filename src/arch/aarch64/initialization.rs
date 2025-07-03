@@ -1,50 +1,52 @@
 //!
 //! The arch-depended functions for initialization
 //!
-//! This module including init codes for device, memory, and task system.
+//! This module includes init codes for devices, memory, and task system.
 //! This module is called by boot function.
 //!
 
 use crate::arch::target_arch::{
     boot_info::BootInformation,
-    context::{memory_layout::physical_address_to_direct_map, ContextManager},
+    context::{ContextManager, memory_layout::physical_address_to_direct_map},
     device::{
         cpu,
         generic_timer::{GenericTimer, SystemCounter},
     },
-    interrupt::{gic::GicDistributor, InterruptManager},
+    interrupt::{InterruptManager, gic::GicDistributor},
     paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
 use crate::kernel::{
     collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::{
-        acpi::{device::AcpiDeviceManager, table::gtdt::GtdtManager, AcpiManager},
+        acpi::{
+            AcpiManager,
+            device::AcpiDeviceManager,
+            table::{gtdt::GtdtManager, madt::MadtManager},
+        },
         dtb::DtbManager,
         efi::{
-            memory_map::{EfiMemoryDescriptor, EfiMemoryType},
             EFI_ACPI_2_0_TABLE_GUID, EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE,
+            memory_map::{EfiMemoryDescriptor, EfiMemoryType},
         },
     },
-    file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD},
+    file_manager::elf::{ELF_PROGRAM_HEADER_SEGMENT_LOAD, Elf64Header},
     initialization::{idle, init_task_ap, init_work_queue},
-    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster},
+    manager_cluster::{CpuManagerCluster, get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
-        alloc_pages, alloc_pages_with_physical_address,
+        MemoryManager, alloc_pages, alloc_pages_with_physical_address,
         data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
         free_pages,
         memory_allocator::MemoryAllocator,
         physical_memory_manager::PhysicalMemoryManager,
-        system_memory_manager::{get_physical_memory_manager, SystemMemoryManager},
+        system_memory_manager::{SystemMemoryManager, get_physical_memory_manager},
         virtual_memory_manager::VirtualMemoryManager,
-        MemoryManager,
     },
     sync::spin_lock::Mutex,
-    task_manager::{run_queue::RunQueue, TaskManager},
+    task_manager::{TaskManager, run_queue::RunQueue},
     timer_manager::LocalTimerManager,
 };
 
-use crate::kernel::drivers::acpi::table::madt::MadtManager;
 use core::mem;
 use core::sync::atomic::AtomicBool;
 
@@ -58,7 +60,7 @@ pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 /// This function must be called on the cpu that is going to own returned manager.
 pub fn setup_cpu_manager_cluster(
     cpu_manager_address: Option<VAddress>,
-) -> &'static mut CpuManagerCluster {
+) -> &'static mut CpuManagerCluster<'static> {
     let cpu_manager_address = cpu_manager_address.unwrap_or_else(|| {
         /* ATTENTION: BSP must be sleeping. */
         get_kernel_manager_cluster()
@@ -79,11 +81,11 @@ pub fn setup_cpu_manager_cluster(
 }
 
 /// Init memory system based on boot information.
-/// This function set up PhysicalMemoryManager which manages where is free
-/// and VirtualMemoryManager which manages which process is using what area of virtual memory.
+/// This function sets up PhysicalMemoryManager which manages where is free
+/// and [`VirtualMemoryManager`] which manages which process is using what area of virtual memory.
 /// After that, this will set up MemoryManager.
-/// If one of process is failed, this will panic.
-/// This function returns new address of BootInformation.
+/// If one of the processes is failed, this will panic.
+/// This function returns a new address of BootInformation.
 pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> BootInformation {
     let mut boot_information = boot_information.clone();
     /* Set up Physical Memory Manager */
@@ -533,7 +535,7 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
     /* Set BSP Local APIC ID into cpu_manager */
 
     /* Extern Assembly Symbols */
-    extern "C" {
+    unsafe extern "C" {
         /* device/cpu.rs */
         fn ap_entry();
         fn ap_entry_end();

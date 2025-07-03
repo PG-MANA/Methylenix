@@ -4,7 +4,7 @@
 
 pub mod socket_system_call;
 
-use super::{ipv4, tcp, udp, InternetType, LinkType, NetworkError, TransportType};
+use super::{InternetType, LinkType, NetworkError, TransportType, ipv4, tcp, udp};
 
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::collections::ring_buffer::Ringbuffer;
@@ -354,7 +354,7 @@ impl SocketManager {
             let _child_socket_lock = child_socket.lock.lock();
             if child_socket.is_active {
                 drop(_child_socket_lock);
-                /* child_socket will be closed by the owner */
+                /* The parent socket will close child_socket */
             } else {
                 drop(_child_socket_lock);
                 self._close_socket(child_socket)?;
@@ -363,21 +363,19 @@ impl SocketManager {
 
         if socket.is_active {
             if socket.wait_queue.is_empty() {
-                if let Err(err) = get_cpu_manager_cluster().local_timer_manager.add_timer(
+                bug_on_err!(get_cpu_manager_cluster().local_timer_manager.add_timer(
                     Self::DEFAULT_SOCKET_CLOSE_TIME_OUT_MS,
                     Self::delete_socket,
                     socket as *mut _ as usize,
-                ) {
-                    pr_err!("Failed to add timeout timer: {:?}", err);
-                }
+                ));
             } else {
-                let _ = socket.wait_queue.wakeup_all();
+                bug_on_err!(socket.wait_queue.wakeup_all());
                 /* TODO: How to delete socket? */
             }
             drop(_socket_lock);
         } else {
             drop(_socket_lock);
-            let _ = kfree!(socket);
+            bug_on_err!(kfree!(socket));
         }
         Ok(())
     }
@@ -387,7 +385,7 @@ impl SocketManager {
         let _lock = socket.lock.lock();
         socket.is_active = false;
         drop(_lock);
-        let _ = kfree!(socket);
+        bug_on_err!(kfree!(socket));
     }
 
     /* Data Receive Handlers */
@@ -413,7 +411,7 @@ impl SocketManager {
                     }
                     Err(err) => {
                         pr_err!("Failed to allocate memory: {:?}", err);
-                        let _ = kfree!(data_buffer, data_length);
+                        bug_on_err!(kfree!(data_buffer, data_length));
                         return;
                     }
                 }
@@ -424,11 +422,9 @@ impl SocketManager {
             if payload_size != written_size {
                 pr_warn!("Overflowed {} Bytes", payload_size - written_size);
             }
-            if let Err(err) = e.wait_queue.wakeup_all() {
-                pr_err!("Failed to wake up threads: {:?}", err);
-            }
+            bug_on_err!(e.wait_queue.wakeup_all());
             drop(_socket_lock);
-            let _ = kfree!(data_buffer, data_length);
+            bug_on_err!(kfree!(data_buffer, data_length));
         };
 
         /* Search actually matched socket */
@@ -520,7 +516,7 @@ impl SocketManager {
             drop(_lock);
         }
         pr_debug!("UDP segment will be deleted...");
-        let _ = kfree!(data_buffer, data_length);
+        bug_on_err!(kfree!(data_buffer, data_length));
     }
 
     /* TCP Port Open Handler */
@@ -656,7 +652,7 @@ impl SocketManager {
                     drop(_lock);
                     let _socket_lock = e.lock.lock();
                     let result = update_function(tcp_info).map(|active| e.is_active = active);
-                    let _ = e.wait_queue.wakeup_all();
+                    bug_on_err!(e.wait_queue.wakeup_all());
                     drop(_socket_lock);
                     return result;
                 }
@@ -732,9 +728,7 @@ impl SocketManager {
                         }
                     }
                     let result = process_function(tcp_info, &mut e.receive_ring_buffer);
-                    if let Err(err) = e.wait_queue.wakeup_all() {
-                        pr_err!("Failed to wake up threads: {:?}", err);
-                    }
+                    bug_on_err!(e.wait_queue.wakeup_all());
                     drop(_socket_lock);
 
                     return result;

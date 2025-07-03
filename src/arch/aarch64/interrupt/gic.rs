@@ -2,11 +2,11 @@
 //! Generic Interrupt Controller
 //!
 
+use super::InterruptGroup;
 use super::gicv2;
 use super::gicv3;
-use super::InterruptGroup;
 
-use crate::kernel::drivers::acpi::{table::madt::MadtManager, AcpiManager};
+use crate::kernel::drivers::acpi::{AcpiManager, table::madt::MadtManager};
 use crate::kernel::memory_manager::data_type::PAddress;
 
 pub enum GicDistributor {

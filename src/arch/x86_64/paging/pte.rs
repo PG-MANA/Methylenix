@@ -3,8 +3,8 @@
 //!
 //! See PageManager for the detail.
 
-use super::PagingEntry;
 use super::PAGE_MASK;
+use super::PagingEntry;
 
 use crate::kernel::memory_manager::data_type::PAddress;
 

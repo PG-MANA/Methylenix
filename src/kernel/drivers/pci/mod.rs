@@ -7,7 +7,7 @@ pub mod msi;
 
 use self::ecam::Ecam;
 
-use crate::arch::target_arch::device::pci::{setup_arch_depend_devices, ArchDependPciManager};
+use crate::arch::target_arch::device::pci::{ArchDependPciManager, setup_arch_depend_devices};
 
 use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
 use crate::kernel::drivers::device::i210::I210Manager;

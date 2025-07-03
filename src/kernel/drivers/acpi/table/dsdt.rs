@@ -56,8 +56,8 @@ impl DsdtManager {
     pub const fn get_definition_block_address_and_size(&self) -> (VAddress, MSize) {
         let dsdt = unsafe { &*(self.base_address.to_usize() as *const DSDT) };
         (
-            self.base_address + MSize::new(core::mem::size_of::<DSDT>()),
-            MSize::new(dsdt.length as usize - core::mem::size_of::<DSDT>()),
+            self.base_address + MSize::new(size_of::<DSDT>()),
+            MSize::new(dsdt.length as usize - size_of::<DSDT>()),
         )
     }
 }

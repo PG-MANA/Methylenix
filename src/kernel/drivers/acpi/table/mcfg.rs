@@ -72,9 +72,9 @@ impl McfgManager {
         if self.base_address.is_zero() {
             return None;
         }
-        const MCFG_SIZE: usize = core::mem::size_of::<MCFG>();
+        const MCFG_SIZE: usize = size_of::<MCFG>();
         const BASE_ADDRESS_ALLOCATION_STRUCT_SIZE: usize =
-            core::mem::size_of::<BaseAddressAllocationStructure>();
+            size_of::<BaseAddressAllocationStructure>();
 
         if (unsafe { &*(self.base_address.to_usize() as *const MCFG) }.length as usize - MCFG_SIZE)
             / BASE_ADDRESS_ALLOCATION_STRUCT_SIZE

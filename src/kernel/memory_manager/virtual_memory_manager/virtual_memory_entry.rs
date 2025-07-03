@@ -28,7 +28,7 @@ pub struct VirtualMemoryEntry {
 // ADD: thread chain
 
 impl VirtualMemoryEntry {
-    pub const ENTRY_SIZE: usize = core::mem::size_of::<Self>();
+    pub const ENTRY_SIZE: usize = size_of::<Self>();
 
     pub const fn new(
         vm_start_address: VAddress,

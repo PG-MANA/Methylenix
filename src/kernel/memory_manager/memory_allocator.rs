@@ -1,13 +1,13 @@
 //!
 //! Memory Allocator
 //!
-//! This is the front end of memory management system.
-//! The Object allocator is used when the system needs to allocate small object which will be freed soon.
+//! This is the front end of the memory management system.
+//! The Object allocator is used when the system needs to allocate a small object which will be freed soon.
 //!
 
+use super::MemoryError;
 use super::data_type::{MSize, MemoryPermissionFlags, VAddress};
 use super::slab_allocator::LocalSlabAllocator;
-use super::MemoryError;
 
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 

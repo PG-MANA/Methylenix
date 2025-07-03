@@ -3,10 +3,10 @@
 //!
 
 use super::{
-    ethernet_device::{EthernetFrameInfo, MacAddress, MAC_ADDRESS_BROAD_CAST},
-    ipv4::{set_default_ipv4_address, Ipv4ConnectionInfo, IPV4_ADDRESS_ANY, IPV4_BROAD_CAST},
-    udp::UdpConnectionInfo,
     AddressPrinter, InternetType, LinkType, NetworkError, TransportType,
+    ethernet_device::{EthernetFrameInfo, MAC_ADDRESS_BROAD_CAST, MacAddress},
+    ipv4::{IPV4_ADDRESS_ANY, IPV4_BROAD_CAST, Ipv4ConnectionInfo},
+    udp::UdpConnectionInfo,
 };
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
@@ -239,8 +239,8 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
     let mac_address = get_kernel_manager_cluster()
         .network_manager
         .get_ethernet_mac_address(device_id);
-    if let Err(e) = mac_address {
-        pr_err!("Failed to get mac address: {:?}", e);
+    if let Err(err) = mac_address {
+        pr_err!("Failed to get mac address: {:?}", err);
         return Err(());
     }
     let mac_address = mac_address.unwrap();
@@ -263,8 +263,8 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
                 .get_socket_manager()
                 .add_socket(socket)
         });
-    if let Err(e) = socket {
-        pr_err!("Failed to add socket: {:?}", e);
+    if let Err(err) = socket {
+        pr_err!("Failed to add socket: {:?}", err);
         return Err(());
     }
     let socket = socket.unwrap();
@@ -287,12 +287,14 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
             }
         });
 
-    if let Err(e) = result {
-        let _ = get_kernel_manager_cluster()
-            .network_manager
-            .get_socket_manager()
-            .close_socket(socket);
-        pr_err!("Failed to send discover request: {:?}", e);
+    if let Err(err) = result {
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .network_manager
+                .get_socket_manager()
+                .close_socket(socket)
+        );
+        pr_err!("Failed to send discover request: {:?}", err);
         return Err(());
     }
 
@@ -308,12 +310,12 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
             true,
         );
 
-    if let Err(e) = result {
+    if let Err(err) = result {
         let _ = get_kernel_manager_cluster()
             .network_manager
             .get_socket_manager()
             .close_socket(socket);
-        pr_err!("Failed to read socket: {:?}", e);
+        pr_err!("Failed to read socket: {:?}", err);
         return Err(());
     }
 
@@ -366,12 +368,14 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
             }
         });
 
-    if let Err(e) = result {
-        let _ = get_kernel_manager_cluster()
-            .network_manager
-            .get_socket_manager()
-            .close_socket(socket);
-        pr_err!("Failed to send request request: {:?}", e);
+    if let Err(err) = result {
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .network_manager
+                .get_socket_manager()
+                .close_socket(socket)
+        );
+        pr_err!("Failed to send request request: {:?}", err);
         return Err(());
     }
 
@@ -386,10 +390,12 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
             true,
         );
 
-    let _ = get_kernel_manager_cluster()
-        .network_manager
-        .get_socket_manager()
-        .close_socket(socket);
+    bug_on_err!(
+        get_kernel_manager_cluster()
+            .network_manager
+            .get_socket_manager()
+            .close_socket(socket)
+    );
 
     if let Err(e) = result {
         pr_err!("Failed to read socket: {:?}", e);

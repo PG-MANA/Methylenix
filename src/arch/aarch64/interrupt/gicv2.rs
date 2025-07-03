@@ -124,7 +124,7 @@ impl GicV2Distributor {
     }
 
     pub fn set_priority(&self, index: u32, priority: u8) {
-        let register_index = ((index >> 2) as usize) * core::mem::size_of::<u32>();
+        let register_index = ((index >> 2) as usize) * size_of::<u32>();
         let register_offset = (index & 0b11) << 3;
         self.write_register(
             Self::GICD_IPRIORITYR + register_index,
@@ -135,7 +135,7 @@ impl GicV2Distributor {
     }
 
     pub fn set_group(&self, index: u32, group: InterruptGroup) {
-        let register_index = ((index / u32::BITS) as usize) * core::mem::size_of::<u32>();
+        let register_index = ((index / u32::BITS) as usize) * size_of::<u32>();
         let register_offset = index & (u32::BITS - 1);
         let data = match group {
             InterruptGroup::NonSecureEl1 => 1,
@@ -148,7 +148,7 @@ impl GicV2Distributor {
     }
 
     pub fn set_enable(&self, index: u32, enable: bool) {
-        let register_index = ((index / u32::BITS) as usize) * core::mem::size_of::<u32>();
+        let register_index = ((index / u32::BITS) as usize) * size_of::<u32>();
         let register_offset = index & (u32::BITS - 1);
         let register = if enable {
             Self::GICD_ISENABLER
@@ -162,7 +162,7 @@ impl GicV2Distributor {
     }
 
     pub fn set_trigger_mode(&self, index: u32, is_level_trigger: bool) {
-        let register_index = ((index / (u32::BITS / 2)) as usize) * core::mem::size_of::<u32>();
+        let register_index = ((index / (u32::BITS / 2)) as usize) * size_of::<u32>();
         let register_offset = index & (u32::BITS / 2 - 1);
 
         self.write_register(
@@ -180,7 +180,7 @@ impl GicV2Distributor {
             pr_err!("Invalid CPU interface {cpu_id}.");
             return;
         }
-        let register_index = ((interrupt_id >> 2) as usize) * core::mem::size_of::<u32>();
+        let register_index = ((interrupt_id >> 2) as usize) * size_of::<u32>();
         let register_offset = (interrupt_id & 0b11) << 3;
         self.write_register(
             Self::GICD_ITARGETSR + register_index,

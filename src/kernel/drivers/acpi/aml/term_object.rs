@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use super::data_object::{
-    try_parse_argument_object, try_parse_local_object, ComputationalData, DataObject,
+    ComputationalData, DataObject, try_parse_argument_object, try_parse_local_object,
 };
 use super::expression_opcode::ExpressionOpcode;
 use super::name_object::NameString;

@@ -227,7 +227,7 @@ impl ProcessEntry {
 
     /// Remove `thread` from ThreadList.
     ///
-    /// This function removes thread from [Self::t_list] and adjust.
+    /// This function removes thread from [Self::t_list] and adjusts the list.
     /// [Self::lock] must be locked, and `thread` must be unlocked.
     pub fn remove_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());

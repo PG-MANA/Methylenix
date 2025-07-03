@@ -9,7 +9,7 @@ use crate::arch::target_arch::device::acpi::osi;
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 pub use self::aml_variable::AmlVariable;
-pub use self::data_object::{eisa_id_to_dword, ConstData, DataRefObject};
+pub use self::data_object::{ConstData, DataRefObject, eisa_id_to_dword};
 use self::evaluator::Evaluator;
 pub use self::name_object::NameString;
 use self::term_object::TermList;
@@ -225,9 +225,9 @@ impl AmlStream {
     }
 
     fn read<T: ?Sized + Copy>(&mut self) -> Result<T, AmlError> {
-        self.check_pointer(core::mem::size_of::<T>())?;
+        self.check_pointer(size_of::<T>())?;
         let d = unsafe { *(self.pointer.to_usize() as *const T) };
-        self.pointer += MSize::new(core::mem::size_of::<T>());
+        self.pointer += MSize::new(size_of::<T>());
         Ok(d)
     }
 

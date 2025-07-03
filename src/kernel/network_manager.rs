@@ -2,9 +2,13 @@
 //! Network Manager
 //!
 
-use crate::kernel::collections::init_struct;
-use crate::kernel::memory_manager::data_type::{MSize, VAddress};
-use crate::kernel::memory_manager::MemoryError;
+use crate::kernel::{
+    collections::init_struct,
+    memory_manager::{
+        MemoryError,
+        data_type::{MSize, VAddress},
+    },
+};
 
 pub mod dhcp;
 pub mod ethernet_device;
@@ -49,6 +53,18 @@ struct AddressPrinter<'a> {
     separator: char,
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub enum AddressInfo {
+    Any,
+    Ipv4(u32),
+    Ipv6([u8; 16]),
+}
+
+pub struct NetworkManager {
+    ethernet_manager: ethernet_device::EthernetDeviceManager,
+    socket_manager: socket_manager::SocketManager,
+}
+
 impl<'a> core::fmt::Display for AddressPrinter<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         use core::fmt::Write;
@@ -64,18 +80,6 @@ impl<'a> core::fmt::Display for AddressPrinter<'a> {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub enum AddressInfo {
-    Any,
-    Ipv4(u32),
-    Ipv6([u8; 16]),
-}
-
-pub struct NetworkManager {
-    ethernet_manager: ethernet_device::EthernetDeviceManager,
-    socket_manager: socket_manager::SocketManager,
 }
 
 impl NetworkManager {

@@ -1,6 +1,3 @@
-[unstable]
-build-std = ["core", "compiler_builtins", "alloc"]
-
 [target.x86_64-unknown-none]
 rustflags = [
     "-C", "link-arg=-Tconfig/x86_64/linkerscript.ld",

@@ -4,8 +4,8 @@
 //! This manager handles PFF2 Font data.
 //! <https://www.gnu.org/software/grub/manual/grub-dev/html_node/PFF2-Font-File-Format.html>
 
-use super::font_cache::FontCache;
 use super::BitmapFontData;
+use super::font_cache::FontCache;
 
 use crate::kernel::memory_manager::data_type::{Address, VAddress};
 
@@ -41,7 +41,7 @@ struct Pff2FontData {
 }
 
 impl Pff2FontManager {
-    const CHAR_INDEX_SIZE: usize = core::mem::size_of::<Pff2CharIndex>();
+    const CHAR_INDEX_SIZE: usize = size_of::<Pff2CharIndex>();
 
     pub const fn new() -> Self {
         Self {

@@ -6,8 +6,8 @@ use crate::arch::target_arch::device::cpu::{
     in_byte, in_dword, in_word, out_byte, out_dword, out_word,
 };
 
-use crate::kernel::drivers::acpi::aml::{AmlError, AmlVariable, ConstData};
 use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::acpi::aml::{AmlError, AmlVariable, ConstData};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::Mutex;
 

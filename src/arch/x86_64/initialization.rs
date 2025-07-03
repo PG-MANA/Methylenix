@@ -1,16 +1,16 @@
 //!
 //! The arch-depended functions for initialization
 //!
-//! This module including init codes for device, memory, and task system.
+//! This module includes init codes for devices, memory, and task system.
 //! This module is called by boot function.
 //!
 
 pub mod multiboot;
 
 use crate::arch::target_arch::{
-    context::{memory_layout::physical_address_to_direct_map, ContextManager},
+    context::{ContextManager, memory_layout::physical_address_to_direct_map},
     device::{cpu, io_apic::IoApicManager, local_apic_timer::LocalApicTimer, pic, pit::PitManager},
-    interrupt::{idt::GateDescriptor, InterruptIndex, InterruptManager},
+    interrupt::{InterruptIndex, InterruptManager, idt::GateDescriptor},
     paging::{PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
@@ -18,13 +18,13 @@ use crate::kernel::{
     collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::acpi::table::madt::MadtManager,
     initialization::{idle, init_task_ap, init_work_queue},
-    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster, CpuManagerCluster},
+    manager_cluster::{CpuManagerCluster, get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
         data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
         memory_allocator::MemoryAllocator,
     },
     sync::spin_lock::Mutex,
-    task_manager::{run_queue::RunQueue, TaskManager},
+    task_manager::{TaskManager, run_queue::RunQueue},
     timer_manager::{LocalTimerManager, Timer},
 };
 
@@ -52,7 +52,7 @@ pub fn init_task(
         0, /*is it ok?*/
         user_cs,
         user_ss,
-        unsafe { cpu::get_cr3() },
+        cpu::get_cr3(),
     );
 
     run_queue.init().expect("Failed to init RunQueue");
@@ -95,7 +95,7 @@ pub fn init_interrupt(kernel_code_segment: u16, user_code_segment: u16) {
 /// This function tries to set up LocalApicTimer.
 /// If TSC-Deadline mode is usable, this will enable it and return.
 /// Otherwise, this will calculate the frequency of the Local APIC Timer with ACPI PM Timer or
-/// PIT.(ACPI PM Timer is prioritized.)
+///  PIT. (ACPI PM Timer is prioritized.)
 /// After that, this registers the timer to InterruptManager.
 pub fn init_local_timer() {
     /* This function assumes that interrupt is not enabled */
@@ -161,7 +161,7 @@ pub fn init_local_timer() {
     /* Setup TimerManager */
 }
 
-/// Allocate CpuManager and set self pointer
+/// Allocate CpuManager and set the self-pointer
 pub fn setup_cpu_manager_cluster(
     cpu_manager_address: Option<VAddress>,
 ) -> &'static mut CpuManagerCluster {
@@ -170,14 +170,14 @@ pub fn setup_cpu_manager_cluster(
         get_kernel_manager_cluster()
             .boot_strap_cpu_manager /* Allocate from BSP Object Manager */
             .memory_allocator
-            .kmalloc(MSize::new(core::mem::size_of::<CpuManagerCluster>()))
+            .kmalloc(MSize::new(size_of::<CpuManagerCluster>()))
             .expect("Failed to alloc CpuManagerCluster")
     });
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
     /*
-        "mov rax, gs:0" is same as "let rax = *(gs as *const u64)".
-        we cannot load gs.base by "lea rax, [gs:0]" because lea cannot use gs register in x86_64.
-        On general kernel, the per-CPU's data struct has a member pointing itself and accesses it.
+        "mov rax, gs:0" is the same as "let rax = *(gs as *const u64)".
+        We cannot load gs.base by "lea rax, [gs:0]" because lea cannot use gs register in x86_64.
+        On the general kernel, the per-CPU's data struct has a member pointing itself and accesses it.
     */
     cpu_manager.arch_depend_data.self_pointer = cpu_manager_address.to_usize();
     unsafe {
@@ -223,7 +223,7 @@ pub fn init_multiple_processors_ap() {
     cpu_manager.cpu_id = bsp_apic_id as usize;
 
     /* Extern Assembly Symbols */
-    extern "C" {
+    unsafe extern "C" {
         /* boot/boot_ap.s */
         fn ap_entry();
         fn ap_entry_end();
@@ -289,7 +289,7 @@ pub fn init_multiple_processors_ap() {
 
         local_apic_manager.send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, true, 0);
 
-        /* Wait 10 millisecond for the AP */
+        /* Wait 10 milliseconds for the AP */
         timer.busy_wait_ms(10);
 
         local_apic_manager
@@ -301,7 +301,7 @@ pub fn init_multiple_processors_ap() {
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
 
         for _wait in 0..5000
-        /* Wait 5s for AP init */
+        /* Wait 5 seconds for AP init */
         {
             if AP_BOOT_COMPLETE_FLAG.load(core::sync::atomic::Ordering::Relaxed) {
                 continue 'ap_init_loop;
@@ -334,10 +334,10 @@ pub fn init_multiple_processors_ap() {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn ap_boot_main() -> ! {
     /* Extern Assembly Symbols */
-    extern "C" {
+    unsafe extern "C" {
         pub static gdt: u64; /* boot/common.s */
         pub static tss_descriptor_address: u64; /* boot/common.s */
     }

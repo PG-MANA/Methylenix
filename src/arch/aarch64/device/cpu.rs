@@ -32,27 +32,32 @@ pub const SMC_PSCI_CPU_ON: u64 = 0xC4000003;
 
 #[inline(always)]
 pub unsafe fn enable_interrupt() {
-    asm!("      dsb ish
+    unsafe {
+        asm!("      dsb ish
                 mrs {t}, DAIF
                 and {t}, {t}, {c}
                 msr DAIF, {t} 
-                ", t = out(reg) _, c = const !(DAIF_FIQ | DAIF_IRQ));
+                ", t = out(reg) _, c = const !(DAIF_FIQ | DAIF_IRQ))
+    };
 }
 
 #[inline(always)]
 pub unsafe fn disable_interrupt() {
-    asm!("      dsb ish
+    unsafe {
+        asm!("      dsb ish
                 mrs {t}, DAIF
                 orr {t}, {t}, {fiq}
                 orr {t}, {t}, {irq}
                 msr DAIF, {t} 
-                ", t = out(reg) _, fiq = const DAIF_FIQ, irq = const DAIF_IRQ);
+                ", t = out(reg) _, fiq = const DAIF_FIQ, irq = const DAIF_IRQ)
+    };
 }
 
 #[inline(always)]
 pub unsafe fn save_daif_and_disable_irq_fiq() -> u64 {
     let daif: u64;
-    asm!("
+    unsafe {
+        asm!("
             mrs {t}, DAIF
             mov {r}, {t}
             orr {t}, {t}, {fiq}
@@ -62,7 +67,8 @@ pub unsafe fn save_daif_and_disable_irq_fiq() -> u64 {
     t = out(reg) _,
     r = out(reg) daif,
     fiq = const DAIF_FIQ,
-    irq = const DAIF_IRQ);
+        irq = const DAIF_IRQ)
+    };
     daif
 }
 
@@ -75,24 +81,28 @@ pub fn get_daif() -> u64 {
 
 #[inline(always)]
 pub unsafe fn restore_irq_fiq(daif: u64) {
-    asm!("  dsb ish
-            msr DAIF, {:x}", in(reg) daif);
+    unsafe {
+        asm!("  dsb ish
+            msr DAIF, {:x}", in(reg) daif)
+    };
 }
 
 #[inline(always)]
 pub unsafe fn halt() {
-    asm!("wfi");
+    unsafe { asm!("wfi") };
 }
 
 #[inline(always)]
 pub unsafe fn idle() {
-    asm!("      dsb ish
+    unsafe {
+        asm!("      dsb ish
                 mrs {t}, DAIF
                 and {t}, {t}, {fiq_m}
                 and {t}, {t}, {irq_m}
                 msr DAIF, {t}
                 wfi
-                ", t = out(reg) _, fiq_m = const !DAIF_FIQ, irq_m = const !DAIF_IRQ);
+                ", t = out(reg) _, fiq_m = const !DAIF_FIQ, irq_m = const !DAIF_IRQ)
+    };
 }
 
 #[inline(always)]
@@ -111,7 +121,7 @@ pub fn get_cpu_base_address() -> usize {
 
 #[inline(always)]
 pub unsafe fn set_cpu_base_address(address: u64) {
-    asm!("msr tpidr_el1, {:x}", in(reg) address);
+    unsafe { asm!("msr tpidr_el1, {:x}", in(reg) address) };
 }
 
 #[inline(always)]
@@ -123,17 +133,15 @@ pub fn get_ttbr1() -> u64 {
 
 #[inline(always)]
 pub unsafe fn set_ttbr0(ttbr1: u64) {
-    asm!("msr ttbr0_el1, {:x}", in(reg) ttbr1);
+    unsafe { asm!("msr ttbr0_el1, {:x}", in(reg) ttbr1) };
 }
 
-/*
 #[inline(always)]
 pub unsafe fn get_id_aa64mmfr0() -> u64 {
     let result: u64;
-    asm!("mrs {:x}, id_aa64mmfr0_el1", out(reg) result);
+    unsafe { asm!("mrs {:x}, id_aa64mmfr0_el1", out(reg) result) };
     result
 }
-*/
 
 #[inline(always)]
 pub fn get_tcr() -> u64 {
@@ -144,7 +152,7 @@ pub fn get_tcr() -> u64 {
 
 #[inline(always)]
 pub unsafe fn set_tcr(tcr: u64) {
-    asm!("msr tcr_el1, {:x}", in(reg) tcr);
+    unsafe { asm!("msr tcr_el1, {:x}", in(reg) tcr) };
 }
 
 #[inline(always)]
@@ -166,7 +174,7 @@ pub fn get_mair() -> u64 {
 
 #[inline(always)]
 pub unsafe fn set_mair(mair: u64) {
-    asm!("msr mair_el1, {:x}", in(reg) mair);
+    unsafe { asm!("msr mair_el1, {:x}", in(reg) mair) };
 }
 
 #[inline(always)]
@@ -257,7 +265,7 @@ pub fn synchronize(target_virtual_address: VAddress) {
 
 #[inline(always)]
 pub unsafe fn set_vbar(address: u64) {
-    asm!("msr vbar_el1, {:x}", in(reg) address);
+    unsafe { asm!("msr vbar_el1, {:x}", in(reg) address) };
 }
 
 #[inline(always)]
@@ -290,47 +298,47 @@ pub fn get_icc_iar1() -> u64 {
 
 #[inline(always)]
 pub unsafe fn set_icc_ctlr_el1(icc_ctlr: u64) {
-    asm!("msr icc_iar1_el1, {:x}", in(reg) icc_ctlr);
+    unsafe { asm!("msr icc_iar1_el1, {:x}", in(reg) icc_ctlr) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_sre(icc_sre: u64) {
-    asm!("msr icc_sre_el1, {:x}", in(reg) icc_sre);
+    unsafe { asm!("msr icc_sre_el1, {:x}", in(reg) icc_sre) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_igrpen1(icc_igrpen1: u64) {
-    asm!("msr icc_igrpen1_el1, {:x}", in(reg) icc_igrpen1);
+    unsafe { asm!("msr icc_igrpen1_el1, {:x}", in(reg) icc_igrpen1) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_igrpen0(icc_igrpen0: u64) {
-    asm!("msr icc_igrpen0_el1, {:x}", in(reg) icc_igrpen0);
+    unsafe { asm!("msr icc_igrpen0_el1, {:x}", in(reg) icc_igrpen0) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_eoir1(icc_eoir1: u64) {
-    asm!("msr icc_eoir1_el1, {:x}", in(reg) icc_eoir1);
+    unsafe { asm!("msr icc_eoir1_el1, {:x}", in(reg) icc_eoir1) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_pmr(icc_pmr: u64) {
-    asm!("msr icc_pmr_el1, {:x}", in(reg) icc_pmr);
+    unsafe { asm!("msr icc_pmr_el1, {:x}", in(reg) icc_pmr) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_bpr1(icc_bpr: u64) {
-    asm!("msr icc_bpr1_el1, {:x}", in(reg) icc_bpr);
+    unsafe { asm!("msr icc_bpr1_el1, {:x}", in(reg) icc_bpr) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_bpr0(icc_bpr: u64) {
-    asm!("msr icc_bpr0_el1, {:x}", in(reg) icc_bpr);
+    unsafe { asm!("msr icc_bpr0_el1, {:x}", in(reg) icc_bpr) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_sgi1r_el1(icc_sgi1r: u64) {
-    asm!("msr icc_sgi1r_el1, {:x}", in(reg) icc_sgi1r);
+    unsafe { asm!("msr icc_sgi1r_el1, {:x}", in(reg) icc_sgi1r) };
 }
 
 #[inline(always)]
@@ -358,12 +366,12 @@ pub fn get_cntfrq() -> u64 {
 
 #[inline(always)]
 pub unsafe fn set_cntp_ctl(cntp_ctl: u64) {
-    asm!("msr cntp_ctl_el0, {:x}", in(reg) cntp_ctl)
+    unsafe { asm!("msr cntp_ctl_el0, {:x}", in(reg) cntp_ctl) };
 }
 
 #[inline(always)]
 pub unsafe fn set_cntp_tval(cntp_tval: u64) {
-    asm!("msr cntp_tval_el0, {:x}", in(reg) cntp_tval)
+    unsafe { asm!("msr cntp_tval_el0, {:x}", in(reg) cntp_tval) };
 }
 
 #[inline(always)]
@@ -403,33 +411,34 @@ pub unsafe fn smc_0(
     x16: &mut u64,
     x17: &mut u64,
 ) {
-    asm!(
-        "smc #0",
-        inout("x0") * x0,
-        inout("x1") * x1,
-        inout("x2") * x2,
-        inout("x3") * x3,
-        inout("x4") * x4,
-        inout("x5") * x5,
-        inout("x6") * x6,
-        inout("x7") * x7,
-        inout("x8") * x8,
-        inout("x9") * x9,
-        inout("x10") * x10,
-        inout("x11") * x11,
-        inout("x12") * x12,
-        inout("x13") * x13,
-        inout("x14") * x14,
-        inout("x15") * x15,
-        inout("x16") * x16,
-        inout("x17") * x17,
-        clobber_abi("C")
-    )
+    unsafe {
+        asm!(
+            "smc #0",
+            inout("x0") * x0,
+            inout("x1") * x1,
+            inout("x2") * x2,
+            inout("x3") * x3,
+            inout("x4") * x4,
+            inout("x5") * x5,
+            inout("x6") * x6,
+            inout("x7") * x7,
+            inout("x8") * x8,
+            inout("x9") * x9,
+            inout("x10") * x10,
+            inout("x11") * x11,
+            inout("x12") * x12,
+            inout("x13") * x13,
+            inout("x14") * x14,
+            inout("x15") * x15,
+            inout("x16") * x16,
+            inout("x17") * x17,
+            clobber_abi("C")
+        )
+    }
 }
 
-#[naked]
-#[allow(unused_variables)]
-pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
+#[unsafe(naked)]
+pub unsafe extern "C" fn run_task(_context_data_address: *const ContextData) {
     naked_asm!(
     "
             ldp  x1, x2, [x0, #(8 * 34)]
@@ -469,19 +478,20 @@ pub unsafe extern "C" fn run_task(context_data_address: *const ContextData) {
     )
 }
 
-/// Save current process into now_context_data and run next_context_data.
+/// Save the current process into now_context_data and run next_context_data.
 ///
 /// This function is called by ContextManager.
 /// This function does not return until another process switches to now_context_data.
-/// This function assume 1st argument is passed by "x0" and 2nd is passed by "x1".
+/// This function assumes 1st argument is passed by "x0" and 2nd is passed by "x1".
 /// now_context_data_address.registers.spsr_el1 must be set by caller.
 #[inline(never)]
 pub unsafe extern "C" fn task_switch(
     next_context_data_address: *const ContextData,
     now_context_data_address: *mut ContextData,
 ) {
-    asm!(
-    "
+    unsafe {
+        asm!(
+        "
             /* x2 ~ x17 are usable in this function(caller saved registers) */
             mrs  x3, tpidr_el0
             mov  x2, sp
@@ -507,10 +517,11 @@ pub unsafe extern "C" fn task_switch(
             b   {}
         1:
     ",
-    sym run_task,
-    in("x0") next_context_data_address,
-    in("x1") now_context_data_address
-    );
+        sym run_task,
+        in("x0") next_context_data_address,
+        in("x1") now_context_data_address
+        )
+    };
 }
 
 global_asm!(

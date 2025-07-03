@@ -42,7 +42,7 @@ pub struct ArchDependedKernelManagerCluster {
 
 pub const TARGET_ARCH_NAME: &str = "x86_64";
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn multiboot_main(
     mbi_address: usize, /* MultiBoot Information */
     kernel_cs: u16,

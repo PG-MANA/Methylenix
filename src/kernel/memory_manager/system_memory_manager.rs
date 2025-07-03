@@ -1,18 +1,20 @@
 //!
 //! System Memory Manager
 //!
-//! This manager manages physical memory and struct entry's pools.
+//! This manager manages physical memory and entry pools.
 //! Only one SystemMemoryManager exists in the Kernel.
 
-use super::data_type::{
-    Address, MOrder, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
+use super::{
+    MemoryError, MemoryManager, alloc_pages,
+    data_type::{
+        Address, MOrder, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
+    },
+    physical_memory_manager::PhysicalMemoryManager,
+    slab_allocator::pool_allocator::PoolAllocator,
+    virtual_memory_manager::{
+        VirtualMemoryEntry, VirtualMemoryManager, VirtualMemoryObject, VirtualMemoryPage,
+    },
 };
-use super::physical_memory_manager::PhysicalMemoryManager;
-use super::slab_allocator::pool_allocator::PoolAllocator;
-use super::virtual_memory_manager::{
-    VirtualMemoryEntry, VirtualMemoryManager, VirtualMemoryObject, VirtualMemoryPage,
-};
-use super::{alloc_pages, MemoryError, MemoryManager};
 
 use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::paging::{PAGE_SHIFT, PAGE_SIZE};
@@ -205,15 +207,12 @@ impl SystemMemoryManager {
             let result = self.vm_entry_pool.alloc();
             if let Ok(e) = result {
                 if count - 1 <= Self::VM_ENTRY_LOW
-                    && get_cpu_manager_cluster()
-                        .work_queue
-                        .add_work(WorkList::new(
-                            Self::pool_alloc_worker,
-                            Self::ALLOC_VM_ENTRY_FLAG,
-                        ))
-                        .is_err()
+                    && let Err(err) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
+                        Self::pool_alloc_worker,
+                        Self::ALLOC_VM_ENTRY_FLAG,
+                    ))
                 {
-                    pr_err!("Failed to add worker for memory allocator.");
+                    pr_err!("Failed to add worker for memory allocator: {:?}", err);
                 }
                 return Ok(e);
             }
@@ -222,6 +221,7 @@ impl SystemMemoryManager {
             let entry = self
                 .vm_entry_pool
                 .alloc()
+                .map(|e| unsafe { &mut *e })
                 .or(Err(MemoryError::EntryPoolRunOut))?;
             drop(_lock);
             return Ok(entry);
@@ -241,18 +241,15 @@ impl SystemMemoryManager {
         let _lock = self.lock.lock();
         let count = self.vm_object_pool.get_count();
         if count > Self::VM_OBJECT_RESERVE {
-            let result = self.vm_object_pool.alloc();
+            let result = self.vm_object_pool.alloc().map(|e| unsafe { &mut *e });
             if let Ok(e) = result {
                 if count - 1 <= Self::VM_OBJECT_LOW
-                    && get_cpu_manager_cluster()
-                        .work_queue
-                        .add_work(WorkList::new(
-                            Self::pool_alloc_worker,
-                            Self::ALLOC_VM_OBJECT_FLAG,
-                        ))
-                        .is_err()
+                    && let Err(err) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
+                        Self::pool_alloc_worker,
+                        Self::ALLOC_VM_OBJECT_FLAG,
+                    ))
                 {
-                    pr_err!("Failed to add worker for memory allocator.");
+                    pr_err!("Failed to add worker for memory allocator: {:?}", err);
                 }
                 return Ok(e);
             }
@@ -261,6 +258,7 @@ impl SystemMemoryManager {
             let entry = self
                 .vm_object_pool
                 .alloc()
+                .map(|e| unsafe { &mut *e })
                 .or(Err(MemoryError::EntryPoolRunOut))?;
             drop(_lock);
             return Ok(entry);
@@ -281,18 +279,15 @@ impl SystemMemoryManager {
         let _lock = self.lock.lock();
         let count = self.vm_page_pool.get_count();
         if count > Self::VM_PAGE_RESERVE {
-            let result = self.vm_page_pool.alloc();
+            let result = self.vm_page_pool.alloc().map(|e| unsafe { &mut *e });
             if let Ok(e) = result {
                 if count - 1 <= Self::VM_PAGE_LOW
-                    && get_cpu_manager_cluster()
-                        .work_queue
-                        .add_work(WorkList::new(
-                            Self::pool_alloc_worker,
-                            Self::ALLOC_VM_PAGE_FLAG,
-                        ))
-                        .is_err()
+                    && let Err(err) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
+                        Self::pool_alloc_worker,
+                        Self::ALLOC_VM_PAGE_FLAG,
+                    ))
                 {
-                    pr_err!("Failed to add worker for memory allocator.");
+                    pr_err!("Failed to add worker for memory allocator: {:?}", err);
                 }
                 return Ok(e);
             }

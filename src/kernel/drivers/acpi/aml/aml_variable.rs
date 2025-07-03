@@ -1070,7 +1070,8 @@ impl AmlVariable {
         })?;
         pr_debug!(
             "Write (Address: {}[VirtualAddress: {}], BitIndex: {}, NumOfBits: {}) <= {:?}(AccessSize: {})",
-            address,virtual_address,
+            address,
+            virtual_address,
             bit_index,
             num_of_bits,
             data,

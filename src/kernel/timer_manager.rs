@@ -2,9 +2,9 @@
 //! Timer Manager
 //!
 //! This manager is the frontend of timer system.
-//! Arch-specific timer call this manager to process timer queue.
+//! Arch-specific timer calls this manager to process timer queue.
 //! When task-switch, this will return to arch-specific timer function once
-//! for processes like sending end of interrupt.
+//! for processes like sending the end of interrupt.
 //! After that, the timer should recall this manager.
 //! The member of this manager may be changed.
 

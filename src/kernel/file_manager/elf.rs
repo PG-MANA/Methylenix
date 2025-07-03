@@ -23,7 +23,7 @@ const ELF_TYPE_EXECUTABLE: u16 = 2;
 pub const ELF_MACHINE_AMD64: u16 = 62;
 pub const ELF_MACHINE_AA64: u16 = 183;
 
-pub const ELF64_HEADER_SIZE: usize = core::mem::size_of::<Elf64Header>();
+pub const ELF64_HEADER_SIZE: usize = size_of::<Elf64Header>();
 
 #[repr(C)]
 pub struct Elf64Header {
@@ -103,27 +103,30 @@ impl Elf64SectionHeader {
 }
 
 impl Elf64Header {
-    pub unsafe fn from_ptr(address: &[u8]) -> Result<&Self, ()> {
-        let s = &*(address.as_ptr() as *const Self);
-        if s.e_ident[0..4] != ELF_MAGIC
-            || s.e_ident[4] != ELF_CLASS
-            || s.e_ident[6] != ELF_HEADER_VERSION
-            || s.e_version != ELF_SUPPORTED_VERSION
+    fn is_legal(&self) -> Result<(), ()> {
+        if self.e_ident[0..4] == ELF_MAGIC
+            && self.e_ident[4] == ELF_CLASS
+            && self.e_ident[6] == ELF_HEADER_VERSION
+            && self.e_version == ELF_SUPPORTED_VERSION
         {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    pub unsafe fn from_ptr(address: &[u8]) -> Result<&Self, ()> {
+        if address.len() < size_of::<Self>() {
             return Err(());
         }
+        let s = unsafe { &*(address.as_ptr() as *const Self) };
+        s.is_legal()?;
         Ok(s)
     }
 
     pub unsafe fn from_address(address: *const u8) -> Result<&'static Self, ()> {
-        let s = &*(address as *const Self);
-        if s.e_ident[0..4] != ELF_MAGIC
-            || s.e_ident[4] != ELF_CLASS
-            || s.e_ident[6] != ELF_HEADER_VERSION
-            || s.e_version != ELF_SUPPORTED_VERSION
-        {
-            return Err(());
-        }
+        let s = unsafe { &*(address as *const Self) };
+        s.is_legal()?;
         Ok(s)
     }
 

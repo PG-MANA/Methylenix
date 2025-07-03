@@ -5,20 +5,19 @@
 //! RunQueue will usually be used only specific cpu, but some methods may be called from other cpu,
 //! therefore, it has SpinLock.
 
-use super::process_entry::ProcessEntry;
-use super::thread_entry::ThreadEntry;
-use super::{TaskError, TaskStatus};
+use super::{ProcessEntry, TaskError, TaskStatus, ThreadEntry};
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu::is_interrupt_enabled;
 use crate::arch::target_arch::interrupt::{InterruptManager, StoredIrqData};
 
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::slab_allocator::LocalSlabAllocator;
-use crate::kernel::memory_manager::MemoryError;
-use crate::kernel::sync::spin_lock::{SpinLockFlag, SpinLockFlagHolder};
-use crate::kernel::timer_manager::GlobalTimerManager;
+use crate::kernel::{
+    collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode},
+    manager_cluster::get_kernel_manager_cluster,
+    memory_manager::{MemoryError, slab_allocator::LocalSlabAllocator},
+    sync::spin_lock::{SpinLockFlag, SpinLockFlagHolder},
+    timer_manager::GlobalTimerManager,
+};
 
 use core::mem::offset_of;
 
@@ -143,7 +142,7 @@ impl RunQueue {
         Err(TaskError::InvalidThreadEntry)
     }
 
-    /// Sleep running thread and switch to next thread.
+    /// Sleep running thread and switch to the next thread.
     ///
     /// This function will remove `thread` from run_queue_manager.
     /// This function assumes [Self::lock] must be lockable.
@@ -168,15 +167,15 @@ impl RunQueue {
         result
     }
 
-    /// Set current thread's status to Sleeping and call [Self::schedule].
+    /// Set the current thread's status to Sleeping and call [Self::schedule].
     ///
     /// This function changes [Self::running_thread] to Sleep and call [Self::schedule].
-    /// `task_status` is set into current thread(it must not be Running).
+    /// `task_status` is set into the current thread (it must not be Running).
     /// This does not check `ThreadEntry::sleep_list`.
     ///
     /// [Self::running_thread] must be unlocked.
     ///
-    /// **Ensure that SpinLocks are unlocked before calling this function.**  
+    /// **Ensure that SpinLocks are unlocked before calling this function.**
     pub fn sleep_current_thread(
         &mut self,
         interrupt_flag: Option<StoredIrqData>,
@@ -324,7 +323,7 @@ impl RunQueue {
     pub fn assign_thread(&mut self, thread: &mut ThreadEntry) -> Result<bool, TaskError> {
         assert!(thread.lock.is_locked());
         let irq = InterruptManager::save_and_disable_local_irq();
-        let _lock = self.lock.lock(); /* To avoid task switch holding other cpu's run_queue_lock */
+        let _lock = self.lock.lock(); /* To avoid task switch holding other CPU's run_queue_lock */
         self._add_thread(thread, false)?;
         let thread_priority = thread.get_priority_level();
         let should_reschedule =

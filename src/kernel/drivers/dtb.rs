@@ -81,8 +81,8 @@ impl DtbManager {
             MemoryPermissionFlags::data()
         ) {
             Ok(v) => v,
-            Err(e) => {
-                pr_err!("Failed to map DTB: {:?}", e);
+            Err(err) => {
+                pr_err!("Failed to map DTB: {:?}", err);
                 return false;
             }
         };
@@ -90,7 +90,7 @@ impl DtbManager {
         let fdt_header = unsafe { &*(self.base_address.to_usize() as *const FdtHeader) };
         if u32::from_be(fdt_header.magic).to_be_bytes() != Self::DTB_MAGIC {
             pr_err!("Invalid DTB magic");
-            let _ = free_pages!(self.base_address);
+            bug_on_err!(free_pages!(self.base_address));
             return false;
         }
         if u32::from_be(fdt_header.version) > Self::DTB_VERSION {
@@ -98,7 +98,7 @@ impl DtbManager {
                 "Unsupported DTB version: {}",
                 u32::from_be(fdt_header.version)
             );
-            let _ = free_pages!(self.base_address);
+            bug_on_err!(free_pages!(self.base_address));
             return false;
         }
         if (u32::from_be(fdt_header.total_size) as usize) > INITIAL_MAP_SIZE.to_usize() {
@@ -110,7 +110,7 @@ impl DtbManager {
                 Ok(v) => v,
                 Err(e) => {
                     pr_err!("Failed to remap DTB: {:?}", e);
-                    let _ = free_pages!(self.base_address);
+                    bug_on_err!(free_pages!(self.base_address));
                     return false;
                 }
             };
@@ -135,7 +135,7 @@ impl DtbManager {
             p += 1;
         }
         let l = unsafe { *(p as *const u8) };
-        for e in delimiter.iter().chain(&[b'\0']) {
+        for e in delimiter.iter().chain(b"\0") {
             if *e == l {
                 return Ok(true);
             }
@@ -156,7 +156,7 @@ impl DtbManager {
             *pointer += 1;
         }
         let l = unsafe { *(*pointer as *const u8) };
-        for e in delimiter.iter().chain(&[b'\0']) {
+        for e in delimiter.iter().chain(b"\0") {
             if *e == l {
                 while unsafe { *(*pointer as *const u8) } != b'\0' {
                     *pointer += 1;
@@ -245,7 +245,7 @@ impl DtbManager {
             return Err(());
         }
         *pointer += Self::FDT_NODE_BYTE;
-        if self.compare_string(pointer, node_name, &[b'@'])? {
+        if self.compare_string(pointer, node_name, b"@")? {
             return Ok(Some(DtbNodeInfo {
                 base_address: VAddress::new(*pointer),
                 address_cells,
@@ -273,9 +273,9 @@ impl DtbManager {
                 Self::FDT_PROP => {
                     *pointer += Self::FDT_NODE_BYTE;
                     let len = u32::from_be_bytes(*self.read_node(*pointer)?);
-                    *pointer += core::mem::size_of::<u32>();
+                    *pointer += size_of::<u32>();
                     let name_segment = u32::from_be_bytes(*self.read_node(*pointer)?);
-                    *pointer += core::mem::size_of::<u32>();
+                    *pointer += size_of::<u32>();
                     self.check_address_and_size_cells(
                         name_segment,
                         *pointer,
@@ -314,9 +314,9 @@ impl DtbManager {
                 Self::FDT_PROP => {
                     *pointer += Self::FDT_NODE_BYTE;
                     let len = u32::from_be_bytes(*self.read_node(*pointer)?);
-                    *pointer += core::mem::size_of::<u32>();
+                    *pointer += size_of::<u32>();
                     /* Skip Name Segment */
-                    *pointer += core::mem::size_of::<u32>();
+                    *pointer += size_of::<u32>();
                     *pointer += len as usize;
                 }
                 _ => {
@@ -392,9 +392,9 @@ impl DtbManager {
                 Self::FDT_PROP => {
                     p += Self::FDT_NODE_BYTE;
                     let len = u32::from_be_bytes(*self.read_node(p).ok()?);
-                    p += core::mem::size_of::<u32>();
+                    p += size_of::<u32>();
                     let name_segment = u32::from_be_bytes(*self.read_node(p).ok()?);
-                    p += core::mem::size_of::<u32>();
+                    p += size_of::<u32>();
                     self.check_address_and_size_cells(
                         name_segment,
                         p,
@@ -447,7 +447,7 @@ impl DtbManager {
                 p += 1;
                 continue;
             }
-            for c in compatible.iter().chain(&[b'\0']) {
+            for c in compatible.iter().chain(b"\0") {
                 if unsafe { *((info.base_address.to_usize() + (p as usize)) as *const u8) } != *c {
                     skip = true;
                     continue 'outer;
@@ -489,7 +489,7 @@ impl DtbManager {
         unsafe {
             core::slice::from_raw_parts(
                 info.base_address.to_usize() as *const u8,
-                (info.len as usize) / core::mem::size_of::<u8>(),
+                (info.len as usize) / size_of::<u8>(),
             )
         }
     }
@@ -498,13 +498,13 @@ impl DtbManager {
         unsafe {
             core::slice::from_raw_parts(
                 info.base_address.to_usize() as *const u32,
-                (info.len as usize) / core::mem::size_of::<u32>(),
+                (info.len as usize) / size_of::<u32>(),
             )
         }
     }
 
     pub fn read_property_as_u32(&self, info: &DtbPropertyInfo) -> Option<u32> {
-        if (info.len as usize) < core::mem::size_of::<u32>() {
+        if (info.len as usize) < size_of::<u32>() {
             None
         } else {
             Some(unsafe { *(info.base_address.to_usize() as *const u32) })

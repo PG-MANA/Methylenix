@@ -3,16 +3,16 @@
 //!
 
 use crate::kernel::drivers::pci::{
-    msi::setup_msi_or_msi_x, ClassCode, PciDevice, PciDeviceDriver, PciManager,
+    ClassCode, PciDevice, PciDeviceDriver, PciManager, msi::setup_msi_or_msi_x,
 };
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::{
     alloc_pages_with_physical_address, data_type::*, free_pages, io_remap, kmalloc,
 };
+use crate::kernel::network_manager::NetworkError;
 use crate::kernel::network_manager::ethernet_device::{
     EthernetDeviceDescriptor, EthernetDeviceDriver, EthernetDeviceInfo, MacAddress, TxEntry,
 };
-use crate::kernel::network_manager::NetworkError;
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use alloc::collections::LinkedList;
@@ -133,9 +133,9 @@ impl PciDeviceDriver for I210Manager {
             MemoryOptionFlags::DEVICE_MEMORY
         ) {
             Ok(a) => a,
-            Err(e) => {
-                let _ = free_pages!(tx_ring_buffer_virtual_address);
-                pr_err!("Failed to allocate memory: {:?}", e);
+            Err(err) => {
+                bug_on_err!(free_pages!(tx_ring_buffer_virtual_address));
+                pr_err!("Failed to allocate memory: {:?}", err);
                 return Err(());
             }
         };
@@ -149,17 +149,16 @@ impl PciDeviceDriver for I210Manager {
             MemoryOptionFlags::DEVICE_MEMORY
         ) {
             Ok(a) => a,
-            Err(e) => {
-                let _ = free_pages!(tx_ring_buffer_virtual_address);
-                let _ = free_pages!(rx_ring_buffer_virtual_address);
-                pr_err!("Failed to allocate memory: {:?}", e);
+            Err(err) => {
+                bug_on_err!(free_pages!(tx_ring_buffer_virtual_address));
+                bug_on_err!(free_pages!(rx_ring_buffer_virtual_address));
+                pr_err!("Failed to allocate memory: {:?}", err);
                 return Err(());
             }
         };
         let rx_ring_buffer = unsafe {
             &mut *(rx_ring_buffer_virtual_address.to_usize()
-                as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
-                    / core::mem::size_of::<u64>()])
+                as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE / size_of::<u64>()])
         };
         for i in 0..Self::NUM_OF_RX_DESC {
             rx_ring_buffer[2 * i] = (receive_buffer_physical_address.to_usize() + i * 2048) as u64;
@@ -168,8 +167,7 @@ impl PciDeviceDriver for I210Manager {
 
         let tx_ring_buffer = unsafe {
             &mut *(tx_ring_buffer_virtual_address.to_usize()
-                as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE
-                    / core::mem::size_of::<u64>()])
+                as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE / size_of::<u64>()])
         };
         for i in 0..Self::NUM_OF_TX_DESC {
             tx_ring_buffer[2 * i + 1] = 0;
@@ -253,7 +251,7 @@ impl PciDeviceDriver for I210Manager {
         mac_address[3] = (i >> (u8::BITS * 3)) as u8;
         let i = u32::from_le(read_mmio::<u32>(
             controller_base_address,
-            Self::INVM_DATA_OFFSET + core::mem::size_of::<u32>(),
+            Self::INVM_DATA_OFFSET + size_of::<u32>(),
         ));
         mac_address[4] = (i & u8::MAX as u32) as u8;
         mac_address[5] = ((i >> u8::BITS) & u8::MAX as u32) as u8;
@@ -298,10 +296,7 @@ impl PciDeviceDriver for I210Manager {
             mac_address[1] = ((d >> u8::BITS) & u8::MAX as u32) as u8;
             mac_address[2] = ((d >> (u8::BITS * 2)) & u8::MAX as u32) as u8;
             mac_address[3] = (d >> (u8::BITS * 3)) as u8;
-            let d = read_mmio::<u32>(
-                controller_base_address,
-                Self::RAL_OFFSET + core::mem::size_of::<u32>(),
-            );
+            let d = read_mmio::<u32>(controller_base_address, Self::RAL_OFFSET + size_of::<u32>());
             mac_address[4] = (d & u8::MAX as u32) as u8;
             mac_address[5] = ((d >> u8::BITS) & u8::MAX as u32) as u8;
         }
@@ -326,8 +321,8 @@ impl PciDeviceDriver for I210Manager {
             }
         ) {
             Ok(e) => e,
-            Err(e) => {
-                pr_err!("Failed to initialize manager: {:?}", e);
+            Err(err) => {
+                pr_err!("Failed to initialize manager: {:?}", err);
                 return Err(());
             }
         };
@@ -507,11 +502,11 @@ impl I210Manager {
             };
             unsafe {
                 *((self.transfer_ring_buffer.to_usize()
-                    + ((self.transfer_tail as usize) * (2 * core::mem::size_of::<u64>())))
+                    + ((self.transfer_tail as usize) * (2 * size_of::<u64>())))
                     as *mut u64) = descriptor[0];
                 *((self.transfer_ring_buffer.to_usize()
-                    + ((self.transfer_tail as usize) * (2 * core::mem::size_of::<u64>())
-                        + core::mem::size_of::<u64>())) as *mut u64) = descriptor[1];
+                    + ((self.transfer_tail as usize) * (2 * size_of::<u64>()) + size_of::<u64>()))
+                    as *mut u64) = descriptor[1];
             }
             self.transfer_ids[self.transfer_tail as usize] = id;
             self.transfer_tail = Self::get_next_transfer_pointer(self.transfer_tail);
@@ -536,8 +531,7 @@ impl I210Manager {
                 let _lock = self.receive_ring_lock.lock();
                 let rx_ring_buffer = unsafe {
                     &mut *(self.receive_ring_buffer.to_usize()
-                        as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE
-                            / core::mem::size_of::<u64>()])
+                        as *mut [u64; Self::NUM_OF_RX_DESC * Self::RX_DESC_SIZE / size_of::<u64>()])
                 };
 
                 let mut receive_descriptor = Self::get_next_receive_pointer(self.receive_tail);
@@ -547,27 +541,29 @@ impl I210Manager {
                     let length =
                         rx_ring_buffer[2 * (receive_descriptor as usize) + 1] & ((1 << 16) - 1);
                     if length > 0 {
-                        let buffer = kmalloc!(MSize::new(length as usize));
-                        if let Ok(buffer) = buffer {
-                            unsafe {
-                                core::ptr::copy_nonoverlapping(
-                                    (self.receive_buffer.to_usize()
-                                        + 2048 * (receive_descriptor as usize))
-                                        as *const u8,
-                                    buffer.to_usize() as *mut u8,
-                                    length as usize,
-                                )
-                            };
-                            /* Throw ethernet manager */
-                            get_kernel_manager_cluster()
-                                .network_manager
-                                .received_ethernet_frame_handler(
-                                    self.device_id,
-                                    buffer,
-                                    MSize::new(length as usize),
-                                );
-                        } else {
-                            pr_err!("Failed to allocate memory: {:?}", buffer.unwrap_err());
+                        match kmalloc!(MSize::new(length as usize)) {
+                            Ok(buffer) => {
+                                unsafe {
+                                    core::ptr::copy_nonoverlapping(
+                                        (self.receive_buffer.to_usize()
+                                            + 2048 * (receive_descriptor as usize))
+                                            as *const u8,
+                                        buffer.to_usize() as *mut u8,
+                                        length as usize,
+                                    )
+                                };
+                                /* Throw ethernet manager */
+                                get_kernel_manager_cluster()
+                                    .network_manager
+                                    .received_ethernet_frame_handler(
+                                        self.device_id,
+                                        buffer,
+                                        MSize::new(length as usize),
+                                    );
+                            }
+                            Err(err) => {
+                                pr_err!("Failed to allocate memory: {:?}", err);
+                            }
                         }
                     }
                     rx_ring_buffer[2 * (receive_descriptor as usize) + 1] = 0;
@@ -597,8 +593,7 @@ impl I210Manager {
                 let _lock = self.transfer_ring_lock.lock();
                 let tx_ring_buffer = unsafe {
                     &mut *(self.transfer_ring_buffer.to_usize()
-                        as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE
-                            / core::mem::size_of::<u64>()])
+                        as *mut [u64; Self::NUM_OF_TX_DESC * Self::TX_DESC_SIZE / size_of::<u64>()])
                 };
 
                 let device_transfer_head = read_mmio::<u32>(self.base_address, Self::TDH_OFFSET);

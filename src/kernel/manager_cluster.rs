@@ -1,30 +1,33 @@
 //!
 //! Cluster of Managers for kernel
 //!
-//! This cluster stores necessary structs for kernel.
+//! This cluster includes essential structs for kernel.
 //! All members of manager must be Mutex.
 
-use crate::arch::target_arch::device::serial_port::SerialPortManager;
-use crate::arch::target_arch::interrupt::InterruptManager;
-use crate::arch::target_arch::{ArchDependedCpuManagerCluster, ArchDependedKernelManagerCluster};
+use crate::arch::target_arch::{
+    ArchDependedCpuManagerCluster, ArchDependedKernelManagerCluster,
+    device::serial_port::SerialPortManager, interrupt::InterruptManager,
+};
 
-use crate::kernel::block_device::BlockDeviceManager;
-use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::drivers::acpi::device::AcpiDeviceManager;
-use crate::kernel::drivers::acpi::event::AcpiEventManager;
-use crate::kernel::drivers::acpi::AcpiManager;
-use crate::kernel::drivers::pci::PciManager;
-use crate::kernel::file_manager::FileManager;
-use crate::kernel::graphic_manager::GraphicManager;
-use crate::kernel::memory_manager::memory_allocator::MemoryAllocator;
-use crate::kernel::memory_manager::{system_memory_manager::SystemMemoryManager, MemoryManager};
-use crate::kernel::network_manager::NetworkManager;
-use crate::kernel::sync::spin_lock::Mutex;
-use crate::kernel::task_manager::run_queue::RunQueue;
-use crate::kernel::task_manager::work_queue::WorkQueue;
-use crate::kernel::task_manager::TaskManager;
-use crate::kernel::timer_manager::{GlobalTimerManager, LocalTimerManager};
-use crate::kernel::tty::TtyManager;
+use crate::kernel::{
+    block_device::BlockDeviceManager,
+    collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode},
+    drivers::{
+        acpi::{AcpiManager, device::AcpiDeviceManager, event::AcpiEventManager},
+        pci::PciManager,
+    },
+    file_manager::FileManager,
+    graphic_manager::GraphicManager,
+    memory_manager::{
+        MemoryManager, memory_allocator::MemoryAllocator,
+        system_memory_manager::SystemMemoryManager,
+    },
+    network_manager::NetworkManager,
+    sync::spin_lock::Mutex,
+    task_manager::{TaskManager, run_queue::RunQueue, work_queue::WorkQueue},
+    timer_manager::{GlobalTimerManager, LocalTimerManager},
+    tty::TtyManager,
+};
 
 use core::mem::MaybeUninit;
 

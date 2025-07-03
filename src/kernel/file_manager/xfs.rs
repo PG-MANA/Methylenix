@@ -2,12 +2,17 @@
 //! XFS
 //!
 
-use super::{file_info::FileInfo, FileError, PartitionInfo, PartitionManager};
+use super::{FileError, PartitionInfo, PartitionManager, file_info::FileInfo};
 
-use crate::kernel::collections::guid::Guid;
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MOffset, MSize, VAddress};
-use crate::kernel::memory_manager::{alloc_non_linear_pages, free_pages};
+use crate::kernel::{
+    collections::guid::Guid,
+    manager_cluster::get_kernel_manager_cluster,
+    memory_manager::{
+        alloc_non_linear_pages,
+        data_type::{Address, MOffset, MSize, VAddress},
+        free_pages,
+    },
+};
 
 type XfsRfsBlock = u64;
 type XfsRtBlock = u64;
@@ -109,7 +114,7 @@ struct DInodeCore {
     d_mev_mask: u32,
     d_m_state: u16,
     flags: u16,
-    gen: u32,
+    generation: u32,
     be_next_unlinked: u32,
     crc: u32,
     be_change_count: u64,
@@ -187,16 +192,15 @@ impl XfsDriver {
             inode_offset,
             self.get_ag(inode_number)
         );
-        let inode_buffer =
-            match alloc_non_linear_pages!(
-                MSize::new((1 << self.inode_size_log2) as usize).page_align_up()
-            ) {
-                Ok(a) => a,
-                Err(e) => {
-                    pr_err!("Failed to allocate memory for directory entries: {:?}", e);
-                    return;
-                }
-            };
+        let inode_buffer = match alloc_non_linear_pages!(
+            MSize::new((1 << self.inode_size_log2) as usize).page_align_up()
+        ) {
+            Ok(a) => a,
+            Err(err) => {
+                pr_err!("Failed to allocate memory for directory entries: {:?}", err);
+                return;
+            }
+        };
         let block_lba = inode_block / partition_info.lba_block_size;
         let block_offset = inode_block - (block_lba * partition_info.lba_block_size);
         if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
@@ -206,7 +210,7 @@ impl XfsDriver {
             ((block_offset + (1 << self.block_size_log2)) / partition_info.lba_block_size).max(1),
         ) {
             pr_err!("Failed to read inode block: {:?}", e);
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return;
         }
         let inode = unsafe {
@@ -215,7 +219,7 @@ impl XfsDriver {
         };
         if inode.magic != XFS_D_INODE_CORE_SIGNATURE {
             pr_err!("Invalid inode(number: {:#X})", inode_number);
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return;
         } else if inode.version != XFS_D_INODE_CORE_VERSION_V3 {
             pr_err!(
@@ -223,18 +227,17 @@ impl XfsDriver {
                 inode_number,
                 inode.version
             );
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return;
         }
         if inode.format != XFS_D_INODE_CORE_FORMAT_LOCAL {
             pr_err!("inode is not the directory format.");
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return;
         }
 
         let inode_sf_hdr = unsafe {
-            &*((inode as *const _ as usize + core::mem::size_of::<DInodeCore>())
-                as *const XfsDir2SfHdr)
+            &*((inode as *const _ as usize + size_of::<DInodeCore>()) as *const XfsDir2SfHdr)
         };
         pr_debug!(
             "Number of entries: {:#X}(Is64bit: {:#X})",
@@ -243,32 +246,32 @@ impl XfsDriver {
         );
 
         let dir_entries_base_address = inode_sf_hdr as *const _ as usize
-            + core::mem::size_of::<XfsDir2SfHdr>()
+            + size_of::<XfsDir2SfHdr>()
             + if inode_sf_hdr.i8_count != 0 {
-                core::mem::size_of::<u64>()
+                size_of::<u64>()
             } else {
-                core::mem::size_of::<u32>()
+                size_of::<u32>()
             };
         let mut pointer = dir_entries_base_address;
         for _ in 0..inode_sf_hdr.count {
             let name_len = unsafe { *(pointer as *const u8) };
-            pointer += core::mem::size_of::<u8>();
+            pointer += size_of::<u8>();
             let offset = u16::from_be(unsafe { *(pointer as *const u16) });
-            pointer += core::mem::size_of::<u16>();
+            pointer += size_of::<u16>();
             let name = core::str::from_utf8(unsafe {
                 core::slice::from_raw_parts(pointer as *const u8, name_len as usize)
             })
             .unwrap_or("????");
             pointer += name_len as usize;
             let file_type = unsafe { *(pointer as *const u8) };
-            pointer += core::mem::size_of::<u8>();
+            pointer += size_of::<u8>();
             let entry_inode_number = if inode_sf_hdr.i8_count != 0 {
                 let p = pointer;
-                pointer += core::mem::size_of::<u64>();
+                pointer += size_of::<u64>();
                 u64::from_be(unsafe { *(p as *const u64) })
             } else {
                 let p = pointer;
-                pointer += core::mem::size_of::<u32>();
+                pointer += size_of::<u32>();
                 u32::from_be(unsafe { *(p as *const u32) }) as u64
             };
             for _ in 0..indent {
@@ -285,7 +288,7 @@ impl XfsDriver {
                 self.list_files(partition_info, entry_inode_number, indent + 1);
             }
         }
-        let _ = free_pages!(inode_buffer);
+        bug_on_err!(free_pages!(inode_buffer));
     }
 
     fn read_inode(
@@ -295,16 +298,15 @@ impl XfsDriver {
     ) -> Result<(VAddress, MOffset), FileError> {
         let inode_block = self.get_inode_block(inode_number);
         let inode_offset = self.get_inode_offset(inode_number);
-        let inode_buffer =
-            match alloc_non_linear_pages!(
-                MSize::new((1 << self.inode_size_log2) as usize).page_align_up()
-            ) {
-                Ok(a) => a,
-                Err(err) => {
-                    pr_err!("Failed to allocate memory for directory entries: {:?}", err);
-                    return Err(FileError::MemoryError(err));
-                }
-            };
+        let inode_buffer = match alloc_non_linear_pages!(
+            MSize::new((1 << self.inode_size_log2) as usize).page_align_up()
+        ) {
+            Ok(a) => a,
+            Err(err) => {
+                pr_err!("Failed to allocate memory for directory entries: {:?}", err);
+                return Err(FileError::MemoryError(err));
+            }
+        };
         let block_lba = inode_block / partition_info.lba_block_size;
         let block_offset = inode_block - (block_lba * partition_info.lba_block_size);
         if let Err(err) = get_kernel_manager_cluster().block_device_manager.read_lba(
@@ -314,7 +316,7 @@ impl XfsDriver {
             ((block_offset + (1 << self.block_size_log2)) / partition_info.lba_block_size).max(1),
         ) {
             pr_err!("Failed to read inode block: {:?}", err);
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::DeviceError);
         }
         Ok((
@@ -327,14 +329,13 @@ impl XfsDriver {
         &self,
         inode_sf_hdr: &XfsDir2SfHdr,
         name: &str,
-        current_directory: &mut FileInfo,
     ) -> Result<(FileInfo, u8 /* File Type */), FileError> {
         let dir_entries_base_address = inode_sf_hdr as *const _ as usize
-            + core::mem::size_of::<XfsDir2SfHdr>()
+            + size_of::<XfsDir2SfHdr>()
             + if inode_sf_hdr.i8_count != 0 {
-                core::mem::size_of::<u64>()
+                size_of::<u64>()
             } else {
-                core::mem::size_of::<u32>()
+                size_of::<u32>()
             };
 
         let count = if inode_sf_hdr.count != 0 {
@@ -346,27 +347,27 @@ impl XfsDriver {
 
         for _ in 0..count {
             let name_len = unsafe { *(pointer as *const u8) };
-            pointer += core::mem::size_of::<u8>();
+            pointer += size_of::<u8>();
             let _offset = u16::from_be(unsafe { *(pointer as *const u16) });
-            pointer += core::mem::size_of::<u16>();
+            pointer += size_of::<u16>();
             let entry_name = core::str::from_utf8(unsafe {
                 core::slice::from_raw_parts(pointer as *const u8, name_len as usize)
             })
             .unwrap_or("N/A");
             pointer += name_len as usize;
             let file_type = unsafe { *(pointer as *const u8) };
-            pointer += core::mem::size_of::<u8>();
+            pointer += size_of::<u8>();
             let entry_inode_number = if inode_sf_hdr.i8_count != 0 {
                 let p = pointer;
-                pointer += core::mem::size_of::<u64>();
+                pointer += size_of::<u64>();
                 u64::from_be(unsafe { *(p as *const u64) })
             } else {
                 let p = pointer;
-                pointer += core::mem::size_of::<u32>();
+                pointer += size_of::<u32>();
                 u32::from_be(unsafe { *(p as *const u32) }) as u64
             };
             if name.len() == name_len as usize && name == entry_name {
-                let mut file_info = FileInfo::new(current_directory);
+                let mut file_info = FileInfo::new();
                 file_info.set_file_name_str(entry_name);
                 file_info.set_inode_number(entry_inode_number);
                 if (file_type & XFS_DIR3_FT_DIR) != 0 {
@@ -381,13 +382,12 @@ impl XfsDriver {
     fn read_file_extents_inode(
         &self,
         partition_info: &PartitionInfo,
-        _file_info: &mut FileInfo,
         inode: &DInodeCore,
         mut offset: MOffset,
         mut length: MSize,
         buffer: VAddress,
     ) -> Result<MSize, FileError> {
-        let extent_list_base = inode as *const _ as usize + core::mem::size_of::<DInodeCore>();
+        let extent_list_base = inode as *const _ as usize + size_of::<DInodeCore>();
         let number_of_extent_records = u32::from_be(inode.next_entries) as usize;
         let mut buffer_pointer = MSize::new(0);
         let mut page_buffer = VAddress::new(0);
@@ -454,7 +454,7 @@ impl XfsDriver {
             if total_read_size > page_buffer_size {
                 let new_allocation_size = total_read_size.page_align_up();
                 if !page_buffer_size.is_zero() {
-                    let _ = free_pages!(page_buffer);
+                    bug_on_err!(free_pages!(page_buffer));
                 }
                 page_buffer = match alloc_non_linear_pages!(new_allocation_size) {
                     Ok(a) => a,
@@ -487,7 +487,7 @@ impl XfsDriver {
         }
 
         if !page_buffer_size.is_zero() {
-            let _ = free_pages!(page_buffer);
+            bug_on_err!(free_pages!(page_buffer));
         }
         Ok(buffer_pointer)
     }
@@ -502,7 +502,7 @@ impl XfsDriver {
         let inode = unsafe { &*((inode_buffer + inode_offset).to_usize() as *const DInodeCore) };
         if inode.magic != XFS_D_INODE_CORE_SIGNATURE {
             pr_err!("Invalid inode(number: {:#X})", file_info.get_inode_number());
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::BadSignature);
         } else if inode.version != XFS_D_INODE_CORE_VERSION_V3 {
             pr_err!(
@@ -510,7 +510,7 @@ impl XfsDriver {
                 file_info.get_inode_number(),
                 inode.version
             );
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::BadSignature);
         }
 
@@ -519,7 +519,7 @@ impl XfsDriver {
         file_info.set_uid(u32::from_be(inode.uid));
         file_info.set_gid(u32::from_be(inode.gid));
 
-        let _ = free_pages!(inode_buffer);
+        bug_on_err!(free_pages!(inode_buffer));
         Ok(())
     }
 }
@@ -578,23 +578,21 @@ impl PartitionManager for XfsDriver {
         file_name: &str,
         current_directory: &mut FileInfo,
     ) -> Result<FileInfo, FileError> {
+        let current_directory_inode = current_directory.get_inode_number();
         let (inode_buffer, inode_offset) =
-            self.read_inode(partition_info, current_directory.get_inode_number())?;
+            self.read_inode(partition_info, current_directory_inode)?;
         let inode = unsafe { &*((inode_buffer + inode_offset).to_usize() as *const DInodeCore) };
         if inode.magic != XFS_D_INODE_CORE_SIGNATURE {
-            pr_err!(
-                "Invalid inode(number: {:#X})",
-                current_directory.get_inode_number()
-            );
-            let _ = free_pages!(inode_buffer);
+            pr_err!("Invalid inode(number: {:#X})", current_directory_inode);
+            bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::BadSignature);
         } else if inode.version != XFS_D_INODE_CORE_VERSION_V3 {
             pr_err!(
                 "Invalid inode version(number: {:#X}, Version: {:#X})",
-                current_directory.get_inode_number(),
+                current_directory_inode,
                 inode.version
             );
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::BadSignature);
         }
 
@@ -604,20 +602,22 @@ impl PartitionManager for XfsDriver {
         match inode.format {
             XFS_D_INODE_CORE_FORMAT_LOCAL => {
                 let inode_sf_hdr = unsafe {
-                    &*((inode as *const _ as usize + core::mem::size_of::<DInodeCore>())
+                    &*((inode as *const _ as usize + size_of::<DInodeCore>())
                         as *const XfsDir2SfHdr)
                 };
-                let result =
-                    self.search_file_local_inode(inode_sf_hdr, file_name, current_directory);
-                if let Err(err) = result {
-                    let _ = free_pages!(inode_buffer);
-                    return Err(err);
+                match self.search_file_local_inode(inode_sf_hdr, file_name) {
+                    Ok((i, _t)) => {
+                        file_info = i;
+                    }
+                    Err(err) => {
+                        bug_on_err!(free_pages!(inode_buffer));
+                        return Err(err);
+                    }
                 }
-                (file_info, _file_type) = result.unwrap();
             }
             format => {
                 pr_err!("Unsupported Format: {:#X}", format);
-                let _ = free_pages!(inode_buffer);
+                bug_on_err!(free_pages!(inode_buffer));
                 return Err(FileError::OperationNotSupported);
             }
         }
@@ -661,7 +661,7 @@ impl PartitionManager for XfsDriver {
 
         if inode.magic != XFS_D_INODE_CORE_SIGNATURE {
             pr_err!("Invalid inode(number: {:#X})", file_info.get_inode_number());
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::BadSignature);
         } else if inode.version != XFS_D_INODE_CORE_VERSION_V3 {
             pr_err!(
@@ -669,29 +669,34 @@ impl PartitionManager for XfsDriver {
                 file_info.get_inode_number(),
                 inode.version
             );
-            let _ = free_pages!(inode_buffer);
+            bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::BadSignature);
         }
 
         match inode.format {
             XFS_D_INODE_CORE_FORMAT_EXTENTS => {
-                let result = self.read_file_extents_inode(
-                    partition_info,
-                    file_info,
-                    inode,
-                    offset,
-                    length,
-                    buffer,
-                );
-                let _ = free_pages!(inode_buffer);
+                let result =
+                    self.read_file_extents_inode(partition_info, inode, offset, length, buffer);
+                bug_on_err!(free_pages!(inode_buffer));
                 result
             }
             format => {
                 pr_err!("Unsupported Format: {:#X}", format);
-                let _ = free_pages!(inode_buffer);
+                bug_on_err!(free_pages!(inode_buffer));
                 Err(FileError::OperationNotSupported)
             }
         }
+    }
+
+    fn write_file(
+        &self,
+        _partition_info: &PartitionInfo,
+        _file_info: &FileInfo,
+        _offset: MOffset,
+        _length: MSize,
+        _buffer: VAddress,
+    ) -> Result<MSize, FileError> {
+        Err(FileError::OperationNotSupported)
     }
 
     fn close_file(&self, _partition_info: &PartitionInfo, _file_info: &mut FileInfo) {}

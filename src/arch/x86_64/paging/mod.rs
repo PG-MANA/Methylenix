@@ -17,13 +17,15 @@ mod pdpte;
 mod pml4e;
 mod pte;
 
-use self::pde::{PDE, PD_MAX_ENTRY};
-use self::pdpte::{PDPTE, PDPT_MAX_ENTRY};
-use self::pml4e::{PML4E, PML4_MAX_ENTRY};
-use self::pte::{PTE, PT_MAX_ENTRY};
+use self::{
+    pde::{PD_MAX_ENTRY, PDE},
+    pdpte::{PDPT_MAX_ENTRY, PDPTE},
+    pml4e::{PML4_MAX_ENTRY, PML4E},
+    pte::{PT_MAX_ENTRY, PTE},
+};
 
 use crate::arch::target_arch::context::memory_layout::{
-    direct_map_to_physical_address, physical_address_to_direct_map, CANONICAL_AREA_HIGH,
+    CANONICAL_AREA_HIGH, direct_map_to_physical_address, physical_address_to_direct_map,
 };
 use crate::arch::target_arch::device::cpu;
 
@@ -826,7 +828,15 @@ impl PageManager {
             PAddress::new(0), /* physical address */
         );
         let print_normal = |v: usize, p: usize, w: bool, e: bool, a: bool, s: &str| {
-            kprintln!("Linear addresses: {:>#16X} => Physical Address: {:>#16X}, W:{:>5}, E:{:>5}, A:{:>5} {}", v, p, w, e, a, s);
+            kprintln!(
+                "Linear addresses: {:>#16X} => Physical Address: {:>#16X}, W:{:>5}, E:{:>5}, A:{:>5} {}",
+                v,
+                p,
+                w,
+                e,
+                a,
+                s
+            );
         };
         let print_omitted = |v: usize, p: usize| {
             kprintln!(

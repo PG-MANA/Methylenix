@@ -32,24 +32,20 @@ impl Guid {
     }
 
     pub fn new_le(d: &[u8; 16]) -> Self {
-        unsafe {
-            Self {
-                d1: u32::from_le(*core::mem::transmute::<&u8, &u32>(&d[0])),
-                d2: u16::from_le(*core::mem::transmute::<&u8, &u16>(&d[4])),
-                d3: u16::from_le(*core::mem::transmute::<&u8, &u16>(&d[6])),
-                d4: *core::mem::transmute::<&u8, &[u8; 8]>(&d[8]),
-            }
+        Self {
+            d1: u32::from_le_bytes([d[0], d[1], d[2], d[3]]),
+            d2: u16::from_le_bytes([d[4], d[5]]),
+            d3: u16::from_le_bytes([d[6], d[7]]),
+            d4: [d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15]],
         }
     }
 
     pub fn new_be(d: &[u8; 16]) -> Self {
-        unsafe {
-            Self {
-                d1: u32::from_be(*core::mem::transmute::<&u8, &u32>(&d[0])),
-                d2: u16::from_be(*core::mem::transmute::<&u8, &u16>(&d[4])),
-                d3: u16::from_be(*core::mem::transmute::<&u8, &u16>(&d[6])),
-                d4: *core::mem::transmute::<&u8, &[u8; 8]>(&d[8]),
-            }
+        Self {
+            d1: u32::from_be_bytes([d[0], d[1], d[2], d[3]]),
+            d2: u16::from_be_bytes([d[4], d[5]]),
+            d3: u16::from_be_bytes([d[6], d[7]]),
+            d4: [d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15]],
         }
     }
 }

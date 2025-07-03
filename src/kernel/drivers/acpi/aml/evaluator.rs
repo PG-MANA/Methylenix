@@ -6,7 +6,7 @@ use super::aml_variable::{
     AmlBitFiled, AmlByteFiled, AmlFunction, AmlIndexField, AmlPackage, AmlPciConfig, AmlVariable,
 };
 use super::data_object::{
-    parse_integer_from_buffer, ComputationalData, ConstData, DataObject, PackageElement,
+    ComputationalData, ConstData, DataObject, PackageElement, parse_integer_from_buffer,
 };
 use super::expression_opcode::{
     ByteList, ExpressionOpcode, Package, ReferenceTypeOpcode, VarPackage,
@@ -17,7 +17,7 @@ use super::namespace_modifier_object::NamespaceModifierObject;
 use super::statement_opcode::{Fatal, IfElse, Notify, StatementOpcode, While};
 use super::term_object::{MethodInvocation, TermArg, TermList, TermObj};
 use super::variable_tree::AmlVariableTree;
-use super::{eisa_id_to_dword, AcpiInt, AmlError, DataRefObject, ACPI_INT_ONES};
+use super::{ACPI_INT_ONES, AcpiInt, AmlError, DataRefObject, eisa_id_to_dword};
 
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::Mutex;
@@ -258,8 +258,8 @@ impl Evaluator {
         Ok(())
     }
 
-    pub(super) fn init_local_variables_and_argument_variables(
-    ) -> (LocalVariables, ArgumentVariables) {
+    pub(super) fn init_local_variables_and_argument_variables()
+    -> (LocalVariables, ArgumentVariables) {
         let mut local_variables: [MaybeUninit<Arc<Mutex<AmlVariable>>>;
             Self::NUMBER_OF_LOCAL_VARIABLES] =
             [const { MaybeUninit::uninit() }; Self::NUMBER_OF_LOCAL_VARIABLES];

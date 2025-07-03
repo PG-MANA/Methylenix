@@ -1,7 +1,8 @@
 //!
-//! Linked List
+//! Pointer Linked List
 //!
-//! This LinkedList only treat ptr from heap
+//! This LinkedList only treats ptr from heap
+//! Before using [`PtrLinkedList`], please consider using [`crate::kernel::collections::LinkedList`] instead.
 //! Be careful about ptr accessibly and conflict of mutable access.
 
 use core::marker::PhantomData;

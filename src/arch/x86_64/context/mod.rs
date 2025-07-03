@@ -13,10 +13,10 @@ use self::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE};
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
-use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::MemoryError;
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
-/// This manager contains system/user stack/code segment pointer.
+/// This manager contains system/user stack/code segment pointers.
 pub struct ContextManager {
     system_ss: u16,
     system_cs: u16,
@@ -63,7 +63,7 @@ impl ContextManager {
 
     /// Create system context data
     ///
-    /// This function makes a context data with system code/stack segment.
+    /// This function makes a `ContextData` with the system code/stack segment.
     ///
     /// `entry_address` must not return.
     pub fn create_system_context(
@@ -91,7 +91,7 @@ impl ContextManager {
 
     /// Create system context data from 'original_context_data'
     ///
-    /// This function makes a context data with system code/stack segment.
+    /// This function makes a `ContextData` with the system code/stack segment.
     ///
     /// `entry_address` must not return.
     pub fn fork_system_context(
@@ -118,7 +118,7 @@ impl ContextManager {
 
     /// Create user context data
     ///
-    /// This function makes a context data with user code/stack segment.
+    /// This function makes a `ContextData` with the user code/stack segment.
     ///
     /// `entry_address` must not return.
     pub fn create_user_context(
@@ -141,7 +141,7 @@ impl ContextManager {
     /// Jump to specific context data.
     ///
     /// This function **does not** save current process data.
-    /// This is used when OS starts task management system.
+    /// This is used when OS starts the task management system.
     ///
     /// **ContextData must be aligned by 64bit**.
     pub unsafe fn jump_to_context(
@@ -149,28 +149,28 @@ impl ContextManager {
         context: &mut ContextData,
         allow_interrupt_after_jump: bool,
     ) {
-        assert_eq!(core::mem::align_of_val(context), 64);
+        assert_eq!(align_of_val(context), 64);
         if allow_interrupt_after_jump {
             context.registers.rflags |= 0x0200;
         }
-        cpu::run_task(context as *mut _);
+        unsafe { cpu::run_task(context as *mut _) };
     }
 
     /// Jump to next_context with saving current context into old_context.
     ///
     /// This function does not return until another context jumps to this context.
-    /// each context must be aligned by 64bit (otherwise this function will panic).
+    /// Each context must be aligned by 64bit (otherwise this function will panic).
     pub unsafe fn switch_context(
         &self,
         old_context: &mut ContextData,
         next_context: &mut ContextData,
         allow_interrupt_after_switch: bool,
     ) {
-        assert_eq!(core::mem::align_of_val(old_context), 64);
-        assert_eq!(core::mem::align_of_val(next_context), 64);
+        assert_eq!(align_of_val(old_context), 64);
+        assert_eq!(align_of_val(next_context), 64);
         if allow_interrupt_after_switch {
             next_context.registers.rflags |= 0x0200;
         }
-        cpu::task_switch(next_context as *mut _, old_context as *mut _);
+        unsafe { cpu::task_switch(next_context as *mut _, old_context as *mut _) };
     }
 }

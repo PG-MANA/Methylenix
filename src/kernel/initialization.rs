@@ -5,8 +5,8 @@
 //!
 
 use crate::arch::target_arch::{
-    device::{cpu, pci::ArchDependPciManager},
     ELF_MACHINE_DEFAULT,
+    device::{cpu, pci::ArchDependPciManager},
 };
 
 use crate::kernel::{
@@ -15,9 +15,9 @@ use crate::kernel::{
     collections::init_struct,
     drivers::{
         acpi::{
+            AcpiManager,
             device::AcpiDeviceManager,
             table::{bgrt::BgrtManager, mcfg::McfgManager},
-            AcpiManager,
         },
         pci::PciManager,
     },
@@ -145,8 +145,8 @@ pub fn init_pci_early() -> bool {
         pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
     }
     init_struct!(get_kernel_manager_cluster().pci_manager, pci_manager);
-    if let Err(e) = get_kernel_manager_cluster().pci_manager.build_device_tree() {
-        pr_err!("Failed to build PCI device tree: {:?}", e);
+    if let Err(err) = get_kernel_manager_cluster().pci_manager.build_device_tree() {
+        pr_err!("Failed to build PCI device tree: {:?}", err);
         return false;
     }
     true

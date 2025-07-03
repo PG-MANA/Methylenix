@@ -6,7 +6,7 @@ description = "The OS written in Rust"
 keywords = ["os", "operating-system", "kernel", "seccamp", "security-camp"]
 categories = ["os"]
 license = "Apache-2.0"
-edition = "2021"
+edition = "2024"
 
 [profile.release]
 #lto = true

@@ -1,12 +1,12 @@
 //!
-//! Init codes for device, memory and else based on MultibootInformation
+//! Init codes for devices, memory and else based on MultibootInformation
 //!
 //! This module is called by boot function.
 
 use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
 use crate::arch::target_arch::{
-    context::memory_layout::{kernel_area_to_physical_address, KERNEL_MAP_START_ADDRESS},
+    context::memory_layout::{KERNEL_MAP_START_ADDRESS, kernel_area_to_physical_address},
     paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE},
 };
 
@@ -16,27 +16,25 @@ use crate::kernel::{
     graphic_manager::font::FontType,
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
+        MemoryManager,
         data_type::{
             Address, MOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
         },
         io_remap,
         memory_allocator::MemoryAllocator,
         physical_memory_manager::PhysicalMemoryManager,
-        system_memory_manager::get_physical_memory_manager,
         system_memory_manager::SystemMemoryManager,
+        system_memory_manager::get_physical_memory_manager,
         virtual_memory_manager::VirtualMemoryManager,
-        MemoryManager,
     },
 };
 
-use core::mem;
-
 /// Init memory system based on multiboot information.
-/// This function set up PhysicalMemoryManager which manages where is free
-/// and VirtualMemoryManager which manages which process is using what area of virtual memory.
+/// This function sets up PhysicalMemoryManager which manages where is free
+/// and [`VirtualMemoryManager`] which manages which process is using what area of virtual memory.
 /// After that, this will set up MemoryManager.
-/// If one of process is failed, this will panic.
-/// This function returns new address of MultiBootInformation.
+/// If one of the processes is failed, this will panic.
+/// This function returns a new address of MultiBootInformation.
 pub fn init_memory_by_multiboot_information(
     multiboot_information: MultiBootInformation,
 ) -> MultiBootInformation {
@@ -45,7 +43,7 @@ pub fn init_memory_by_multiboot_information(
     unsafe {
         physical_memory_manager.add_memory_entry_pool(
             core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER) as usize,
-            mem::size_of_val(&*core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)),
+            size_of_val(&*core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)),
         );
     }
     for entry in multiboot_information.memory_map_info.clone() {
@@ -117,7 +115,7 @@ pub fn init_memory_by_multiboot_information(
             let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
                 kernel_area_to_physical_address(virtual_address)
             } else {
-                virtual_address.to_direct_mapped_p_address()
+                unsafe { virtual_address.to_direct_mapped_p_address() }
             };
             physical_memory_manager
                 .reserve_memory(
@@ -182,7 +180,7 @@ pub fn init_memory_by_multiboot_information(
         let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
             kernel_area_to_physical_address(virtual_address)
         } else {
-            virtual_address.to_direct_mapped_p_address()
+            unsafe { virtual_address.to_direct_mapped_p_address() }
         };
         /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
         match virtual_memory_manager.map_address(

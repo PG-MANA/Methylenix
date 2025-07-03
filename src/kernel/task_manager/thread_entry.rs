@@ -3,7 +3,7 @@
 //!
 //! This entry contains some arch-depending data
 
-use super::{scheduling_class::SchedulingClass, ProcessEntry, TaskStatus};
+use super::{ProcessEntry, TaskStatus, scheduling_class::SchedulingClass};
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
@@ -16,7 +16,7 @@ use core::ptr::NonNull;
 /// ThreadEntry's method does not lock `Self::lock`, **the caller must lock it**.
 pub struct ThreadEntry {
     pub(super) t_list: PtrLinkedListNode<Self>,
-    /* All thread in process */
+    /* All threads in process */
     pub(super) run_list: PtrLinkedListNode<Self>,
     pub(super) sleep_list: PtrLinkedListNode<Self>,
     pub(super) lock: SpinLockFlag,

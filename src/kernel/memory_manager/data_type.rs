@@ -214,9 +214,9 @@ into_and_from_usize!(VAddress);
 display!(VAddress);
 
 impl VAddress {
-    /// Casting from VAddress to PAddress without mapping
-    /// This is used to cast address when using direct map
-    pub const fn to_direct_mapped_p_address(&self) -> PAddress {
+    /// Casting from VAddress to PAddress without any memory mapping.
+    /// This is used to cast address when using direct memory mapping.
+    pub const unsafe fn to_direct_mapped_p_address(&self) -> PAddress {
         PAddress::new(self.0)
     }
 }
@@ -260,9 +260,9 @@ into_and_from_usize!(PAddress);
 display!(PAddress);
 
 impl PAddress {
-    /// Casting from VAddress to PAddress without mapping
-    /// This is used to cast address when using direct map
-    pub const fn to_direct_mapped_v_address(&self) -> VAddress {
+    /// Casting from PAddress to VAddress without any memory mapping.
+    /// This is used to cast address when using direct memory mapping.
+    pub const unsafe fn to_direct_mapped_v_address(&self) -> VAddress {
         VAddress::new(self.0)
     }
 }

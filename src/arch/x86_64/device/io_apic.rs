@@ -65,26 +65,31 @@ impl IoApicManager {
     /// Read I/O register.
     unsafe fn read_register(&self, index: u32) -> u64 {
         use core::ptr::{read_volatile, write_volatile};
-        write_volatile(self.base_address.to_usize() as *mut u32, index);
-        let mut result = read_volatile((self.base_address.to_usize() + 0x10) as *mut u32) as u64;
-        write_volatile(self.base_address.to_usize() as *mut u32, index + 1);
-        result |= (read_volatile((self.base_address.to_usize() + 0x10) as *mut u32) as u64) << 32;
+        let mut result;
+        unsafe { write_volatile(self.base_address.to_usize() as *mut u32, index) };
+        result = unsafe { read_volatile((self.base_address.to_usize() + 0x10) as *mut u32) } as u64;
+        unsafe { write_volatile(self.base_address.to_usize() as *mut u32, index + 1) };
+        result |= (unsafe { read_volatile((self.base_address.to_usize() + 0x10) as *mut u32) }
+            as u64)
+            << 32;
         result
     }
 
     /// Write I/O register.
     unsafe fn write_register(&self, index: u32, data: u64) {
         use core::ptr::write_volatile;
-        write_volatile(self.base_address.to_usize() as *mut u32, index);
-        write_volatile(
-            (self.base_address.to_usize() + 0x10) as *mut u32,
-            data as u32,
-        );
-        write_volatile(self.base_address.to_usize() as *mut u32, index + 1);
-        write_volatile(
-            (self.base_address.to_usize() + 0x10) as *mut u32,
-            (data >> 32) as u32,
-        );
+        unsafe {
+            write_volatile(self.base_address.to_usize() as *mut u32, index);
+            write_volatile(
+                (self.base_address.to_usize() + 0x10) as *mut u32,
+                data as u32,
+            );
+            write_volatile(self.base_address.to_usize() as *mut u32, index + 1);
+            write_volatile(
+                (self.base_address.to_usize() + 0x10) as *mut u32,
+                (data >> 32) as u32,
+            );
+        }
     }
 
     pub fn send_eoi(&self, index: u8) {

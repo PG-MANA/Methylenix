@@ -90,8 +90,8 @@ impl MadtManager {
     /// Each Local APIC ID will be returned by  LocalApicIdIter.
     pub fn find_apic_id_list(&self) -> LocalApicIdIter {
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
-        let length = madt.length as usize - core::mem::size_of::<MADT>();
-        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+        let length = madt.length as usize - size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(size_of::<MADT>());
 
         LocalApicIdIter {
             base_address,
@@ -102,8 +102,8 @@ impl MadtManager {
 
     pub fn get_generic_interrupt_controller_cpu_info_iter(&self) -> GicCpuIter {
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
-        let length = madt.length as usize - core::mem::size_of::<MADT>();
-        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+        let length = madt.length as usize - size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(size_of::<MADT>());
 
         GicCpuIter {
             base_address,
@@ -120,8 +120,8 @@ impl MadtManager {
             return None;
         }
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
-        let length = madt.length as usize - core::mem::size_of::<MADT>();
-        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+        let length = madt.length as usize - size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(size_of::<MADT>());
         let mut pointer = 0usize;
         while pointer < length {
             let record_base = base_address.to_usize() + pointer;
@@ -151,8 +151,8 @@ impl MadtManager {
             return None;
         }
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
-        let length = madt.length as usize - core::mem::size_of::<MADT>();
-        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+        let length = madt.length as usize - size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(size_of::<MADT>());
         let mut pointer = 0usize;
         while pointer < length {
             let record_base = base_address.to_usize() + pointer;
@@ -179,8 +179,8 @@ impl MadtManager {
             return None;
         }
         let madt = unsafe { &*(self.base_address.to_usize() as *const MADT) };
-        let length = madt.length as usize - core::mem::size_of::<MADT>();
-        let base_address = self.base_address + MSize::new(core::mem::size_of::<MADT>());
+        let length = madt.length as usize - size_of::<MADT>();
+        let base_address = self.base_address + MSize::new(size_of::<MADT>());
         let mut pointer = 0usize;
         while pointer < length {
             let record_base = base_address.to_usize() + pointer;

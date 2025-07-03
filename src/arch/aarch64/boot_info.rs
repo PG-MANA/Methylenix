@@ -2,8 +2,8 @@
 //! BootInformation Structure from bootloader
 //!
 
-use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::kernel::drivers::efi::EfiSystemTable;
+use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
 use crate::kernel::file_manager::elf::ELF64_HEADER_SIZE;
 
 #[derive(Clone)]

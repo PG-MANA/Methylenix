@@ -54,11 +54,7 @@ impl<T: ?Sized> RwLock<T> {
             if self
                 .readers
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
-                    if x == usize::MAX {
-                        None
-                    } else {
-                        Some(x + 1)
-                    }
+                    if x == usize::MAX { None } else { Some(x + 1) }
                 })
                 .is_ok()
             {

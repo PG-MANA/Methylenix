@@ -266,7 +266,7 @@ impl ClassicIrqSaveSpinLockFlag {
 }
 
 impl<T: ?Sized> Mutex<T> {
-    pub fn lock(&self) -> Result<MutexGuard<T>, ()> {
+    pub fn lock(&self) -> Result<MutexGuard<'_, T>, ()> {
         let lock_holder = self.lock_flag.lock();
         Ok(MutexGuard {
             _lock_flag: lock_holder,
@@ -274,7 +274,7 @@ impl<T: ?Sized> Mutex<T> {
         })
     }
 
-    pub fn try_lock(&self) -> Result<MutexGuard<T>, ()> {
+    pub fn try_lock(&self) -> Result<MutexGuard<'_, T>, ()> {
         let result = self.lock_flag.try_lock();
         if result.is_err() {
             return Err(());

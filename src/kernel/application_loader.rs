@@ -2,21 +2,21 @@
 //! Application Software Loader
 //!
 
-use crate::arch::target_arch::context::memory_layout::USER_STACK_END_ADDRESS;
-use crate::arch::target_arch::context::ContextManager;
-use crate::arch::target_arch::paging::PAGE_SIZE_USIZE;
+use crate::arch::target_arch::{
+    context::{ContextManager, memory_layout::USER_STACK_END_ADDRESS},
+    paging::PAGE_SIZE_USIZE,
+};
 
-use crate::kernel::collections::auxiliary_vector;
-use crate::kernel::file_manager::elf::{Elf64Header, ELF_PROGRAM_HEADER_SEGMENT_LOAD};
-use crate::kernel::file_manager::{
-    FileSeekOrigin, PathInfo, FILE_PERMISSION_READ, FILE_PERMISSION_WRITE,
-};
-use crate::kernel::manager_cluster::get_kernel_manager_cluster;
-use crate::kernel::memory_manager::data_type::{
-    Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
-};
-use crate::kernel::memory_manager::{
-    alloc_non_linear_pages, free_pages, kfree, kmalloc, MemoryManager,
+use crate::kernel::{
+    collections::auxiliary_vector,
+    file_manager::elf::{ELF_PROGRAM_HEADER_SEGMENT_LOAD, Elf64Header},
+    file_manager::{FILE_PERMISSION_READ, FILE_PERMISSION_WRITE, FileSeekOrigin, PathInfo},
+    manager_cluster::get_kernel_manager_cluster,
+    memory_manager::{
+        MemoryManager, alloc_non_linear_pages,
+        data_type::{Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress},
+        free_pages, kfree, kmalloc,
+    },
 };
 
 const DEFAULT_PRIVILEGE_LEVEL: u8 = 3;
@@ -34,8 +34,8 @@ pub fn load_and_execute(
         None,
         FILE_PERMISSION_READ,
     );
-    if let Err(e) = result {
-        pr_err!("{} is not found: {:?}", file_name, e);
+    if let Err(err) = result {
+        pr_err!("{} is not found: {:?}", file_name, err);
         return Err(());
     }
     let mut file_descriptor = result.unwrap();
@@ -49,19 +49,17 @@ pub fn load_and_execute(
             return Err(());
         }
     };
-    if let Err(e) = file_descriptor.read(head_data, head_read_size) {
-        pr_err!("Failed to read data: {:?}", e);
-        file_descriptor.close();
-        let _ = kfree!(head_data, head_read_size);
+    if let Err(err) = file_descriptor.read(head_data, head_read_size) {
+        pr_err!("Failed to read data: {:?}", err);
+        bug_on_err!(kfree!(head_data, head_read_size));
         return Err(());
     }
 
     let header = match unsafe { Elf64Header::from_address(head_data.to_usize() as *const u8) } {
         Ok(e) => e,
-        Err(e) => {
-            pr_err!("File is not valid ELF file: {:?}", e);
-            file_descriptor.close();
-            let _ = kfree!(head_data, head_read_size);
+        Err(err) => {
+            pr_err!("File is not valid ELF file: {:?}", err);
+            bug_on_err!(kfree!(head_data, head_read_size));
             return Err(());
         }
     };
@@ -70,8 +68,7 @@ pub fn load_and_execute(
         || !header.is_lsb()
     {
         pr_err!("The file is not executable.");
-        file_descriptor.close();
-        let _ = kfree!(head_data, head_read_size);
+        bug_on_err!(kfree!(head_data, head_read_size));
         return Err(());
     }
 
@@ -79,8 +76,7 @@ pub fn load_and_execute(
         > head_read_size.to_usize()
     {
         pr_err!("Program Header is too far from head(TODO: support...)");
-        file_descriptor.close();
-        let _ = kfree!(head_data, head_read_size);
+        bug_on_err!(kfree!(head_data, head_read_size));
         return Err(());
     }
 
@@ -91,8 +87,7 @@ pub fn load_and_execute(
         Ok(e) => e,
         Err(e) => {
             pr_err!("Failed to create the user process: {:?}", e);
-            file_descriptor.close();
-            let _ = kfree!(head_data, head_read_size);
+            bug_on_err!(kfree!(head_data, head_read_size));
             return Err(());
         }
     };
@@ -105,17 +100,17 @@ pub fn load_and_execute(
             /* TODO: delete the process when failed. */
             if program_header.get_segment_type() == ELF_PROGRAM_HEADER_SEGMENT_LOAD {
                 pr_debug!(
-                "PA: {:#X}, VA: {:#X}, MS: {:#X}, FS: {:#X}, FO: {:#X}, AL: {}, R:{}, W: {}, E:{}",
-                program_header.get_physical_address(),
-                program_header.get_virtual_address(),
-                program_header.get_memory_size(),
-                program_header.get_file_size(),
-                program_header.get_file_offset(),
-                program_header.get_align(),
-                program_header.is_segment_readable(),
-                program_header.is_segment_writable(),
-                program_header.is_segment_executable()
-            );
+                    "PA: {:#X}, VA: {:#X}, MS: {:#X}, FS: {:#X}, FO: {:#X}, AL: {}, R:{}, W: {}, E:{}",
+                    program_header.get_physical_address(),
+                    program_header.get_virtual_address(),
+                    program_header.get_memory_size(),
+                    program_header.get_file_size(),
+                    program_header.get_file_offset(),
+                    program_header.get_align(),
+                    program_header.is_segment_readable(),
+                    program_header.is_segment_writable(),
+                    program_header.is_segment_executable()
+                );
 
                 let alignment = program_header.get_align().max(1);
                 let align_offset =
@@ -153,7 +148,7 @@ pub fn load_and_execute(
                         FileSeekOrigin::SeekSet,
                     ) {
                         pr_err!("Failed to seek: {:?}", e);
-                        let _ = free_pages!(allocated_memory);
+                        bug_on_err!(free_pages!(allocated_memory));
                         Err(())?
                     }
                     if let Err(e) = file_descriptor.read(
@@ -161,7 +156,7 @@ pub fn load_and_execute(
                         MSize::new(program_header.get_file_size() as usize),
                     ) {
                         pr_err!("Failed to read data: {:?}", e);
-                        let _ = free_pages!(allocated_memory);
+                        bug_on_err!(free_pages!(allocated_memory));
                         Err(())?
                     }
                 }
@@ -177,7 +172,7 @@ pub fn load_and_execute(
                         )
                     }
                 }
-                if let Err(e) = get_kernel_manager_cluster()
+                if let Err(err) = get_kernel_manager_cluster()
                     .kernel_memory_manager
                     .share_kernel_memory_with_user(
                         process_memory_manager,
@@ -192,25 +187,24 @@ pub fn load_and_execute(
                         MemoryOptionFlags::USER,
                     )
                 {
-                    pr_err!("Failed to map memory into user process: {:?}", e);
-                    let _ = free_pages!(allocated_memory);
+                    pr_err!("Failed to map memory into user process: {:?}", err);
+                    bug_on_err!(free_pages!(allocated_memory));
                     Err(())?
                 }
 
-                let _ = free_pages!(allocated_memory);
+                bug_on_err!(free_pages!(allocated_memory));
             }
         }
     };
     file_descriptor.close();
 
     if result.is_err() {
-        let _ = kfree!(head_data, head_read_size);
-        if let Err(e) = get_kernel_manager_cluster()
-            .task_manager
-            .delete_user_process(process)
-        {
-            pr_err!("Failed to delete user process: {:?}", e);
-        }
+        bug_on_err!(kfree!(head_data, head_read_size));
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+        );
         return Err(());
     }
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_USER);
@@ -218,13 +212,12 @@ pub fn load_and_execute(
         Ok(v) => v,
         Err(e) => {
             pr_err!("Failed to alloc stack: {:?}", e);
-            let _ = kfree!(head_data, head_read_size);
-            if let Err(e) = get_kernel_manager_cluster()
-                .task_manager
-                .delete_user_process(process)
-            {
-                pr_err!("Failed to delete user process: {:?}", e);
-            }
+            bug_on_err!(kfree!(head_data, head_read_size));
+            bug_on_err!(
+                get_kernel_manager_cluster()
+                    .task_manager
+                    .delete_user_process(process)
+            );
             return Err(());
         }
     };
@@ -249,12 +242,12 @@ pub fn load_and_execute(
         ap_offset_from_stack_top += e.0.as_bytes().len() + 1 + e.1.as_bytes().len() + 1;
     }
     ap_offset_from_stack_top +=
-        auxiliary_vector_list.len() * core::mem::size_of::<auxiliary_vector::AuxiliaryVector>();
+        auxiliary_vector_list.len() * size_of::<auxiliary_vector::AuxiliaryVector>();
     if (ap_offset_from_stack_top & 0b111) != 0 {
         ap_offset_from_stack_top = (ap_offset_from_stack_top & !0b111) + 8;
     }
     ap_offset_from_stack_top += (1 /* argc */ + 1 /* file_name */ + arguments.len() + 1 + environments.len() + 1)
-        * core::mem::size_of::<u64>();
+        * size_of::<u64>();
 
     let ap_offset_from_stack_top = ap_offset_from_stack_top;
     let stack_top_address_user = USER_STACK_END_ADDRESS.to_usize() + 1;
@@ -265,7 +258,7 @@ pub fn load_and_execute(
     unsafe {
         *(ap as *mut u64) = 1 /* file_name */ + arguments.len() as u64
     };
-    ap += core::mem::size_of::<u64>();
+    ap += size_of::<u64>();
 
     /* Write arguments */
     for e in [file_name].iter().chain(arguments.iter()) {
@@ -280,10 +273,10 @@ pub fn load_and_execute(
         }
         argv_env_pointer += len + 1;
         unsafe { *(ap as *mut u64) = (stack_top_address_user - argv_env_pointer) as u64 };
-        ap += core::mem::size_of::<u64>();
+        ap += size_of::<u64>();
     }
     unsafe { *(ap as *mut u64) = 0u64 };
-    ap += core::mem::size_of::<u64>();
+    ap += size_of::<u64>();
 
     /* Write environment variables */
     for e in environments {
@@ -306,7 +299,7 @@ pub fn load_and_execute(
         }
         argv_env_pointer += e.0.as_bytes().len() + 1 + e.1.as_bytes().len() + 1;
         unsafe { *(ap as *mut u64) = (stack_top_address_user - argv_env_pointer) as u64 };
-        ap += core::mem::size_of::<u64>();
+        ap += size_of::<u64>();
     }
     unsafe { *(ap as *mut u64) = 0u64 };
 
@@ -315,7 +308,7 @@ pub fn load_and_execute(
     /* Write auxiliary vector */
     for e in auxiliary_vector_list {
         unsafe { *(ap as *mut auxiliary_vector::AuxiliaryVector) = e };
-        ap += core::mem::size_of::<auxiliary_vector::AuxiliaryVector>();
+        ap += size_of::<auxiliary_vector::AuxiliaryVector>();
     }
 
     if let Err(e) = get_kernel_manager_cluster()
@@ -329,17 +322,16 @@ pub fn load_and_execute(
         )
     {
         pr_err!("Failed to map stack into user: {:?}", e);
-        let _ = free_pages!(stack_address);
-        let _ = kfree!(head_data, head_read_size);
-        if let Err(e) = get_kernel_manager_cluster()
-            .task_manager
-            .delete_user_process(process)
-        {
-            pr_err!("Failed to delete user process: {:?}", e);
-        }
+        bug_on_err!(free_pages!(stack_address));
+        bug_on_err!(kfree!(head_data, head_read_size));
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+        );
         return Err(());
     }
-    let _ = free_pages!(stack_address);
+    bug_on_err!(free_pages!(stack_address));
 
     let thread = get_kernel_manager_cluster()
         .task_manager
@@ -352,16 +344,15 @@ pub fn load_and_execute(
         );
     if let Err(e) = thread {
         pr_err!("Failed to add thread: {:?}", e);
-        let _ = kfree!(head_data, head_read_size);
-        if let Err(e) = get_kernel_manager_cluster()
-            .task_manager
-            .delete_user_process(process)
-        {
-            pr_err!("Failed to delete user process: {:?}", e);
-        }
+        bug_on_err!(kfree!(head_data, head_read_size));
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+        );
         return Err(());
     }
-    let _ = kfree!(head_data, head_read_size);
+    bug_on_err!(kfree!(head_data, head_read_size));
 
     /* Add stdout/stdin */
     use crate::kernel::tty;
@@ -382,11 +373,11 @@ pub fn load_and_execute(
     ); /* stderr */
 
     pr_debug!("Execute {}", file_name);
-    if let Err(e) = get_kernel_manager_cluster()
+    if let Err(err) = get_kernel_manager_cluster()
         .task_manager
         .wake_up_thread(thread.unwrap())
     {
-        pr_err!("Failed to run the thread: {:?}", e);
+        pr_err!("Failed to run the thread: {:?}", err);
         return Err(());
     }
     Ok(())

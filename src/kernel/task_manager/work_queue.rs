@@ -1,9 +1,9 @@
 //!
 //! Work Queue
 //!
-//! This module manages delay-interrupt process.
+//! This module manages delay-interrupt processes.
 //! The structure may be changed.
-//! Work Queue will be in per-cpu structure, therefore this uses disabling interrupt as a lock.
+//! Work Queue will be in per-cpu structure; therefore, this uses disabling interrupt as a lock.
 
 use super::{TaskError, TaskManager, TaskStatus, ThreadEntry};
 
@@ -118,13 +118,12 @@ impl WorkQueue {
         loop {
             let irq = InterruptManager::save_and_disable_local_irq();
             if manager.work_queue.is_empty() {
-                assert!(!unsafe { &mut *manager.daemon_thread }.lock.is_locked());
-                if let Err(e) = get_cpu_manager_cluster()
-                    .run_queue
-                    .sleep_current_thread(Some(irq), TaskStatus::Interruptible)
-                {
-                    pr_err!("Failed to sleep work queue thread: {:?}", e);
-                }
+                assert!(!unsafe { manager.daemon_thread.as_ref() }.lock.is_locked());
+                bug_on_err!(
+                    get_cpu_manager_cluster()
+                        .run_queue
+                        .sleep_current_thread(Some(irq), TaskStatus::Interruptible)
+                );
                 /* Woke up */
                 continue;
             }
@@ -150,12 +149,11 @@ impl WorkQueue {
             if manager.work_queue.is_empty() {
                 assert!(!unsafe { &mut *manager.daemon_thread }.lock.is_locked());
                 drop(_lock);
-                if let Err(e) = get_cpu_manager_cluster()
-                    .run_queue
-                    .sleep_current_thread(None, TaskStatus::Interruptible)
-                {
-                    pr_err!("Failed to sleep work queue thread: {:?}", e);
-                }
+                bug_on_err!(
+                    get_cpu_manager_cluster()
+                        .run_queue
+                        .sleep_current_thread(None, TaskStatus::Interruptible)
+                );
                 /* Woke up */
                 continue;
             }

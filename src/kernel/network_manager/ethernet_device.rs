@@ -3,20 +3,21 @@
 //!
 //!
 
-use super::{ipv4, LinkType, NetworkError};
+use super::{LinkType, NetworkError, ipv4};
 
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+use crate::kernel::{
+    collections::linked_list::GeneralLinkedList,
+    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
+    memory_manager::{
+        alloc_pages_with_physical_address,
+        data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
+        free_pages, kfree, kmalloc,
+    },
+    sync::spin_lock::IrqSaveSpinLockFlag,
+    task_manager::work_queue::WorkList,
 };
-use crate::kernel::memory_manager::{
-    alloc_pages_with_physical_address, free_pages, kfree, kmalloc,
-};
-use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
-use crate::kernel::task_manager::work_queue::WorkList;
-use crate::kernel::task_manager::ThreadEntry;
 
 use core::ptr::NonNull;
 
@@ -79,7 +80,6 @@ pub struct TxEntry {
     entry_id: u32,
     buffer: (VAddress, PAddress),
     length: MSize,
-    thread: Option<NonNull<ThreadEntry>>,
     result: u8,
 }
 
@@ -230,18 +230,16 @@ impl EthernetDeviceManager {
             ether_type,
             VAddress::from(data.as_ptr()),
             MSize::new(data.len()),
-        );
-        if let Err(e) = result {
-            pr_err!("Failed to create packet: {:?}", e);
-            let _ = free_pages!(buffer.0);
-            return Err(e);
-        }
+        )
+        .inspect_err(|err| {
+            pr_err!("Failed to create packet: {:?}", err);
+            bug_on_err!(free_pages!(buffer.0));
+        })?;
         let assigned_id = self.next_id;
         let entry = TxEntry {
             entry_id: assigned_id,
             buffer,
-            length: result.unwrap(),
-            thread: None,
+            length: result,
             result: 0,
         };
         self.tx_list.push_back(entry.clone());
@@ -249,7 +247,7 @@ impl EthernetDeviceManager {
         let driver = unsafe { &mut *(self.device_list[device_id].driver) };
         let info = self.device_list[device_id].info.clone();
         drop(_lock);
-        let result = driver.send(&info, entry);
+        let result = driver.send(&info, entry).map(|_| {});
         if result.is_err() {
             _lock = self.lock.lock();
             let mut cursor = self.tx_list.cursor_front_mut();
@@ -264,7 +262,7 @@ impl EthernetDeviceManager {
                 cursor.move_next();
             }
         }
-        result.map(|_| ())
+        result
     }
 
     pub fn get_mac_address(&self, device_id: usize) -> Result<MacAddress, NetworkError> {
@@ -278,12 +276,10 @@ impl EthernetDeviceManager {
         if self.tx_list.is_empty() {
             return;
         }
-        if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
+        bug_on_err!(get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
             Self::update_transmit_status_worker,
             id as usize | ((is_successful as usize) << u32::BITS),
-        )) {
-            pr_err!("Failed to add work: {:?}", e);
-        }
+        )));
     }
 
     fn update_transmit_status_worker(id: usize) {
@@ -300,19 +296,9 @@ impl EthernetDeviceManager {
                 if !is_successful {
                     e.result |= 1;
                 }
-                let thread = e.thread.take();
-                if let Some(mut thread) = thread {
-                    if let Err(error) = get_kernel_manager_cluster()
-                        .task_manager
-                        .wake_up_thread(unsafe { thread.as_mut() })
-                    {
-                        pr_err!("Failed to wake up the thread: {:?}", error);
-                    }
-                } else {
-                    s.memory_buffer[s.number_of_memory_buffer] = e.buffer;
-                    s.number_of_memory_buffer += 1;
-                    let _ = cursor.remove_current();
-                }
+                s.memory_buffer[s.number_of_memory_buffer] = e.buffer;
+                s.number_of_memory_buffer += 1;
+                let _ = cursor.remove_current();
                 drop(_lock);
                 break;
             }
@@ -337,22 +323,22 @@ impl EthernetDeviceManager {
             Ok(a) => a,
             Err(e) => {
                 pr_err!("Failed to allocate memory: {:?}", e);
-                let _ = kfree!(allocated_data, length);
+                bug_on_err!(kfree!(allocated_data, length));
                 return;
             }
         };
         let work = WorkList::new(Self::frame_worker, rx_entry as *const _ as usize);
         if let Err(e) = get_cpu_manager_cluster().work_queue.add_work(work) {
             pr_err!("Failed to add worker: {:?}", e);
-            let _ = kfree!(allocated_data, length);
-            let _ = kfree!(rx_entry);
+            bug_on_err!(kfree!(allocated_data, length));
+            bug_on_err!(kfree!(rx_entry));
         }
     }
 
     pub fn frame_worker(data: usize) {
-        let rx_entry = unsafe { &*(data as *const RxEntry) };
+        let rx_entry = unsafe { &mut *(data as *mut RxEntry) };
         let cloned_rx_entry = rx_entry.clone();
-        let _ = kfree!(rx_entry);
+        bug_on_err!(kfree!(rx_entry));
         let rx_entry = cloned_rx_entry;
 
         let sender_mac_address =
@@ -382,7 +368,7 @@ impl EthernetDeviceManager {
                         rx_entry.length.to_usize(),
                     )
                 });
-                let _ = kfree!(rx_entry.buffer, rx_entry.length);
+                bug_on_err!(kfree!(rx_entry.buffer, rx_entry.length));
             }
         }
     }
@@ -420,7 +406,7 @@ fn create_ethernet_frame(
             );
             buffer_pointer += PREAMBLE.1;
             *((send_buffer.to_usize() + buffer_pointer) as *mut u8) = SFD;
-            buffer_pointer += core::mem::size_of_val(&SFD);
+            buffer_pointer += size_of_val(&SFD);
             crc_start = send_buffer.to_usize() + buffer_pointer;*/
             *((send_buffer.to_usize() + buffer_pointer) as *mut [u8; 6]) = target_mac_address.0;
             buffer_pointer += MAC_ADDRESS_SIZE;
@@ -428,7 +414,7 @@ fn create_ethernet_frame(
                 *ethernet_descriptor.info.mac_address.inner();
             buffer_pointer += MAC_ADDRESS_SIZE;
             *((send_buffer.to_usize() + buffer_pointer) as *mut [u8; 2]) = frame_type.to_be_bytes();
-            buffer_pointer += core::mem::size_of_val(&frame_type);
+            buffer_pointer += size_of_val(&frame_type);
         };
         let size_to_send = (data_size.to_usize() - sent_size).min(MAX_FRAME_DATA_SIZE);
         unsafe {
@@ -459,7 +445,7 @@ fn create_ethernet_frame(
         }
         crc_u32 ^= u32::MAX;
         unsafe { *((send_buffer.to_usize() + buffer_pointer) as *mut u32) = crc_u32.to_be() };
-        buffer_pointer += core::mem::size_of_val(&crc_u32);
+        buffer_pointer += size_of_val(&crc_u32);
         unsafe {
             core::ptr::write_bytes((send_buffer.to_usize() + buffer_pointer) as *mut u8, 0, IPG)
         };

@@ -8,11 +8,11 @@
 
 mod table_entry;
 
-use self::table_entry::{TableEntry, NUM_OF_TABLE_ENTRIES, NUM_OF_TOP_LEVEL_TABLE_ENTRIES};
+use self::table_entry::{NUM_OF_TABLE_ENTRIES, NUM_OF_TOP_LEVEL_TABLE_ENTRIES, TableEntry};
 
 use crate::arch::target_arch::context::memory_layout::{
-    direct_map_to_physical_address, physical_address_to_direct_map, DIRECT_MAP_START_ADDRESS,
-    HIGH_MEMORY_START_ADDRESS,
+    DIRECT_MAP_START_ADDRESS, HIGH_MEMORY_START_ADDRESS, direct_map_to_physical_address,
+    physical_address_to_direct_map,
 };
 use crate::arch::target_arch::device::cpu;
 

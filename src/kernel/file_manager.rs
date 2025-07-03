@@ -128,16 +128,15 @@ impl FileManager {
     }
 
     fn analysis_partition(&mut self, partition_info: PartitionInfo) {
-        let first_block_data =
-            match alloc_non_linear_pages!(
-                MSize::new(partition_info.lba_block_size as usize).page_align_up()
-            ) {
-                Ok(a) => a,
-                Err(e) => {
-                    pr_err!("Failed to allocate memory: {:?}", e);
-                    return;
-                }
-            };
+        let first_block_data = match alloc_non_linear_pages!(
+            MSize::new(partition_info.lba_block_size as usize).page_align_up()
+        ) {
+            Ok(a) => a,
+            Err(err) => {
+                pr_err!("Failed to allocate memory: {:?}", err);
+                return;
+            }
+        };
         if let Err(e) = get_kernel_manager_cluster().block_device_manager.read_lba(
             partition_info.device_id,
             first_block_data,
@@ -186,7 +185,7 @@ impl FileManager {
         try_detect!(xfs);
 
         pr_err!("Unknown File System");
-        let _ = free_pages!(first_block_data);
+        bug_on_err!(free_pages!(first_block_data));
     }
 
     pub fn mount_root(&mut self, root_uuid: Guid, is_writable: bool) {

@@ -10,7 +10,7 @@ use crate::kernel::block_device::{
 };
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::drivers::pci::{
-    msi::setup_msi_or_msi_x, ClassCode, PciDevice, PciDeviceDriver, PciManager,
+    ClassCode, PciDevice, PciDeviceDriver, PciManager, msi::setup_msi_or_msi_x,
 };
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::{
@@ -242,7 +242,7 @@ impl PciDeviceDriver for NvmeManager {
                 Ok(a) => a,
                 Err(e) => {
                     pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
-                    let _ = free_pages!(admin_submission_queue_virtual_address);
+                    bug_on_err!(free_pages!(admin_submission_queue_virtual_address));
                     return Err(());
                 }
             };
@@ -265,8 +265,8 @@ impl PciDeviceDriver for NvmeManager {
                 max_queue
             );
 
-            let _ = free_pages!(admin_completion_queue_virtual_address);
-            let _ = free_pages!(admin_submission_queue_virtual_address);
+            bug_on_err!(free_pages!(admin_completion_queue_virtual_address));
+            bug_on_err!(free_pages!(admin_submission_queue_virtual_address));
             return Err(());
         }
 
@@ -312,8 +312,8 @@ impl PciDeviceDriver for NvmeManager {
 
         if let Err(e) = nvme_manager.setup_interrupt(pci_dev) {
             pr_debug!("Failed to setup interrupt: {:?}", e);
-            let _ = free_pages!(admin_completion_queue_virtual_address);
-            let _ = free_pages!(admin_submission_queue_virtual_address);
+            bug_on_err!(free_pages!(admin_completion_queue_virtual_address));
+            bug_on_err!(free_pages!(admin_submission_queue_virtual_address));
             return Err(());
         }
 
@@ -341,8 +341,8 @@ impl PciDeviceDriver for NvmeManager {
             MemoryOptionFlags::DEVICE_MEMORY
         ) {
             Ok(a) => a,
-            Err(e) => {
-                pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
+            Err(err) => {
+                pr_err!("Failed to alloc memory for the admin queue: {:?}", err);
                 return Err(());
             }
         };
@@ -356,7 +356,7 @@ impl PciDeviceDriver for NvmeManager {
             .wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
         {
             pr_err!("Failed to wait the command: {:?}", e);
-            let _ = free_pages!(identify_info_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
             return Err(());
         }
         let result = nvme_manager.take_completed_admin_command();
@@ -366,7 +366,7 @@ impl PciDeviceDriver for NvmeManager {
                 result,
                 (result[3] >> 16) & !1
             );
-            let _ = free_pages!(identify_info_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
             return Err(());
         }
         pr_debug!(
@@ -397,7 +397,7 @@ impl PciDeviceDriver for NvmeManager {
             Ok(a) => a,
             Err(e) => {
                 pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
-                let _ = free_pages!(identify_info_virtual_address);
+                bug_on_err!(free_pages!(identify_info_virtual_address));
                 return Err(());
             }
         };
@@ -409,8 +409,8 @@ impl PciDeviceDriver for NvmeManager {
             Ok(a) => a,
             Err(e) => {
                 pr_err!("Failed to alloc memory for the admin queue: {:?}", e);
-                let _ = free_pages!(identify_info_virtual_address);
-                let _ = free_pages!(io_submission_queue_virtual_address);
+                bug_on_err!(free_pages!(identify_info_virtual_address));
+                bug_on_err!(free_pages!(io_submission_queue_virtual_address));
                 return Err(());
             }
         };
@@ -439,9 +439,9 @@ impl PciDeviceDriver for NvmeManager {
             .wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
         {
             pr_err!("Failed to wait the command: {:?}", e);
-            let _ = free_pages!(identify_info_virtual_address);
-            let _ = free_pages!(io_completion_queue_virtual_address);
-            let _ = free_pages!(io_submission_queue_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
+            bug_on_err!(free_pages!(io_completion_queue_virtual_address));
+            bug_on_err!(free_pages!(io_submission_queue_virtual_address));
             return Err(());
         }
         let result = nvme_manager.take_completed_admin_command();
@@ -451,9 +451,9 @@ impl PciDeviceDriver for NvmeManager {
                 result,
                 (result[3] >> 16) & !1
             );
-            let _ = free_pages!(identify_info_virtual_address);
-            let _ = free_pages!(io_completion_queue_virtual_address);
-            let _ = free_pages!(io_submission_queue_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
+            bug_on_err!(free_pages!(io_completion_queue_virtual_address));
+            bug_on_err!(free_pages!(io_submission_queue_virtual_address));
             return Err(());
         }
 
@@ -474,9 +474,9 @@ impl PciDeviceDriver for NvmeManager {
             .wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
         {
             pr_err!("Failed to wait the command: {:?}", e);
-            let _ = free_pages!(identify_info_virtual_address);
-            let _ = free_pages!(io_completion_queue_virtual_address);
-            let _ = free_pages!(io_submission_queue_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
+            bug_on_err!(free_pages!(io_completion_queue_virtual_address));
+            bug_on_err!(free_pages!(io_submission_queue_virtual_address));
             return Err(());
         }
         let result = nvme_manager.take_completed_admin_command();
@@ -486,9 +486,9 @@ impl PciDeviceDriver for NvmeManager {
                 result,
                 (result[3] >> 16) & !1
             );
-            let _ = free_pages!(identify_info_virtual_address);
-            let _ = free_pages!(io_completion_queue_virtual_address);
-            let _ = free_pages!(io_submission_queue_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
+            bug_on_err!(free_pages!(io_completion_queue_virtual_address));
+            bug_on_err!(free_pages!(io_submission_queue_virtual_address));
             return Err(());
         }
 
@@ -512,7 +512,7 @@ impl PciDeviceDriver for NvmeManager {
             .wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
         {
             pr_err!("Failed to wait the command: {:?}", e);
-            let _ = free_pages!(identify_info_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
             return Err(());
         }
         let result = nvme_manager.take_completed_admin_command();
@@ -522,7 +522,7 @@ impl PciDeviceDriver for NvmeManager {
                 result,
                 (result[3] >> 16) & !1
             );
-            let _ = free_pages!(identify_info_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
             return Err(());
         }
 
@@ -537,8 +537,8 @@ impl PciDeviceDriver for NvmeManager {
                 Ok(n) => {
                     nvme_manager.add_name_space(n);
                 }
-                Err(e) => {
-                    pr_err!("Failed to detect Name Space {:#X}: {:?}", nsid, e);
+                Err(err) => {
+                    pr_err!("Failed to detect Name Space {:#X}: {:?}", nsid, err);
                     continue;
                 }
             }
@@ -550,13 +550,13 @@ impl PciDeviceDriver for NvmeManager {
         }
         if nsid_table[0] == 0 {
             pr_err!("There is no usable name space");
-            let _ = free_pages!(identify_info_virtual_address);
-            let _ = free_pages!(admin_completion_queue_virtual_address);
-            let _ = free_pages!(admin_submission_queue_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
+            bug_on_err!(free_pages!(admin_completion_queue_virtual_address));
+            bug_on_err!(free_pages!(admin_submission_queue_virtual_address));
             return Ok(());
         }
 
-        let _ = free_pages!(identify_info_virtual_address);
+        bug_on_err!(free_pages!(identify_info_virtual_address));
         Ok(())
     }
 }
@@ -681,7 +681,7 @@ impl NvmeManager {
 
         write_mmio::<[u32; 16]>(
             queue.submit_queue,
-            (queue.submission_current_pointer as usize) * core::mem::size_of::<[u32; 16]>(),
+            (queue.submission_current_pointer as usize) * size_of::<[u32; 16]>(),
             command,
         );
         let mut next_pointer = queue.submission_current_pointer + 1;
@@ -717,7 +717,7 @@ impl NvmeManager {
         while time < time_out_ms {
             if (read_mmio::<[u32; 4]>(
                 queue.completion_queue,
-                (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>(),
+                (queue.completion_current_pointer as usize) * size_of::<[u32; 4]>(),
             )[3] & 0xffff) as u16
                 == command_id
             {
@@ -780,12 +780,12 @@ impl NvmeManager {
         get_cpu_manager_cluster()
             .run_queue
             .sleep_current_thread(Some(irq), TaskStatus::Interruptible)
-            .map_err(|e| {
-                pr_err!("Failed to sleep: {:#?}", e);
-                let _ = kfree!(wait_list);
+            .map_err(|err| {
+                pr_err!("Failed to sleep: {:#?}", err);
+                bug_on_err!(kfree!(wait_list));
             })?;
         let result = wait_list.result;
-        let _ = kfree!(wait_list);
+        bug_on_err!(kfree!(wait_list));
         Ok(result)
     }
 
@@ -796,13 +796,13 @@ impl NvmeManager {
     ) -> [u32; 4] {
         let data = read_mmio::<[u32; 4]>(
             queue.completion_queue,
-            (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>(),
+            (queue.completion_current_pointer as usize) * size_of::<[u32; 4]>(),
         );
         /* Clear the command id and phase tag */
         write_mmio::<u32>(
             queue.completion_queue,
-            (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>()
-                + core::mem::size_of::<u32>() * 3,
+            (queue.completion_current_pointer as usize) * size_of::<[u32; 4]>()
+                + size_of::<u32>() * 3,
             0,
         );
         queue.completion_current_pointer += 1;
@@ -921,7 +921,7 @@ impl NvmeManager {
             self.wait_completion_of_admin_command_by_spin(command_id, Self::SPIN_WAIT_TIMEOUT_MS)
         {
             pr_err!("Failed to wait the command: {:?}", e);
-            let _ = free_pages!(identify_info_virtual_address);
+            bug_on_err!(free_pages!(identify_info_virtual_address));
             return Err(e);
         }
         let result = self.take_completed_admin_command();
@@ -1042,8 +1042,7 @@ impl NvmeManager {
                 }
             };
             let list = unsafe {
-                &mut *(v.to_usize()
-                    as *mut [PAddress; PAGE_SIZE_USIZE / core::mem::size_of::<PAddress>()])
+                &mut *(v.to_usize() as *mut [PAddress; PAGE_SIZE_USIZE / size_of::<PAddress>()])
             };
             let result = get_kernel_manager_cluster()
                 .kernel_memory_manager
@@ -1062,7 +1061,7 @@ impl NvmeManager {
                     read_size,
                     result.unwrap() << PAGE_SHIFT
                 );
-                let _ = free_pages!(v);
+                bug_on_err!(free_pages!(v));
                 return Err(BlockDeviceError::InvalidBuffer);
             }
             let prp1 = (list[0].to_usize() as u64).to_le();
@@ -1094,12 +1093,12 @@ impl NvmeManager {
                 (result[3] >> 16) & !1
             );
             if let Some(v) = pre_list_virtual_address {
-                let _ = free_pages!(v);
+                bug_on_err!(free_pages!(v));
             }
             return Err(BlockDeviceError::DeviceError);
         }
         if let Some(v) = pre_list_virtual_address {
-            let _ = free_pages!(v);
+            bug_on_err!(free_pages!(v));
         }
         Ok(())
     }
@@ -1109,8 +1108,8 @@ impl NvmeManager {
             let _lock = queue.lock.lock();
             if (read_mmio::<u32>(
                 queue.completion_queue,
-                (queue.completion_current_pointer as usize) * core::mem::size_of::<[u32; 4]>()
-                    + core::mem::size_of::<u32>() * 3,
+                (queue.completion_current_pointer as usize) * size_of::<[u32; 4]>()
+                    + size_of::<u32>() * 3,
             ) & (1 << 16))
                 != 0
             {

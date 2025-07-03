@@ -50,8 +50,8 @@ impl SerialPortManager {
         unsafe {
             out_byte(self.port + 1, 0x00); // Off the FIFO of controller
             out_byte(self.port + 3, 0x80); // Enable DLAB
-                                           //out_byte(self.port + 0, 0x03); // Set lower of the rate
-                                           //out_byte(self.port + 1, 0x00); // Set higher of the rate
+            //out_byte(self.port + 0, 0x03); // Set lower of the rate
+            //out_byte(self.port + 1, 0x00); // Set higher of the rate
             out_byte(self.port + 3, 0x03); // Set the data style: 8bit no parity bit
             out_byte(self.port + 1, 0x05); // Fire an interruption on new data or error
             out_byte(self.port + 2, 0xC7); // On FIFO and allow interruption

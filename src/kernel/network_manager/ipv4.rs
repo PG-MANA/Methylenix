@@ -2,7 +2,7 @@
 //! IPv4
 //!
 
-use super::{tcp, udp, LinkType, NetworkError};
+use super::{LinkType, NetworkError, tcp, udp};
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 use crate::kernel::memory_manager::kfree;
@@ -173,7 +173,7 @@ impl DefaultIpv4Packet {
         let mut checksum: u16 = 0;
         let header_buffer =
             unsafe { &*(self as *const _ as usize as *const [u8; IPV4_DEFAULT_HEADER_SIZE]) };
-        for i in 0..(IPV4_DEFAULT_HEADER_SIZE / core::mem::size_of::<u16>()) {
+        for i in 0..(IPV4_DEFAULT_HEADER_SIZE / size_of::<u16>()) {
             let i = checksum.overflowing_add(u16::from_be_bytes([
                 header_buffer[2 * i],
                 header_buffer[2 * i + 1],
@@ -246,19 +246,19 @@ pub(super) fn ipv4_packet_handler(
         || ipv4_packet.get_version() != IPV4_VERSION
     {
         pr_err!("Invalid packet");
-        let _ = kfree!(allocated_data_base, data_length);
+        bug_on_err!(kfree!(allocated_data_base, data_length));
         return;
     }
     let header_length = ipv4_packet.get_header_length();
     let packet_size = ipv4_packet.get_packet_length();
     if ((packet_size as usize) + packet_offset) > data_length.to_usize() {
         pr_err!("Invalid IP packet size: {:#X}", packet_size);
-        let _ = kfree!(allocated_data_base, data_length);
+        bug_on_err!(kfree!(allocated_data_base, data_length));
         return;
     }
     if ipv4_packet.is_more_packet_flag_on() {
         pr_err!("Packet is fragmented: TODO...");
-        let _ = kfree!(allocated_data_base, data_length);
+        bug_on_err!(kfree!(allocated_data_base, data_length));
         return;
     }
     let ipv4_packet_info = Ipv4ConnectionInfo {

@@ -64,12 +64,14 @@ impl ContextData {
     /// Check if the size of Registers was changed.
     /// if you changed, you must review assembly code like context_switch and fix this function.
     const fn check_registers_size() -> usize {
-        if core::mem::size_of::<Registers>() != 36 * core::mem::size_of::<u64>() {
-            panic!("GeneralRegisters was changed.\nYou must check task_switch function and interrupt handler.");
-        } else if (core::mem::size_of::<Registers>() / core::mem::size_of::<u64>()) & 1 != 0 {
+        if size_of::<Registers>() != 36 * size_of::<u64>() {
+            panic!(
+                "GeneralRegisters was changed.\nYou must check task_switch function and interrupt handler."
+            );
+        } else if (size_of::<Registers>() / size_of::<u64>()) & 1 != 0 {
             panic!("GeneralRegisters is not 16byte aligned.");
         }
-        core::mem::size_of::<Registers>() / core::mem::size_of::<u64>()
+        size_of::<Registers>() / size_of::<u64>()
     }
 
     /// Create ContextData by setting all registers to zero.

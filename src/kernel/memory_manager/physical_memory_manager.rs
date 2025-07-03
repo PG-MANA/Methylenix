@@ -1,11 +1,12 @@
 //!
 //! Physical Memory Manager
 //!
-//! 現時点では連結リスト管理だが、AVL-Treeなども実装してみたい
 
-use super::data_type::{Address, MOrder, MPageOrder, MSize, PAddress};
-use super::slab_allocator::pool_allocator::PoolAllocator;
-use super::MemoryError;
+use super::{
+    MemoryError,
+    data_type::{Address, MOrder, MPageOrder, MSize, PAddress},
+    slab_allocator::pool_allocator::PoolAllocator,
+};
 
 use crate::arch::target_arch::paging::PAGE_SHIFT;
 
@@ -223,7 +224,7 @@ impl PhysicalMemoryManager {
             );
         } else if entry.get_end_address() == end_address {
             /* Free duplicated area */
-            /* entry may be first entry */
+            /* entry may be the first entry */
             return self.define_free_memory(start_address, size - entry.get_size());
         }
 

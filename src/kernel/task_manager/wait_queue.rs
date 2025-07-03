@@ -3,7 +3,7 @@
 //!
 //! This module manages a list of sleeping tasks.
 //! This will be used by the device handlers.
-//! Device handlers contains this manager and when data is arrived, they search the thread to wakeup
+//! Device handlers contain this manager, and when data is arrived, they search the thread to wakeup
 //! from this manager.
 //!
 //! Do not call this Manager in interrupt handlers, please add work_queue and call from there.

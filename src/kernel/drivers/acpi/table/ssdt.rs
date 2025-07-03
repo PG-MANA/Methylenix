@@ -55,8 +55,8 @@ impl SsdtManager {
     pub const fn get_definition_block_address_and_size(&self) -> (VAddress, MSize) {
         let dsdt = unsafe { &*(self.base_address.to_usize() as *const SSDT) };
         (
-            self.base_address + MSize::new(core::mem::size_of::<SSDT>()),
-            MSize::new(dsdt.length as usize - core::mem::size_of::<SSDT>()),
+            self.base_address + MSize::new(size_of::<SSDT>()),
+            MSize::new(dsdt.length as usize - size_of::<SSDT>()),
         )
     }
 }

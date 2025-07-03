@@ -75,7 +75,7 @@ impl SystemCounter {
         self.current_frequency = unsafe {
             *((self.base_address.to_usize()
                 + Self::CNTFID0
-                + (self.current_frequency_model as usize) * core::mem::size_of::<u32>())
+                + (self.current_frequency_model as usize) * size_of::<u32>())
                 as *const u32)
         };
         if self.current_frequency == u32::MAX {

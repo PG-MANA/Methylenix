@@ -8,8 +8,6 @@ use crate::arch::target_arch::device::cpu;
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
-use core::mem::size_of;
-
 const IO_MAP_SIZE: usize = (0xFFFF / 8) + 1;
 
 #[allow(dead_code)]
