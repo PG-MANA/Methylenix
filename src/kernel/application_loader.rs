@@ -45,7 +45,6 @@ pub fn load_and_execute(
         Ok(v) => v,
         Err(e) => {
             pr_err!("Failed to allocate memory: {:?}", e);
-            file_descriptor.close();
             return Err(());
         }
     };
@@ -196,7 +195,7 @@ pub fn load_and_execute(
             }
         }
     };
-    file_descriptor.close();
+    drop(file_descriptor);
 
     if result.is_err() {
         bug_on_err!(kfree!(head_data, head_read_size));

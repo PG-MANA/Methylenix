@@ -16,6 +16,7 @@ use crate::kernel::{
 use core::fmt;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
+use core::ptr::NonNull;
 
 pub struct TtyManager {
     input_lock: SpinLockFlag,
@@ -207,8 +208,11 @@ impl TtyManager {
         Some(old)
     }
 
-    pub fn open_tty_as_file(&'static mut self, permission: u8) -> Result<File<'static>, ()> {
-        Ok(File::new(FileDescriptor::new(0, 0, permission), self))
+    pub fn open_tty_as_file(&'static mut self, permission: u8) -> Result<File, ()> {
+        Ok(File::new(
+            FileDescriptor::new(FileDescriptorData::Address(0), 0, permission),
+            NonNull::new(self).unwrap(),
+        ))
     }
 }
 
@@ -264,7 +268,7 @@ impl FileOperationDriver for TtyManager {
         Ok(MOffset::new(0))
     }
 
-    fn close(&mut self, _descriptor: FileDescriptor) {}
+    fn close(&mut self, _descriptor: &mut FileDescriptor) {}
 }
 
 pub fn kernel_print(args: fmt::Arguments) {

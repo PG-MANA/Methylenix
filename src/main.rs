@@ -6,6 +6,7 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(step_trait)]
 #![feature(try_blocks)]
+#![feature(allocator_api)]
 
 #[macro_use]
 extern crate alloc;

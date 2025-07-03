@@ -23,6 +23,8 @@ use crate::kernel::{
     },
 };
 
+use core::ptr::NonNull;
+
 const AF_UNIX: u64 = 0x01;
 const AF_INET: u64 = 0x02;
 const AF_INET6: u64 = 0x0A;
@@ -53,15 +55,15 @@ struct NetworkSocketDriver {}
 
 static mut NETWORK_SOCKET_DRIVER: NetworkSocketDriver = NetworkSocketDriver {};
 
-fn get_socket_driver_mut() -> &'static mut NetworkSocketDriver {
-    unsafe { &mut *core::ptr::addr_of_mut!(NETWORK_SOCKET_DRIVER) }
+fn get_socket_driver_mut() -> NonNull<NetworkSocketDriver> {
+    NonNull::new(&raw mut NETWORK_SOCKET_DRIVER).unwrap()
 }
 
 pub fn create_socket(
     domain_number: u64,
     socket_type_number: u64,
     protocol_number: u64,
-) -> Result<File<'static>, ()> {
+) -> Result<File, ()> {
     let link_type = LinkType::None;
     let internet_type = match domain_number {
         AF_INET => InternetType::Ipv4(Ipv4ConnectionInfo::new(IPV4_ADDRESS_ANY, IPV4_ADDRESS_ANY)),
@@ -93,8 +95,12 @@ pub fn create_socket(
         .create_socket(link_type, internet_type, transport_type)
     {
         Ok(socket) => match kmalloc!(Socket, socket) {
-            Ok(d) => Ok(File::new(
-                FileDescriptor::new(d as *mut _ as usize, DEVICE_ID_INVALID, 0),
+            Ok(s) => Ok(File::new(
+                FileDescriptor::new(
+                    FileDescriptorData::Address(s as *mut _ as usize),
+                    DEVICE_ID_INVALID,
+                    0,
+                ),
                 get_socket_driver_mut(),
             )),
             Err(err) => {
@@ -110,7 +116,7 @@ pub fn create_socket(
 }
 
 pub fn bind_socket(file: &mut File, sock_addr: &SockAddr) -> Result<(), ()> {
-    if file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
+    if !file.is_driver::<NetworkSocketDriver>() {
         pr_err!("Invalid file descriptor");
         return Err(());
     }
@@ -119,7 +125,10 @@ pub fn bind_socket(file: &mut File, sock_addr: &SockAddr) -> Result<(), ()> {
         pr_err!("Socket is in use");
         return Err(());
     }
-    let socket = unsafe { &mut *(file_descriptor.get_data() as *mut Socket) };
+    let FileDescriptorData::Address(socket_address) = file_descriptor.get_data() else {
+        return Err(());
+    };
+    let socket = unsafe { &mut *(*socket_address as *mut Socket) };
 
     match &mut socket.layer_info.internet {
         InternetType::None => {
@@ -155,16 +164,20 @@ pub fn bind_socket(file: &mut File, sock_addr: &SockAddr) -> Result<(), ()> {
 }
 
 pub fn listen_socket(file: &mut File, _max_connection: usize) -> Result<(), ()> {
-    if file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
+    if !file.is_driver::<NetworkSocketDriver>() {
         pr_err!("Invalid file descriptor");
         return Err(());
     }
-    let file_descriptor = file.get_descriptor();
+    let file_descriptor = file.get_descriptor_mut();
     if file_descriptor.get_device_index() != DEVICE_ID_INVALID {
         pr_err!("Socket is in use");
         return Err(());
     }
-    let socket = unsafe { &mut *(file_descriptor.get_data() as *mut Socket) };
+    let FileDescriptorData::Address(socket_address) = file_descriptor.get_data() else {
+        return Err(());
+    };
+    let socket = unsafe { &mut *(*socket_address as *mut Socket) };
+
     match get_kernel_manager_cluster()
         .network_manager
         .get_socket_manager()
@@ -172,7 +185,11 @@ pub fn listen_socket(file: &mut File, _max_connection: usize) -> Result<(), ()> 
     {
         Ok(_) => {
             *file = File::new(
-                FileDescriptor::new(file_descriptor.get_data(), DEVICE_ID_VALID, 0),
+                FileDescriptor::new(
+                    FileDescriptorData::Address(*socket_address),
+                    DEVICE_ID_VALID,
+                    0,
+                ),
                 get_socket_driver_mut(),
             );
             Ok(())
@@ -184,8 +201,8 @@ pub fn listen_socket(file: &mut File, _max_connection: usize) -> Result<(), ()> 
     }
 }
 
-pub fn accept(file: &mut File) -> Result<(File<'static>, SockAddr), ()> {
-    if file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
+pub fn accept(file: &File) -> Result<(File, SockAddr), ()> {
+    if !file.is_driver::<NetworkSocketDriver>() {
         pr_err!("Invalid file descriptor");
         return Err(());
     }
@@ -193,8 +210,12 @@ pub fn accept(file: &mut File) -> Result<(File<'static>, SockAddr), ()> {
     if file_descriptor.get_device_index() != DEVICE_ID_VALID {
         pr_err!("Socket is invalid");
         return Err(());
-    }
-    let socket = unsafe { &mut *(file_descriptor.get_data() as *mut Socket) };
+    };
+    let FileDescriptorData::Address(socket_address) = file_descriptor.get_data() else {
+        return Err(());
+    };
+    let socket = unsafe { &mut *(*socket_address as *mut Socket) };
+
     match get_kernel_manager_cluster()
         .network_manager
         .get_socket_manager()
@@ -226,7 +247,7 @@ pub fn accept(file: &mut File) -> Result<(File<'static>, SockAddr), ()> {
             };
             let accepted_file = File::new(
                 FileDescriptor::new(
-                    s as *mut _ as usize,
+                    FileDescriptorData::Address(s as *mut _ as usize),
                     DEVICE_ID_VALID,
                     FILE_PERMISSION_READ | FILE_PERMISSION_WRITE,
                 ),
@@ -242,21 +263,21 @@ pub fn accept(file: &mut File) -> Result<(File<'static>, SockAddr), ()> {
 }
 
 pub fn recv_from(
-    socket_file: &mut File,
+    file: &File,
     buffer_address: VAddress,
     buffer_size: MSize,
     flags: usize,
     sock_addr: Option<&SockAddr>,
 ) -> Result<MSize, ()> {
-    if socket_file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
+    if !file.is_driver::<NetworkSocketDriver>() {
         pr_err!("Invalid file descriptor");
         return Err(());
-    } else if !socket_file.is_readable() {
+    } else if !file.is_readable() {
         pr_err!("Socket is not readable");
         return Err(());
     }
     _recv_from(
-        socket_file.get_descriptor(),
+        file.get_descriptor(),
         buffer_address,
         buffer_size,
         flags,
@@ -275,7 +296,10 @@ fn _recv_from(
         pr_err!("Socket is invalid");
         return Err(());
     }
-    let socket = unsafe { &mut *(file_descriptor.get_data() as *mut Socket) };
+    let FileDescriptorData::Address(socket_address) = file_descriptor.get_data() else {
+        return Err(());
+    };
+    let socket = unsafe { &mut *(*socket_address as *mut Socket) };
 
     match get_kernel_manager_cluster()
         .network_manager
@@ -291,21 +315,21 @@ fn _recv_from(
 }
 
 pub fn send_to(
-    socket_file: &mut File,
+    file: &mut File,
     buffer_address: VAddress,
     buffer_size: MSize,
     flags: usize,
     sock_addr: Option<&SockAddr>,
 ) -> Result<MSize, ()> {
-    if socket_file.get_driver_address() != get_socket_driver_mut() as *mut _ as usize {
+    if !file.is_driver::<NetworkSocketDriver>() {
         pr_err!("Invalid file descriptor");
         return Err(());
-    } else if !socket_file.is_writable() {
+    } else if !file.is_writable() {
         pr_err!("Socket is not writable");
         return Err(());
     }
     _send_to(
-        socket_file.get_descriptor(),
+        file.get_descriptor(),
         buffer_address,
         buffer_size,
         flags,
@@ -324,7 +348,10 @@ fn _send_to(
         pr_err!("Socket is invalid");
         return Err(());
     }
-    let socket = unsafe { &mut *(file_descriptor.get_data() as *mut Socket) };
+    let FileDescriptorData::Address(socket_address) = file_descriptor.get_data() else {
+        return Err(());
+    };
+    let socket = unsafe { &mut *(*socket_address as *mut Socket) };
 
     match get_kernel_manager_cluster()
         .network_manager
@@ -367,11 +394,16 @@ impl FileOperationDriver for NetworkSocketDriver {
         Err(FileError::OperationNotSupported)
     }
 
-    fn close(&mut self, descriptor: FileDescriptor) {
-        let socket = unsafe { &mut *(descriptor.get_data() as *mut Socket) };
+    fn close(&mut self, descriptor: &mut FileDescriptor) {
         if descriptor.get_device_index() == DEVICE_ID_INVALID {
-            let _ = kfree!(socket);
-        } else if let Err(err) = get_kernel_manager_cluster()
+            return;
+        }
+        let FileDescriptorData::Address(socket_address) = descriptor.get_data() else {
+            return;
+        };
+        let socket = unsafe { &mut *(*socket_address as *mut Socket) };
+
+        if let Err(err) = get_kernel_manager_cluster()
             .network_manager
             .get_socket_manager()
             .close_socket(socket)

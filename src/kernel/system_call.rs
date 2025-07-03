@@ -242,10 +242,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                 context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
                 return;
             }
-            let file = unsafe {
-                core::ptr::replace(&mut *file.unwrap().lock().unwrap(), File::new_invalid())
-            };
-            file.close();
+            core::mem::take(&mut *file.unwrap().lock().unwrap());
             context.set_system_call_return_value(0);
         }
         SYSCALL_ARCH_PRCTL => {

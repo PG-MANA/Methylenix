@@ -10,6 +10,7 @@ pub use self::{
         FileOperationDriver, FileSeekOrigin,
     },
 };
+
 use crate::kernel::{
     block_device::BlockDeviceError,
     collections::{guid::Guid, linked_list::GeneralLinkedList},
@@ -22,6 +23,11 @@ use crate::kernel::{
     sync::spin_lock::Mutex,
 };
 
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+
+use core::ptr::NonNull;
+
 pub mod elf;
 mod fat32;
 mod file_info;
@@ -29,6 +35,8 @@ mod gpt;
 mod path_info;
 mod vfs;
 mod xfs;
+
+pub type FInfo = Arc<Mutex<FileInfo>>;
 
 //#[derive(Clone)]
 pub struct PartitionInfo {
@@ -89,10 +97,9 @@ trait PartitionManager {
         &self,
         partition_info: &PartitionInfo,
         file_name: &str,
-        current_directory: &mut FileInfo,
+        current_directory: &FileInfo,
     ) -> Result<FileInfo, FileError>;
 
-    #[allow(dead_code)]
     fn get_file_size(
         &self,
         partition_info: &PartitionInfo,
@@ -102,13 +109,22 @@ trait PartitionManager {
     fn read_file(
         &self,
         partition_info: &PartitionInfo,
-        file_info: &mut FileInfo,
+        file_info: &FileInfo,
         offset: MOffset,
         length: MSize,
         buffer: VAddress,
     ) -> Result<MSize, FileError>;
 
-    fn close_file(&self, partition_info: &PartitionInfo, file_info: &mut FileInfo);
+    fn write_file(
+        &self,
+        partition_info: &PartitionInfo,
+        file_info: &FileInfo,
+        offset: MOffset,
+        length: MSize,
+        buffer: VAddress,
+    ) -> Result<MSize, FileError>;
+
+    fn close_file(&self, partition_info: &PartitionInfo, file_info: &FileInfo);
 }
 
 impl Default for FileManager {
@@ -120,8 +136,8 @@ impl Default for FileManager {
 impl FileManager {
     pub fn new() -> Self {
         Self {
-            root: FileInfo::new_root(false),
             partition_list: GeneralLinkedList::new(),
+            root: Arc::new(Mutex::new(FileInfo::new_root(false))),
         }
     }
 
@@ -182,10 +198,11 @@ impl FileManager {
     pub fn mount_root(&mut self, root_uuid: Guid, is_writable: bool) {
         for e in self.partition_list.iter_mut() {
             if root_uuid == e.uuid {
+                let mut root = self.root.lock().unwrap();
                 e.driver
-                    .get_root_node(&e.info, &mut self.root, is_writable)
+                    .get_root_node(&e.info, &mut root, is_writable)
                     .expect("Failed to create root");
-                self.root.driver = e as *mut _;
+                root.partition = e;
                 return;
             }
         }
@@ -198,115 +215,115 @@ impl FileManager {
     }
 
     fn get_file_size(&self, descriptor: &FileDescriptor) -> Result<u64, FileError> {
-        Ok(unsafe { &*(descriptor.get_data() as *const FileInfo) }.get_file_size())
+        let FileDescriptorData::Data(b) = descriptor.get_data() else {
+            return Err(FileError::OperationNotSupported);
+        };
+        let f_i = b
+            .as_ref()
+            .downcast_ref::<FInfo>()
+            .ok_or(FileError::OperationNotSupported)?;
+        let f_i = f_i.lock().unwrap();
+        let partition = unsafe { &*(f_i.partition) };
+
+        partition.driver.get_file_size(&partition.info, &f_i)
     }
 
     fn _open_file_info(
         &mut self,
         file_name: &str,
-        current_directory: &mut FileInfo,
+        current_directory: FInfo,
         permission_and_flags: u16,
-    ) -> Result<&'static mut FileInfo, FileError> {
+    ) -> Result<FInfo, FileError> {
         if file_name == "." || file_name.is_empty() {
-            return Ok(unsafe { &mut *(current_directory as *mut _) });
+            return Ok(current_directory.clone());
         } else if file_name == ".." {
-            return if current_directory.parent.is_null() {
-                assert_ne!(current_directory as *mut _, &mut self.root as *mut _);
-                Ok(unsafe { &mut *(current_directory as *mut _) })
-            } else {
-                Ok(unsafe { &mut *(current_directory.parent) })
+            let f_i = current_directory.lock().unwrap();
+            return match &f_i.parent {
+                Some(p) => p.upgrade().ok_or(FileError::FileNotFound),
+                None => Ok(current_directory.clone()),
             };
         }
-        let _lock = current_directory.lock.lock();
-        if (current_directory.permission_and_flags & FileInfo::FLAGS_VOLATILE) == 0 {
-            for e in unsafe { current_directory.child.iter_mut(offset_of!(FileInfo, list)) } {
-                if e.get_file_name() == file_name
-                    && (e.permission_and_flags & permission_and_flags == permission_and_flags)
+        let mut f_i = current_directory.lock().unwrap();
+        if (f_i.permission_and_flags & FileInfo::FLAGS_VOLATILE) == 0 {
+            for e in f_i.child.iter_mut() {
+                let locked_e = e.lock().unwrap();
+                if locked_e.get_file_name() == file_name
+                    && (locked_e.permission_and_flags & permission_and_flags
+                        == permission_and_flags)
                 {
-                    return Ok(e);
+                    drop(locked_e);
+                    return Ok(e.clone());
                 }
             }
         }
 
-        if current_directory.driver.is_null() {
-            return Err(FileError::FileNotFound);
-        }
-        let driver = unsafe { &mut *(current_directory.driver) };
-        let f = driver
+        let partition = unsafe { &mut *(f_i.partition) };
+        let mut f = partition
             .driver
-            .search_file(&driver.info, file_name, current_directory)?;
-        let file_info = match kmalloc!(FileInfo, f) {
-            Ok(i) => i,
-            Err(err) => {
-                pr_err!("Failed to allocate FileInfo: {:?}", err);
-                return Err(FileError::MemoryError(err));
-            }
-        };
-
-        current_directory.reference_counter += 1;
-        file_info.parent = current_directory;
-        file_info.list = PtrLinkedListNode::new();
-        if file_info.driver.is_null() {
-            file_info.driver = driver;
+            .search_file(&partition.info, file_name, &f_i)?;
+        if f.permission_and_flags & permission_and_flags != permission_and_flags {
+            return Err(FileError::OperationNotPermitted);
         }
-        current_directory.child.insert_tail(&mut file_info.list);
-
-        if file_info.permission_and_flags & permission_and_flags == permission_and_flags {
-            Ok(file_info)
-        } else {
-            Err(FileError::OperationNotPermitted)
+        if f.partition.is_null() {
+            f.partition = f_i.partition;
         }
+        f.parent = Some(Arc::downgrade(&current_directory));
+        let f = Arc::try_new(Mutex::new(f))
+            .map_err(|e| FileError::MemoryError(MemoryError::from(e)))?;
+        f_i.child.push_back(f.clone())?;
+        Ok(f)
     }
 
     pub fn open_file_info(
         &mut self,
         file_name: &PathInfo,
-        current_directory: &mut FileInfo,
+        current_directory: Option<&FInfo>,
         _permission: u8,
-    ) -> Result<&'static mut FileInfo, FileError> {
+    ) -> Result<FInfo, FileError> {
         let mut dir = if file_name.is_absolute_path() {
-            unsafe { &mut *(&mut self.root as *mut _) }
+            self.root.clone()
         } else {
-            unsafe { &mut *(current_directory as *mut _) }
+            current_directory.ok_or(FileError::FileNotFound)?.clone()
         };
         let permission_and_flags = 0; //permission
         for e in file_name.iter() {
             dir = self._open_file_info(e, dir, permission_and_flags)?;
         }
-        Ok(dir)
+        Ok(dir.clone())
     }
 
     pub fn open_file_info_as_file(
         &mut self,
-        info: &mut FileInfo,
+        info: &FInfo,
         permission: u8,
     ) -> Result<File, FileError> {
-        let _lock = info.lock.lock();
-        if (info.permission_and_flags & FileInfo::FLAGS_DIRECTORY) != 0
-            || (info.permission_and_flags & FileInfo::FLAGS_META_DARA) != 0
+        let f_i = info.lock().unwrap();
+        if (f_i.permission_and_flags & FileInfo::FLAGS_DIRECTORY) != 0
+            || (f_i.permission_and_flags & FileInfo::FLAGS_META_DARA) != 0
         {
             return Err(FileError::InvalidFile);
         }
         /* TODO: permission check based on user/group */
 
-        info.reference_counter += 1;
-
+        drop(f_i);
         Ok(File::new(
-            FileDescriptor::new(info as *mut _ as usize, 0, permission),
-            self,
+            FileDescriptor::new(
+                FileDescriptorData::Data(Box::new(info.clone())),
+                0,
+                permission,
+            ),
+            NonNull::new(self).unwrap(),
         ))
     }
 
     pub fn open_file(
         &mut self,
         file_name: &PathInfo,
-        current_directory: Option<&mut FileInfo>,
+        current_directory: Option<&FInfo>,
         permission: u8,
     ) -> Result<File, FileError> {
-        let current_directory =
-            current_directory.unwrap_or(unsafe { &mut *(&mut self.root as *mut _) });
         let file_info = self.open_file_info(file_name, current_directory, permission)?;
-        self.open_file_info_as_file(file_info, permission)
+        self.open_file_info_as_file(&file_info, permission)
     }
 }
 
@@ -317,14 +334,19 @@ impl FileOperationDriver for FileManager {
         buffer: VAddress,
         length: MSize,
     ) -> Result<MSize, FileError> {
-        let file_info = unsafe { &mut *(descriptor.get_data() as *mut FileInfo) };
-        let _lock = file_info.lock.lock();
+        let FileDescriptorData::Data(b) = descriptor.get_data() else {
+            return Err(FileError::OperationNotSupported);
+        };
+        let f_i = b
+            .as_ref()
+            .downcast_ref::<FInfo>()
+            .ok_or(FileError::OperationNotSupported)?;
+        let f_i = f_i.lock().unwrap();
+        let partition = unsafe { &*(f_i.partition) };
 
-        let partition_info = unsafe { &mut *(file_info.driver) };
-
-        let result = partition_info.driver.read_file(
-            &mut partition_info.info,
-            file_info,
+        let result = partition.driver.read_file(
+            &partition.info,
+            &f_i,
             descriptor.get_position(),
             length,
             buffer,
@@ -338,11 +360,32 @@ impl FileOperationDriver for FileManager {
 
     fn write(
         &mut self,
-        _descriptor: &mut FileDescriptor,
-        _buffer: VAddress,
-        _length: MSize,
+        descriptor: &mut FileDescriptor,
+        buffer: VAddress,
+        length: MSize,
     ) -> Result<MSize, FileError> {
-        Err(FileError::OperationNotSupported)
+        let FileDescriptorData::Data(b) = descriptor.get_data() else {
+            return Err(FileError::OperationNotSupported);
+        };
+        let f_i = b
+            .as_ref()
+            .downcast_ref::<FInfo>()
+            .ok_or(FileError::OperationNotSupported)?;
+        let f_i = f_i.lock().unwrap();
+        let partition = unsafe { &*(f_i.partition) };
+
+        let result = partition.driver.write_file(
+            &partition.info,
+            &f_i,
+            descriptor.get_position(),
+            length,
+            buffer,
+        );
+
+        if let Ok(s) = result {
+            descriptor.add_position(s);
+        }
+        result
     }
 
     fn seek(
@@ -362,16 +405,16 @@ impl FileOperationDriver for FileManager {
         Ok(descriptor.get_position())
     }
 
-    fn close(&mut self, descriptor: FileDescriptor) {
-        let file_info = unsafe { &mut *(descriptor.get_data() as *mut FileInfo) };
-        let _lock = file_info.lock.lock();
-        let partition_info = unsafe { &mut *(file_info.driver) };
+    fn close(&mut self, descriptor: &mut FileDescriptor) {
+        let FileDescriptorData::Data(b) = descriptor.get_data() else {
+            return;
+        };
+        let Some(f_i) = b.as_ref().downcast_ref::<FInfo>() else {
+            return;
+        };
+        let f_i = f_i.lock().unwrap();
+        let partition = unsafe { &*(f_i.partition) };
 
-        partition_info
-            .driver
-            .close_file(&mut partition_info.info, file_info);
-
-        file_info.reference_counter -= 1;
-        if file_info.reference_counter == 0 { /*TODO: delete file info */ }
+        partition.driver.close_file(&partition.info, &f_i);
     }
 }

@@ -151,7 +151,7 @@ impl PartitionManager for Fat32Driver {
         &self,
         partition_info: &PartitionInfo,
         file_name: &str,
-        current_directory: &mut FileInfo,
+        current_directory: &FileInfo,
     ) -> Result<FileInfo, FileError> {
         let entry = self.find_entry(
             partition_info,
@@ -159,12 +159,12 @@ impl PartitionManager for Fat32Driver {
             file_name,
         )?;
 
-        let mut file_info = FileInfo::new(current_directory);
+        let mut file_info = FileInfo::new();
 
         file_info.set_inode_number(entry.entry_cluster as _);
         file_info.set_file_size(entry.file_size as _);
         file_info.set_file_name(entry.file_name);
-        file_info.driver = current_directory.driver;
+        file_info.partition = current_directory.partition;
 
         let all_permission = FileInfo::PERMISSION_FLAG_EXECUTE
             | FileInfo::PERMISSION_FLAG_WRITE
@@ -194,7 +194,7 @@ impl PartitionManager for Fat32Driver {
     fn read_file(
         &self,
         partition_info: &PartitionInfo,
-        file_info: &mut FileInfo,
+        file_info: &FileInfo,
         offset: MOffset,
         mut length: MSize,
         buffer: VAddress,
@@ -298,7 +298,18 @@ impl PartitionManager for Fat32Driver {
         Ok(MSize::new(buffer_pointer))
     }
 
-    fn close_file(&self, _: &PartitionInfo, _file_info: &mut FileInfo) {}
+    fn write_file(
+        &self,
+        _partition_info: &PartitionInfo,
+        _file_info: &FileInfo,
+        _offset: MOffset,
+        _length: MSize,
+        _buffer: VAddress,
+    ) -> Result<MSize, FileError> {
+        Err(FileError::OperationNotSupported)
+    }
+
+    fn close_file(&self, _: &PartitionInfo, _file_info: &FileInfo) {}
 }
 
 impl Fat32Driver {

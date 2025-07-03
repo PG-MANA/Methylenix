@@ -7,6 +7,9 @@ use crate::kernel::{
 };
 
 use alloc::string::String;
+use alloc::sync::{Arc, Weak};
+
+use core::ptr::null_mut;
 
 pub type InodeNumber = u64;
 
@@ -17,8 +20,8 @@ pub struct FileInfo {
     pub permission_and_flags: u16,
     uid: u32,
     gid: u32,
-    pub driver: *mut Partition,
-    pub parent: *mut FileInfo,
+    pub parent: Option<Weak<Mutex<Self>>>,
+    pub partition: *mut Partition,
     pub child: GeneralLinkedList<Arc<Mutex<Self>>>,
 }
 
@@ -34,7 +37,7 @@ impl FileInfo {
     pub const FLAGS_META_DARA: u16 = 1 << 10;
     pub const FLAGS_VOLATILE: u16 = 1 << 15;
 
-    pub const fn new(parent: &mut Self) -> Self {
+    pub const fn new() -> Self {
         Self {
             inode_number: 0,
             file_name: String::new(),
@@ -42,8 +45,8 @@ impl FileInfo {
             permission_and_flags: 0,
             uid: 0,
             gid: 0,
-            driver: core::ptr::null_mut(),
-            parent,
+            parent: None,
+            partition: null_mut(),
             child: GeneralLinkedList::new(),
         }
     }
@@ -67,8 +70,8 @@ impl FileInfo {
                 | Self::FLAGS_DIRECTORY,
             uid: 0,
             gid: 0,
-            driver: core::ptr::null_mut(),
-            parent: core::ptr::null_mut(),
+            parent: None,
+            partition: null_mut(),
             child: GeneralLinkedList::new(),
         }
     }

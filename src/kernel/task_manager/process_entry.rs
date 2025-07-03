@@ -34,9 +34,7 @@ pub struct ProcessEntry {
     num_of_thread: usize,
     privilege_level: u8,
     next_thread_id: usize,
-
-    files: Vec<Arc<Mutex<File<'static>>>>,
-    file_vec_lock: SpinLockFlag,
+    files: Mutex<Vec<Arc<Mutex<File>>>>,
 }
 
 impl ProcessEntry {
@@ -55,8 +53,7 @@ impl ProcessEntry {
             num_of_thread: 0,
             privilege_level: 0,
             next_thread_id: 0,
-            files: Vec::new(),
-            file_vec_lock: SpinLockFlag::new(),
+            files: Mutex::new(Vec::new()),
         }
     }
 
@@ -224,43 +221,23 @@ impl ProcessEntry {
         }
     }
 
-    pub fn add_file(&mut self, f: File<'static>) -> usize {
-        let _lock = if self.num_of_thread == 1 {
-            None
-        } else {
-            Some(self.file_vec_lock.lock())
-        };
-        let i = self.files.len();
-        self.files.push(Arc::new(Mutex::new(f)));
-        drop(_lock);
-        i
+    pub fn get_file(&self, index: usize) -> Option<Arc<Mutex<File>>> {
+        self.files.lock().unwrap().get(index).cloned()
     }
 
-    pub fn remove_file_from_list(&mut self, index: usize) -> Result<Arc<Mutex<File<'static>>>, ()> {
-        let _lock = if self.num_of_thread > 1 {
-            None
+    pub fn add_file(&mut self, f: File) -> usize {
+        let mut l = self.files.lock().unwrap();
+        l.push(Arc::new(Mutex::new(f)));
+        l.len()
+    }
+
+    pub fn remove_file_from_list(&mut self, index: usize) -> Result<Arc<Mutex<File>>, ()> {
+        let mut l = self.files.lock()?;
+        if index < l.len() {
+            let file = core::mem::replace(&mut l[index], Arc::new(Mutex::new(File::invalid())));
+            Ok(file)
         } else {
-            Some(self.file_vec_lock.lock())
-        };
-        if index >= self.files.len() {
-            return Err(());
+            Err(())
         }
-        let file = core::mem::replace(
-            &mut self.files[index],
-            Arc::new(Mutex::new(File::new_invalid())),
-        );
-        drop(_lock);
-        Ok(file)
-    }
-
-    pub fn remove_file_from_list_append(&mut self) -> Option<Arc<Mutex<File<'static>>>> {
-        let _lock = if self.num_of_thread > 1 {
-            None
-        } else {
-            Some(self.file_vec_lock.lock())
-        };
-        let file = self.files.pop();
-        drop(_lock);
-        file
     }
 }

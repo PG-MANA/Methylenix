@@ -6,6 +6,9 @@ use super::FileError;
 
 use crate::kernel::memory_manager::data_type::{MOffset, MSize, VAddress};
 
+use core::any::Any;
+use core::ptr::NonNull;
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum FileSeekOrigin {
     SeekSet,
@@ -15,32 +18,6 @@ pub enum FileSeekOrigin {
 
 pub const FILE_PERMISSION_READ: u8 = 1;
 pub const FILE_PERMISSION_WRITE: u8 = 1 << 1;
-
-#[repr(transparent)]
-struct FakeDriver {}
-
-static mut FAKE_DRIVER: FakeDriver = FakeDriver {};
-
-impl FileOperationDriver for FakeDriver {
-    fn read(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, FileError> {
-        Err(FileError::OperationNotSupported)
-    }
-
-    fn write(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, FileError> {
-        Err(FileError::OperationNotSupported)
-    }
-
-    fn seek(
-        &mut self,
-        _: &mut FileDescriptor,
-        _: MOffset,
-        _: FileSeekOrigin,
-    ) -> Result<MOffset, FileError> {
-        Err(FileError::OperationNotSupported)
-    }
-
-    fn close(&mut self, _: FileDescriptor) {}
-}
 
 pub trait FileOperationDriver {
     fn read(
@@ -64,23 +41,54 @@ pub trait FileOperationDriver {
         origin: FileSeekOrigin,
     ) -> Result<MOffset, FileError>;
 
-    fn close(&mut self, descriptor: FileDescriptor);
+    fn close(&mut self, descriptor: &mut FileDescriptor);
+}
+
+#[repr(transparent)]
+struct StubDriver {}
+
+static mut STUB_DRIVER: StubDriver = StubDriver {};
+
+impl FileOperationDriver for StubDriver {
+    fn read(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, FileError> {
+        Err(FileError::OperationNotSupported)
+    }
+
+    fn write(&mut self, _: &mut FileDescriptor, _: VAddress, _: MSize) -> Result<MSize, FileError> {
+        Err(FileError::OperationNotSupported)
+    }
+
+    fn seek(
+        &mut self,
+        _: &mut FileDescriptor,
+        _: MOffset,
+        _: FileSeekOrigin,
+    ) -> Result<MOffset, FileError> {
+        Err(FileError::OperationNotSupported)
+    }
+
+    fn close(&mut self, _: &mut FileDescriptor) {}
+}
+
+pub enum FileDescriptorData {
+    Address(usize),
+    Data(alloc::boxed::Box<dyn core::any::Any>),
 }
 
 pub struct FileDescriptor {
-    data: usize,
+    data: FileDescriptorData,
     position: MOffset,
     device_index: usize,
     permission: u8,
 }
 
-pub struct File<'a> {
-    driver: &'a mut dyn FileOperationDriver,
+pub struct File {
+    driver: NonNull<dyn FileOperationDriver>,
     descriptor: FileDescriptor,
 }
 
 impl FileDescriptor {
-    pub fn new(data: usize, device_index: usize, permission: u8) -> Self {
+    pub fn new(data: FileDescriptorData, device_index: usize, permission: u8) -> Self {
         Self {
             data,
             position: MOffset::new(0),
@@ -89,8 +97,12 @@ impl FileDescriptor {
         }
     }
 
-    pub const fn get_data(&self) -> usize {
-        self.data
+    pub const fn get_data(&self) -> &FileDescriptorData {
+        &self.data
+    }
+
+    pub const fn get_data_mut(&mut self) -> &mut FileDescriptorData {
+        &mut self.data
     }
 
     pub const fn get_device_index(&self) -> usize {
@@ -110,21 +122,21 @@ impl FileDescriptor {
     }
 }
 
-impl<'a> File<'a> {
-    pub fn new(descriptor: FileDescriptor, driver: &'a mut dyn FileOperationDriver) -> Self {
+impl File {
+    pub fn new(descriptor: FileDescriptor, driver: NonNull<dyn FileOperationDriver>) -> Self {
         Self { descriptor, driver }
     }
 
-    pub fn new_invalid() -> Self {
+    pub fn invalid() -> Self {
         Self {
-            descriptor: FileDescriptor::new(0, 0, 0),
-            driver: unsafe { &mut *core::ptr::addr_of_mut!(FAKE_DRIVER) },
+            descriptor: FileDescriptor::new(FileDescriptorData::Address(0), 0, 0),
+            driver: unsafe { NonNull::new_unchecked(&raw mut STUB_DRIVER) },
         }
     }
 
     pub const fn is_invalid(&self) -> bool {
         self.descriptor.permission == 0
-            && self.descriptor.data == 0
+            && matches!(self.descriptor.data, FileDescriptorData::Address(0))
             && self.descriptor.device_index == 0
             && self.descriptor.position.is_zero()
     }
@@ -141,33 +153,47 @@ impl<'a> File<'a> {
         &self.descriptor
     }
 
-    pub fn get_driver_address(&self) -> usize {
-        (self.driver as *const dyn FileOperationDriver).addr()
+    pub const fn get_descriptor_mut(&mut self) -> &mut FileDescriptor {
+        &mut self.descriptor
     }
 
     pub fn read(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, FileError> {
         if !self.is_readable() {
             return Err(FileError::OperationNotPermitted);
         }
-        self.driver.read(&mut self.descriptor, buffer, length)
+        unsafe { self.driver.as_mut() }.read(&mut self.descriptor, buffer, length)
+    }
+
+    pub fn get_driver(&self) -> NonNull<dyn FileOperationDriver> {
+        self.driver
+    }
+
+    pub fn is_driver<T: 'static>(&self) -> bool {
+        self.driver.type_id() == core::any::TypeId::of::<T>()
     }
 
     pub fn write(&mut self, buffer: VAddress, length: MSize) -> Result<MSize, FileError> {
         if !self.is_writable() {
             return Err(FileError::OperationNotPermitted);
         }
-        self.driver.write(&mut self.descriptor, buffer, length)
+        unsafe { self.driver.as_mut() }.write(&mut self.descriptor, buffer, length)
     }
 
     pub fn seek(&mut self, offset: MOffset, origin: FileSeekOrigin) -> Result<MOffset, FileError> {
-        self.driver.seek(&mut self.descriptor, offset, origin)
+        unsafe { self.driver.as_mut() }.seek(&mut self.descriptor, offset, origin)
     }
+}
 
-    pub fn close(self) {
-        self.driver.close(self.descriptor)
+impl Default for File {
+    fn default() -> Self {
+        Self::invalid()
     }
+}
 
-    pub unsafe fn close_ref(&mut self) {
-        self.driver.close(core::ptr::read(&self.descriptor))
+impl Drop for File {
+    fn drop(&mut self) {
+        if !self.is_invalid() {
+            unsafe { self.driver.as_mut() }.close(&mut self.descriptor);
+        }
     }
 }

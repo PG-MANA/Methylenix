@@ -492,7 +492,7 @@ impl XfsDriver {
         Ok(buffer_pointer)
     }
 
-    fn analysis_file_and_set_file_info(
+    fn analysis_file_and_set_file_information(
         &self,
         partition_info: &PartitionInfo,
         file_info: &mut FileInfo,
@@ -568,7 +568,7 @@ impl PartitionManager for XfsDriver {
         _is_writable: bool,
     ) -> Result<(), FileError> {
         file_info.set_inode_number(self.root_inode);
-        self.analysis_file_and_set_file_info(partition_info, file_info)?;
+        self.analysis_file_and_set_file_information(partition_info, file_info)?;
         Ok(())
     }
 
@@ -576,7 +576,7 @@ impl PartitionManager for XfsDriver {
         &self,
         partition_info: &PartitionInfo,
         file_name: &str,
-        current_directory: &mut FileInfo,
+        current_directory: &FileInfo,
     ) -> Result<FileInfo, FileError> {
         let current_directory_inode = current_directory.get_inode_number();
         let (inode_buffer, inode_offset) =
@@ -622,8 +622,7 @@ impl PartitionManager for XfsDriver {
             }
         }
 
-        self.analysis_file_and_set_file_info(partition_info, &mut file_info)?;
-        file_info.driver = current_directory.driver;
+        self.analysis_file_and_set_file_information(partition_info, &mut file_info)?;
 
         Ok(file_info)
     }
@@ -639,7 +638,7 @@ impl PartitionManager for XfsDriver {
     fn read_file(
         &self,
         partition_info: &PartitionInfo,
-        file_info: &mut FileInfo,
+        file_info: &FileInfo,
         offset: MOffset,
         mut length: MSize,
         buffer: VAddress,
@@ -699,5 +698,5 @@ impl PartitionManager for XfsDriver {
         Err(FileError::OperationNotSupported)
     }
 
-    fn close_file(&self, _partition_info: &PartitionInfo, _file_info: &mut FileInfo) {}
+    fn close_file(&self, _partition_info: &PartitionInfo, _file_info: &FileInfo) {}
 }
