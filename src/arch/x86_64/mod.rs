@@ -174,10 +174,3 @@ fn main_arch_depend_initialization_process() -> ! {
     pr_info!("All arch-depend initializations are done!");
     main_initialization_process()
 }
-
-#[no_mangle]
-pub extern "C" fn unknown_boot_main() -> ! {
-    loop {
-        unsafe { cpu::halt() };
-    }
-}

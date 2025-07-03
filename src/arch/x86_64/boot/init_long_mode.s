@@ -43,8 +43,9 @@ init_long_mode:
   movabs    $(os_stack + OS_STACK_SIZE), %rsp   /* Reset Stack */
   cmp   $BOOT_FROM_MULTIBOOT_MARK, %rax
   jz    jump_to_multiboot_main
-  movabs    $unknown_boot_main, %rax             /* at src/arch/x86_64/mod.rs */
-  jmp   *%rax
+2:
+  hlt
+  jmp   2b
 .size       init_long_mode, . - init_long_mode
 
 .type       jump_to_multiboot_main, %function
