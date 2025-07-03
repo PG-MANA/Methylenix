@@ -238,7 +238,7 @@ impl TaskManager {
         )?;
         new_thread.fork_data(thread, new_context);
         drop(_original_thread_lock);
-        let parent_process = new_thread.get_process_mut();
+        let parent_process = unsafe { &mut *new_thread.get_process_mut() };
         let _process_lock = parent_process
             .lock
             .try_lock()
@@ -338,7 +338,7 @@ impl TaskManager {
 
     pub fn create_user_process(
         &mut self,
-        parent_process: *mut ProcessEntry,
+        parent_process: Option<&mut ProcessEntry>,
         privilege_level: u8,
     ) -> Result<&'static mut ProcessEntry, TaskError> {
         /* Create Memory Manager */
@@ -357,13 +357,17 @@ impl TaskManager {
 
         let _lock = self.lock.lock();
         let result = try {
-            let new_process = self.process_entry_pool.alloc()?;
-            if parent_process.is_null() {
-                assert_eq!(self.next_process_id, 1);
-            }
+            let new_process = allocate_new_process!(self)?;
+            let parent = match parent_process {
+                Some(p) => p as *mut _,
+                None => {
+                    assert_eq!(self.next_process_id, 1);
+                    null_mut()
+                }
+            };
             new_process.init(
                 self.next_process_id,
-                parent_process,
+                parent,
                 &mut [],
                 user_memory_manager as *mut _,
                 privilege_level,
@@ -465,9 +469,8 @@ impl TaskManager {
         }
 
         /* Delete from parent */
-        let parent = target_process.get_parent_process();
-        if !parent.is_null() {
-            let parent = unsafe { &mut *parent };
+        if let Some(mut parent) = target_process.get_parent_process() {
+            let parent = unsafe { parent.as_mut() };
             let mut _parent_lock;
             loop {
                 if let Ok(e) = parent.lock.try_lock() {

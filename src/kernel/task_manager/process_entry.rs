@@ -29,8 +29,7 @@ pub struct ProcessEntry {
     status: ProcessStatus,
     memory_manager: *mut MemoryManager,
     process_id: usize,
-    parent: *mut ProcessEntry,
-    /* kernel process has invalid pointer */
+    parent: Option<NonNull<ProcessEntry>>,
     num_of_thread: usize,
     privilege_level: u8,
     next_thread_id: usize,
@@ -49,7 +48,7 @@ impl ProcessEntry {
             status: ProcessStatus::New,
             memory_manager: core::ptr::null_mut(),
             process_id: 0,
-            parent: core::ptr::null_mut(),
+            parent: None,
             num_of_thread: 0,
             privilege_level: 0,
             next_thread_id: 0,
@@ -69,7 +68,7 @@ impl ProcessEntry {
         privilege_level: u8,
     ) {
         init_struct!(*self, Self::new());
-        self.parent = parent;
+        self.parent = NonNull::new(parent);
         self.process_id = p_id;
         self.privilege_level = privilege_level;
         self.memory_manager = memory_manager;
@@ -147,7 +146,7 @@ impl ProcessEntry {
         self.privilege_level
     }
 
-    pub const fn get_parent_process(&self) -> *mut Self {
+    pub const fn get_parent_process(&self) -> Option<NonNull<Self>> {
         self.parent
     }
 

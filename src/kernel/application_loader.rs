@@ -81,7 +81,7 @@ pub fn load_and_execute(
 
     let process = match get_kernel_manager_cluster()
         .task_manager
-        .create_user_process(core::ptr::null_mut(), DEFAULT_PRIVILEGE_LEVEL)
+        .create_user_process(None, DEFAULT_PRIVILEGE_LEVEL)
     {
         Ok(e) => e,
         Err(e) => {

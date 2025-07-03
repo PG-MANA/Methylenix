@@ -15,12 +15,12 @@ use crate::kernel::{
     sync::spin_lock::IrqSaveSpinLockFlag,
 };
 
-use core::mem::offset_of;
+use core::ptr::NonNull;
 
 pub struct WorkQueue {
     global_lock: IrqSaveSpinLockFlag,
-    daemon_thread: *mut ThreadEntry,
     work_queue: LocalSlabAllocLinkedList<WorkList>,
+    daemon_thread: NonNull<ThreadEntry>,
 }
 
 pub struct WorkList {
@@ -55,7 +55,7 @@ impl WorkQueue {
                 self as *mut _ as usize,
             )
             .expect("Failed to add the soft interrupt daemon");
-        self.daemon_thread = thread as *mut _;
+        self.daemon_thread = NonNull::new(thread).unwrap();
     }
 
     pub fn init_cpu_work_queue(&mut self, task_manager: &mut TaskManager) {
@@ -73,7 +73,7 @@ impl WorkQueue {
                 TaskManager::FLAG_LOCAL_THREAD,
             )
             .expect("Failed to add the soft interrupt daemon");
-        self.daemon_thread = thread as *mut _;
+        self.daemon_thread = NonNull::new(thread).unwrap();
     }
 
     pub fn add_work(&mut self, w: WorkList) -> Result<(), TaskError> {
@@ -85,7 +85,7 @@ impl WorkQueue {
             TaskError::MemoryError(err)
         })?;
 
-        let worker_thread = unsafe { &mut *self.daemon_thread };
+        let worker_thread = unsafe { self.daemon_thread.as_mut() };
         let _worker_thread_lock = worker_thread.lock.lock();
         if worker_thread.get_task_status() != TaskStatus::Running {
             let run_queue = &mut get_cpu_manager_cluster().run_queue;
@@ -136,7 +136,7 @@ impl WorkQueue {
         loop {
             let _lock = manager.global_lock.lock();
             if manager.work_queue.is_empty() {
-                assert!(!unsafe { &mut *manager.daemon_thread }.lock.is_locked());
+                assert!(!unsafe { manager.daemon_thread.as_ref() }.lock.is_locked());
                 drop(_lock);
                 bug_on_err!(
                     get_cpu_manager_cluster()
