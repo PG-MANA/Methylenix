@@ -1,0 +1,3 @@
+[toolchain]
+components = ["rustc", "cargo"]
+targets = ["aarch64-unknown-uefi"]
