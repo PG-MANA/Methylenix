@@ -16,6 +16,6 @@ GRUB2MKRES = grub2-mkrescue
 
 iso:
 	-$(MKDIR) $(MAKE_IMGDIR) $(MAKE_TMPDIR)grub-iso/boot/grub/ $(MAKE_TMPDIR)grub-iso/boot/methylenix/
-	$(CP) target/x86_64-unknown-none/release/methylenix $(MAKE_TMPDIR)grub-iso/boot/methylenix/kernel.elf
+	$(CP) target/x86_64-unknown-none/release/Methylenix $(MAKE_TMPDIR)grub-iso/boot/methylenix/kernel.elf
 	$(CP) $(MAKE_CONGIGDIR)grub  $(MAKE_TMPDIR)grub-iso/boot/
 	$(GRUBMKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso || $(GRUB2MKRES) -o $(MAKE_IMGDIR)boot.iso $(MAKE_TMPDIR)grub-iso

@@ -9,9 +9,6 @@ use super::name_object::{NameString, SimpleName, SuperName, Target};
 use super::opcode;
 use super::term_object::{MethodInvocation, TermArg};
 use super::{AcpiInt, AmlError, AmlStream, DataRefObject, Evaluator};
-
-use core::mem::MaybeUninit;
-
 #[derive(Debug, Clone)]
 pub struct Package {
     num_elements: AcpiInt,
@@ -500,14 +497,9 @@ impl ExpressionOpcode {
                 }
                 opcode::LOAD_TABLE_OP => {
                     stream.seek(2)?;
-                    let mut table: [MaybeUninit<TermArg>; 6] = [const { MaybeUninit::uninit() }; 6];
-                    for e in &mut table {
-                        /* Using this style instead of Iter */
-                        e.write(TermArg::try_parse(stream, current_scope, evaluator)?);
-                    }
-                    Ok(Self::DefLoadTable(unsafe {
-                        MaybeUninit::array_assume_init(table)
-                    }))
+                    Ok(Self::DefLoadTable(core::array::try_from_fn(|_| {
+                        TermArg::try_parse(stream, current_scope, evaluator)
+                    })?))
                 }
                 opcode::TIMER_OP => {
                     stream.seek(2)?;
@@ -523,7 +515,7 @@ impl ExpressionOpcode {
                     stream.seek(2)?;
                     let pkg_length = PkgLength::parse(stream)?;
                     stream.seek(pkg_length.actual_length)?;
-                    Ok(Self::DefProcessor) /* Ignore(From ACPI 6.4, DefProcessor was deleted) */
+                    Ok(Self::DefProcessor) /* Ignore (From ACPI 6.4, DefProcessor was deleted) */
                 }
                 opcode::WAIT_OP => {
                     stream.seek(2)?;

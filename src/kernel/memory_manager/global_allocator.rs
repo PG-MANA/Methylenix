@@ -20,11 +20,6 @@ impl GlobalAllocator {
     }
 }
 
-#[alloc_error_handler]
-fn alloc_error_oom(layout: Layout) -> ! {
-    panic!("Memory Allocation({:?}) was failed.", layout);
-}
-
 unsafe impl GlobalAlloc for GlobalAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match get_cpu_manager_cluster()

@@ -1,11 +1,13 @@
 use std::{env, fs, path::Path, process::Command};
 
-const OS_PROJECT_NAME: &str = "methylenix";
+const OS_PROJECT_NAME: &str = "Methylenix";
 
 fn main() {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let base_dir = Path::new(manifest_dir.as_str()).parent().unwrap();
     let ret = match env::args().nth(1).as_deref() {
-        Some("build") => build(&cargo),
+        Some("build") => build(&cargo, base_dir),
         Some("help") => show_error(&cargo, false),
         Some(c) => {
             eprintln!("Unknown command: {c}");
@@ -16,7 +18,7 @@ fn main() {
     std::process::exit(ret);
 }
 
-fn build(cargo: &String) -> i32 {
+fn build(cargo: &String, base_dir: &Path) -> i32 {
     let (target_arch, loader, loader_arch, original_loader_name, loader_name) =
         match env::args().nth(2).as_deref() {
             Some("x86_64") => ("x86_64-unknown-none", None, "", "", ""),
@@ -36,21 +38,16 @@ fn build(cargo: &String) -> i32 {
                 return show_error(cargo, true);
             }
         };
-    let output_dir = "bin/EFI/BOOT";
+    let output_dir = base_dir.join("bin/EFI/BOOT");
     let build_type = "release";
-    let Ok(current_dir) = env::current_dir() else {
-        eprintln!("Failed to get the current directory.");
-        return -1;
-    };
-    let kernel_path = current_dir
-        .clone()
-        .join("target")
+    let target_dir = base_dir.join("target");
+    let kernel_path = target_dir
         .join(target_arch)
         .join(build_type)
         .join(OS_PROJECT_NAME);
 
     /* Create the output dir */
-    if let Err(err) = fs::create_dir_all(output_dir) {
+    if let Err(err) = fs::create_dir_all(&output_dir) {
         eprintln!("Failed to create the output dir: {err:?}");
         return -1;
     }
@@ -70,16 +67,15 @@ fn build(cargo: &String) -> i32 {
     }
 
     /* Copy the kernel to the output dir */
-    if let Err(err) = fs::copy(kernel_path, Path::new(output_dir).join("kernel.elf")) {
+    println!("{kernel_path:?}");
+    if let Err(err) = fs::copy(kernel_path, output_dir.join("kernel.elf")) {
         eprintln!("Failed to copy the kernel: {err:?}");
         return -1;
     }
 
     /* Build the loader */
     if let Some(loader) = loader {
-        let loader_path = current_dir
-            .clone()
-            .join("target")
+        let loader_path = target_dir
             .join(loader_arch)
             .join(build_type)
             .join(original_loader_name);
@@ -93,7 +89,7 @@ fn build(cargo: &String) -> i32 {
         }
 
         /* Copy the loader to the output dir */
-        if let Err(err) = fs::copy(loader_path, Path::new(output_dir).join(loader_name)) {
+        if let Err(err) = fs::copy(loader_path, output_dir.join(loader_name)) {
             eprintln!("Failed to copy the kernel: {err:?}");
             return -1;
         }

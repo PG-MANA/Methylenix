@@ -1,17 +1,15 @@
 #![no_std]
 #![no_main]
-#![feature(alloc_error_handler)]
+#![feature(allocator_api)]
+#![feature(array_try_from_fn)]
 #![feature(const_ops)]
 #![feature(const_trait_impl)]
-#![feature(maybe_uninit_array_assume_init)]
 #![feature(step_trait)]
 #![feature(try_blocks)]
-#![feature(allocator_api)]
-
 #[macro_use]
 extern crate alloc;
 
-pub const OS_NAME: &str = "Methylenix";
+pub const OS_NAME: &str = env!("CARGO_PKG_NAME");
 pub const OS_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Arch independent modules
