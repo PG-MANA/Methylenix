@@ -194,8 +194,10 @@ fn dump_system() {
     println!("ID_AA64MMFR1_EL1: {:#X}", cpu::get_id_aa64mmfr1_el1());
     if el == 2 {
         println!("TCR_EL2: {:#X}", cpu::get_tcr_el2());
+        println!("MAIR_EL2: {:#X}", cpu::get_mair_el2());
     } else {
         println!("TCR_EL1: {:#X}", cpu::get_tcr_el1());
+        println!("MAIR_EL1: {:#X}", cpu::get_mair_el1());
     }
 }
 

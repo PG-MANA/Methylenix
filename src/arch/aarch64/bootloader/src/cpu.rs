@@ -98,6 +98,13 @@ pub fn get_mair_el1() -> u64 {
 }
 
 #[inline(always)]
+pub fn get_mair_el2() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {}, mair_el2", out(reg) result) };
+    result
+}
+
+#[inline(always)]
 pub unsafe fn cli() {
     unsafe {
         asm!("  mrs {t}, DAIF

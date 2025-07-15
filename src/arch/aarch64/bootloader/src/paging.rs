@@ -46,6 +46,7 @@ pub fn get_direct_map_start_address() -> usize {
 }
 
 pub fn init_paging(top_level_page_table: usize) {
+    let current_el = get_current_el() >> 2;
     let pa_range = get_id_aa64mmfr0_el1() & 0b1111;
     let pa_range = if pa_range > 4 {
         44 + 4 * (pa_range as u8 - 4)
@@ -55,7 +56,7 @@ pub fn init_paging(top_level_page_table: usize) {
     let minimum_txsz = (32 - (pa_range - 32)).max(unsafe { MINIMUM_TXSZ });
 
     let mut tcr_el1 = 0u64;
-    if (get_current_el() >> 2) == 2 && (get_hcr_el2() & (1 << 34)) == 0 {
+    if current_el == 2 && (get_hcr_el2() & (1 << 34)) == 0 {
         let original_tcr_el2 = get_tcr_el2();
         /* PS */
         tcr_el1 |= ((original_tcr_el2 & (0b111 << 16)) >> 16) << 32;
@@ -102,14 +103,19 @@ pub fn init_paging(top_level_page_table: usize) {
     sctlr_el1 |= (1 << 12) | (1 << 3) | (1 << 2) | 1;
     sctlr_el1 &= !((1 << 3) | (1 << 1));
 
-    let mut mair_el1 = get_mair_el1();
+    let mut mair = if current_el == 2 {
+        get_mair_el2()
+    } else {
+        get_mair_el1()
+    };
     for i in 0..8 {
-        if (mair_el1 & 0xff) == 0xff {
+        if (mair & 0xff) == 0xff {
             unsafe { MAIR_INDEX = i };
             break;
         }
-        mair_el1 >>= 8;
+        mair >>= 8;
     }
+    assert_ne!(mair, 0);
 
     unsafe {
         MINIMUM_TXSZ = minimum_txsz;
@@ -133,6 +139,14 @@ pub fn set_page_table() {
     }
 }
 
+fn create_attribute(is_executable: bool, is_writable: bool) -> u64 {
+    ((!is_executable as u64) << 54)
+        | (1 << 10/* AF */)
+        | (0b11 << 8/* Inner Shareable */)
+        | (((!is_writable as u64) << 1) << 6)
+        | (unsafe { MAIR_INDEX as u64 } << 2)
+}
+
 fn _associate_address(
     table_address: usize,
     shift_level: u8,
@@ -145,12 +159,7 @@ fn _associate_address(
     let table = unsafe { &mut *(table_address as *mut [u64; NUM_OF_ENTRIES_IN_PAGE_TABLE]) };
     let mut index = (*virtual_address >> shift_level) & (NUM_OF_ENTRIES_IN_PAGE_TABLE - 1);
     if shift_level == PAGE_SHIFT as u8 {
-        let attr = ((!permission.is_executable() as u64) << 54)
-            | (1 << 10/* AF */)
-            | (0b11 << 8/* Inner Shareable */)
-            | (((!permission.is_writable() as u64) << 1) << 6)
-            | (unsafe { MAIR_INDEX as u64 } << 2)
-            | 0b11;
+        let attr = create_attribute(permission.is_executable(), permission.is_writable()) | 0b11;
 
         while *pages > 0 && index < NUM_OF_ENTRIES_IN_PAGE_TABLE {
             table[index] = *physical_address as u64 | attr;
@@ -170,14 +179,9 @@ fn _associate_address(
             && (*pages << PAGE_SHIFT) >= block_size
         {
             /* Block Entry */
-            let attr = ((!permission.is_executable() as u64) << 54)
-                | (1 << 10/* AF */)
-                | (0b11 << 8/* Inner Shareable */)
-                | (((!permission.is_writable() as u64) << 1) << 6)
-                | (unsafe { MAIR_INDEX as u64 } << 2)
+            table[index] = *physical_address as u64
+                | create_attribute(permission.is_executable(), permission.is_writable())
                 | 0b01;
-
-            table[index] = *physical_address as u64 | attr;
             *physical_address += block_size;
             *virtual_address += block_size;
             *pages -= block_size >> PAGE_SHIFT;
