@@ -2,7 +2,10 @@
 //! Serial Port Devices
 //!
 
-use super::{SerialPortDeviceEntry, SerialPortManager};
+use crate::arch::target_arch::device::{
+    cpu::flush_data_cache_all,
+    serial_port::{SerialPortDeviceEntry, SerialPortManager},
+};
 
 use crate::kernel::drivers::acpi::table::spcr::SpcrManager;
 use crate::kernel::manager_cluster::get_cpu_manager_cluster;
@@ -22,11 +25,17 @@ const PL011_UARTIMSC_RXIM: u16 = 1 << 4;
 pub(super) const PL011: SerialPortDeviceEntry = SerialPortDeviceEntry {
     interface_type: SpcrManager::INTERFACE_TYPE_ARM_PL011,
     compatible: "arm,pl011",
+    early_putc_func: early_pl011_putc,
     putc_func: pl011_putc,
     getc_func: pl011_getc,
     interrupt_enable: pl011_setup_interrupt,
     wait_buffer: pl011_wait,
 };
+
+fn early_pl011_putc(base_address: usize, c: u8) {
+    pl011_putc(base_address, c);
+    flush_data_cache_all();
+}
 
 fn pl011_putc(base_address: usize, c: u8) {
     unsafe { write_volatile((base_address + PL011_UARTDR) as *mut u16, c as u16) };
@@ -97,11 +106,17 @@ fn pl011_setup_interrupt(
 pub(super) const MESON_GX_UART: SerialPortDeviceEntry = SerialPortDeviceEntry {
     interface_type: 0xFF,
     compatible: "amlogic,meson-gx-uart",
+    early_putc_func: early_meson_gx_putc,
     putc_func: meson_gx_putc,
     getc_func: meson_gx_getc,
     interrupt_enable: super::dummy_interrupt_setup,
     wait_buffer: meson_gx_wait,
 };
+
+fn early_meson_gx_putc(base_address: usize, c: u8) {
+    meson_gx_putc(base_address, c);
+    flush_data_cache_all();
+}
 
 fn meson_gx_putc(base_address: usize, c: u8) {
     unsafe { write_volatile(base_address as *mut u32, c as u32) };

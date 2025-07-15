@@ -37,6 +37,7 @@ fn dummy_interrupt_setup(_: usize, _: u32, _: fn(usize) -> bool) -> bool {
 struct SerialPortDeviceEntry {
     interface_type: u8,
     compatible: &'static str,
+    early_putc_func: fn(base_address: usize, char: u8),
     putc_func: fn(base_address: usize, char: u8),
     getc_func: fn(base_address: usize) -> Option<u8>,
     interrupt_enable:
@@ -75,6 +76,14 @@ impl SerialPortManager {
             interrupt_enable: dummy_interrupt_setup,
             wait_buffer: dummy_wait_buffer,
         }
+    }
+
+    /// For debug
+    #[allow(dead_code)]
+    pub unsafe fn init_early(&mut self, physical_address: usize, device_index: usize) {
+        self.base_address = physical_address;
+        self.putc_func = SERIAL_PORT_DEVICES[device_index].early_putc_func;
+        self.wait_buffer = SERIAL_PORT_DEVICES[device_index].wait_buffer;
     }
 
     pub fn init_with_acpi(&mut self) -> bool {
