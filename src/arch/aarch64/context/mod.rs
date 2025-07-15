@@ -138,7 +138,7 @@ impl ContextManager {
         if allow_interrupt_after_switch {
             next_context.registers.spsr &= !(cpu::SPSR_I | cpu::SPSR_F);
         }
-        old_context.registers.spsr = cpu::get_daif() | cpu::SPSR_M_EL1H;
+        old_context.registers.spsr = cpu::get_daif() | cpu::get_kernel_spsr_m();
         unsafe { cpu::task_switch(next_context as *mut _, old_context as *mut _) }
     }
 }

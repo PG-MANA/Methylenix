@@ -146,7 +146,7 @@ impl Elf64Header {
         self.e_entry
     }
 
-    const fn get_num_of_program_header(&self) -> u16 {
+    const fn get_num_of_program_headers(&self) -> u16 {
         self.e_phnum
     }
 
@@ -154,19 +154,19 @@ impl Elf64Header {
         self.e_phoff
     }
 
-    pub const fn get_program_header_array_size(&self) -> u64 {
-        self.get_num_of_program_header() as u64 * self.get_program_header_entry_size() as u64
+    pub const fn get_program_headers_array_size(&self) -> u64 {
+        self.get_num_of_program_headers() as u64 * self.get_program_headers_entry_size() as u64
     }
 
-    const fn get_program_header_entry_size(&self) -> u16 {
+    const fn get_program_headers_entry_size(&self) -> u16 {
         self.e_phentsize
     }
 
-    pub fn get_program_header_iter(&self, base_address: usize) -> Elf64ProgramHeaderIter {
+    pub fn get_program_headers_iter(&self, base_address: usize) -> Elf64ProgramHeaderIter {
         Elf64ProgramHeaderIter {
             pointer: base_address,
-            size: self.get_program_header_entry_size(),
-            remaining: self.get_num_of_program_header(),
+            size: self.get_program_headers_entry_size(),
+            remaining: self.get_num_of_program_headers(),
         }
     }
 }

@@ -14,7 +14,8 @@ use core::arch::{asm, global_asm, naked_asm};
 const DAIF_IRQ: u64 = 1 << 7;
 const DAIF_FIQ: u64 = 1 << 6;
 
-pub const SPSR_M_EL1H: u64 = 0b0101;
+const SPSR_M_EL2H: u64 = 0b1001;
+const SPSR_M_EL1H: u64 = 0b0101;
 pub const SPSR_M_EL0T: u64 = 0b0000;
 pub const SPSR_M: u64 = 0b1111;
 pub const SPSR_I: u64 = 1 << 7;
@@ -390,6 +391,21 @@ pub const fn mpidr_to_packed_affinity(mpidr: u64) -> u32 {
     ((a & ((1 << 24) - 1)) | ((a & (0xff << 32)) >> (32 - 24))) as u32
 }
 
+/// This function returns `CurrentEL >> 2`
+pub fn get_current_el() -> u64 {
+    let current_el: u64;
+    unsafe { asm!("mrs {}, currentel", out(reg) current_el) };
+    current_el >> 2
+}
+
+pub fn get_kernel_spsr_m() -> u64 {
+    if get_current_el() == 2 {
+        SPSR_M_EL2H
+    } else {
+        SPSR_M_EL1H
+    }
+}
+
 /// Execute SMC #0 with Secure Monitor Call Conversation
 pub unsafe fn smc_0(
     x0: &mut u64,
@@ -490,8 +506,7 @@ pub unsafe extern "C" fn task_switch(
     now_context_data_address: *mut ContextData,
 ) {
     unsafe {
-        asm!(
-        "
+        asm!("
             /* x2 ~ x17 are usable in this function(caller saved registers) */
             mrs  x3, tpidr_el0
             mov  x2, sp
@@ -531,14 +546,22 @@ global_asm!(
 .type       ap_entry, %function
 .align      2
 ap_entry:
-    mrs x2, CurrentEL
+    mrs x2, currentel
     lsr x2, x2, 2
     cmp x2, 2
-    b.ne 1f
+    b.ne 3f
     /* EL2 */
+    mov x3, (0b11 << 24) /* SMEN */ | (0b11 << 20) /* FPEN */ | (0b11 << 16) /* ZEN */
+    msr cptr_el2, x3
+    /* is FEAT_VHE supported? */
+    mrs x2, id_aa64mmfr1_el1
+    tst x2, (0b1111 << 8)
+    b.ne 2f
+    /*  FEAT_VHE is not supported */
+    /* Jump to EL1 */
     mov x3, (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 1) | (1 << 0)
     msr cnthctl_el2, x3
-    adr x2, 1f
+    adr x2, 3f
     msr elr_el2, x2
     mov x3, 0xC5
     msr spsr_el2, x3
@@ -546,11 +569,14 @@ ap_entry:
     orr x2, x2, (1 << 31)
     orr x2, x2, (1 << 19)
     msr hcr_el2, x2
-    isb
     eret
-
-1:
-    /* EL1 */
+2:
+    /* FEAT_VHE is supported */
+    mov x2, (1 << 31) /* RW */ | (1 << 27) /* TGE */
+    orr x2, x2, (1 << 34) /* E2H */
+    msr hcr_el2, x2
+3:
+    /* EL1 or EL2(E2H) */
     mrs x6, DAIF
     orr x6, x6, (1 << 6) | (1 << 7)
     msr DAIF, x6

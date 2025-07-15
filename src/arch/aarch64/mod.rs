@@ -21,21 +21,26 @@ pub mod interrupt;
 pub mod paging;
 pub mod system_call;
 
-use self::boot_info::BootInformation;
-use self::device::generic_timer::{GenericTimer, SystemCounter};
-use self::device::serial_port::SerialPortManager;
-use self::initialization::*;
-use self::interrupt::gic::{GicDistributor, GicRedistributor};
+use self::{
+    boot_info::BootInformation,
+    device::{
+        generic_timer::{GenericTimer, SystemCounter},
+        serial_port::SerialPortManager,
+    },
+    initialization::*,
+    interrupt::gic::{GicDistributor, GicRedistributor},
+};
 
-use crate::kernel::collections::init_struct;
-use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
-use crate::kernel::drivers::dtb::DtbManager;
 pub use crate::kernel::file_manager::elf::ELF_MACHINE_AA64 as ELF_MACHINE_DEFAULT;
-use crate::kernel::graphic_manager::{GraphicManager, font::FontType};
-use crate::kernel::initialization::*;
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::VAddress;
-use crate::kernel::tty::TtyManager;
+use crate::kernel::{
+    collections::{init_struct, ptr_linked_list::PtrLinkedList},
+    drivers::dtb::DtbManager,
+    graphic_manager::{GraphicManager, font::FontType},
+    initialization::*,
+    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
+    memory_manager::data_type::VAddress,
+    tty::TtyManager,
+};
 
 pub struct ArchDependedKernelManagerCluster {
     dtb_manager: DtbManager,
@@ -53,7 +58,7 @@ pub const TARGET_ARCH_NAME: &str = "aarch64";
 
 #[unsafe(no_mangle)]
 extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
-    let boot_information = unsafe { &*boot_information };
+    let mut boot_information = unsafe { &*boot_information }.clone();
 
     /* Initialize Kernel TTY (Early) */
     init_struct!(
@@ -80,7 +85,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     )));
 
     /* Initialize Memory System */
-    let boot_information = init_memory_by_boot_information(boot_information);
+    init_memory_by_boot_information(&mut boot_information);
 
     /* Initialize ACPI and DTB */
     let acpi_available = init_acpi_early_by_boot_information(&boot_information);
@@ -120,11 +125,9 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
         .open(&get_kernel_manager_cluster().graphic_manager);
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
-    pr_info!(
-        "Booted from AArch64 BootLoader: ACPI: {} DTB: {}",
-        acpi_available,
-        dtb_available
-    );
+    pr_info!("Booted from UEFI Loader");
+    pr_info!("Device Information: ACPI: {acpi_available}, DTB: {dtb_available}");
+    pr_info!("CurrentEL: {}", device::cpu::get_current_el());
 
     /* Init interrupt */
     init_interrupt(acpi_available, dtb_available);

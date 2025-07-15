@@ -87,9 +87,7 @@ pub fn setup_cpu_manager_cluster(
 /// and [`VirtualMemoryManager`] which manages which process is using what area of virtual memory.
 /// After that, this will set up MemoryManager.
 /// If one of the processes is failed, this will panic.
-/// This function returns a new address of BootInformation.
-pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> BootInformation {
-    let mut boot_information = boot_information.clone();
+pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
     /* Set up Physical Memory Manager */
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
@@ -146,7 +144,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
         .init_pools(&mut virtual_memory_manager);
 
     let elf_header = unsafe { Elf64Header::from_ptr(&boot_information.elf_header_buffer) }.unwrap();
-    for entry in elf_header.get_program_header_iter(boot_information.elf_program_header_address) {
+    for entry in elf_header.get_program_headers_iter(boot_information.elf_program_headers_address) {
         let virtual_address = entry.get_virtual_address() as usize;
         let physical_address = entry.get_physical_address() as usize;
         if entry.get_segment_type() != ELF_PROGRAM_HEADER_SEGMENT_LOAD
@@ -203,7 +201,7 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
     );
 
     /* Adjust Memory Pointer */
-    /* `efi_memory_map_address` and `elf_program_header_address` are already direct mapped. */
+    /* `efi_memory_map_address` and `elf_program_headers_address` are already direct mapped. */
     boot_information.efi_system_table.set_configuration_table(
         physical_address_to_direct_map(PAddress::new(
             boot_information.efi_system_table.get_configuration_table(),
@@ -228,8 +226,6 @@ pub fn init_memory_by_boot_information(boot_information: &BootInformation) -> Bo
         .init()
         .expect("Failed to init MemoryAllocator");
     init_struct!(get_cpu_manager_cluster().memory_allocator, memory_allocator);
-
-    boot_information
 }
 
 /// Init InterruptManager
@@ -593,7 +589,7 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
         if mpidr == bsp_mpidr {
             continue;
         }
-        pr_debug!("MPIDR: {:#X}", mpidr);
+        pr_debug!("Boot the CPU(MPIDR: {:#X})", mpidr);
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
         cpu::synchronize(VAddress::from(AP_BOOT_COMPLETE_FLAG.as_ptr()));
         let mut x0 = cpu::SMC_PSCI_CPU_ON;
@@ -647,6 +643,10 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
 pub extern "C" fn ap_boot_main() -> ! {
     /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
+
+    /* Show information */
+    pr_info!("Booted CPU(ID: {})", cpu_manager.cpu_id);
+    pr_info!("CurrentEL: {}", cpu::get_current_el());
 
     /* Setup memory management system */
     let mut memory_allocator = MemoryAllocator::new();

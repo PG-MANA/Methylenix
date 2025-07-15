@@ -4,7 +4,7 @@
 //! This entry contains arch-depending data.
 //!
 
-use crate::arch::target_arch::device::cpu::{SPSR_M_EL0T, SPSR_M_EL1H};
+use crate::arch::target_arch::device::cpu::{SPSR_M_EL0T, get_kernel_spsr_m};
 
 #[repr(C, align(64))]
 #[derive(Clone)]
@@ -88,7 +88,7 @@ impl ContextData {
         let mut data = Self::new();
         data.registers.elr = entry_address as u64;
         data.registers.sp = stack as u64;
-        data.registers.spsr = SPSR_M_EL1H;
+        data.registers.spsr = get_kernel_spsr_m();
         data
     }
 
