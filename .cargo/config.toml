@@ -12,3 +12,6 @@ rustflags = [
     "-C", "code-model=large",
     "-C", "no-redzone=yes"
 ]
+
+[alias]
+xtask = "run --package xtask --"

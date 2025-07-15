@@ -8,7 +8,7 @@ build_x86_64:
     - apt-get update && apt-get install -y grub-efi-amd64-bin xorriso mtools
     - rustup default nightly
     - rustup target add x86_64-unknown-none
-    - make iso
+    - cargo xtask build x86_64 --release
   artifacts:
     paths:
       - bin/
@@ -19,7 +19,7 @@ build_aarch64:
     - rustup default nightly
     - rustup target add aarch64-unknown-uefi
     - rustup target add aarch64-unknown-none-softfloat
-    - make TARGET_ARCH=aarch64
+    - cargo xtask build aarch64 --release
   artifacts:
     paths:
       - bin/

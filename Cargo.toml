@@ -1,15 +1,24 @@
-[package]
-name = "methylenix"
-version = "0.2.4"
+[workspace]
+members = ["src/arch/aarch64/bootloader", "xtask"]
+default-members = ["."]
+
+[workspace.package]
 authors = ["PG_MANA <pg_mana@taprix.org>"]
-description = "The OS written in Rust"
+edition = "2024"
+license = "Apache-2.0"
+version = "0.2.4"
+
+[package]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+name = "Methylenix"
+description = "A operating system written in Rust"
 keywords = ["os", "operating-system", "kernel", "seccamp", "security-camp"]
 categories = ["os"]
-license = "Apache-2.0"
-edition = "2024"
 
 [profile.release]
-#lto = true
-#opt-level = 1
+lto = true
+opt-level = 2
 debug = true
-strip = "symbols"
