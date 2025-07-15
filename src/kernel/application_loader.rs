@@ -71,7 +71,7 @@ pub fn load_and_execute(
         return Err(());
     }
 
-    if (header.get_program_header_offset() + header.get_program_header_array_size()) as usize
+    if (header.get_program_header_offset() + header.get_program_headers_array_size()) as usize
         > head_read_size.to_usize()
     {
         pr_err!("Program Header is too far from head(TODO: support...)");
@@ -93,7 +93,7 @@ pub fn load_and_execute(
     let process_memory_manager = unsafe { &mut *process.get_memory_manager() };
 
     let result: Result<(), ()> = try {
-        for program_header in header.get_program_header_iter(
+        for program_header in header.get_program_headers_iter(
             head_data.to_usize() + header.get_program_header_offset() as usize,
         ) {
             /* TODO: delete the process when failed. */

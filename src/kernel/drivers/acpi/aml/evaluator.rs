@@ -22,7 +22,6 @@ use super::{ACPI_INT_ONES, AcpiInt, AmlError, DataRefObject, eisa_id_to_dword};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::sync::spin_lock::Mutex;
 
-use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use alloc::string::String;
@@ -260,27 +259,13 @@ impl Evaluator {
 
     pub(super) fn init_local_variables_and_argument_variables()
     -> (LocalVariables, ArgumentVariables) {
-        let mut local_variables: [MaybeUninit<Arc<Mutex<AmlVariable>>>;
-            Self::NUMBER_OF_LOCAL_VARIABLES] =
-            [const { MaybeUninit::uninit() }; Self::NUMBER_OF_LOCAL_VARIABLES];
-        let mut argument_variables: [MaybeUninit<Arc<Mutex<AmlVariable>>>;
-            Self::NUMBER_OF_ARGUMENT_VARIABLES] =
-            [const { MaybeUninit::uninit() }; Self::NUMBER_OF_ARGUMENT_VARIABLES];
-
+        /* TODO: use core::array::repeat when it was stabilized */
+        use core::array::from_fn;
         let uninitialized_data = Arc::new(Mutex::new(AmlVariable::Uninitialized));
-
-        for e in local_variables.iter_mut() {
-            e.write(uninitialized_data.clone());
-        }
-        for e in argument_variables.iter_mut() {
-            e.write(uninitialized_data.clone());
-        }
-        unsafe {
-            (
-                MaybeUninit::array_assume_init(local_variables),
-                MaybeUninit::array_assume_init(argument_variables),
-            )
-        }
+        (
+            from_fn(|_| uninitialized_data.clone()),
+            from_fn(|_| uninitialized_data.clone()),
+        )
     }
 
     fn search_aml_variable_by_parsing_term_list(

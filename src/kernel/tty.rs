@@ -23,7 +23,7 @@ pub struct TtyManager {
     output_lock: IrqSaveSpinLockFlag,
     input_queue: Fifo<u8, { Self::DEFAULT_INPUT_BUFFER_SIZE }>,
     output_queue: Fifo<u8, { Self::DEFAULT_OUTPUT_BUFFER_SIZE }>,
-    output_driver: Option<&'static (dyn Writer)>,
+    output_driver: Option<&'static dyn Writer>,
     text_color: (u32, u32),
     input_wait_queue: WaitQueue,
 }
