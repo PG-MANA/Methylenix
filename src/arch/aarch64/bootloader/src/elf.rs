@@ -82,19 +82,19 @@ impl Elf64Header {
         self.e_entry
     }
 
-    const fn get_num_of_program_header(&self) -> u16 {
+    const fn get_num_of_program_headers(&self) -> u16 {
         self.e_phnum
     }
 
-    pub const fn get_program_header_offset(&self) -> u64 {
+    pub const fn get_program_headers_offset(&self) -> u64 {
         self.e_phoff
     }
 
-    pub const fn get_program_header_array_size(&self) -> u64 {
-        self.get_num_of_program_header() as u64 * self.get_program_header_entry_size() as u64
+    pub const fn get_program_headers_array_size(&self) -> u64 {
+        self.get_num_of_program_headers() as u64 * self.get_program_headers_entry_size() as u64
     }
 
-    const fn get_program_header_entry_size(&self) -> u16 {
+    const fn get_program_headers_entry_size(&self) -> u16 {
         self.e_phentsize
     }
 
@@ -102,11 +102,11 @@ impl Elf64Header {
         &self,
         base_address: &'a mut [u8],
     ) -> Elf64ProgramHeaderIterMut<'a> {
-        assert!(base_address.len() >= self.get_program_header_array_size() as usize);
+        assert!(base_address.len() >= self.get_program_headers_array_size() as usize);
         Elf64ProgramHeaderIterMut {
             pointer: base_address.as_ptr() as usize,
-            size: self.get_program_header_entry_size(),
-            remaining: self.get_num_of_program_header(),
+            size: self.get_program_headers_entry_size(),
+            remaining: self.get_num_of_program_headers(),
             phantom: PhantomData,
         }
     }
@@ -138,10 +138,6 @@ impl Elf64ProgramHeader {
 
     pub const fn get_virtual_address(&self) -> u64 {
         self.p_vaddr
-    }
-
-    pub const fn get_physical_address(&self) -> u64 {
-        self.p_paddr
     }
 
     pub fn set_physical_address(&mut self, address: u64) {

@@ -7,7 +7,7 @@ use crate::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInforma
 
 pub struct BootInformation {
     pub elf_header_buffer: [u8; size_of::<crate::elf::Elf64Header>()],
-    pub elf_program_header_address: usize,
+    pub elf_program_headers_address: usize,
     pub efi_system_table: EfiSystemTable,
     pub graphic_info: Option<GraphicInfo>,
     pub font_address: Option<(usize, usize)>,

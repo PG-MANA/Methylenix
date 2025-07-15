@@ -12,22 +12,27 @@ mod paging;
 
 use self::boot_information::*;
 use self::efi::{
-    EFI_PAGE_MASK, EFI_PAGE_SIZE, EFI_SUCCESS, EfiBootServices, EfiHandle, EfiSystemTable,
+    EFI_PAGE_MASK, EFI_PAGE_SIZE, EfiBootServices, EfiHandle, EfiStatus,
+    EfiStatus::Success,
+    EfiSystemTable,
     protocol::{file_protocol::*, graphics_output_protocol::*, loaded_image_protocol::*},
 };
 use self::elf::{ELF_MACHINE_AA64, ELF_PROGRAM_HEADER_SEGMENT_LOAD, Elf64Header};
 use self::paging::*;
 
 use core::arch::asm;
+use core::mem::MaybeUninit;
 use core::panic;
 
 static mut BOOT_SERVICES: *const EfiBootServices = core::ptr::null();
+static mut MAIN_HANDLE: EfiHandle = 0;
 
-const KERNEL_PATH: &str = "\\EFI\\BOOT\\kernel.elf";
-const FONT_PATH: &str = "\\EFI\\BOOT\\font";
+const KERNEL_PATH: &str = "\\kernel.elf";
+const FONT_PATH: &str = "\\font";
 
 const KERNEL_STACK_PAGES: usize = 64;
 
+static mut BOOT_INFO: MaybeUninit<BootInformation> = MaybeUninit::zeroed();
 static mut DIRECT_MAP_START_ADDRESS: usize = 0;
 const DIRECT_MAP_END_ADDRESS: usize = 0xffff_ff1f_ffff_ffff;
 
@@ -35,42 +40,46 @@ const DIRECT_MAP_END_ADDRESS: usize = 0xffff_ff1f_ffff_ffff;
 extern "efiapi" fn efi_main(
     main_handle: EfiHandle,
     system_table: *const EfiSystemTable,
-) -> efi::EfiStatus {
+) -> EfiStatus {
     if system_table.is_null() {
-        return (1 << (usize::BITS - 1)) | 21;
+        return EfiStatus::Aborted;
     }
     let system_table = unsafe { &*system_table };
     if !system_table.verify() {
-        return (1 << (usize::BITS - 1)) | 21;
+        return EfiStatus::Aborted;
     }
-    unsafe { BOOT_SERVICES = system_table.get_boot_services() };
+    let boot_services = unsafe { &*system_table.get_boot_services() };
+    unsafe {
+        BOOT_SERVICES = boot_services;
+        MAIN_HANDLE = main_handle;
+    }
 
     /* Set up println */
     print::init(system_table.get_console_output_protocol());
-    println!("AArch64 Boot Loader version {}", env!("CARGO_PKG_VERSION"));
+    println!("AArch64 Loader version {}", env!("CARGO_PKG_VERSION"));
     dump_system();
 
     /* Setup BootInformation */
-    const { assert!(size_of::<BootInformation>() <= EFI_PAGE_SIZE) };
-    let boot_info = alloc_pages(1).expect("Failed to allocate a page for BootInformation");
-    unsafe { core::ptr::write_bytes(boot_info as *mut u8, 0, size_of::<BootInformation>()) };
-    let boot_info = unsafe { &mut *(boot_info as *mut BootInformation) };
-    boot_info.efi_system_table = unsafe { core::mem::transmute_copy(system_table) };
+    let boot_info = unsafe { (&raw mut BOOT_INFO).as_mut().unwrap().assume_init_mut() };
+    unsafe {
+        (&mut boot_info.efi_system_table as *mut EfiSystemTable)
+            .copy_from_nonoverlapping(system_table, 1)
+    };
 
     /* Set up page table */
     assert_eq!(EFI_PAGE_SIZE, PAGE_SIZE);
     let top_level_page_table = alloc_pages(1).expect("Failed to allocate a page for page tables");
     init_paging(top_level_page_table);
 
-    let entry_point = load_kernel(main_handle, unsafe { &*BOOT_SERVICES }, boot_info);
+    let entry_point = load_kernel(main_handle, boot_services, boot_info);
 
     /* Set up the direct mapping */
     unsafe { DIRECT_MAP_START_ADDRESS = get_direct_map_start_address() };
-    associate_direct_map_address(
+    associate_address(
         0,
         unsafe { DIRECT_MAP_START_ADDRESS },
-        MemoryPermissionFlags::data(),
-        DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS } + 1,
+        MemoryPermissionFlags::new(true, true, false, false),
+        (DIRECT_MAP_END_ADDRESS - unsafe { DIRECT_MAP_START_ADDRESS } + 1) >> PAGE_SHIFT,
         alloc_pages,
     )
     .expect("Failed to setup direct map");
@@ -105,59 +114,68 @@ extern "efiapi" fn efi_main(
         &mut descriptor_size,
         &mut descriptor_version,
     );
-    if r != EFI_SUCCESS {
-        panic!("Failed to get memory map: {:#X}", r);
-    }
+    assert_eq!(r, Success, "Failed to get memory map: {r:?}");
 
+    /* Set up the BootInfo */
     boot_info.memory_info = MemoryInfo {
         efi_descriptor_version: descriptor_version,
         efi_descriptor_size: descriptor_size,
         efi_memory_map_size: memory_map_size,
         efi_memory_map_address: memory_map_address,
     };
-
     adjust_boot_info(boot_info);
 
-    if cpu::get_current_el() >> 2 == 2 {
-        if (cpu::get_id_aa64mmfr1_el1() & (0b1111 << 8)) != (1 << 8) {
-            unsafe { cpu::jump_to_el1() };
-        } else {
-            /* Enable E2H*/
-            println!("TODO: Enable E2H");
-            /* TODO: Enabling E2H hangs up... */
-            unsafe {
-                cpu::set_hcr_el2(
-                    cpu::get_hcr_el2()
-                        | (1 << 34)
-                        | (1 << 31)
-                        | (1 << 27)
-                        | (1 << 5)
-                        | (1 << 4)
-                        | (1 << 3),
-                )
-            };
-        }
-    }
-
+    /* Exit Boot Services */
     println!("Exit boot services");
-
-    /* Exit Boot Service and map kernel */
     let r = (unsafe { &*system_table.get_boot_services() }.exit_boot_services)(
         main_handle,
         memory_map_key,
     );
-    if r != EFI_SUCCESS {
-        panic!("Failed to exit boot service");
+    assert_eq!(r, Success, "Failed to exit boot services: {r:?}");
+
+    match cpu::get_current_el() >> 2 {
+        1 => {
+            set_page_table();
+        }
+        2 => {
+            if (cpu::get_id_aa64mmfr1_el1() & (0b1111 << 8)) != 0 {
+                /* FEAT_VHE is supported */
+                unsafe {
+                    /* Enable FP accesses */
+                    cpu::set_cptr_el2(
+                        (0b11 << 24) /* SMEN */ | (0b11 << 20) /* FPEN */ | (0b11 << 16), /* ZEN */
+                    );
+                    /* Disable the paging to enable E2H */
+                    cpu::set_sctlr_el2(cpu::get_sctlr_el2() & !1);
+                    /* Enable E2H */
+                    cpu::set_hcr_el2(
+                        (1 << 34) /* E2H */ | (1 << 31) /* RW */ | (1 << 27), /* TGE */
+                    );
+                }
+                /* Set page table and enable it */
+                set_page_table();
+            } else {
+                /* Enable FP accesses */
+                unsafe {
+                    cpu::set_cptr_el2(
+                        (0b11 << 24)/* SMEN */|(0b11 << 20)/* FPEN */ | (0b11 << 16), /* ZEN */
+                    )
+                };
+                /* Set page table and enable it */
+                set_page_table();
+                unsafe { cpu::jump_to_el1() };
+            }
+        }
+        _ => unreachable!(),
     }
 
     /* Jump to the kernel */
     cpu::flush_data_cache();
-    apply_paging_settings();
     cpu::flush_instruction_cache();
     unsafe { cpu::cli() };
-
     unsafe {
         asm!("
+        isb
         mov x0, {arg}
         mov sp, {stack}
         br {entry}",
@@ -165,7 +183,7 @@ extern "efiapi" fn efi_main(
         stack = in(reg) kernel_stack + DIRECT_MAP_START_ADDRESS,
         entry = in(reg) entry_point,
         options(noreturn))
-    };
+    }
 }
 
 fn dump_system() {
@@ -182,14 +200,14 @@ fn dump_system() {
 }
 
 fn adjust_boot_info(boot_info: &mut BootInformation) {
-    /* Convert physical address to direct mapped address */
+    /* Convert physical address to direct-mapped address */
     fn to_direct_mapped_address(address: &mut usize) {
         let virtual_address = *address + unsafe { DIRECT_MAP_START_ADDRESS };
         assert!(virtual_address <= DIRECT_MAP_END_ADDRESS);
         *address = virtual_address;
     }
 
-    to_direct_mapped_address(&mut boot_info.elf_program_header_address);
+    to_direct_mapped_address(&mut boot_info.elf_program_headers_address);
     to_direct_mapped_address(&mut boot_info.memory_info.efi_memory_map_address);
 }
 
@@ -201,8 +219,8 @@ fn alloc_pages(num_of_pages: usize) -> Option<usize> {
         num_of_pages,
         &mut address,
     );
-    if result != EFI_SUCCESS {
-        println!("Failed to allocate memory: {:#X}", result);
+    if result != Success {
+        println!("Failed to allocate memory: {result:?}");
         None
     } else {
         Some(address)
@@ -230,9 +248,7 @@ fn load_kernel(
         0,
         EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
     );
-    if r != EFI_SUCCESS {
-        panic!("Failed to open LOADED_IMAGE_PROTOCOL: {:#X}", r);
-    }
+    assert_eq!(r, Success, "Failed to open LOADED_IMAGE_PROTOCOL: {r:?}");
 
     /* Open simple_file_system_protocol */
     let r = (boot_service.open_protocol)(
@@ -243,19 +259,12 @@ fn load_kernel(
         0,
         EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
     );
-    if r != EFI_SUCCESS {
-        panic!(
-            "Failed to open EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID: {:#X}",
-            r
-        );
-    }
+    assert_eq!(r, Success, "Failed to open Protocol: {r:?}");
     let simple_file_protocol = unsafe { &*simple_file_protocol };
 
     /* Open root directory */
     let r = (simple_file_protocol.open_volume)(simple_file_protocol, &mut root_directory);
-    if r != EFI_SUCCESS {
-        panic!("Failed to open the volume: {:#X}", r);
-    };
+    assert_eq!(r, Success, "Failed to open the volume: {r:?}");
     let root_directory = unsafe { &*root_directory };
 
     /* Open the kernel file */
@@ -269,9 +278,7 @@ fn load_kernel(
         EFI_FILE_MODE_READ,
         0,
     );
-    if r != EFI_SUCCESS {
-        panic!("Failed to open \"{}\": {:#X}", KERNEL_PATH, r);
-    };
+    assert_eq!(r, Success, "Failed to open \"{KERNEL_PATH}\": {r:?}");
     let file_protocol = unsafe { &*file_protocol };
 
     /* Read ELF Header */
@@ -281,103 +288,87 @@ fn load_kernel(
         &mut read_size,
         boot_info.elf_header_buffer.as_mut_ptr(),
     );
-    if r != EFI_SUCCESS || read_size != ELF_64_HEADER_SIZE {
-        panic!(
-            "Failed to read ELF Header (Read Size: {:#X}, expected: {:#X}, EfiStatus: {:#X})",
-            read_size, ELF_64_HEADER_SIZE, r
-        );
-    }
+    assert_eq!(r, Success, "Failed to read the ELF header: {r:?}");
+    assert_eq!(ELF_64_HEADER_SIZE, read_size);
     cpu::flush_data_cache();
     let elf_header =
         unsafe { Elf64Header::from_ptr(&boot_info.elf_header_buffer) }.expect("Invalid ELF file");
-    if !elf_header.is_executable_file() || elf_header.get_machine_type() != ELF_MACHINE_AA64 {
-        panic!("ELF file is not for this computer.");
-    }
+    assert!(
+        elf_header.is_executable_file() && elf_header.get_machine_type() == ELF_MACHINE_AA64,
+        "ELF file is not for this computer."
+    );
 
     /* Read ELF Program Header */
-    let mut elf_program_headers_size = elf_header.get_program_header_array_size() as usize;
-    if elf_program_headers_size == 0 {
-        panic!("Invalid ELF file");
-    }
-    boot_info.elf_program_header_address =
+    let mut elf_program_headers_size = elf_header.get_program_headers_array_size() as usize;
+    assert_ne!(elf_program_headers_size, 0, "Invalid ELF file");
+
+    boot_info.elf_program_headers_address =
         alloc_pages(((elf_program_headers_size - 1) & EFI_PAGE_MASK) / EFI_PAGE_SIZE + 1)
             .expect("Failed to allocate memory for ELF Program Header");
-    let r = (file_protocol.set_position)(file_protocol, elf_header.get_program_header_offset());
-    if r != EFI_SUCCESS {
-        panic!("Failed to seek: {:#X}", r);
-    }
+    let r = (file_protocol.set_position)(file_protocol, elf_header.get_program_headers_offset());
+    assert_eq!(r, Success, "Failed to seek: {r:?}");
     let r = (file_protocol.read)(
         file_protocol,
         &mut elf_program_headers_size,
-        boot_info.elf_program_header_address as *mut u8,
+        boot_info.elf_program_headers_address as *mut u8,
     );
-    if r != EFI_SUCCESS
-        || elf_program_headers_size != elf_header.get_program_header_array_size() as usize
-    {
-        panic!("Failed to read Program Header");
-    }
+    assert_eq!(r, Success, "Failed to read the ELF program headers: {r:?}");
+    assert_eq!(
+        elf_program_headers_size,
+        elf_header.get_program_headers_array_size() as usize
+    );
     cpu::flush_data_cache();
 
     /* Load and map segments */
     for entry in elf_header.get_program_header_iter_mut(unsafe {
         core::slice::from_raw_parts_mut(
-            boot_info.elf_program_header_address as *mut u8,
+            boot_info.elf_program_headers_address as *mut u8,
             elf_program_headers_size,
         )
     }) {
-        if entry.get_segment_type() != ELF_PROGRAM_HEADER_SEGMENT_LOAD {
-            println!(
-                "Segment({{PA: {:#016X}, VA: {:#016X}}}) will not be loaded.",
-                entry.get_physical_address(),
-                entry.get_virtual_address()
-            );
-            continue;
-        }
-        assert!(entry.get_virtual_address() as usize >= TTBR1_EL1_START_ADDRESS);
+        let segment_type = entry.get_segment_type();
+        let virtual_address = entry.get_virtual_address() as usize;
+        let memory_size = entry.get_memory_size() as usize;
+        let file_size = entry.get_file_size() as usize;
+        let file_offset = entry.get_file_offset() as usize;
+        let alignment = entry.get_align().max(1) as usize;
 
-        let alignment = entry.get_align().max(1);
-        let align_offset = (entry.get_virtual_address() & (alignment - 1)) as usize;
-        if ((entry.get_virtual_address() as usize) & !EFI_PAGE_MASK) != 0 {
-            panic!("Invalid Alignment: {:#X}", alignment);
-        } else if entry.get_memory_size() == 0 {
+        if segment_type != ELF_PROGRAM_HEADER_SEGMENT_LOAD || memory_size == 0 {
             continue;
         }
-        let aligned_memory_size =
-            ((entry.get_memory_size() as usize + align_offset - 1) & EFI_PAGE_MASK) + EFI_PAGE_SIZE;
+        assert!(virtual_address >= TTBR1_EL1_START_ADDRESS);
+        assert_eq!(virtual_address & !EFI_PAGE_MASK, 0);
+
+        let aligned_memory_size = ((memory_size - 1) & EFI_PAGE_MASK) + EFI_PAGE_SIZE;
         let num_of_pages = aligned_memory_size / EFI_PAGE_SIZE;
-        let allocated_memory =
+        let physical_address =
             alloc_pages(num_of_pages).expect("Failed to allocate memory for the kernel");
-        if entry.get_file_size() > 0 {
+
+        if file_size > 0 {
             let r = (file_protocol.set_position)(file_protocol, entry.get_file_offset());
-            if r != EFI_SUCCESS {
-                panic!("Failed to seek for Kernel");
-            }
-            let mut read_size = entry.get_file_size() as usize;
-            let r = (file_protocol.read)(
-                file_protocol,
-                &mut read_size,
-                (allocated_memory + align_offset) as *mut u8,
-            );
-            if r != EFI_SUCCESS || read_size != entry.get_file_size() as usize {
-                panic!("Failed to read Kernel");
-            }
+            assert_eq!(r, Success, "Failed to seek: {r:?}");
+            let mut read_size = file_size;
+            let r =
+                (file_protocol.read)(file_protocol, &mut read_size, physical_address as *mut u8);
+            assert_eq!(r, Success, "Failed to read the kernel: {r:?}");
+            assert_eq!(file_size, read_size);
         }
-        if entry.get_memory_size() > entry.get_file_size() {
+        if memory_size > file_size {
             unsafe {
                 core::ptr::write_bytes(
-                    (allocated_memory + align_offset + read_size) as *mut u8,
+                    (physical_address + file_size) as *mut u8,
                     0,
-                    (entry.get_memory_size() - entry.get_file_size()) as usize,
+                    memory_size - file_size,
                 )
             };
         }
-        entry.set_physical_address((allocated_memory + align_offset) as u64);
+        entry.set_physical_address(physical_address as u64);
         cpu::flush_data_cache();
 
         assert_eq!(EFI_PAGE_SIZE, PAGE_SIZE);
         associate_address(
-            entry.get_physical_address() as usize,
-            entry.get_virtual_address() as usize,
+            physical_address,
+            virtual_address,
             MemoryPermissionFlags::new(
                 entry.is_segment_readable(),
                 entry.is_segment_writable(),
@@ -390,26 +381,22 @@ fn load_kernel(
         .expect("Failed to map kernel");
 
         println!(
-            "PA: {:#016X}, {:#016X}, MS: {:#X}, FS: {:#X}, FO: {:#X}, AL: {:#X}, R: {}, W: {}, E: {}",
-            entry.get_physical_address(),
-            entry.get_virtual_address(),
-            entry.get_memory_size(),
-            entry.get_file_size(),
-            entry.get_file_offset(),
-            entry.get_align(),
+            "PA: {physical_address:#016X}, VA: {virtual_address:#016X}, MS: {memory_size:#04X},\
+             FS: {file_size:#04X}, FO: {file_offset:#04X}, AL: {alignment:#04X}, R: {}, W: {}, E: {}",
             entry.is_segment_readable(),
             entry.is_segment_writable(),
             entry.is_segment_executable()
         );
     }
 
-    println!("Entry Point: {:#016X}", elf_header.get_entry_point());
+    let entry_point = elf_header.get_entry_point() as usize;
+    println!("Entry Point: {entry_point:#016X}");
 
     /* Close handlers */
     let _ = (file_protocol.close)(file_protocol);
     let _ = (root_directory.close)(root_directory);
 
-    elf_header.get_entry_point() as usize
+    entry_point
 }
 
 fn load_font_file(
@@ -435,10 +422,7 @@ fn load_font_file(
         0,
         EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
     );
-    if r != EFI_SUCCESS {
-        println!("Failed to open LOADED_IMAGE_PROTOCOL: {:#X}", r);
-        return;
-    }
+    assert_eq!(r, Success, "Failed to open the protocol: {r:?}");
 
     /* Open simple_file_system_protocol */
     let r = (boot_service.open_protocol)(
@@ -449,20 +433,12 @@ fn load_font_file(
         0,
         EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL,
     );
-    if r != EFI_SUCCESS {
-        println!(
-            "Failed to open EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID: {:#X}",
-            r
-        );
-        return;
-    }
+    assert_eq!(r, Success, "Failed to open the protocol: {r:?}");
     let simple_file_protocol = unsafe { &*simple_file_protocol };
 
     /* Open root directory */
     let r = (simple_file_protocol.open_volume)(simple_file_protocol, &mut root_directory);
-    if r != EFI_SUCCESS {
-        panic!("Failed to open the volume: {:#X}", r);
-    };
+    assert_eq!(r, Success, "Failed to open the volume: {r:?}");
     let root_directory = unsafe { &*root_directory };
 
     /* Open the font file */
@@ -477,8 +453,8 @@ fn load_font_file(
         EFI_FILE_MODE_READ,
         0,
     );
-    if r != EFI_SUCCESS {
-        println!("Failed to open \"{}\": {:#X}", FONT_PATH, r);
+    if r != Success {
+        println!("Failed to open \"{FONT_PATH}\": {r:?}");
         (root_directory.close)(root_directory);
         return;
     };
@@ -486,14 +462,10 @@ fn load_font_file(
 
     /* Get the file size */
     let r = (file_protocol.set_position)(file_protocol, u64::MAX);
-    if r != EFI_SUCCESS {
-        panic!("Failed to seek \"{}\": {:#X}", FONT_PATH, r);
-    };
+    assert_eq!(r, Success, "Failed to seek \"{FONT_PATH}\": {r:?}");
     let mut file_size: u64 = 0;
     let r = (file_protocol.get_position)(file_protocol, &mut file_size);
-    if r != EFI_SUCCESS {
-        panic!("Failed to seek \"{}\": {:#X}", FONT_PATH, r);
-    };
+    assert_eq!(r, Success, "Failed to seek \"{FONT_PATH}\": {r:?}");
     if file_size == 0 {
         println!("Invalid file size");
         (file_protocol.close)(file_protocol);
@@ -508,19 +480,15 @@ fn load_font_file(
     let mut read_size = file_size as usize;
     let _ = (file_protocol.set_position)(file_protocol, 0);
     let r = (file_protocol.read)(file_protocol, &mut read_size, allocated_memory as *mut u8);
-    if r != EFI_SUCCESS || read_size != file_size as usize {
-        println!(
-            "Failed to read Font size(Read Size: {:#X}, expected: {:#X}, EfiStatus: {:#X})",
-            read_size, file_size, r
-        );
-    } else {
-        cpu::flush_data_cache();
-        println!(
-            "Loaded Font File(File Size: {:#X}, Location: {:#X})",
-            file_size, allocated_memory
-        );
-        boot_info.font_address = Some((allocated_memory, file_size as usize));
-    }
+    assert_eq!(r, Success, "Failed to read \"{FONT_PATH}\": {r:?}");
+    assert_eq!(read_size, file_size as usize);
+    cpu::flush_data_cache();
+    println!(
+        "Loaded Font File(File Size: {:#X}, Location: {:#X})",
+        file_size, allocated_memory
+    );
+    boot_info.font_address = Some((allocated_memory, file_size as usize));
+
     let _ = (file_protocol.close)(file_protocol);
     let _ = (root_directory.close)(root_directory);
 }
@@ -533,8 +501,8 @@ fn detect_graphics(boot_service: &EfiBootServices) -> Option<GraphicInfo> {
         0,
         &mut graphics_output_protocol as *mut _ as usize,
     );
-    if r != EFI_SUCCESS {
-        println!("Failed to open EfiGraphicsOutputProtocol: {:#X}", r);
+    if r != Success {
+        println!("Failed to open EfiGraphicsOutputProtocol: {r:?}");
         return None;
     }
 
@@ -551,6 +519,14 @@ fn detect_graphics(boot_service: &EfiBootServices) -> Option<GraphicInfo> {
 #[panic_handler]
 pub fn panic(p: &panic::PanicInfo) -> ! {
     println!("{p}");
+    if !unsafe { BOOT_SERVICES.is_null() } {
+        (unsafe { &*BOOT_SERVICES }.exit)(
+            unsafe { MAIN_HANDLE },
+            EfiStatus::Aborted,
+            0,
+            core::ptr::null(),
+        );
+    }
     loop {
         unsafe { asm!("wfi") };
     }

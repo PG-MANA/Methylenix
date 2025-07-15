@@ -15,8 +15,45 @@ use self::protocol::simple_text_output_protocol::EfiSimpleTextOutputProtocol;
 
 use crate::guid::Guid;
 
-pub type EfiStatus = usize;
-pub const EFI_SUCCESS: EfiStatus = 0;
+#[allow(dead_code, clippy::enum_clike_unportable_variant)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+#[repr(usize)]
+pub enum EfiStatus {
+    Success = 0,
+    LoadError = (1 << (usize::BITS - 1)) | 1,
+    InvalidParameter = (1 << (usize::BITS - 1)) | 2,
+    Unsupported = (1 << (usize::BITS - 1)) | 3,
+    BadBufferSize = (1 << (usize::BITS - 1)) | 4,
+    BufferTooSmall = (1 << (usize::BITS - 1)) | 5,
+    NotReady = (1 << (usize::BITS - 1)) | 6,
+    DeviceError = (1 << (usize::BITS - 1)) | 7,
+    WriteProtected = (1 << (usize::BITS - 1)) | 8,
+    OutOfResources = (1 << (usize::BITS - 1)) | 9,
+    VolumeCorrupted = (1 << (usize::BITS - 1)) | 10,
+    VolumeFull = (1 << (usize::BITS - 1)) | 11,
+    NoMedia = (1 << (usize::BITS - 1)) | 12,
+    MediaChanged = (1 << (usize::BITS - 1)) | 13,
+    NotFound = (1 << (usize::BITS - 1)) | 14,
+    AccessDenied = (1 << (usize::BITS - 1)) | 15,
+    NoResponse = (1 << (usize::BITS - 1)) | 16,
+    NoMapping = (1 << (usize::BITS - 1)) | 17,
+    Timeout = (1 << (usize::BITS - 1)) | 18,
+    NotStarted = (1 << (usize::BITS - 1)) | 19,
+    AlreadyStarted = (1 << (usize::BITS - 1)) | 20,
+    Aborted = (1 << (usize::BITS - 1)) | 21,
+    IcmpError = (1 << (usize::BITS - 1)) | 22,
+    TftpError = (1 << (usize::BITS - 1)) | 23,
+    ProtocolError = (1 << (usize::BITS - 1)) | 24,
+    IncompatibleVersion = (1 << (usize::BITS - 1)) | 25,
+    SecurityViolation = (1 << (usize::BITS - 1)) | 26,
+    CrcError = (1 << (usize::BITS - 1)) | 27,
+    EndOfMedia = (1 << (usize::BITS - 1)) | 28,
+    EndOfFile = (1 << (usize::BITS - 1)) | 31,
+    InvalidLanguage = (1 << (usize::BITS - 1)) | 32,
+    CompromisedData = (1 << (usize::BITS - 1)) | 33,
+    IpAddressConflict = (1 << (usize::BITS - 1)) | 34,
+    HttpError = (1 << (usize::BITS - 1)) | 35,
+}
 
 pub const EFI_PAGE_SIZE: usize = 0x1000;
 pub const EFI_PAGE_MASK: usize = !0xFFF;
@@ -62,7 +99,7 @@ pub struct EfiBootServices {
     install_configuration_table: usize,
     load_image: usize,
     start_image: usize,
-    exit: usize,
+    pub exit: extern "efiapi" fn(EfiHandle, EfiStatus, usize, *const i16) -> EfiStatus,
     unload_image: usize,
     pub exit_boot_services: extern "efiapi" fn(EfiHandle, usize) -> EfiStatus,
     get_next_monotonic_count: usize,

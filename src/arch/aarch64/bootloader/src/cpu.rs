@@ -62,6 +62,23 @@ pub unsafe fn set_sctlr_el1(sctlr_el1: u64) {
 }
 
 #[inline(always)]
+pub fn get_sctlr_el2() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {}, sctlr_el2", out(reg) result) };
+    result
+}
+
+#[inline(always)]
+pub unsafe fn set_sctlr_el2(sctlr_el2: u64) {
+    unsafe { asm!("msr sctlr_el2, {}", in(reg) sctlr_el2) };
+}
+
+#[inline(always)]
+pub unsafe fn set_cptr_el2(cptr_el2: u64) {
+    unsafe { asm!("msr cptr_el2, {}", in(reg) cptr_el2) };
+}
+
+#[inline(always)]
 pub fn get_hcr_el2() -> u64 {
     let result: u64;
     unsafe { asm!("mrs {}, hcr_el2", out(reg) result) };

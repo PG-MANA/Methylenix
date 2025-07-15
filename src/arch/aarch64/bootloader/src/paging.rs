@@ -32,36 +32,12 @@ impl MemoryPermissionFlags {
         )
     }
 
-    #[allow(dead_code)]
-    pub const fn rodata() -> Self {
-        Self::new(true, false, false, false)
-    }
-
-    pub const fn data() -> Self {
-        Self::new(true, true, false, false)
-    }
-
-    #[allow(dead_code)]
-    pub const fn user_data() -> Self {
-        Self::new(true, true, false, true)
-    }
-
-    #[allow(dead_code)]
-    pub fn is_readable(&self) -> bool {
-        self.0 & (1 << 0) != 0
-    }
-
     pub fn is_writable(&self) -> bool {
         self.0 & (1 << 1) != 0
     }
 
     pub fn is_executable(&self) -> bool {
         self.0 & (1 << 2) != 0
-    }
-
-    #[allow(dead_code)]
-    pub fn is_user_accessible(&self) -> bool {
-        self.0 & (1 << 3) != 0
     }
 }
 
@@ -148,7 +124,7 @@ pub fn init_paging(top_level_page_table: usize) {
     }
 }
 
-pub fn apply_paging_settings() {
+pub fn set_page_table() {
     unsafe {
         set_ttbr1_el1(TTBR1_EL1);
         set_sctlr_el1(SCTLR_EL1);
@@ -187,8 +163,30 @@ fn _associate_address(
         return Ok(());
     }
     while *pages > 0 && index < NUM_OF_ENTRIES_IN_PAGE_TABLE {
+        let block_size = 1 << shift_level;
+        let mask = block_size - 1;
+        if *physical_address & mask == 0
+            && *virtual_address & mask == 0
+            && (*pages << PAGE_SHIFT) >= block_size
+        {
+            /* Block Entry */
+            let attr = ((!permission.is_executable() as u64) << 54)
+                | (1 << 10/* AF */)
+                | (0b11 << 8/* Inner Shareable */)
+                | (((!permission.is_writable() as u64) << 1) << 6)
+                | (unsafe { MAIR_INDEX as u64 } << 2)
+                | 0b01;
+
+            table[index] = *physical_address as u64 | attr;
+            *physical_address += block_size;
+            *virtual_address += block_size;
+            *pages -= block_size >> PAGE_SHIFT;
+            index += 1;
+            continue;
+        }
+        let next_table_address;
         if table[index] & 0b11 != 0b11 {
-            let next_table_address = alloc_pages(1).ok_or(())?;
+            next_table_address = alloc_pages(1).ok_or(())?;
             unsafe {
                 core::ptr::write_bytes(
                     next_table_address as *mut u64,
@@ -198,11 +196,12 @@ fn _associate_address(
             };
             flush_data_cache();
             table[index] = (next_table_address as u64) | 0b11;
+        } else {
+            next_table_address = (table[index] & (((1 << 48) - 1) ^ ((1 << 12) - 1))) as usize;
         }
-        let next_table_address = table[index] & (((1 << 48) - 1) ^ ((1 << 12) - 1));
 
         _associate_address(
-            next_table_address as usize,
+            next_table_address,
             shift_level - 9,
             physical_address,
             virtual_address,
@@ -223,9 +222,7 @@ pub fn associate_address(
     mut pages: usize,
     alloc_pages: fn(usize) -> Option<usize>,
 ) -> Result<(), ()> {
-    if virtual_address < TTBR1_EL1_START_ADDRESS {
-        unimplemented!();
-    }
+    assert!(virtual_address >= TTBR1_EL1_START_ADDRESS);
     virtual_address -= u64::MAX as usize - ((1 << (64 - unsafe { MINIMUM_TXSZ })) - 1);
     _associate_address(
         unsafe { TTBR1_EL1 } as usize,
@@ -233,95 +230,6 @@ pub fn associate_address(
         &mut physical_address,
         &mut virtual_address,
         &mut pages,
-        permission,
-        alloc_pages,
-    )
-}
-
-fn _associate_direct_map_address(
-    table_address: usize,
-    shift_level: u8,
-    physical_address: &mut usize,
-    virtual_address: &mut usize,
-    size: &mut usize,
-    permission: MemoryPermissionFlags,
-    alloc_pages: fn(usize) -> Option<usize>,
-) -> Result<(), ()> {
-    let table = unsafe { &mut *(table_address as *mut [u64; NUM_OF_ENTRIES_IN_PAGE_TABLE]) };
-    let mut index = (*virtual_address >> shift_level) & (NUM_OF_ENTRIES_IN_PAGE_TABLE - 1);
-    if shift_level <= (PAGE_SHIFT as u8) + (3 - 1) * 9 {
-        /* Create Block */
-        if (table[index] & 0b11) != 0b00 {
-            return Err(());
-        }
-
-        let attr = ((!permission.is_executable() as u64) << 54)
-            | (1 << 10/* AF */)
-            | (0b11 << 8/* Inner Shareable */)
-            | (((!permission.is_writable() as u64) << 1) << 6)
-            | (unsafe { MAIR_INDEX as u64 } << 2)
-            | 0b01;
-
-        while *size > 0 && index < NUM_OF_ENTRIES_IN_PAGE_TABLE {
-            if *size < (1 << shift_level) {
-                return Err(());
-            }
-            table[index] = *physical_address as u64 | attr;
-            *physical_address += 1 << shift_level;
-            *virtual_address += 1 << shift_level;
-            index += 1;
-            *size -= 1 << shift_level;
-        }
-        flush_data_cache();
-        return Ok(());
-    }
-    while *size > 0 && index < NUM_OF_ENTRIES_IN_PAGE_TABLE {
-        if table[index] & 0b11 != 0b11 {
-            let next_table_address = alloc_pages(1).ok_or(())?;
-            unsafe {
-                core::ptr::write_bytes(
-                    next_table_address as *mut u64,
-                    0,
-                    NUM_OF_ENTRIES_IN_PAGE_TABLE,
-                )
-            };
-            flush_data_cache();
-            table[index] = (next_table_address as u64) | 0b11;
-        }
-        let next_table_address = table[index] & (((1 << 48) - 1) ^ ((1 << 12) - 1));
-
-        _associate_direct_map_address(
-            next_table_address as usize,
-            shift_level - 9,
-            physical_address,
-            virtual_address,
-            size,
-            permission,
-            alloc_pages,
-        )?;
-
-        index += 1;
-    }
-    Ok(())
-}
-
-pub fn associate_direct_map_address(
-    mut physical_address: usize,
-    mut virtual_address: usize,
-    permission: MemoryPermissionFlags,
-    mut size: usize,
-    alloc_pages: fn(usize) -> Option<usize>,
-) -> Result<(), ()> {
-    if virtual_address < TTBR1_EL1_START_ADDRESS {
-        unimplemented!();
-    }
-    virtual_address -= u64::MAX as usize - ((1 << (64 - unsafe { MINIMUM_TXSZ })) - 1);
-    _associate_direct_map_address(
-        unsafe { TTBR1_EL1 } as usize,
-        unsafe { TTBR1_INITIAL_SHIFT },
-        &mut physical_address,
-        &mut virtual_address,
-        &mut size,
         permission,
         alloc_pages,
     )

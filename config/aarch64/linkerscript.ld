@@ -5,43 +5,35 @@ __ALIGN_SIZE = 0x1000;
 __KERNEL_MAP_START_ADDRESS = 0xffffff8000000000;
 
 SECTIONS {
+  . += __KERNEL_MAP_START_ADDRESS;
 
-  . = __KERNEL_MAP_START_ADDRESS;
-  . = ALIGN(__ALIGN_SIZE);
-  .text : AT(ADDR(.text) - __KERNEL_MAP_START_ADDRESS) {
+  .text : ALIGN(__ALIGN_SIZE) {
     *(.text .text.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-  .data : AT(ADDR(.data) - __KERNEL_MAP_START_ADDRESS) {
+  .data : ALIGN(__ALIGN_SIZE) {
     *(.data .data.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-  .rodata : AT(ADDR(.rodata) - __KERNEL_MAP_START_ADDRESS) {
+  .rodata : ALIGN(__ALIGN_SIZE) {
     *(.rodata .rodata.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-  .bss : AT(ADDR(.bss) - __KERNEL_MAP_START_ADDRESS) {
+  .bss : ALIGN(__ALIGN_SIZE) {
     *(.bss .bss.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-  .got : AT(ADDR(.got) - __KERNEL_MAP_START_ADDRESS) {
+  .got : ALIGN(__ALIGN_SIZE) {
     *(.got .got.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-  .eh_frame : AT(ADDR(.eh_frame) - __KERNEL_MAP_START_ADDRESS) {
+  .eh_frame : ALIGN(__ALIGN_SIZE) {
     *(.eh_frame .eh_frame.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-  .eh_frame_hdr : AT(ADDR(.eh_frame_hdr) - __KERNEL_MAP_START_ADDRESS) {
+  .eh_frame_hdr : ALIGN(__ALIGN_SIZE) {
     *(.eh_frame_hdr .eh_frame_hdr.*)
   }
-
 
   /DISCARD/ : {
     *(.comment .comment.*)

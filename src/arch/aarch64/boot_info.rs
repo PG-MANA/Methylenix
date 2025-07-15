@@ -9,7 +9,7 @@ use crate::kernel::file_manager::elf::ELF64_HEADER_SIZE;
 #[derive(Clone)]
 pub struct BootInformation {
     pub elf_header_buffer: [u8; ELF64_HEADER_SIZE],
-    pub elf_program_header_address: usize,
+    pub elf_program_headers_address: usize,
     pub efi_system_table: EfiSystemTable,
     pub graphic_info: Option<GraphicInfo>,
     pub font_address: Option<(usize, usize)>,
