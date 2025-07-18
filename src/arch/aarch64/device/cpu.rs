@@ -21,10 +21,22 @@ pub const SPSR_M: u64 = 0b1111;
 pub const SPSR_I: u64 = 1 << 7;
 pub const SPSR_F: u64 = 1 << 6;
 
-pub const TCR_EL1_T0SZ_OFFSET: u64 = 0;
-pub const TCR_EL1_T0SZ: u64 = 0b111111 << TCR_EL1_T0SZ_OFFSET;
+pub const TCR_EL1_TBI0_OFFSET: u64 = 37;
+pub const TCR_EL1_TBI0: u64 = 1 << TCR_EL1_TBI0_OFFSET;
 pub const TCR_EL1_T1SZ_OFFSET: u64 = 16;
 pub const TCR_EL1_T1SZ: u64 = 0b111111 << TCR_EL1_T1SZ_OFFSET;
+pub const TCR_EL1_TG0_OFFSET: u64 = 14;
+pub const TCR_EL1_TG0: u64 = 0b11 << TCR_EL1_TG0_OFFSET;
+pub const TCR_EL1_SH0_OFFSET: u64 = 12;
+pub const TCR_EL1_SH0: u64 = 0b11 << TCR_EL1_SH0_OFFSET;
+pub const TCR_EL1_ORGN0_OFFSET: u64 = 10;
+pub const TCR_EL1_ORGN0: u64 = 0b11 << TCR_EL1_ORGN0_OFFSET;
+pub const TCR_EL1_IRGN0_OFFSET: u64 = 8;
+pub const TCR_EL1_IRGN0: u64 = 0b11 << TCR_EL1_IRGN0_OFFSET;
+pub const TCR_EL1_EPD0_OFFSET: u64 = 7;
+pub const TCR_EL1_EPD0: u64 = 1 << TCR_EL1_EPD0_OFFSET;
+pub const TCR_EL1_T0SZ_OFFSET: u64 = 0;
+pub const TCR_EL1_T0SZ: u64 = 0b111111 << TCR_EL1_T0SZ_OFFSET;
 
 pub const SMC_PSCI_CPU_ON: u64 = 0xC4000003;
 
@@ -126,6 +138,11 @@ pub unsafe fn set_cpu_base_address(address: u64) {
 }
 
 #[inline(always)]
+pub unsafe fn set_ttbr0(ttbr0: u64) {
+    unsafe { asm!("msr ttbr0_el1, {:x}", in(reg) ttbr0) };
+}
+
+#[inline(always)]
 pub fn get_ttbr1() -> u64 {
     let result: u64;
     unsafe { asm!("mrs {:x}, ttbr1_el1", out(reg) result) };
@@ -133,8 +150,8 @@ pub fn get_ttbr1() -> u64 {
 }
 
 #[inline(always)]
-pub unsafe fn set_ttbr0(ttbr1: u64) {
-    unsafe { asm!("msr ttbr0_el1, {:x}", in(reg) ttbr1) };
+pub unsafe fn set_ttbr1(ttbr1: u64) {
+    unsafe { asm!("msr ttbr1_el1, {:x}", in(reg) ttbr1) };
 }
 
 #[inline(always)]
@@ -157,13 +174,13 @@ pub unsafe fn set_tcr(tcr: u64) {
 }
 
 #[inline(always)]
-pub fn get_t0sz() -> u64 {
-    (get_tcr() & TCR_EL1_T0SZ) >> TCR_EL1_T0SZ_OFFSET
+pub const fn get_t0sz(tcr: u64) -> u64 {
+    (tcr & TCR_EL1_T0SZ) >> TCR_EL1_T0SZ_OFFSET
 }
 
 #[inline(always)]
-pub fn get_t1sz() -> u64 {
-    (get_tcr() & TCR_EL1_T1SZ) >> TCR_EL1_T1SZ_OFFSET
+pub const fn get_t1sz(tcr: u64) -> u64 {
+    (tcr & TCR_EL1_T1SZ) >> TCR_EL1_T1SZ_OFFSET
 }
 
 #[inline(always)]

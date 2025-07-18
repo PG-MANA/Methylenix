@@ -47,7 +47,6 @@ use crate::kernel::{
     timer_manager::LocalTimerManager,
 };
 
-use core::mem;
 use core::sync::atomic::AtomicBool;
 
 /// Memory Areas for PhysicalMemoryManager
@@ -66,10 +65,10 @@ pub fn setup_cpu_manager_cluster(
         get_kernel_manager_cluster()
             .boot_strap_cpu_manager /* Allocate from BSP Object Manager */
             .memory_allocator
-            .kmalloc(MSize::new(mem::size_of::<CpuManagerCluster>()))
+            .kmalloc(MSize::new(size_of::<CpuManagerCluster>()))
             .expect("Failed to alloc CpuManagerCluster")
     });
-    let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
+    let cpu_manager = unsafe { &mut *(cpu_manager_address.to::<CpuManagerCluster>()) };
 
     unsafe { cpu::set_cpu_base_address(cpu_manager as *const _ as u64) };
     init_struct!(cpu_manager.list, PtrLinkedListNode::new());
@@ -92,8 +91,12 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
     let mut physical_memory_manager = PhysicalMemoryManager::new();
     unsafe {
         physical_memory_manager.add_memory_entry_pool(
-            core::ptr::addr_of_mut!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER) as usize,
-            mem::size_of_val(&*core::ptr::addr_of!(MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)),
+            &raw const MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as usize,
+            size_of_val(
+                (&raw const MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)
+                    .as_ref()
+                    .unwrap(),
+            ),
         );
     }
 
@@ -113,9 +116,7 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
             | EfiMemoryType::EfiLoaderCode => {
                 let start_address = PAddress::new(entry.physical_start);
                 let size = MSize::new((entry.number_of_pages as usize) * EFI_PAGE_SIZE);
-                if let Err(e) = physical_memory_manager.free(start_address, size, true) {
-                    pr_warn!("Failed to free memory: {:?}", e);
-                }
+                bug_on_err!(physical_memory_manager.free(start_address, size, true));
                 if start_address + size > max_usable_memory_address {
                     max_usable_memory_address = start_address + size;
                 }
@@ -226,6 +227,8 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
         .init()
         .expect("Failed to init MemoryAllocator");
     init_struct!(get_cpu_manager_cluster().memory_allocator, memory_allocator);
+
+    /* TODO: free EfiLoaderData area excepting kernel area */
 }
 
 /// Init InterruptManager

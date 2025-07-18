@@ -42,10 +42,6 @@ pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0xFFFF_FFFF_FFFF_FFFF;
 
 pub const NEED_COPY_HIGH_MEMORY_PAGE_TABLE: bool = false;
 
-const TTBR1_TABLE_ADDRESS_MASK: u64 = ((1 << 48) - 1) ^ 1;
-#[allow(dead_code)]
-const TTBR0_TABLE_ADDRESS_MASK: u64 = ((1 << 48) - 1) ^ 1;
-
 const BLOCK_ENTRY_ENABLED_SHIFT_LEVEL: u8 = (PAGE_SHIFT as u8) + 9 * (3 - 1/* Level 1*/);
 
 static mut MAIR_NORMAL_MEMORY_INDEX: u64 = 0;
@@ -58,6 +54,13 @@ const SHAREABILITY_NON_SHAREABLE: u64 = 0;
 const SHAREABILITY_OUTER_SHAREABLE: u64 = 0b10;
 const SHAREABILITY_INNER_SHAREABLE: u64 = 0b11;
 
+#[derive(Clone)]
+enum PageTableType {
+    Invalid,
+    Kernel(VAddress),
+    User(VAddress),
+}
+
 /// PageManager
 ///
 /// This controls paging system.
@@ -65,7 +68,8 @@ const SHAREABILITY_INNER_SHAREABLE: u64 = 0b11;
 /// that should be done by VirtualMemoryManager.
 #[derive(Clone)]
 pub struct PageManager {
-    page_table: Option<VAddress>,
+    page_table: PageTableType,
+    tcr: u64,
 }
 
 /// Paging Error enum
@@ -88,13 +92,16 @@ impl PageManager {
     ///
     /// [`init`]: #method.init
     pub const fn new() -> Self {
-        Self { page_table: None }
+        Self {
+            page_table: PageTableType::Invalid,
+            tcr: 0,
+        }
     }
 
     /// Init PageManager
     ///
     /// This function must be called only once on boot time.
-    pub fn init(&mut self, _: &mut PhysicalMemoryManager) -> Result<(), PagingError> {
+    pub fn init(&mut self, pm_manager: &mut PhysicalMemoryManager) -> Result<(), PagingError> {
         let mut mair = cpu::get_mair();
         for i in 0..=8 {
             if i == 8 {
@@ -115,27 +122,32 @@ impl PageManager {
                 | (MAIR_DEVICE_MEMORY_ATTRIBUTE << (MAIR_DEVICE_MEMORY_INDEX << 3))
         };
         unsafe { cpu::set_mair(mair) };
-        let mut tcr_el1 = cpu::get_tcr();
+        /* TODO: Setup TCR_EL1 from scratch */
+        let tcr_el1 = cpu::get_tcr();
         let t1sz = (tcr_el1 & cpu::TCR_EL1_T1SZ) >> cpu::TCR_EL1_T1SZ_OFFSET;
-        tcr_el1 = tcr_el1 & !(cpu::TCR_EL1_T0SZ) | (t1sz << cpu::TCR_EL1_T0SZ_OFFSET);
+
+        /* Set memory address information */
         unsafe {
             HIGH_MEMORY_START_ADDRESS = VAddress::new(((1 << t1sz) - 1) << (64 - t1sz));
             DIRECT_MAP_START_ADDRESS = HIGH_MEMORY_START_ADDRESS;
-            cpu::set_tcr(tcr_el1);
-            cpu::instruction_barrier();
         }
+
+        /* Set up the page table */
+        self.page_table = PageTableType::Kernel(Self::alloc_page_table(pm_manager)?);
+        self.tcr = tcr_el1;
+
         Ok(())
     }
 
     pub fn init_user(
         &mut self,
-        _: &Self,
+        system_page_manager: &Self,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), PagingError> {
-        self.page_table = Some(Self::alloc_page_table(pm_manager)?);
-        for e in self.get_user_table().unwrap().iter_mut() {
-            *e = TableEntry::new();
-        }
+        self.page_table = PageTableType::User(Self::alloc_page_table(pm_manager)?);
+        self.tcr = system_page_manager.tcr;
+        /* TODO: Adjust TCR_EL1 for user */
+
         Ok(())
     }
 
@@ -143,31 +155,32 @@ impl PageManager {
         Ok(())
     }
 
-    const fn get_user_table(&self) -> Option<&mut [TableEntry; NUM_OF_TOP_LEVEL_TABLE_ENTRIES]> {
-        if let Some(e) = self.page_table {
-            Some(unsafe {
-                &mut *(e.to_usize() as *mut [TableEntry; NUM_OF_TOP_LEVEL_TABLE_ENTRIES])
-            })
-        } else {
-            None
-        }
-    }
-
-    fn get_table_and_initial_shit_level(
+    const fn get_table_and_initial_shit_level(
         &self,
         virtual_address: VAddress,
     ) -> Result<(VAddress, u8), PagingError> {
-        if (virtual_address.to_usize() & (1 << (u64::BITS - 1))) != 1 {
-            Ok((
-                physical_address_to_direct_map(PAddress::new(
-                    (cpu::get_ttbr1() & TTBR1_TABLE_ADDRESS_MASK) as usize,
-                )),
-                Self::txsz_to_initial_shift_level(cpu::get_t1sz()),
-            ))
-        } else if let Some(t) = self.page_table {
-            Ok((t, Self::txsz_to_initial_shift_level(cpu::get_t0sz())))
-        } else {
-            Err(PagingError::EntryIsNotFound)
+        match self.page_table {
+            PageTableType::Invalid => Err(PagingError::InvalidPageTable),
+            PageTableType::Kernel(a) => {
+                if (virtual_address.to_usize() & (1 << (u64::BITS - 1))) != 0 {
+                    Ok((
+                        a,
+                        Self::txsz_to_initial_shift_level(cpu::get_t1sz(self.tcr)),
+                    ))
+                } else {
+                    Err(PagingError::AddressIsNotCanonical)
+                }
+            }
+            PageTableType::User(a) => {
+                if (virtual_address.to_usize() & (1 << (u64::BITS - 1))) == 0 {
+                    Ok((
+                        a,
+                        Self::txsz_to_initial_shift_level(cpu::get_t0sz(self.tcr)),
+                    ))
+                } else {
+                    Err(PagingError::AddressIsNotCanonical)
+                }
+            }
         }
     }
 
@@ -206,12 +219,6 @@ impl PageManager {
                 return Err(PagingError::EntryIsNotFound);
             }
             let new_table_address = Self::alloc_page_table(pm_manager)?;
-            let new_table = unsafe {
-                &mut *(new_table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES])
-            };
-            for e in new_table {
-                *e = TableEntry::new();
-            }
             let result = self._get_target_level3_descriptor(
                 pm_manager,
                 virtual_address,
@@ -423,12 +430,6 @@ impl PageManager {
                     return Err(PagingError::EntryIsNotFound);
                 }
                 let new_table_address = Self::alloc_page_table(pm_manager)?;
-                let new_table = unsafe {
-                    &mut *(new_table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES])
-                };
-                for e in new_table {
-                    *e = TableEntry::new();
-                }
                 if let Err(e) = self._associate_area(
                     shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
                     new_table_address,
@@ -693,11 +694,11 @@ impl PageManager {
         &mut self,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), PagingError> {
-        if let Some(t) = self.page_table {
+        if let PageTableType::User(t) = self.page_table {
             pm_manager
                 .free(direct_map_to_physical_address(t), PAGE_SIZE, false)
                 .or(Err(PagingError::MemoryCacheOverflowed))?;
-            self.page_table = None;
+            self.page_table = PageTableType::Invalid;
             Ok(())
         } else {
             Err(PagingError::InvalidPageTable)
@@ -707,7 +708,15 @@ impl PageManager {
     /// Allocate the page table.
     fn alloc_page_table(pm_manager: &mut PhysicalMemoryManager) -> Result<VAddress, PagingError> {
         match pm_manager.alloc(PAGE_SIZE, MOrder::new(PAGE_SHIFT)) {
-            Ok(p) => Ok(physical_address_to_direct_map(p)),
+            Ok(p) => {
+                let table_address = physical_address_to_direct_map(p);
+                let table =
+                    unsafe { &mut *(table_address.to::<[TableEntry; NUM_OF_TABLE_ENTRIES]>()) };
+                for e in table {
+                    *e = TableEntry::new();
+                }
+                Ok(table_address)
+            }
             Err(_) => Err(PagingError::MemoryCacheRanOut),
         }
     }
@@ -722,16 +731,46 @@ impl PageManager {
 
     /// Flush page table and apply new page table.
     ///
-    /// This function sets page_table into TTBR0.
+    /// This function sets page_table into TTBR.
     /// If Self is for kernel page manager, this function does nothing.
     /// **This function must call after [`init`], otherwise system may crash.**
     ///
     /// [`init`]: #method.init
     pub fn flush_page_table(&mut self) {
-        if let Some(t) = self.page_table {
-            cpu::flush_data_cache_all();
-            unsafe { cpu::set_ttbr0(direct_map_to_physical_address(t).to_usize() as u64) };
-            unsafe { cpu::tlbi_vmalle1is() };
+        cpu::flush_data_cache_all();
+        match self.page_table {
+            PageTableType::Invalid => { /* Do nothing */ }
+            PageTableType::User(a) => {
+                let mut tcr = cpu::get_tcr();
+                let mask = cpu::TCR_EL1_TBI0
+                    | cpu::TCR_EL1_TG0
+                    | cpu::TCR_EL1_SH0
+                    | cpu::TCR_EL1_ORGN0
+                    | cpu::TCR_EL1_IRGN0
+                    | cpu::TCR_EL1_EPD0
+                    | cpu::TCR_EL1_T0SZ;
+                tcr &= !mask;
+                tcr |= self.tcr & mask;
+                unsafe { cpu::set_tcr(tcr) };
+                unsafe { cpu::set_ttbr0(direct_map_to_physical_address(a).to_usize() as u64) };
+                unsafe { cpu::tlbi_vmalle1is() };
+            }
+            PageTableType::Kernel(a) => {
+                let mut tcr = cpu::get_tcr();
+                /* Set except settings for TTBR0_EL1 */
+                let mask = !(cpu::TCR_EL1_TBI0
+                    | cpu::TCR_EL1_TG0
+                    | cpu::TCR_EL1_SH0
+                    | cpu::TCR_EL1_ORGN0
+                    | cpu::TCR_EL1_IRGN0
+                    | cpu::TCR_EL1_EPD0
+                    | cpu::TCR_EL1_T0SZ);
+                tcr &= !mask;
+                tcr |= self.tcr & mask;
+                unsafe { cpu::set_tcr(tcr) };
+                unsafe { cpu::set_ttbr1(direct_map_to_physical_address(a).to_usize() as u64) };
+                unsafe { cpu::tlbi_vmalle1is() };
+            }
         }
     }
 
@@ -868,30 +907,37 @@ impl PageManager {
             );
         };
 
-        let ((table_address, initial_shift), base) = if self.page_table.is_some() {
-            if let Some(s) = start {
-                if s >= unsafe { HIGH_MEMORY_START_ADDRESS } {
-                    kprintln!("Invalid start_address: {}", s);
-                    return;
-                }
+        let ((table_address, initial_shift), base) = match self.page_table {
+            PageTableType::Invalid => {
+                kprintln!("Invalid Page Table");
+                return;
             }
-            (
-                self.get_table_and_initial_shit_level(VAddress::new(0))
-                    .unwrap(),
-                0,
-            )
-        } else {
-            if let Some(e) = end {
-                if e < unsafe { HIGH_MEMORY_START_ADDRESS } {
-                    kprintln!("Invalid end_address: {}", e);
-                    return;
+            PageTableType::User(_) => {
+                if let Some(s) = start {
+                    if s >= unsafe { HIGH_MEMORY_START_ADDRESS } {
+                        kprintln!("Invalid start_address: {}", s);
+                        return;
+                    }
                 }
+                (
+                    self.get_table_and_initial_shit_level(VAddress::new(0))
+                        .unwrap(),
+                    0,
+                )
             }
-            (
-                self.get_table_and_initial_shit_level(unsafe { HIGH_MEMORY_START_ADDRESS })
-                    .unwrap(),
-                unsafe { HIGH_MEMORY_START_ADDRESS }.to_usize(),
-            )
+            PageTableType::Kernel(_) => {
+                if let Some(e) = end {
+                    if e < unsafe { HIGH_MEMORY_START_ADDRESS } {
+                        kprintln!("Invalid end_address: {}", e);
+                        return;
+                    }
+                }
+                (
+                    self.get_table_and_initial_shit_level(unsafe { HIGH_MEMORY_START_ADDRESS })
+                        .unwrap(),
+                    unsafe { HIGH_MEMORY_START_ADDRESS }.to_usize(),
+                )
+            }
         };
         let mut omitted = false;
         let mut continued_address = (
