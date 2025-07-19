@@ -106,7 +106,9 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     }
 
     /* Detect serial port*/
-    init_serial_port(acpi_available, dtb_available);
+    if !init_serial_port(acpi_available, dtb_available) {
+        pr_err!("Failed to setup the serial port");
+    }
 
     /* Initialize Graphic */
     init_struct!(

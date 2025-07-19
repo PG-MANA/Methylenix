@@ -87,7 +87,6 @@ impl SerialPortManager {
     }
 
     pub fn init_with_acpi(&mut self) -> bool {
-        let _lock = self.lock.lock();
         let Some(spcr_manager) = get_kernel_manager_cluster()
             .acpi_manager
             .lock()
@@ -109,6 +108,7 @@ impl SerialPortManager {
                     MemoryOptionFlags::DEVICE_MEMORY
                 ) {
                     Ok(virtual_address) => {
+                        let _lock = self.lock.lock();
                         self.base_address = virtual_address.to_usize();
                         self.interrupt_id = spcr_manager.get_interrupt_id();
                         self.putc_func = e.putc_func;
@@ -128,16 +128,17 @@ impl SerialPortManager {
     }
 
     pub fn init_with_dtb(&mut self) -> bool {
-        let _lock = self.lock.lock();
         let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
 
         for node_name in [b"uart".as_slice(), b"serial".as_slice()].iter() {
             let mut previous = None;
             while let Some(info) = dtb_manager.search_node(node_name, previous.as_ref()) {
+                if !dtb_manager.is_node_operational(&info) {
+                    previous = Some(info);
+                    continue;
+                }
                 for e in &SERIAL_PORT_DEVICES {
-                    if dtb_manager.is_device_compatible(&info, e.compatible.as_bytes())
-                        && dtb_manager.is_node_operational(&info)
-                    {
+                    if dtb_manager.is_device_compatible(&info, e.compatible.as_bytes()) {
                         if let Some((address, size)) = dtb_manager.read_reg_property(&info, 0) {
                             return match io_remap!(
                                 PAddress::new(address),
@@ -146,6 +147,7 @@ impl SerialPortManager {
                                 MemoryOptionFlags::DEVICE_MEMORY
                             ) {
                                 Ok(virtual_address) => {
+                                    let _lock = self.lock.lock();
                                     self.base_address = virtual_address.to_usize();
                                     self.putc_func = e.putc_func;
                                     self.wait_buffer = e.wait_buffer;
