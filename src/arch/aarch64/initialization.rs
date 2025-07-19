@@ -403,12 +403,19 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
                     panic!("Failed to init System Counter: {:?}", e);
                 }
             }
-            generic_timer.init(
-                true,
-                (gtdt.get_non_secure_el1_flags() & 1) == 0,
-                gtdt.get_non_secure_el1_gsiv(),
-                None,
-            );
+            let is_level_trigger;
+            let interrupt_id;
+            if cpu::get_current_el() == 2 {
+                pr_info!("Using EL2 Physical Timer");
+                is_level_trigger = (gtdt.get_el2_flags() & 1) == 0;
+                interrupt_id = gtdt.get_el2_gsiv();
+            } else {
+                pr_info!("Using EL1 Timer");
+                is_level_trigger = (gtdt.get_non_secure_el1_flags() & 1) == 0;
+                interrupt_id = gtdt.get_non_secure_el1_gsiv();
+            }
+
+            generic_timer.init(true, is_level_trigger, interrupt_id, None);
             gtdt.delete_map();
             initialized = true;
         }
@@ -426,27 +433,24 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
                 {
                     let clock_frequency = dtb_manager.get_property(&info, b"clock-frequency");
                     let interrupts = dtb_manager.read_property_as_u32_array(&interrupts);
-                    if interrupts.len() >= 3 * 2 {
-                        pr_debug!(
-                            "Generic Timer: {}",
-                            if interrupts[3] == GicDistributor::DTB_GIC_PPI {
-                                "PPI"
-                            } else if interrupts[3] == GicDistributor::DTB_GIC_SPI {
-                                "SPI"
-                            } else {
-                                "Unknown"
-                            }
-                        );
-                        let interrupt_id = if interrupts[3] == GicDistributor::DTB_GIC_SPI {
-                            interrupts[4] + GicDistributor::DTB_GIC_SPI_INTERRUPT_ID_OFFSET
-                        } else {
-                            interrupts[4]
-                        };
+                    let index_base = if cpu::get_current_el() == 2 {
+                        pr_info!("Using EL2 Physical Timer");
+                        9
+                    } else {
+                        pr_info!("Using EL1 Timer");
+                        3
+                    };
 
+                    if interrupts.len() >= index_base + 3 {
                         generic_timer.init(
                             true,
-                            (interrupts[5] & 0b1111) == 4,
-                            interrupt_id,
+                            (interrupts[index_base + 2] & 0b1111) == 4,
+                            if interrupts[index_base] == GicDistributor::DTB_GIC_SPI {
+                                interrupts[index_base + 1]
+                                    + GicDistributor::DTB_GIC_SPI_INTERRUPT_ID_OFFSET
+                            } else {
+                                interrupts[index_base + 1]
+                            },
                             clock_frequency.and_then(|i| dtb_manager.read_property_as_u32(&i)),
                         );
                         initialized = true;

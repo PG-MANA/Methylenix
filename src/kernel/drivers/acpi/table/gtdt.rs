@@ -87,6 +87,16 @@ impl GtdtManager {
         gtdt.non_secure_el1_timer_flags
     }
 
+    pub fn get_el2_gsiv(&self) -> u32 {
+        let gtdt = unsafe { &*(self.base_address.to_usize() as *const GTDT) };
+        gtdt.el2_timer_gsiv
+    }
+
+    pub fn get_el2_flags(&self) -> u32 {
+        let gtdt = unsafe { &*(self.base_address.to_usize() as *const GTDT) };
+        gtdt.el2_timer_flags
+    }
+
     pub fn delete_map(self) {
         let _ = free_pages!(self.base_address);
     }

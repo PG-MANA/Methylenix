@@ -88,21 +88,18 @@ impl SerialPortManager {
 
     pub fn init_with_acpi(&mut self) -> bool {
         let _lock = self.lock.lock();
-        let spcr_manager = get_kernel_manager_cluster()
+        let Some(spcr_manager) = get_kernel_manager_cluster()
             .acpi_manager
             .lock()
             .unwrap()
             .get_table_manager()
-            .get_table_manager::<SpcrManager>();
-        if spcr_manager.is_none() {
+            .get_table_manager::<SpcrManager>()
+        else {
             return false;
-        }
-        let spcr_manager = spcr_manager.unwrap();
-        let base_address = spcr_manager.get_memory_mapped_io_base_address();
-        if base_address.is_none() {
+        };
+        let Some(base_address) = spcr_manager.get_memory_mapped_io_base_address() else {
             return false;
-        }
-        let base_address = base_address.unwrap();
+        };
         for e in &SERIAL_PORT_DEVICES {
             if spcr_manager.get_interface_type() == e.interface_type {
                 return match io_remap!(
