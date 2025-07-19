@@ -149,8 +149,17 @@ impl DtbManager {
         name: &[u8],
         delimiter: &[u8],
     ) -> Result<bool, ()> {
+        let skip = |p: &mut usize| {
+            while unsafe { *(*p as *const u8) } != b'\0' {
+                *p += 1;
+            }
+            *p += 1; /* Move next of '\0' */
+            self.skip_padding(p);
+        };
+
         for c in name {
             if *c != unsafe { *(*pointer as *const u8) } {
+                skip(pointer);
                 return Ok(false);
             }
             *pointer += 1;
@@ -158,17 +167,11 @@ impl DtbManager {
         let l = unsafe { *(*pointer as *const u8) };
         for e in delimiter.iter().chain(b"\0") {
             if *e == l {
-                while unsafe { *(*pointer as *const u8) } != b'\0' {
-                    *pointer += 1;
-                }
-                self.skip_padding(pointer);
+                skip(pointer);
                 return Ok(true);
             }
         }
-        while unsafe { *(*pointer as *const u8) } != b'\0' {
-            *pointer += 1;
-        }
-        self.skip_padding(pointer);
+        skip(pointer);
         Ok(false)
     }
 
@@ -240,8 +243,16 @@ impl DtbManager {
         mut size_cells: u32,
     ) -> Result<Option<DtbNodeInfo>, ()> {
         self.skip_nop(pointer)?;
-        if *self.read_node(*pointer)? != Self::FDT_BEGIN_NODE {
-            pr_err!("Invalid DTB");
+        let n = *self.read_node(*pointer)?;
+        if n != Self::FDT_BEGIN_NODE {
+            if n == Self::FDT_END_NODE || n == Self::FDT_END {
+                return Ok(None);
+            }
+            pr_err!(
+                "Expected {:#X}, But found {:#X}",
+                u32::from_be_bytes(Self::FDT_BEGIN_NODE),
+                u32::from_be_bytes(*self.read_node(*pointer)?)
+            );
             return Err(());
         }
         *pointer += Self::FDT_NODE_BYTE;
@@ -284,10 +295,11 @@ impl DtbManager {
                     )?;
                     *pointer += len as usize;
                 }
-                _ => {
+                n => {
                     pr_err!(
-                        "Unknown Token: {:#X}",
-                        u32::from_be_bytes(*self.read_node(*pointer)?)
+                        "Unknown Token(Offset: {:#X}): {:#X}",
+                        *pointer - self.base_address.to_usize(),
+                        u32::from_be_bytes(n)
                     );
                     return Err(());
                 }
@@ -319,10 +331,11 @@ impl DtbManager {
                     *pointer += size_of::<u32>();
                     *pointer += len as usize;
                 }
-                _ => {
+                n => {
                     pr_err!(
-                        "Unknown Token: {:#X}",
-                        u32::from_be_bytes(*self.read_node(*pointer)?)
+                        "Unknown Token(Offset: {:#X}): {:#X}",
+                        *pointer - self.base_address.to_usize(),
+                        u32::from_be_bytes(n)
                     );
                     return Err(());
                 }
@@ -356,7 +369,12 @@ impl DtbManager {
         while self.read_node(pointer).is_ok() {
             match self._search_node(node_name, &mut pointer, address_cells, size_cells) {
                 Ok(Some(n)) => return Some(n),
-                Ok(None) => pointer += Self::FDT_NODE_BYTE,
+                Ok(None) => {
+                    if self.read_node(pointer).map(|n| *n == Self::FDT_END) == Ok(true) {
+                        return None;
+                    }
+                    /* Continue */
+                }
                 Err(()) => return None,
             }
         }
@@ -415,10 +433,11 @@ impl DtbManager {
                     }
                     p += len as usize;
                 }
-                _ => {
+                n => {
                     pr_err!(
-                        "Unknown Token: {:#X}",
-                        u32::from_be_bytes(*self.read_node(p).ok()?)
+                        "Unknown Token(Offset: {:#X}): {:#X}",
+                        p - self.base_address.to_usize(),
+                        u32::from_be_bytes(n)
                     );
                     return None;
                 }
@@ -427,8 +446,11 @@ impl DtbManager {
     }
 
     pub fn is_node_operational(&self, node: &DtbNodeInfo) -> bool {
-        self.get_property(node, &Self::PROP_STATUS).map(|p| unsafe { *(p.base_address.to_usize() as *const [u8; 5]) }
-            == Self::PROP_STATUS_OKAY)
+        self.get_property(node, &Self::PROP_STATUS)
+            .map(|p| unsafe {
+                core::slice::from_raw_parts(p.base_address.to::<u8>(), p.len as usize)
+                    == Self::PROP_STATUS_OKAY
+            })
             .unwrap_or(true)
     }
 
@@ -465,22 +487,24 @@ impl DtbManager {
         };
         let mut address: usize = 0;
         let mut size: usize = 0;
-        let offset = ((info.address_cells + info.size_cells) as usize) * index;
-        if offset + ((info.address_cells + info.size_cells) as usize) > info.len as usize {
+        let offset =
+            ((info.address_cells + info.size_cells) as usize) * Self::FDT_NODE_BYTE * index;
+        if offset + ((info.address_cells + info.size_cells) as usize) * Self::FDT_NODE_BYTE
+            > info.len as usize
+        {
             return None;
         }
-        for i in 0..info.address_cells {
+
+        let mut p = info.base_address.to_usize() + offset;
+        for _ in 0..(info.address_cells as usize * Self::FDT_NODE_BYTE) {
             address <<= 8;
-            address |=
-                unsafe { *((info.base_address.to_usize() + offset + i as usize) as *const u8) }
-                    as usize;
+            address |= unsafe { *(p as *const u8) } as usize;
+            p += 1;
         }
-        for i in 0..info.size_cells {
+        for _ in 0..(info.size_cells as usize * Self::FDT_NODE_BYTE) {
             size <<= 8;
-            size |= unsafe {
-                *((info.base_address.to_usize() + offset + (info.address_cells + i) as usize)
-                    as *const u8)
-            } as usize;
+            size |= unsafe { *(p as *const u8) } as usize;
+            p += 1;
         }
         Some((address, size))
     }
