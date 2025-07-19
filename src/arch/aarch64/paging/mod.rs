@@ -88,9 +88,7 @@ pub enum PagingError {
 
 impl PageManager {
     /// Create System Page Manager
-    /// Before use, **you must call [`init`]**.
-    ///
-    /// [`init`]: #method.init
+    /// Before use, **you must call [`Self::init`]**.
     pub const fn new() -> Self {
         Self {
             page_table: PageTableType::Invalid,
@@ -320,15 +318,13 @@ impl PageManager {
 
     /// Associate physical address with virtual_address.
     ///
-    /// This function will get target PTE from virtual_address
-    /// (if not exist, will make)and set physical address.
-    /// "permission" will be used when set the PTE attribute.
-    /// If you want to associate wide area(except physical address is non-linear),
-    /// you should use [`associate_area`].(it may use 2MB paging).
+    /// This function will get target page table entry from virtual_address
+    /// (if not exist, will make) and set physical address.
+    /// "Permission" will be used when set the page table entry attribute.
+    /// If you want to associate wide area (except physical address is non-linear),
+    /// you should use [`Self::associate_area`]. (it may use 2MB paging).
     ///
     /// This function does not flush page table and invoke page cache. You should do them manually.
-    ///
-    /// [`associate_area`]: #method.associate_area
     pub fn associate_address(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
@@ -348,6 +344,7 @@ impl PageManager {
         entry.set_output_address(physical_address);
         Self::set_permission_and_options(entry, permission, option);
         entry.validate_as_level3_descriptor();
+        cpu::flush_data_cache_all();
         Ok(())
     }
 
@@ -475,11 +472,9 @@ impl PageManager {
     /// This function is used to map consecutive physical address.
     /// This may use 2MB or 1GB paging.
     /// If you want to map non-consecutive physical address,
-    /// you should call [`associate_address`] repeatedly.
+    /// you should call [`Self::associate_address`] repeatedly.
     ///
     /// This function does not flush page table and invoke page cache. You should do them manually.
-    ///
-    /// [`associate_address`]: #method.associate_address
     pub fn associate_area(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
@@ -520,7 +515,6 @@ impl PageManager {
             false,
         )?;
         if !size.is_zero() {
-            pr_err!("Size is not zero: {}", size);
             Err(PagingError::EntryIsNotFound)
         } else {
             Ok(())
@@ -529,7 +523,7 @@ impl PageManager {
 
     /// Change permission of virtual_address
     ///
-    /// This function searches the target page entry(usually PTE) and change permission.
+    /// This function searches the target page table entry and changes the permission.
     /// If virtual_address is not valid, this will return PagingError::EntryIsNotFound.
     pub fn change_memory_permission(
         &self,
@@ -542,17 +536,18 @@ impl PageManager {
         }
         let entry = self.get_target_descriptor_descriptor(pm_manager, virtual_address)?;
         entry.set_permission(permission);
+        cpu::flush_data_cache_all();
         Ok(())
     }
 
     /// Unmap virtual_address.
     ///
-    /// This function searches target page entry(usually PTE) and disable present flag.
+    /// This function searches target page table entry and disable present flag.
     /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
-    /// If target entry is not exists, this function will ignore it and call [`Self::cleanup_page_table`]
-    /// when entry_may_be_deleted == true, otherwise this will return PagingError:PagingError::EntryIsNotFound.
+    /// If target entry does not exist, this function will ignore it and call [`Self::cleanup_page_table`]
+    /// when entry_may_be_deleted == true, otherwise this will return [`PagingError::EntryIsNotFound`].
     ///
-    /// This does not delete physical address and huge bit from the entry. it disables present flag only.
+    /// This does not delete physical address and huge bit from the entry. It disables the present flag only.
     /// It helps [`Self::cleanup_page_table`].
     pub fn unassociate_address(
         &self,
@@ -563,6 +558,7 @@ impl PageManager {
         match self.get_target_level3_descriptor(pm_manager, virtual_address, false) {
             Ok(entry) => {
                 entry.invalidate();
+                cpu::flush_data_cache_all();
                 self.cleanup_page_table(virtual_address, pm_manager)
             }
             Err(err) => {
@@ -577,12 +573,12 @@ impl PageManager {
 
     /// Unmap virtual_address ~ (virtual_address + size)
     ///
-    /// This function searches target page entry(PDPTE, PDE, PTE) and disable present flag.
+    /// This function searches target page entries and disable present flag.
     /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
-    /// If target entry is not exists, this function will return Error:EntryIsNotFound.
-    /// When huge table was used and the mapped size is different from expected size, this will return error.
+    /// If target entry does not exist, this function will return Error:EntryIsNotFound.
+    /// When a huge table was used and the mapped size is different from expected size, this will return error.
     ///
-    /// This does not delete physical address and huge bit from the entry. it disables present flag only.
+    /// This does not delete physical address and huge bit from the entry.
     pub fn unassociate_address_width_size(
         &self,
         virtual_address: VAddress,
@@ -615,6 +611,7 @@ impl PageManager {
         if !size.is_zero() {
             return Err(PagingError::InvalidPageTable);
         }
+        cpu::flush_data_cache_all();
         if self._cleanup_page_tables(initial_shift, table_address, pm_manager, virtual_address)? {
             Err(PagingError::InvalidPageTable)
         } else {
@@ -686,6 +683,8 @@ impl PageManager {
         )? {
             Err(PagingError::InvalidPageTable)
         } else {
+            cpu::flush_data_cache_all();
+            cpu::tlbi_vmalle1is();
             Ok(())
         }
     }
@@ -733,7 +732,7 @@ impl PageManager {
     ///
     /// This function sets page_table into TTBR.
     /// If Self is for kernel page manager, this function does nothing.
-    /// **This function must call after [`init`], otherwise system may crash.**
+    /// **This function must call after [`Self::init`], otherwise the system may crash.**
     ///
     /// [`init`]: #method.init
     pub fn flush_page_table(&mut self) {
@@ -753,7 +752,7 @@ impl PageManager {
                 tcr |= self.tcr & mask;
                 unsafe { cpu::set_tcr(tcr) };
                 unsafe { cpu::set_ttbr0(direct_map_to_physical_address(a).to_usize() as u64) };
-                unsafe { cpu::tlbi_vmalle1is() };
+                cpu::tlbi_vmalle1is();
             }
             PageTableType::Kernel(a) => {
                 let mut tcr = cpu::get_tcr();
@@ -769,14 +768,14 @@ impl PageManager {
                 tcr |= self.tcr & mask;
                 unsafe { cpu::set_tcr(tcr) };
                 unsafe { cpu::set_ttbr1(direct_map_to_physical_address(a).to_usize() as u64) };
-                unsafe { cpu::tlbi_vmalle1is() };
+                cpu::tlbi_vmalle1is();
             }
         }
     }
 
     /// Delete the paging cache of the target address and update it.
     ///
-    /// This function operates tlbi vaelis.
+    /// This function operates `tlbi vaelis`.
     pub fn update_page_cache(virtual_address: VAddress, range: MSize) {
         if range.to_index().to_usize() > 16 {
             Self::update_page_cache_all()
@@ -790,10 +789,10 @@ impl PageManager {
 
     /// Delete all TLBs
     ///
-    /// This function operates tlbi vmalle1is.
+    /// This function operates `tlbi vmalle1is`.
     pub fn update_page_cache_all() {
         cpu::flush_data_cache_all();
-        unsafe { cpu::tlbi_vmalle1is() };
+        cpu::tlbi_vmalle1is();
     }
 
     fn _dump_table(

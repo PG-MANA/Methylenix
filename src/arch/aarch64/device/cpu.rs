@@ -204,7 +204,7 @@ pub fn tlbi_vaae1is(target: u64) {
 }
 
 #[inline(always)]
-pub unsafe fn tlbi_vmalle1is() {
+pub fn tlbi_vmalle1is() {
     data_barrier();
     unsafe { asm!("tlbi vmalle1is") };
     data_barrier();
