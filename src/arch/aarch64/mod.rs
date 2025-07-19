@@ -75,6 +75,17 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
         get_kernel_manager_cluster().serial_port_manager,
         SerialPortManager::new()
     );
+
+    /* If you want to use the early debug console, please uncomment the below code
+        and fill `SERIAL_PORT_ADDRESS` and `SERIAL_PORT_DEVICES_INDEX.
+       (`SERIAL_PORT_ADDRESS` must be mapped.)
+    */
+    /* unsafe {
+        get_kernel_manager_cluster()
+            .serial_port_manager
+            .init_early(SERIAL_PORT_ADDRESS, SERIAL_PORT_DEVICES_INDEX)
+    }; */
+
     get_kernel_manager_cluster().kernel_tty_manager[0]
         .open(&get_kernel_manager_cluster().serial_port_manager);
 
