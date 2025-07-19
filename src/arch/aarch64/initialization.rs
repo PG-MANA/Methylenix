@@ -233,40 +233,93 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
 
 /// Init InterruptManager
 pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
+    use core::mem::MaybeUninit;
     init_struct!(
         get_cpu_manager_cluster().interrupt_manager,
         InterruptManager::new()
     );
+    let mut initialized = false;
+    let mut distributor = MaybeUninit::uninit();
+    let mut redistributor = MaybeUninit::uninit();
+
     get_cpu_manager_cluster().interrupt_manager.init();
 
     if acpi_available {
-        let acpi_manager = &get_kernel_manager_cluster().acpi_manager.lock().unwrap();
-        if let Ok(mut gic_manager) = GicDistributor::new_with_acpi(acpi_manager) {
-            if !gic_manager.init_generic_interrupt_distributor() {
-                panic!("Failed to init GIC");
-            }
-            let cpu_redistributor = gic_manager
-                .init_redistributor(Some(acpi_manager))
-                .expect("Failed to init GIC Redistributor");
-            init_struct!(
-                get_cpu_manager_cluster()
-                    .arch_depend_data
-                    .gic_redistributor_manager,
-                cpu_redistributor
-            );
-            init_struct!(
-                get_kernel_manager_cluster().arch_depend_data.gic_manager,
+        /* Try to find with ACPI */
+        let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+        if let Ok(mut gic_manager) = GicDistributor::new_with_acpi(&acpi_manager) {
+            assert!(gic_manager.init(), "Failed to initialize GIC Distributor");
+            redistributor.write(
                 gic_manager
+                    .new_redistributor_with_acpi(&acpi_manager)
+                    .expect("Failed to initialize GIC Redistributor"),
             );
-            get_cpu_manager_cluster().interrupt_manager.init_ipi();
-            return;
+            distributor.write(gic_manager);
+            initialized = true;
         }
     }
 
-    if dtb_available {
-        unimplemented!("GIC initialization with DTB is not supported.");
+    if !initialized && dtb_available {
+        /* Try to find with Devicetree */
+        let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
+        if let Ok(mut gic_manager) = GicDistributor::new_with_dtb(dtb_manager) {
+            assert!(gic_manager.init(), "Failed to initialize GIC Distributor");
+            redistributor.write(
+                gic_manager
+                    .new_redistributor_with_dtb(dtb_manager)
+                    .expect("Failed to initialize GIC Redistributor"),
+            );
+            distributor.write(gic_manager);
+            initialized = true;
+        }
     }
-    panic!("GIC is not available");
+
+    assert!(initialized, "GIC is not available");
+
+    init_struct!(
+        get_cpu_manager_cluster()
+            .arch_depend_data
+            .gic_redistributor_manager,
+        unsafe { redistributor.assume_init() }
+    );
+    init_struct!(
+        get_kernel_manager_cluster().arch_depend_data.gic_manager,
+        unsafe { distributor.assume_init() }
+    );
+    get_cpu_manager_cluster().interrupt_manager.init_ipi();
+}
+
+pub fn init_interrupt_ap(cpu_manager_cluster: &mut CpuManagerCluster) {
+    let mut interrupt_manager = InterruptManager::new();
+    let mut cpu_redistributor;
+    interrupt_manager.init_ap();
+
+    {
+        /* Try to find with ACPI */
+        let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+        cpu_redistributor = get_kernel_manager_cluster()
+            .arch_depend_data
+            .gic_manager
+            .new_redistributor_with_acpi(&acpi_manager);
+    }
+
+    if cpu_redistributor.is_none() {
+        /* Try to find with Devicetree */
+        let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
+        cpu_redistributor = get_kernel_manager_cluster()
+            .arch_depend_data
+            .gic_manager
+            .new_redistributor_with_dtb(dtb_manager);
+    }
+
+    init_struct!(
+        cpu_manager_cluster
+            .arch_depend_data
+            .gic_redistributor_manager,
+        cpu_redistributor.expect("GIC Redistributor is not available")
+    );
+    interrupt_manager.init_ipi();
+    init_struct!(cpu_manager_cluster.interrupt_manager, interrupt_manager);
 }
 
 /// Init SerialPort
@@ -662,24 +715,8 @@ pub extern "C" fn ap_boot_main() -> ! {
         .expect("Failed to init MemoryAllocator");
     init_struct!(cpu_manager.memory_allocator, memory_allocator);
 
-    /* Setup InterruptManager(including LocalApicManager) */
-    let mut interrupt_manager = InterruptManager::new();
-    interrupt_manager.init_ap();
-    let cpu_redistributor = get_kernel_manager_cluster()
-        .arch_depend_data
-        .gic_manager
-        .init_redistributor(Some(
-            &get_kernel_manager_cluster().acpi_manager.lock().unwrap(),
-        ))
-        .expect("Failed to init GIC Redistributor");
-    init_struct!(
-        get_cpu_manager_cluster()
-            .arch_depend_data
-            .gic_redistributor_manager,
-        cpu_redistributor
-    );
-    interrupt_manager.init_ipi();
-    init_struct!(cpu_manager.interrupt_manager, interrupt_manager);
+    /* Setup InterruptManager */
+    init_interrupt_ap(cpu_manager);
 
     init_local_timer_ap();
     init_task_ap(ap_idle);

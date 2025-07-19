@@ -2,15 +2,14 @@
 //! Generic Interrupt Controller version 3 and 4
 //!
 
-use super::InterruptGroup;
+use super::super::InterruptGroup;
 
 use crate::arch::target_arch::device::cpu;
 
-use crate::kernel::drivers::acpi::table::madt::{GenericInterruptDistributorInfo, MadtManager};
-use crate::kernel::memory_manager::data_type::{
-    Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
+use crate::kernel::memory_manager::{
+    data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
+    io_remap,
 };
-use crate::kernel::memory_manager::io_remap;
 
 const GIC_V3_DISTRIBUTOR_MEMORY_MAP_SIZE: MSize = MSize::new(0x10000);
 
@@ -46,21 +45,13 @@ impl GicV3Distributor {
     const GICD_IGRPMODR: usize = 0x0D00;
     const GICD_IROUTER: usize = 0x6100;
 
-    pub fn new_from_acpi(
-        madt: &MadtManager,
-        gic_distributor_info: GenericInterruptDistributorInfo,
+    pub fn new(
+        base_address: PAddress,
+        version: u8,
+        redistributor_range: Option<(PAddress, MSize)>,
     ) -> Result<Self, ()> {
-        if gic_distributor_info.version != 3 && gic_distributor_info.version != 4 {
-            pr_err!("Unsupported GIC version: {}", gic_distributor_info.version);
-            return Err(());
-        }
-        pr_info!("Detect GICv{}", gic_distributor_info.version);
-
-        let interrupt_distributor_physical_address =
-            PAddress::new(gic_distributor_info.base_address);
-        let version = gic_distributor_info.version;
         let interrupt_distributor_base_address = match io_remap!(
-            interrupt_distributor_physical_address,
+            base_address,
             GIC_V3_DISTRIBUTOR_MEMORY_MAP_SIZE,
             MemoryPermissionFlags::data(),
             MemoryOptionFlags::DEVICE_MEMORY
@@ -73,10 +64,10 @@ impl GicV3Distributor {
         };
         let interrupt_redistributor_discovery_base_address;
         let interrupt_redistributor_discovery_length;
-        if let Some(discovery_info) = madt.find_generic_interrupt_redistributor_struct() {
+        if let Some((base, size)) = redistributor_range {
             interrupt_redistributor_discovery_base_address = match io_remap!(
-                PAddress::new(discovery_info.discovery_range_base_address as usize),
-                MSize::new(discovery_info.discovery_range_length as usize),
+                base,
+                size,
                 MemoryPermissionFlags::data(),
                 MemoryOptionFlags::DEVICE_MEMORY
             ) {
@@ -89,14 +80,14 @@ impl GicV3Distributor {
                     return Err(());
                 }
             };
-            interrupt_redistributor_discovery_length = discovery_info.discovery_range_length;
+            interrupt_redistributor_discovery_length = size.to_usize() as u32;
         } else {
             interrupt_redistributor_discovery_base_address = None;
             interrupt_redistributor_discovery_length = 0;
         }
 
         Ok(Self {
-            interrupt_distributor_physical_address,
+            interrupt_distributor_physical_address: base_address,
             interrupt_distributor_base_address,
             interrupt_redistributor_discovery_base_address,
             interrupt_redistributor_discovery_length,
@@ -114,8 +105,12 @@ impl GicV3Distributor {
         true
     }
 
-    pub fn init_redistributor(&self, madt: Option<&MadtManager>) -> Option<GicV3Redistributor> {
-        let redistributor_address = self.find_redistributor_address_of_this_pe(madt)?;
+    pub fn init_redistributor<F>(&self, redistributor_info: F) -> Option<GicV3Redistributor>
+    where
+        F: FnOnce(u64) -> Option<PAddress>,
+    {
+        let redistributor_address =
+            self.find_redistributor_address_of_this_pe(redistributor_info)?;
         let mut redistributor_manager = GicV3Redistributor::new(redistributor_address);
         if !redistributor_manager.init() {
             pr_err!("Failed to init GIC Redistributor.");
@@ -124,10 +119,10 @@ impl GicV3Distributor {
         Some(redistributor_manager)
     }
 
-    fn find_redistributor_address_of_this_pe(
-        &self,
-        madt: Option<&MadtManager>,
-    ) -> Option<VAddress> {
+    fn find_redistributor_address_of_this_pe<F>(&self, finder: F) -> Option<VAddress>
+    where
+        F: FnOnce(u64) -> Option<PAddress>,
+    {
         if let Some(discovery_base) = self.interrupt_redistributor_discovery_base_address {
             let mut pointer = 0;
             let redistributor_memory_size = if self.version == 3 {
@@ -152,31 +147,24 @@ impl GicV3Distributor {
                 self_affinity
             );
             None
-        } else if let Some(madt) = madt {
-            if let Some(info) = madt.find_generic_interrupt_controller_cpu_interface(
-                cpu::mpidr_to_affinity(cpu::get_mpidr()),
+        } else if let Some(base) = finder(cpu::mpidr_to_affinity(cpu::get_mpidr())) {
+            match io_remap!(
+                base,
+                if self.version == 3 {
+                    GIC_V3_REDISTRIBUTOR_MEMORY_MAP_SIZE
+                } else if self.version == 4 {
+                    GIC_V4_REDISTRIBUTOR_MEMORY_MAP_SIZE
+                } else {
+                    unimplemented!()
+                },
+                MemoryPermissionFlags::data(),
+                MemoryOptionFlags::DEVICE_MEMORY
             ) {
-                match io_remap!(
-                    PAddress::new(info.gicr_base_address as usize),
-                    if self.version == 3 {
-                        GIC_V3_REDISTRIBUTOR_MEMORY_MAP_SIZE
-                    } else if self.version == 4 {
-                        GIC_V4_REDISTRIBUTOR_MEMORY_MAP_SIZE
-                    } else {
-                        unimplemented!()
-                    },
-                    MemoryPermissionFlags::data(),
-                    MemoryOptionFlags::DEVICE_MEMORY
-                ) {
-                    Ok(v) => Some(v),
-                    Err(e) => {
-                        pr_err!("Failed to map Redistributor: {:?}", e);
-                        None
-                    }
+                Ok(v) => Some(v),
+                Err(e) => {
+                    pr_err!("Failed to map Redistributor: {:?}", e);
+                    None
                 }
-            } else {
-                pr_err!("GIC CPU Interface Structure is not found.");
-                None
             }
         } else {
             pr_err!("No redistributor information is found.");

@@ -3,8 +3,6 @@
 //!
 
 pub mod gic;
-mod gicv2;
-mod gicv3;
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;

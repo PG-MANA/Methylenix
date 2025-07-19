@@ -3,11 +3,15 @@
 //!
 
 use super::InterruptGroup;
-use super::gicv2;
-use super::gicv3;
 
-use crate::kernel::drivers::acpi::{AcpiManager, table::madt::MadtManager};
-use crate::kernel::memory_manager::data_type::PAddress;
+use crate::kernel::drivers::{
+    acpi::{AcpiManager, table::madt::MadtManager},
+    dtb::DtbManager,
+};
+use crate::kernel::memory_manager::data_type::{MSize, PAddress};
+
+mod gicv2;
+mod gicv3;
 
 pub enum GicDistributor {
     GicV2(gicv2::GicV2Distributor),
@@ -31,22 +35,32 @@ impl GicDistributor {
             .get_table_manager()
             .get_table_manager::<MadtManager>()
         else {
-            pr_err!("GIC is not found.");
+            pr_err!("MADT is not found.");
             return Err(());
         };
         let Some(gic_distributor_info) = madt.find_generic_interrupt_distributor() else {
             pr_err!("GIC Distributor information is not found.");
             return Err(());
         };
+        pr_info!("Detect GICv{}", gic_distributor_info.version);
         match gic_distributor_info.version {
-            1 | 2 => Ok(Self::GicV2(gicv2::GicV2Distributor::new_from_acpi(
-                &madt,
-                gic_distributor_info,
-            )?)),
-            3 | 4 => Ok(Self::GicV3(gicv3::GicV3Distributor::new_from_acpi(
-                &madt,
-                gic_distributor_info,
-            )?)),
+            1 | 2 => Ok(Self::GicV2(gicv2::GicV2Distributor::new(PAddress::new(
+                gic_distributor_info.base_address,
+            ))?)),
+            3 | 4 => {
+                let redistributor_range =
+                    madt.find_generic_interrupt_redistributor_struct().map(|i| {
+                        (
+                            PAddress::new(i.discovery_range_base_address as _),
+                            MSize::new(i.discovery_range_length as _),
+                        )
+                    });
+                Ok(Self::GicV3(gicv3::GicV3Distributor::new(
+                    PAddress::new(gic_distributor_info.base_address),
+                    gic_distributor_info.version,
+                    redistributor_range,
+                )?))
+            }
             v => {
                 pr_err!("Unsupported GIC version: {v}");
                 Err(())
@@ -54,23 +68,128 @@ impl GicDistributor {
         }
     }
 
-    pub fn init_generic_interrupt_distributor(&mut self) -> bool {
+    pub fn new_redistributor_with_acpi(
+        &self,
+        acpi_manager: &AcpiManager,
+    ) -> Option<GicRedistributor> {
+        let Some(madt) = acpi_manager
+            .get_table_manager()
+            .get_table_manager::<MadtManager>()
+        else {
+            pr_err!("MADT is not found.");
+            return None;
+        };
+        Some(match self {
+            GicDistributor::GicV2(d) => GicRedistributor::GicV2(d.init_redistributor(
+                |affinity| -> Option<(PAddress, u8)> {
+                    madt.find_generic_interrupt_controller_cpu_interface(affinity)
+                        .map(|info| {
+                            (
+                                PAddress::new(info.physical_address as _),
+                                info.cpu_interface_number as u8,
+                            )
+                        })
+                },
+            )?),
+            GicDistributor::GicV3(d) => {
+                GicRedistributor::GicV3(d.init_redistributor(|affinity| -> Option<PAddress> {
+                    madt.find_generic_interrupt_controller_cpu_interface(affinity)
+                        .map(|info| PAddress::new(info.gicr_base_address as _))
+                })?)
+            }
+        })
+    }
+
+    pub fn new_with_dtb(dtb_manager: &DtbManager) -> Result<Self, ()> {
+        let mut current_node = None;
+        while let Some(node) =
+            dtb_manager.search_node(b"interrupt-controller", current_node.as_ref())
+        {
+            if !dtb_manager.is_node_operational(&node) {
+                current_node = Some(node);
+                continue;
+            }
+            let version = if dtb_manager.is_device_compatible(&node, b"arm,gic-v4") {
+                4
+            } else if dtb_manager.is_device_compatible(&node, b"arm,gic-v3") {
+                3
+            } else if dtb_manager.is_device_compatible(&node, b"arm,gic-v2")
+                || dtb_manager.is_device_compatible(&node, b"arm,gic-400")
+            {
+                2
+            } else {
+                pr_warn!("Unknown interrupt controller.");
+                current_node = Some(node);
+                continue;
+            };
+            pr_info!("Detect GIC v{}", version);
+            match version {
+                3 | 4 => {
+                    let Some((base, _)) = dtb_manager.read_reg_property(&node, 0) else {
+                        pr_err!("Failed to read reg property");
+                        return Err(());
+                    };
+                    let redistributor_range = dtb_manager
+                        .read_reg_property(&node, 1)
+                        .map(|(base, size)| (PAddress::new(base), MSize::new(size)));
+                    return Ok(Self::GicV3(gicv3::GicV3Distributor::new(
+                        PAddress::new(base),
+                        version,
+                        redistributor_range,
+                    )?));
+                }
+                2 => {
+                    let Some((base, _)) = dtb_manager.read_reg_property(&node, 0) else {
+                        pr_err!("Failed to read reg property");
+                        return Err(());
+                    };
+                    return Ok(Self::GicV2(gicv2::GicV2Distributor::new(PAddress::new(
+                        base,
+                    ))?));
+                }
+                _ => unreachable!(),
+            }
+        }
+        pr_err!("GIC is not found");
+        Err(())
+    }
+
+    pub fn new_redistributor_with_dtb(&self, dtb_manager: &DtbManager) -> Option<GicRedistributor> {
+        Some(match self {
+            GicDistributor::GicV2(d) => GicRedistributor::GicV2(d.init_redistributor(
+                |affinity| -> Option<(PAddress, u8)> {
+                    /* Not a good algorithm */
+                    let mut current_node = None;
+                    let mut result = None;
+                    while let Some(node) =
+                        dtb_manager.search_node(b"interrupt-controller", current_node.as_ref())
+                    {
+                        if dtb_manager.is_node_operational(&node)
+                            && (dtb_manager.is_device_compatible(&node, b"arm,gic-v2")
+                                || dtb_manager.is_device_compatible(&node, b"arm,gic-400"))
+                        {
+                            let cpu_interface = (affinity & 0xF) as u8;
+                            if let Some((base, _)) =
+                                dtb_manager.read_reg_property(&node, 1 + cpu_interface as usize)
+                            {
+                                result = Some((PAddress::new(base), cpu_interface));
+                                break;
+                            }
+                        }
+                        current_node = Some(node);
+                    }
+                    result
+                },
+            )?),
+            GicDistributor::GicV3(d) => GicRedistributor::GicV3(d.init_redistributor(|_| None)?),
+        })
+    }
+
+    pub fn init(&mut self) -> bool {
         match self {
             GicDistributor::GicV2(d) => d.init(),
             GicDistributor::GicV3(d) => d.init(),
         }
-    }
-
-    pub fn init_redistributor(&self, acpi: Option<&AcpiManager>) -> Option<GicRedistributor> {
-        let madt = acpi.and_then(|a| a.get_table_manager().get_table_manager::<MadtManager>());
-        Some(match self {
-            GicDistributor::GicV2(d) => {
-                GicRedistributor::GicV2(d.init_redistributor(madt.as_ref())?)
-            }
-            GicDistributor::GicV3(d) => {
-                GicRedistributor::GicV3(d.init_redistributor(madt.as_ref())?)
-            }
-        })
     }
 
     pub fn set_priority(&self, index: u32, priority: u8) {

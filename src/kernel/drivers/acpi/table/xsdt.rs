@@ -224,7 +224,7 @@ impl XsdtManager {
     }
 
     fn get_entry(&self, index: usize) -> Option<PAddress> {
-        if (self.get_length() - 0x24) >> 3 > index {
+        if !self.base_address.is_zero() && (self.get_length() - 0x24) >> 3 > index {
             Some(PAddress::new(unsafe {
                 read_unaligned((self.base_address.to_usize() + 0x24 + index * 8) as *const u64)
             } as usize))
