@@ -45,7 +45,7 @@ struct SerialPortDeviceEntry {
     wait_buffer: fn(base_address: usize) -> bool,
 }
 
-const SERIAL_PORT_DEVICES: [SerialPortDeviceEntry; 2] = [devices::PL011, devices::MESON_GX_UART];
+const SERIAL_PORT_DEVICES: [SerialPortDeviceEntry; 2] = [devices::PL011, devices::DW_APB_UART];
 
 pub struct SerialPortManager {
     lock: SpinLockFlag,
