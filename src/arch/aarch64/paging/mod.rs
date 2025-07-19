@@ -517,6 +517,7 @@ impl PageManager {
         if !size.is_zero() {
             Err(PagingError::EntryIsNotFound)
         } else {
+            cpu::flush_data_cache_all();
             Ok(())
         }
     }
@@ -714,6 +715,7 @@ impl PageManager {
                 for e in table {
                     *e = TableEntry::new();
                 }
+                cpu::flush_data_cache_all();
                 Ok(table_address)
             }
             Err(_) => Err(PagingError::MemoryCacheRanOut),
