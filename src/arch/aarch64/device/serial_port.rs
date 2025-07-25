@@ -4,6 +4,7 @@
 
 mod devices;
 
+use crate::arch::aarch64::interrupt::gic;
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
 use crate::kernel::drivers::acpi::table::spcr::SpcrManager;
@@ -152,6 +153,14 @@ impl SerialPortManager {
                                     self.putc_func = e.putc_func;
                                     self.wait_buffer = e.wait_buffer;
                                     self.getc_func = e.getc_func;
+                                    if let Some((interrupt_id, _)) =
+                                        gic::read_interrupt_info_from_dtb(dtb_manager, &info, 0)
+                                    {
+                                        self.interrupt_id = interrupt_id;
+                                        self.interrupt_enable = e.interrupt_enable;
+                                    } else {
+                                        pr_warn!("Failed to get the interrupt information");
+                                    }
                                     true
                                 }
                                 Err(e) => {

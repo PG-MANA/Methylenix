@@ -518,20 +518,13 @@ impl DtbManager {
         }
     }
 
-    pub fn read_property_as_u32_array(&self, info: &DtbPropertyInfo) -> &[u32] {
-        unsafe {
-            core::slice::from_raw_parts(
-                info.base_address.to_usize() as *const u32,
-                (info.len as usize) / size_of::<u32>(),
-            )
-        }
-    }
-
-    pub fn read_property_as_u32(&self, info: &DtbPropertyInfo) -> Option<u32> {
-        if (info.len as usize) < size_of::<u32>() {
+    pub fn read_property_as_u32(&self, info: &DtbPropertyInfo, index: usize) -> Option<u32> {
+        if (info.len as usize) < (size_of::<u32>() * (index + 1)) {
             None
         } else {
-            Some(unsafe { *(info.base_address.to_usize() as *const u32) })
+            Some(u32::from_be(unsafe {
+                *((info.base_address.to_usize() + size_of::<u32>() * index) as *const u32)
+            }))
         }
     }
 }

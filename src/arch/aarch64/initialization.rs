@@ -12,7 +12,7 @@ use crate::arch::target_arch::{
         cpu,
         generic_timer::{GenericTimer, SystemCounter},
     },
-    interrupt::{InterruptManager, gic::GicDistributor},
+    interrupt::{InterruptManager, gic::GicDistributor, gic::read_interrupt_info_from_dtb},
     paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
@@ -291,17 +291,17 @@ pub fn init_interrupt(acpi_available: bool, dtb_available: bool) {
 
 pub fn init_interrupt_ap(cpu_manager_cluster: &mut CpuManagerCluster) {
     let mut interrupt_manager = InterruptManager::new();
-    let mut cpu_redistributor;
+    let mut cpu_redistributor = None;
     interrupt_manager.init_ap();
 
-    {
-        /* Try to find with ACPI */
-        let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+    let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
+    if acpi_manager.is_available() {
         cpu_redistributor = get_kernel_manager_cluster()
             .arch_depend_data
             .gic_manager
             .new_redistributor_with_acpi(&acpi_manager);
     }
+    drop(acpi_manager);
 
     if cpu_redistributor.is_none() {
         /* Try to find with Devicetree */
@@ -443,36 +443,36 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
     let system_counter = &mut get_kernel_manager_cluster().arch_depend_data.system_counter;
     let local_timer_manager = &mut get_cpu_manager_cluster().local_timer_manager;
     let mut initialized = false;
-    if acpi_available {
-        if let Some(gtdt) = get_kernel_manager_cluster()
+    if acpi_available
+        && let Some(gtdt) = get_kernel_manager_cluster()
             .acpi_manager
             .lock()
             .unwrap()
             .get_table_manager()
             .get_table_manager::<GtdtManager>()
-        {
-            if let Some(cnt_base) = gtdt.get_cnt_control_base() {
-                if let Err(e) = system_counter.init_cnt_ctl_base(PAddress::new(cnt_base)) {
-                    panic!("Failed to init System Counter: {:?}", e);
-                }
+    {
+        if let Some(cnt_base) = gtdt.get_cnt_control_base() {
+            if let Err(e) = system_counter.init_cnt_ctl_base(PAddress::new(cnt_base)) {
+                panic!("Failed to init System Counter: {:?}", e);
             }
-            let is_level_trigger;
-            let interrupt_id;
-            if cpu::get_current_el() == 2 {
-                pr_info!("Using EL2 Physical Timer");
-                is_level_trigger = (gtdt.get_el2_flags() & 1) == 0;
-                interrupt_id = gtdt.get_el2_gsiv();
-            } else {
-                pr_info!("Using EL1 Timer");
-                is_level_trigger = (gtdt.get_non_secure_el1_flags() & 1) == 0;
-                interrupt_id = gtdt.get_non_secure_el1_gsiv();
-            }
-
-            generic_timer.init(true, is_level_trigger, interrupt_id, None);
-            gtdt.delete_map();
-            initialized = true;
         }
+        let is_level_trigger;
+        let interrupt_id;
+        if cpu::get_current_el() == 2 {
+            pr_info!("Using EL2 Physical Timer");
+            is_level_trigger = (gtdt.get_el2_flags() & 1) == 0;
+            interrupt_id = gtdt.get_el2_gsiv();
+        } else {
+            pr_info!("Using EL1 Timer");
+            is_level_trigger = (gtdt.get_non_secure_el1_flags() & 1) == 0;
+            interrupt_id = gtdt.get_non_secure_el1_gsiv();
+        }
+
+        generic_timer.init(true, is_level_trigger, interrupt_id, None);
+        gtdt.delete_map();
+        initialized = true;
     }
+
     if !initialized && dtb_available {
         let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
         let mut previous_timer = None;
@@ -481,39 +481,28 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
                 && dtb_manager.is_node_operational(&info)
             {
                 /* Found Usable timer */
-                if let Some(interrupts) =
-                    dtb_manager.get_property(&info, &DtbManager::PROP_INTERRUPTS)
-                {
-                    let clock_frequency = dtb_manager.get_property(&info, b"clock-frequency");
-                    let interrupts = dtb_manager.read_property_as_u32_array(&interrupts);
-                    let index_base = if cpu::get_current_el() == 2 {
-                        pr_info!("Using EL2 Physical Timer");
-                        9
-                    } else {
-                        pr_info!("Using EL1 Timer");
-                        3
-                    };
+                let clock_frequency = dtb_manager.get_property(&info, b"clock-frequency");
+                let interrupt_index = if cpu::get_current_el() == 2 {
+                    pr_info!("Using EL2 Physical Timer");
+                    3
+                } else {
+                    pr_info!("Using EL1 Timer");
+                    1
+                };
 
-                    if interrupts.len() >= index_base + 3 {
-                        generic_timer.init(
-                            true,
-                            (interrupts[index_base + 2] & 0b1111) == 4,
-                            if interrupts[index_base] == GicDistributor::DTB_GIC_SPI {
-                                interrupts[index_base + 1]
-                                    + GicDistributor::DTB_GIC_SPI_INTERRUPT_ID_OFFSET
-                            } else {
-                                interrupts[index_base + 1]
-                            },
-                            clock_frequency.and_then(|i| dtb_manager.read_property_as_u32(&i)),
-                        );
-                        initialized = true;
-                        break;
-                    } else {
-                        pr_err!(
-                            "Interrupts cells are too small(Length: {:#X})",
-                            interrupts.len()
-                        );
-                    }
+                if let Some((interrupt_id, is_level_trigger)) =
+                    read_interrupt_info_from_dtb(dtb_manager, &info, interrupt_index)
+                {
+                    generic_timer.init(
+                        true,
+                        is_level_trigger,
+                        interrupt_id,
+                        clock_frequency.and_then(|i| dtb_manager.read_property_as_u32(&i, 0)),
+                    );
+                    initialized = true;
+                    break;
+                } else {
+                    pr_err!("Failed to get interrupt information");
                 }
             }
             previous_timer = Some(info);

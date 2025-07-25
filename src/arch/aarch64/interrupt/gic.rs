@@ -6,7 +6,7 @@ use super::InterruptGroup;
 
 use crate::kernel::drivers::{
     acpi::{AcpiManager, table::madt::MadtManager},
-    dtb::DtbManager,
+    dtb::{DtbManager, DtbNodeInfo},
 };
 use crate::kernel::memory_manager::data_type::{MSize, PAddress};
 
@@ -23,12 +23,14 @@ pub enum GicRedistributor {
     GicV3(gicv3::GicV3Redistributor),
 }
 
+/* Devicetree Definitions */
+const DTB_GIC_SPI: u32 = 0x00;
+const DTB_GIC_PPI: u32 = 0x01;
+const DTB_GIC_PPI_INTERRUPT_ID_OFFSET: u32 = 16;
+const DTB_GIC_SPI_INTERRUPT_ID_OFFSET: u32 = 32;
+
 impl GicDistributor {
     pub const INTERRUPT_ID_INVALID: u32 = 1023;
-    /* Device Tree Definitions */
-    pub const DTB_GIC_SPI: u32 = 0x00;
-    pub const DTB_GIC_PPI: u32 = 0x01;
-    pub const DTB_GIC_SPI_INTERRUPT_ID_OFFSET: u32 = 32;
 
     pub fn new_with_acpi(acpi_manager: &AcpiManager) -> Result<Self, ()> {
         let Some(madt) = acpi_manager
@@ -302,4 +304,37 @@ impl GicRedistributor {
             GicRedistributor::GicV3(r) => r.send_eoi(index, group),
         }
     }
+}
+
+pub fn read_interrupt_info_from_dtb(
+    dtb_manager: &DtbManager,
+    info: &DtbNodeInfo,
+    index: usize,
+) -> Option<(
+    u32,  /* interrupt_id */
+    bool, /* is_level_trigger */
+)> {
+    let base = index * 3;
+    dtb_manager
+        .get_property(info, &DtbManager::PROP_INTERRUPTS)
+        .and_then(|i| {
+            if let Some(interrupt_type) = dtb_manager.read_property_as_u32(&i, base)
+                && let Some(interrupt_id) = dtb_manager.read_property_as_u32(&i, base + 1)
+                && let Some(interrupt_attribute) = dtb_manager.read_property_as_u32(&i, base + 2)
+            {
+                Some((
+                    match interrupt_type {
+                        DTB_GIC_SPI => DTB_GIC_SPI_INTERRUPT_ID_OFFSET + interrupt_id,
+                        DTB_GIC_PPI => DTB_GIC_PPI_INTERRUPT_ID_OFFSET + interrupt_id,
+                        t => {
+                            pr_warn!("Unknown interrupt type: {t:#X}");
+                            interrupt_id
+                        }
+                    },
+                    interrupt_attribute & 0b1111 == 4,
+                ))
+            } else {
+                None
+            }
+        })
 }
