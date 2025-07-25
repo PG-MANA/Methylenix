@@ -247,17 +247,17 @@ impl GicRedistributor {
     /// Set Priority Mask
     ///
     /// If the priority of interrupt request  is higher(nearer 0), this processing element will generate interrupt.
-    pub fn set_priority_mask(&self, mask: u8) {
+    pub fn set_priority_mask(&self, mask: u8, group: InterruptGroup) {
         match self {
-            GicRedistributor::GicV2(r) => r.set_priority_mask(mask),
-            GicRedistributor::GicV3(r) => r.set_priority_mask(mask),
+            GicRedistributor::GicV2(r) => r.set_priority_mask(mask, group),
+            GicRedistributor::GicV3(r) => r.set_priority_mask(mask, group),
         }
     }
 
-    pub fn set_binary_point(&self, point: u8) {
+    pub fn set_binary_point(&self, point: u8, group: InterruptGroup) {
         match self {
-            GicRedistributor::GicV2(r) => r.set_binary_point(point),
-            GicRedistributor::GicV3(r) => r.set_binary_point(point),
+            GicRedistributor::GicV2(r) => r.set_binary_point(point, group),
+            GicRedistributor::GicV3(r) => r.set_binary_point(point, group),
         }
     }
 

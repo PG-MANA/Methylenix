@@ -297,11 +297,10 @@ impl GicV3Distributor {
 
 impl GicV3Redistributor {
     pub const DEFAULT_PRIORITY: u8 = 0xff;
-    pub const DEFAULT_BINARY_POINT: u8 = 0x00;
+    pub const DEFAULT_BINARY_POINT: u8 = 0x03;
 
     const ICC_SRE_SRE: u64 = 1;
     const ICC_IGRPEN1_EN: u64 = 1;
-    const ICC_IGRPEN0_EN: u64 = 1;
 
     const GICR_CTLR: usize = 0x00;
     #[allow(dead_code)]
@@ -342,10 +341,11 @@ impl GicV3Redistributor {
         while (self.read_register(Self::GICR_WAKER) & Self::GICR_WAKER_CHILDREN_ASLEEP) != 0 {
             core::hint::spin_loop();
         }
-        self.set_priority_mask(Self::DEFAULT_PRIORITY);
-        self.set_binary_point(Self::DEFAULT_BINARY_POINT);
+
+        /* Set up Group1 interrupts */
+        self.set_priority_mask(Self::DEFAULT_PRIORITY, InterruptGroup::NonSecureEl1);
+        self.set_binary_point(Self::DEFAULT_BINARY_POINT, InterruptGroup::NonSecureEl1);
         unsafe { cpu::set_icc_igrpen1(Self::ICC_IGRPEN1_EN) };
-        unsafe { cpu::set_icc_igrpen0(Self::ICC_IGRPEN0_EN) };
         true
     }
 
@@ -356,14 +356,15 @@ impl GicV3Redistributor {
     /// Set Priority Mask
     ///
     /// If the priority of interrupt request  is higher(nearer 0), this processing element will generate interrupt.
-    pub fn set_priority_mask(&self, mask: u8) {
-        unsafe { cpu::set_icc_pmr(mask as u64) }
+    pub fn set_priority_mask(&self, mask: u8, group: InterruptGroup) {
+        match group {
+            InterruptGroup::NonSecureEl1 => unsafe { cpu::set_icc_pmr(mask as u64) },
+        }
     }
 
-    pub fn set_binary_point(&self, point: u8) {
-        unsafe {
-            cpu::set_icc_bpr0(point as u64);
-            cpu::set_icc_bpr1(point as u64);
+    pub fn set_binary_point(&self, point: u8, group: InterruptGroup) {
+        match group {
+            InterruptGroup::NonSecureEl1 => unsafe { cpu::set_icc_bpr1(point as u64) },
         }
     }
 

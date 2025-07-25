@@ -233,9 +233,10 @@ impl GicV2Redistributor {
     }
 
     fn init(&mut self) -> bool {
+        /* Set up Group1 interrupts */
         self.write_register(Self::GICC_CTLR, Self::GICC_CTLR_ENABLE_GRP1);
-        self.set_priority_mask(Self::DEFAULT_PRIORITY);
-        self.set_binary_point(Self::DEFAULT_BINARY_POINT);
+        self.set_priority_mask(Self::DEFAULT_PRIORITY, InterruptGroup::NonSecureEl1);
+        self.set_binary_point(Self::DEFAULT_BINARY_POINT, InterruptGroup::NonSecureEl1);
         true
     }
 
@@ -246,11 +247,11 @@ impl GicV2Redistributor {
     /// Set Priority Mask
     ///
     /// If the priority of interrupt request  is higher(nearer 0), this processing element will generate interrupt.
-    pub fn set_priority_mask(&self, mask: u8) {
+    pub fn set_priority_mask(&self, mask: u8, _: InterruptGroup) {
         self.write_register(Self::GICC_PMR, mask as u32);
     }
 
-    pub fn set_binary_point(&self, point: u8) {
+    pub fn set_binary_point(&self, point: u8, _: InterruptGroup) {
         self.write_register(Self::GICC_BPR, point as u32);
     }
 
