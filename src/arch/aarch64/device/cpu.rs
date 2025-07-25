@@ -592,6 +592,7 @@ ap_entry:
     mov x2, (1 << 31) /* RW */ | (1 << 27) /* TGE */
     orr x2, x2, (1 << 34) /* E2H */
     msr hcr_el2, x2
+    isb
 3:
     /* EL1 or EL2(E2H) */
     mrs x6, DAIF
@@ -604,11 +605,9 @@ ap_entry:
     ldp x7, x8, [x2, #(16 * 2)] /* x7: Stack, x8: Jump Point */
     msr tcr_el1, x3
     msr ttbr1_el1, x4
-    msr ttbr0_el1, x4
     msr mair_el1, x6
-    msr sctlr_el1, x5
     mov sp, x7
-    isb
+    msr sctlr_el1, x5
     br  x8
 .align  4
 ap_entry_end:

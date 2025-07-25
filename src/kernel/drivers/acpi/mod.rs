@@ -100,7 +100,7 @@ impl AcpiManager {
     }
 
     pub fn init(&mut self, rsdp_ptr: usize, device_manager: &mut AcpiDeviceManager) -> bool {
-        /* rsdp_ptr is pointer of RSDP. */
+        /* rsdp_ptr is the pointer of RSDP. */
         /* *rsdp_ptr must be readable. */
         let rsdp = unsafe { &*(rsdp_ptr as *const RSDP) };
         if rsdp.signature != *b"RSD PTR " {

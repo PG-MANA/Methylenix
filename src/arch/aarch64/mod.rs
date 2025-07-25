@@ -158,7 +158,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     /* Setup APs if the processor is multicore-processor */
     init_multiple_processors_ap(acpi_available, dtb_available);
 
-    /* Switch to main process */
+    /* Switch to the main process */
     get_cpu_manager_cluster().run_queue.start()
     /* Never return to here */
 }

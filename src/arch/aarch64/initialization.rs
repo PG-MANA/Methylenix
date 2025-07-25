@@ -562,24 +562,52 @@ pub fn init_task(main_process: fn() -> !, idle_process: fn() -> !) {
 ///
 /// This function will set up multiple processors by using ACPI
 /// This is in the development
-pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
-    if !acpi_available {
-        unimplemented!()
-    }
-    /* Get available Local APIC IDs from ACPI */
-    let Some(madt_manager) = get_kernel_manager_cluster()
-        .acpi_manager
-        .lock()
-        .unwrap()
-        .get_table_manager()
-        .get_table_manager::<MadtManager>()
-    else {
-        pr_info!("ACPI does not have MADT.");
-        return;
-    };
-    let mpidr_list_iter = madt_manager.get_generic_interrupt_controller_cpu_info_iter();
+pub fn init_multiple_processors_ap(acpi_available: bool, dtb_available: bool) {
+    /* For ACPI */
+    let acpi_madt_manager;
+    let mut acpi_cpu_iter = None;
+    /* For Devicetree */
+    let mut dtb_cpu_node = None;
 
-    /* Set BSP Local APIC ID into cpu_manager */
+    /* Prepare the structs needed by `mpidr_iter` */
+    if acpi_available {
+        acpi_madt_manager = get_kernel_manager_cluster()
+            .acpi_manager
+            .lock()
+            .unwrap()
+            .get_table_manager()
+            .get_table_manager::<MadtManager>();
+        if acpi_madt_manager.is_none() {
+            pr_info!("ACPI does not have MADT.");
+            return;
+        };
+        acpi_cpu_iter =
+            acpi_madt_manager.map(|m| m.get_generic_interrupt_controller_cpu_info_iter());
+    } else if dtb_available {
+        /* Do nothing */
+    } else {
+        pr_info!("Failed to get processors information");
+        return;
+    }
+
+    let mut mpidr_iter = || {
+        if acpi_available {
+            acpi_cpu_iter.as_mut().unwrap().next()
+        } else if dtb_available {
+            let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
+            if let Some(n) = dtb_manager.search_node(b"cpu", dtb_cpu_node.as_ref()) {
+                let mpidr = dtb_manager
+                    .read_reg_property(&n, 0)
+                    .map(|(mpidr, _)| mpidr as u64);
+                dtb_cpu_node = Some(n);
+                mpidr
+            } else {
+                None
+            }
+        } else {
+            unreachable!();
+        }
+    };
 
     /* Extern Assembly Symbols */
     unsafe extern "C" {
@@ -609,7 +637,6 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
             ap_entry_end_address - ap_entry_address,
         )
     };
-    cpu::flush_data_cache_all();
 
     /* Allocate and set temporary stack */
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
@@ -634,11 +661,11 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
 
     let mut num_of_cpu = 1usize;
 
-    'ap_init_loop: for mpidr in mpidr_list_iter {
+    'ap_init_loop: while let Some(mpidr) = mpidr_iter() {
         if mpidr == bsp_mpidr {
             continue;
         }
-        pr_debug!("Boot the CPU(MPIDR: {:#X})", mpidr);
+        pr_debug!("Boot the CPU (MPIDR: {mpidr:#X})");
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
         cpu::synchronize(VAddress::from(AP_BOOT_COMPLETE_FLAG.as_ptr()));
         let mut x0 = cpu::SMC_PSCI_CPU_ON;
@@ -682,8 +709,6 @@ pub fn init_multiple_processors_ap(acpi_available: bool, _dtb_available: bool) {
     let _ = free_pages!(virtual_address);
     let _ = free_pages!(stack);
 
-    //madt_manager.release_memory_map();
-
     if num_of_cpu != 1 {
         pr_info!("Found {} CPUs", num_of_cpu);
     }
@@ -694,7 +719,7 @@ pub extern "C" fn ap_boot_main() -> ! {
     let cpu_manager = setup_cpu_manager_cluster(None);
 
     /* Show information */
-    pr_info!("Booted CPU(ID: {})", cpu_manager.cpu_id);
+    pr_info!("Booted CPU (ID: {:#X})", cpu_manager.cpu_id);
     pr_info!("CurrentEL: {}", cpu::get_current_el());
 
     /* Setup memory management system */
