@@ -509,9 +509,7 @@ pub fn init_local_timer_and_system_counter(acpi_available: bool, dtb_available: 
         }
     }
 
-    if !initialized {
-        panic!("Failed to initialize Generic Timer");
-    }
+    assert!(initialized, "Failed to initialize Generic Timer");
     local_timer_manager.set_source_timer(generic_timer);
 }
 
@@ -558,11 +556,7 @@ pub fn init_task(main_process: fn() -> !, idle_process: fn() -> !) {
     init_struct!(get_kernel_manager_cluster().task_manager, task_manager);
 }
 
-/// Init APs
-///
-/// This function will set up multiple processors by using ACPI
-/// This is in the development
-pub fn init_multiple_processors_ap(acpi_available: bool, dtb_available: bool) {
+pub fn wake_up_application_processors(acpi_available: bool, dtb_available: bool) {
     /* For ACPI */
     let acpi_madt_manager;
     let mut acpi_cpu_iter = None;
@@ -614,6 +608,7 @@ pub fn init_multiple_processors_ap(acpi_available: bool, dtb_available: bool) {
         /* device/cpu.rs */
         fn ap_entry();
         fn ap_entry_end();
+        fn ap_temporary_interrupt_vector();
     }
     let ap_entry_address = ap_entry as *const fn() as usize;
     let ap_entry_end_address = ap_entry_end as *const fn() as usize;
@@ -647,8 +642,10 @@ pub fn init_multiple_processors_ap(acpi_available: bool, dtb_available: bool) {
         cpu::get_ttbr1(),
         cpu::get_sctlr(),
         cpu::get_mair(),
+        ap_temporary_interrupt_vector as *const fn() as usize as u64,
         (stack + stack_size).to_usize() as u64,
         ap_boot_main as *const fn() as usize as u64,
+        0,
     ];
 
     unsafe {
@@ -665,7 +662,7 @@ pub fn init_multiple_processors_ap(acpi_available: bool, dtb_available: bool) {
         if mpidr == bsp_mpidr {
             continue;
         }
-        pr_debug!("Boot the CPU (MPIDR: {mpidr:#X})");
+        pr_info!("Boot the CPU (MPIDR: {mpidr:#X})");
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
         cpu::synchronize(VAddress::from(AP_BOOT_COMPLETE_FLAG.as_ptr()));
         let mut x0 = cpu::SMC_PSCI_CPU_ON;
@@ -692,7 +689,7 @@ pub fn init_multiple_processors_ap(acpi_available: bool, dtb_available: bool) {
             )
         }
         if x0 != 0 {
-            pr_err!("Failed to startup CPU(Result of PSCI: {:#X})", x0);
+            pr_err!("Failed to startup the CPU: {x0:#X}");
             continue;
         }
         loop {
@@ -703,7 +700,6 @@ pub fn init_multiple_processors_ap(acpi_available: bool, dtb_available: bool) {
             }
             core::hint::spin_loop();
         }
-        //panic!("Fialed to setup CPU(MPIDR: {:#X})", mpidr);
     }
 
     let _ = free_pages!(virtual_address);
@@ -717,24 +713,27 @@ pub fn init_multiple_processors_ap(acpi_available: bool, dtb_available: bool) {
 pub extern "C" fn ap_boot_main() -> ! {
     /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
+    pr_info!(
+        "Booted (CPU ID: {:#X}, CurrentEL: {})",
+        cpu_manager.cpu_id,
+        cpu::get_current_el()
+    );
 
-    /* Show information */
-    pr_info!("Booted CPU (ID: {:#X})", cpu_manager.cpu_id);
-    pr_info!("CurrentEL: {}", cpu::get_current_el());
-
-    /* Setup memory management system */
+    /* Set up the memory management system */
     let mut memory_allocator = MemoryAllocator::new();
     memory_allocator
         .init()
         .expect("Failed to init MemoryAllocator");
     init_struct!(cpu_manager.memory_allocator, memory_allocator);
 
-    /* Setup InterruptManager */
+    /* Set up the interrupt */
     init_interrupt_ap(cpu_manager);
-
     init_local_timer_ap();
+
+    /* Set up the task management system */
     init_task_ap(ap_idle);
     init_work_queue();
+
     /* Switch to ap_idle task with own stack */
     cpu_manager.run_queue.start()
 }

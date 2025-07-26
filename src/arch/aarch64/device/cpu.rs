@@ -599,18 +599,48 @@ ap_entry:
     orr x6, x6, (1 << 6) | (1 << 7)
     msr DAIF, x6
     isb
-    adr x2, ap_entry_end
-    ldp x3, x4, [x2, #(16 * 0)] /* x3: TCR_EL1, x4: TTBR1_EL1 */
-    ldp x5, x6, [x2, #(16 * 1)] /* x5: SCTLR_EL1, x6: MAIR_EL1 */
-    ldp x7, x8, [x2, #(16 * 2)] /* x7: Stack, x8: Jump Point */
-    msr tcr_el1, x3
-    msr ttbr1_el1, x4
-    msr mair_el1, x6
-    mov sp, x7
-    msr sctlr_el1, x5
-    br  x8
+    adr x30, ap_entry_end
+    ldp  x1,  x2, [x30, #(16 * 0)] /* x1: TCR_EL1,   x2: TTBR1_EL1 */
+    ldp  x3,  x4, [x30, #(16 * 1)] /* x3: SCTLR_EL1, x4: MAIR_EL1 */
+    ldp  x5,  x6, [x30, #(16 * 2)] /* x5: VBAR_EL1,  x6: Stack Pointer */
+    ldp  x7, xzr, [x30, #(16 * 3)] /* x7: Entry Point */
+    msr tcr_el1,    x1
+    msr ttbr1_el1,  x2
+    msr mair_el1,   x4
+    msr vbar_el1,   x5
+    mov sp,         x6
+    isb
+    msr sctlr_el1,  x3
+    br  x7
 .align  4
 ap_entry_end:
 .size   ap_entry, ap_entry_end - ap_entry
+
+.global     ap_temporary_interrupt_vector
+.balign     0x800
+ap_temporary_interrupt_vector:
+/* synchronous_current_el_stack_pointer_0 */
+    msr elr_el1, x7
+    eret
+
+.balign 0x080
+/* irq_current_el_stack_pointer_0 */
+    b   ap_temporary_interrupt_vector
+
+.balign 0x080
+/* fiq_current_el_stack_pointer_0 */
+    b   ap_temporary_interrupt_vector
+
+.balign 0x080
+/* s_error_current_el_stack_pointer_0 */
+    b   ap_temporary_interrupt_vector
+
+.balign 0x080
+/* synchronous_current_el_stack_pointer_x */
+    msr elr_el1, x7
+    eret
+
+.balign     0x800
+.size   ap_temporary_interrupt_vector, . - ap_temporary_interrupt_vector
 "
 );

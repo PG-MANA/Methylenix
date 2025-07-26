@@ -138,25 +138,18 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
         .open(&get_kernel_manager_cluster().graphic_manager);
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
-    pr_info!("Booted from UEFI Loader");
-    pr_info!("Device Information: ACPI: {acpi_available}, DTB: {dtb_available}");
+    pr_info!("Booted from UEFI Loader (ACPI: {acpi_available}, DTB: {dtb_available})");
     pr_info!("CurrentEL: {}", device::cpu::get_current_el());
 
-    /* Init interrupt */
     init_interrupt(acpi_available, dtb_available);
-
-    /* Init Timers */
     init_local_timer_and_system_counter(acpi_available, dtb_available);
     init_global_timer();
 
-    /* Init the task management system */
+    /* Set up the task management system */
     init_task(main_arch_depend_initialization_process, idle);
-
-    /* Setup work queue system */
     init_work_queue();
 
-    /* Setup APs if the processor is multicore-processor */
-    init_multiple_processors_ap(acpi_available, dtb_available);
+    wake_up_application_processors(acpi_available, dtb_available);
 
     /* Switch to the main process */
     get_cpu_manager_cluster().run_queue.start()
@@ -164,9 +157,6 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
 }
 
 fn main_arch_depend_initialization_process() -> ! {
-    /* Interrupt is enabled */
-
-    /* Start Timer*/
     get_cpu_manager_cluster()
         .arch_depend_data
         .generic_timer
@@ -179,6 +169,5 @@ fn main_arch_depend_initialization_process() -> ! {
         pr_err!("Failed to setup interrupt of SerialPort");
     }
 
-    pr_info!("All arch-depend initializations are done!");
     main_initialization_process()
 }

@@ -143,14 +143,11 @@ pub extern "C" fn multiboot_main(
         main_arch_depend_initialization_process,
         idle,
     );
-
-    /* Setup work queue system */
     init_work_queue();
 
-    /* Setup APs if the processor is multicore-processor */
-    init_multiple_processors_ap();
+    wake_up_application_processors();
 
-    /* Switch to main process */
+    /* Switch to the main process */
     get_cpu_manager_cluster().run_queue.start()
     /* Never return to here */
 }
@@ -160,8 +157,6 @@ pub fn general_protection_exception_handler(e_code: usize) -> ! {
 }
 
 fn main_arch_depend_initialization_process() -> ! {
-    /* Interrupt is enabled */
-
     get_cpu_manager_cluster()
         .arch_depend_data
         .local_apic_timer
@@ -171,6 +166,5 @@ fn main_arch_depend_initialization_process() -> ! {
                 .get_local_apic_manager(),
         );
 
-    pr_info!("All arch-depend initializations are done!");
     main_initialization_process()
 }

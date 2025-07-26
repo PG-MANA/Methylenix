@@ -123,7 +123,10 @@ impl GenericTimer {
         self.is_level_trigger = is_level_trigger;
         self.interrupt_id = interrupt_id;
         self.frequency = frequency.unwrap_or(0);
-        pr_debug!("Generic Timer Interrupt ID: {interrupt_id}");
+        pr_info!(
+            "Interrupt ID: {interrupt_id}, Timer frequency: {} Hz",
+            self.frequency
+        );
         get_cpu_manager_cluster()
             .interrupt_manager
             .set_device_interrupt_function(

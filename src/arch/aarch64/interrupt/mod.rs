@@ -286,151 +286,102 @@ global_asm!(
     "
 .section    .text
 .global     interrupt_vector
-.balign     0x800
-
 .type       interrupt_vector, %function
+
+.balign     0x800
 interrupt_vector:
-
-.type       synchronous_current_el_stack_pointer_0, %function
-synchronous_current_el_stack_pointer_0:
-    b       synchronous_current_el_stack_pointer_0
-.size       synchronous_current_el_stack_pointer_0, . - synchronous_current_el_stack_pointer_0
+/* synchronous_current_el_stack_pointer_0 */
+    b       interrupt_vector
 
 .balign 0x080
-
-.type       irq_current_el_stack_pointer_0, %function
-irq_current_el_stack_pointer_0:
+/* irq_current_el_stack_pointer_0 */
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
     mov     x1, {irq_mark}
     b       interrupt_entry
-.size       irq_current_el_stack_pointer_0, . - irq_current_el_stack_pointer_0
 
 .balign 0x080
-
-.type       fiq_current_el_stack_pointer_0, %function
-fiq_current_el_stack_pointer_0:
+/* fiq_current_el_stack_pointer_0 */
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
     mov     x1, {fiq_mark}
     b       interrupt_entry
-.size       fiq_current_el_stack_pointer_0, . - fiq_current_el_stack_pointer_0
 
 .balign 0x080
-
-.type       fiq_current_el_stack_pointer_0, %function
-s_error_current_el_stack_pointer_0:
-    b       s_error_current_el_stack_pointer_0
-.size       s_error_current_el_stack_pointer_0, . - s_error_current_el_stack_pointer_0
+/* s_error_current_el_stack_pointer_0 */
+    b       interrupt_vector
 
 .balign 0x080
-
-.type       synchronous_current_el_stack_pointer_x, %function
-synchronous_current_el_stack_pointer_x:
-    b       synchronous_current_el_stack_pointer_x
-.size       synchronous_current_el_stack_pointer_x, . - synchronous_current_el_stack_pointer_x
+/* synchronous_current_el_stack_pointer_x */
+    b       interrupt_vector
 
 .balign 0x080
-
-.type       irq_current_el_stack_pointer_x, %function
-irq_current_el_stack_pointer_x:
+/* irq_current_el_stack_pointer_x */
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
     mov     x1, {irq_mark}
     b       interrupt_entry
-.size       synchronous_current_el_stack_pointer_x, . - synchronous_current_el_stack_pointer_x
 
 .balign 0x080
-
-.type       fiq_current_el_stack_pointer_x, %function
-fiq_current_el_stack_pointer_x:
+/* fiq_current_el_stack_pointer_x */
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
     mov     x1, {fiq_mark}
     b       interrupt_entry
-.size       fiq_current_el_stack_pointer_x, . - fiq_current_el_stack_pointer_x
 
 .balign 0x080
-
-.type       s_error_current_el_stack_pointer_x, %function
-s_error_current_el_stack_pointer_x:
-    b       s_error_current_el_stack_pointer_x
-.size       s_error_current_el_stack_pointer_x, . - s_error_current_el_stack_pointer_x
+/* s_error_current_el_stack_pointer_x */
+    b       interrupt_vector
 
 .balign 0x080
-
-.type       synchronous_lower_el_aarch64, %function
-synchronous_lower_el_aarch64:
+/* synchronous_lower_el_aarch64 */
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
     mov     x1, {synchronous_lower}
     b       interrupt_entry
-.size       synchronous_lower_el_aarch64, . - synchronous_lower_el_aarch64
 
 .balign 0x080
-
-.type       irq_lower_el_aarch64, %function
-irq_lower_el_aarch64:
+/* irq_lower_el_aarch64 */
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
     mov     x1, {irq_mark}
     b       interrupt_entry
-.size       irq_lower_el_aarch64, . - irq_lower_el_aarch64
 
 .balign 0x080
-
-.type       fiq_lower_el_aarch64, %function
-fiq_lower_el_aarch64:
+/* fiq_lower_el_aarch64 */
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
     mov     x1, {fiq_mark}
     b       interrupt_entry
-.size       fiq_lower_el_aarch64, . - fiq_lower_el_aarch64
 
 .balign 0x080
-
-.type       s_error_lower_el_aarch64, %function
-s_error_lower_el_aarch64:
-    b       s_error_lower_el_aarch64
-.size       s_error_lower_el_aarch64, . - s_error_lower_el_aarch64
+/* s_error_lower_el_aarch64 */
+    b       interrupt_vector
 
 .balign 0x080
-
-.type       synchronous_lower_el_aarch32, %function
-synchronous_lower_el_aarch32:
-    b       synchronous_lower_el_aarch32
-.size       synchronous_lower_el_aarch32, . - synchronous_lower_el_aarch32
+/* synchronous_lower_el_aarch32 */
+    b       interrupt_vector
 
 .balign 0x080
-
-.type       irq_lower_el_aarch32, %function
-irq_lower_el_aarch32:
-    b       irq_lower_el_aarch32
-.size       irq_lower_el_aarch32, . - irq_lower_el_aarch32
+/* irq_lower_el_aarch32 */
+    b       interrupt_vector
 
 .balign 0x080
-
-.type       fiq_lower_el_aarch32, %function
-fiq_lower_el_aarch32:
-    b       fiq_lower_el_aarch32
-.size       fiq_lower_el_aarch32, . - fiq_lower_el_aarch32
+/* fiq_lower_el_aarch32 */
+    b       interrupt_vector
 
 .balign 0x080
-
-.type       fiq_lower_el_aarch32, %function
-s_error_lower_el_aarch32:
-    b       s_error_lower_el_aarch32
-.size       s_error_lower_el_aarch32, . - s_error_lower_el_aarch32
+/* s_error_lower_el_aarch32 */
+    b       interrupt_vector
 
 // sp must be subbed {c} sizes, x0 ~ x3 must be saved
-.type       interrupt_entry, %function
 interrupt_entry:
     //sub     sp, sp, {c}
     //stp     x0, x1, [sp, #(16 * 0)]

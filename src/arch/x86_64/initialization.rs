@@ -194,11 +194,7 @@ pub fn setup_cpu_manager_cluster(
     cpu_manager
 }
 
-/// Init APs
-///
-/// This function will set up multiple processors by using ACPI
-/// This is in the development
-pub fn init_multiple_processors_ap() {
+pub fn wake_up_application_processors() {
     /* 0 ~ PAGE_SIZE is allocated as boot code TODO: allocate dynamically */
     let boot_address = PAddress::new(0);
 
@@ -276,7 +272,7 @@ pub fn init_multiple_processors_ap() {
         if apic_id == bsp_apic_id {
             continue;
         }
-        num_of_cpu += 1;
+        pr_info!("Boot the CPU (APIC ID: {apic_id:#X})");
 
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
 
@@ -286,48 +282,41 @@ pub fn init_multiple_processors_ap() {
             .get_local_apic_manager();
 
         local_apic_manager.send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, false, 0);
-
         timer.busy_wait_us(100);
-
         local_apic_manager.send_interrupt_command(apic_id, 0b101 /*INIT*/, 1, true, 0);
 
         /* Wait 10 milliseconds for the AP */
         timer.busy_wait_ms(10);
-
         local_apic_manager
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
-
         timer.busy_wait_us(200);
-
         local_apic_manager
             .send_interrupt_command(apic_id, 0b110 /* Startup IPI*/, 0, false, vector);
 
-        for _wait in 0..5000
         /* Wait 5 seconds for AP init */
-        {
+        for _wait in 0..5000 {
             if AP_BOOT_COMPLETE_FLAG.load(core::sync::atomic::Ordering::Relaxed) {
+                num_of_cpu += 1;
                 continue 'ap_init_loop;
             }
             timer.busy_wait_ms(1);
         }
-        panic!("Cannot init CPU(APIC ID: {})", apic_id);
+        panic!("Failed to boot the CPU (APIC ID: {apic_id:#X})");
     }
 
     /* Free boot_address */
-    if let Err(e) = get_kernel_manager_cluster()
-        .kernel_memory_manager
-        .free_physical_memory(boot_address, PAGE_SIZE)
-    {
-        pr_err!("Cannot free boot_address: {:?}", e);
-    }
+    bug_on_err!(
+        get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .free_physical_memory(boot_address, PAGE_SIZE)
+    );
 
     /* Free temporary stack */
-    if let Err(e) = get_kernel_manager_cluster()
-        .kernel_memory_manager
-        .free(stack.0)
-    {
-        pr_err!("Cannot free temporary stack: {:?}", e);
-    }
+    bug_on_err!(
+        get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .free(stack.0)
+    );
 
     madt_manager.release_memory_map();
 
@@ -355,6 +344,7 @@ pub extern "C" fn ap_boot_main() -> ! {
 
     /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
+    pr_info!("Booted (CPU ID: {:#X})", cpu_manager.cpu_id);
 
     /* Setup memory management system */
     let mut memory_allocator = MemoryAllocator::new();
@@ -383,12 +373,12 @@ pub extern "C" fn ap_boot_main() -> ! {
     init_local_timer();
     init_task_ap(ap_idle);
     init_work_queue();
+
     /* Switch to ap_idle task with own stack */
     cpu_manager.run_queue.start()
 }
 
 fn ap_idle() -> ! {
-    /* Tell BSP completing of init */
     AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
     get_cpu_manager_cluster()
         .arch_depend_data
