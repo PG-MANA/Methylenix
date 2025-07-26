@@ -370,10 +370,20 @@ impl DtbManager {
             match self._search_node(node_name, &mut pointer, address_cells, size_cells) {
                 Ok(Some(n)) => return Some(n),
                 Ok(None) => {
-                    if self.read_node(pointer).map(|n| *n == Self::FDT_END) == Ok(true) {
-                        return None;
+                    match self.read_node(pointer).map(|n| *n) {
+                        Ok(Self::FDT_END) | Err(_) => {
+                            return None;
+                        }
+                        Ok(Self::FDT_BEGIN_NODE) => { /* Continue */ }
+                        Ok(Self::FDT_END_NODE) | Ok(Self::FDT_NOP) => {
+                            pointer += Self::FDT_NODE_BYTE;
+                            /* Continue */
+                        }
+                        Ok(n) => {
+                            pr_err!("Unexpected Node: {:#X}", u32::from_be_bytes(n));
+                            return None;
+                        }
                     }
-                    /* Continue */
                 }
                 Err(()) => return None,
             }
