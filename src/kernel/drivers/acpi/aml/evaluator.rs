@@ -259,13 +259,9 @@ impl Evaluator {
 
     pub(super) fn init_local_variables_and_argument_variables()
     -> (LocalVariables, ArgumentVariables) {
-        /* TODO: use core::array::repeat when it was stabilized */
-        use core::array::from_fn;
-        let uninitialized_data = Arc::new(Mutex::new(AmlVariable::Uninitialized));
-        (
-            from_fn(|_| uninitialized_data.clone()),
-            from_fn(|_| uninitialized_data.clone()),
-        )
+        use core::array::repeat;
+        let d = Arc::new(Mutex::new(AmlVariable::Uninitialized));
+        (repeat(d.clone()), repeat(d))
     }
 
     fn search_aml_variable_by_parsing_term_list(
