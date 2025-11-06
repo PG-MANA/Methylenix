@@ -7,7 +7,7 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
-use crate::kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 use core::arch::{asm, global_asm, naked_asm};
 
@@ -37,6 +37,9 @@ pub const TCR_EL1_EPD0_OFFSET: u64 = 7;
 pub const TCR_EL1_EPD0: u64 = 1 << TCR_EL1_EPD0_OFFSET;
 pub const TCR_EL1_T0SZ_OFFSET: u64 = 0;
 pub const TCR_EL1_T0SZ: u64 = 0b111111 << TCR_EL1_T0SZ_OFFSET;
+
+pub const CTR_EL0_DMIN_LINE_OFFSET: u64 = 16;
+pub const CTR_EL0_DMIN_LINE: u64 = 0b1111 << CTR_EL0_DMIN_LINE_OFFSET;
 
 pub const SMC_PSCI_CPU_ON: u64 = 0xC4000003;
 
@@ -221,9 +224,20 @@ pub fn instruction_barrier() {
     unsafe { asm!("isb") };
 }
 
-pub fn flush_data_cache(virtual_address: VAddress) {
+pub fn flush_data_cache(virtual_address: VAddress, size: MSize) {
     data_barrier();
-    unsafe { asm!("dc civac, {:x}", in(reg) (virtual_address.to_usize())) };
+    let cache_words = (get_ctr_el0() & CTR_EL0_DMIN_LINE) >> CTR_EL0_DMIN_LINE_OFFSET;
+    let word_size = 4;
+    let cache_size = word_size << cache_words;
+    let cache_mask = !(cache_size - 1);
+
+    let mut address = virtual_address.to_usize() & cache_mask;
+    let end_address = ((virtual_address + size).to_usize() & cache_mask) + cache_size;
+
+    while address <= end_address {
+        unsafe { asm!("dc cvac, {:x}", in(reg) address) };
+        address += word_size;
+    }
     instruction_barrier();
 }
 
@@ -270,6 +284,7 @@ pub fn flush_data_cache_all() {
     unsafe { asm!("msr csselr_el1, {:x}", in(reg) 0) };
 }
 
+#[inline(always)]
 pub fn flush_all_cache() {
     instruction_barrier();
     unsafe { asm!("ic ialluis") };
@@ -277,8 +292,18 @@ pub fn flush_all_cache() {
 }
 
 #[inline(always)]
-pub fn synchronize(target_virtual_address: VAddress) {
-    flush_data_cache(target_virtual_address);
+pub fn synchronize<T>(target_virtual_address: *const T) {
+    flush_data_cache(
+        VAddress::new(target_virtual_address as usize),
+        MSize::new(size_of::<T>()),
+    );
+}
+
+#[inline(always)]
+pub fn get_ctr_el0() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {}, ctr_el0", out(reg) result) };
+    result
 }
 
 #[inline(always)]

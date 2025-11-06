@@ -10,7 +10,7 @@ use crate::arch::target_arch::interrupt::gic::GicDistributor;
 
 use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::memory_manager::data_type::Address;
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use core::arch::global_asm;
@@ -125,9 +125,7 @@ impl InterruptManager {
             }
         } else {
             interrupt_info.handlers[interrupt_id as usize] = function as *const fn(usize) as usize;
-            cpu::synchronize(VAddress::from(
-                &interrupt_info.handlers[interrupt_id as usize] as *const _,
-            ));
+            cpu::synchronize(&interrupt_info.handlers[interrupt_id as usize]);
         }
 
         if interrupt_id < 32 {
@@ -169,7 +167,7 @@ impl InterruptManager {
         for (i, e) in interrupt_info.handlers[32..].iter_mut().enumerate() {
             if *e == 0 {
                 *e = function as *const fn() as usize;
-                cpu::synchronize(VAddress::from(e as *const _));
+                cpu::synchronize(e);
                 interrupt_id = i as u32;
                 break;
             }

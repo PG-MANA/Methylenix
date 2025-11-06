@@ -7,7 +7,7 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
-use crate::kernel::memory_manager::data_type::VAddress;
+use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 
 use core::arch::{asm, naked_asm};
 
@@ -32,7 +32,9 @@ pub unsafe fn idle() {
 }
 
 #[inline(always)]
-pub fn synchronize(_: VAddress) {}
+pub fn synchronize<T>(_: *const T) {
+    flush_data_cache_all()
+}
 
 #[inline(always)]
 pub fn flush_data_cache_all() {
@@ -40,7 +42,7 @@ pub fn flush_data_cache_all() {
 }
 
 #[inline(always)]
-pub fn flush_data_cache(_: VAddress) {
+pub fn flush_data_cache(_: VAddress, _: MSize) {
     flush_data_cache_all()
 }
 

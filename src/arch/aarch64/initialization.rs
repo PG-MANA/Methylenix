@@ -664,7 +664,7 @@ pub fn wake_up_application_processors(acpi_available: bool, dtb_available: bool)
         }
         pr_info!("Boot the CPU (MPIDR: {mpidr:#X})");
         AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
-        cpu::synchronize(VAddress::from(AP_BOOT_COMPLETE_FLAG.as_ptr()));
+        cpu::synchronize(AP_BOOT_COMPLETE_FLAG.as_ptr());
         let mut x0 = cpu::SMC_PSCI_CPU_ON;
         unsafe {
             cpu::smc_0(
@@ -693,7 +693,7 @@ pub fn wake_up_application_processors(acpi_available: bool, dtb_available: bool)
             continue;
         }
         loop {
-            cpu::synchronize(VAddress::from(AP_BOOT_COMPLETE_FLAG.as_ptr()));
+            cpu::synchronize(AP_BOOT_COMPLETE_FLAG.as_ptr());
             if AP_BOOT_COMPLETE_FLAG.load(core::sync::atomic::Ordering::Relaxed) {
                 num_of_cpu += 1;
                 continue 'ap_init_loop;
