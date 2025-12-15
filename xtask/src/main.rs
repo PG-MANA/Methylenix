@@ -41,6 +41,10 @@ fn build(cargo: &str, base_dir: &Path) -> i32 {
             target_arch = "aarch64-unknown-none-softfloat";
             loader = build_loader_aarch64;
         }
+        Some("riscv64") => {
+            target_arch = "riscv64imac-unknown-none-elf";
+            loader = build_loader_riscv64;
+        }
         Some(a) => {
             eprintln!("Unknown architecture: {a}");
             return show_error(cargo, true);
@@ -181,6 +185,16 @@ fn build_loader_aarch64(
         eprintln!("Failed to copy the kernel: {err:?}");
         return -1;
     }
+    0
+}
+
+fn build_loader_riscv64(
+    _cargo: &str,
+    _base_dir: &Path,
+    _target_dir: &Path,
+    _output_dir: &Path,
+    _build_type: &str,
+) -> i32 {
     0
 }
 
