@@ -383,7 +383,7 @@ impl TaskManager {
             bug_on_err!(user_memory_manager.free_all_allocated_memory());
             bug_on_err!(kfree!(user_memory_manager));
         }
-        result
+        Ok(result?)
     }
 
     pub fn create_user_thread(
@@ -429,7 +429,7 @@ impl TaskManager {
         };
         drop(_lock);
         bug_on_err!(&result);
-        result
+        Ok(result?)
     }
 
     pub fn delete_user_process(

@@ -3,6 +3,7 @@
 #![feature(allocator_api)]
 #![feature(array_try_from_fn)]
 #![feature(const_ops)]
+#![feature(const_convert)]
 #![feature(const_trait_impl)]
 #![feature(step_trait)]
 #![feature(try_blocks)]

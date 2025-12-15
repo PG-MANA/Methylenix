@@ -57,15 +57,9 @@ impl SystemMemoryManager {
         }
     }
     pub fn init_pools(&mut self, _vm_manager: &mut VirtualMemoryManager) {
-        // TODO: const trait
-        /*
         const VM_MAP_ENTRY_POOL_SIZE: MSize = PAGE_SIZE << MSize::new(3);
         const VM_OBJECT_POOL_SIZE: MSize = PAGE_SIZE << MSize::new(2);
         const VM_PAGE_POOL_SIZE: MSize = PAGE_SIZE << MSize::new(7);
-         */
-        const VM_MAP_ENTRY_POOL_SIZE: MSize = MSize::new(PAGE_SIZE.to_usize() << 3);
-        const VM_OBJECT_POOL_SIZE: MSize = MSize::new(PAGE_SIZE.to_usize() << 2);
-        const VM_PAGE_POOL_SIZE: MSize = MSize::new(PAGE_SIZE.to_usize() << 7);
 
         let alloc_func = |size: MSize, p: &mut PhysicalMemoryManager| -> usize {
             p.alloc(size, MOrder::new(PAGE_SHIFT))

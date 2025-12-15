@@ -28,11 +28,9 @@ pub const CANONICAL_AREA_HIGH: RangeInclusive<VAddress> =
     VAddress::new(0xffff_8000_0000_0000)..=VAddress::new(0xffff_ffff_ffff_ffff);
 
 const _CHECK_MEMORY_LAYOUT: () = const {
-    // TODO: const trait
     if (KERNEL_MAP_START_ADDRESS.to_usize() & ((1usize << 39) - 1)) != 0 {
         panic!("KERNEL_MAP_START_ADDRESS is not pml4 aligned.");
     }
-    // TODO: const trait
     if (DIRECT_MAP_START_ADDRESS.to_usize() & ((1usize << 39) - 1)) != 0 {
         panic!("KERNEL_MAP_START_ADDRESS is not pml4 aligned.");
     }

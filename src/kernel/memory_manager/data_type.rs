@@ -37,8 +37,7 @@ pub struct MemoryPermissionFlags(u8);
 #[derive(Clone, Eq, PartialEq, Copy)]
 pub struct MemoryOptionFlags(u16);
 
-#[const_trait]
-pub trait Address:
+pub const trait Address:
     Copy
     + Clone
     + Ord
@@ -83,21 +82,21 @@ macro_rules! address {
 
 macro_rules! address_bit_operation {
     ($t:ty) => {
-        impl BitAnd<usize> for $t {
+        impl const BitAnd<usize> for $t {
             type Output = usize;
             fn bitand(self, rhs: usize) -> Self::Output {
                 self.0 & rhs
             }
         }
 
-        impl BitOr<usize> for $t {
+        impl const BitOr<usize> for $t {
             type Output = usize;
             fn bitor(self, rhs: usize) -> Self::Output {
                 self.0 | rhs
             }
         }
 
-        impl BitXor<usize> for $t {
+        impl const BitXor<usize> for $t {
             type Output = usize;
             fn bitxor(self, rhs: usize) -> Self::Output {
                 self.0 ^ rhs
@@ -126,14 +125,14 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl AddAssign<MSize> for $t {
+        impl const AddAssign<MSize> for $t {
             #[inline]
             fn add_assign(&mut self, rhs: MSize) {
                 self.0 += rhs.0;
             }
         }
 
-        impl Sub<MSize> for $t {
+        impl const Sub<MSize> for $t {
             type Output = Self;
             #[inline]
             fn sub(self, rhs: MSize) -> Self::Output {
@@ -141,14 +140,14 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl SubAssign<MSize> for $t {
+        impl const SubAssign<MSize> for $t {
             #[inline]
             fn sub_assign(&mut self, rhs: MSize) {
                 self.0 -= rhs.0;
             }
         }
 
-        impl Shr<MSize> for $t {
+        impl const Shr<MSize> for $t {
             type Output = Self;
             #[inline]
             fn shr(self, rhs: MSize) -> Self::Output {
@@ -156,14 +155,14 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl ShrAssign<MSize> for $t {
+        impl const ShrAssign<MSize> for $t {
             #[inline]
             fn shr_assign(&mut self, rhs: MSize) {
                 self.0 >>= rhs.0;
             }
         }
 
-        impl Shl<MSize> for $t {
+        impl const Shl<MSize> for $t {
             type Output = Self;
             #[inline]
             fn shl(self, rhs: MSize) -> Self::Output {
@@ -171,7 +170,7 @@ macro_rules! add_and_sub_shift_with_m_size {
             }
         }
 
-        impl ShlAssign<MSize> for $t {
+        impl const ShlAssign<MSize> for $t {
             #[inline]
             fn shl_assign(&mut self, rhs: MSize) {
                 self.0 <<= rhs.0;
@@ -182,13 +181,13 @@ macro_rules! add_and_sub_shift_with_m_size {
 
 macro_rules! into_and_from_usize {
     ($t:ty) => {
-        impl Into<usize> for $t {
+        impl const Into<usize> for $t {
             fn into(self) -> usize {
                 self.0
             }
         }
 
-        impl From<usize> for $t {
+        impl const From<usize> for $t {
             fn from(s: usize) -> Self {
                 Self(s)
             }
@@ -225,13 +224,13 @@ impl VAddress {
     }
 }
 
-impl<T: Sized> From<VAddress> for *mut T {
+impl<T: Sized> const From<VAddress> for *mut T {
     fn from(val: VAddress) -> Self {
         val.to_usize() as *mut T
     }
 }
 
-impl<T: Sized> From<VAddress> for *const T {
+impl<T: Sized> const From<VAddress> for *const T {
     fn from(val: VAddress) -> Self {
         val.to_usize() as *const T
     }
@@ -249,7 +248,7 @@ impl<T: Sized> From<*mut T> for VAddress {
     }
 }
 
-impl Sub<Self> for VAddress {
+impl const Sub<Self> for VAddress {
     type Output = MSize;
     fn sub(self, rhs: Self) -> Self::Output {
         MSize(self.0 - rhs.0)
@@ -271,7 +270,7 @@ impl PAddress {
     }
 }
 
-impl Sub<Self> for PAddress {
+impl const Sub<Self> for PAddress {
     type Output = MSize;
     fn sub(self, rhs: Self) -> Self::Output {
         MSize(self.0 - rhs.0)
@@ -334,7 +333,7 @@ impl const Add<PAddress> for MSize {
     }
 }
 
-impl Mul<Self> for MSize {
+impl const Mul<Self> for MSize {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
         MSize(self.0 * rhs.0)
@@ -445,14 +444,14 @@ impl const Add for MIndex {
     }
 }
 
-impl AddAssign for MIndex {
+impl const AddAssign for MIndex {
     #[inline]
     fn add_assign(&mut self, rhs: Self) {
         self.0 += rhs.0;
     }
 }
 
-impl Sub for MIndex {
+impl const Sub for MIndex {
     type Output = Self;
     #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
@@ -460,7 +459,7 @@ impl Sub for MIndex {
     }
 }
 
-impl SubAssign for MIndex {
+impl const SubAssign for MIndex {
     #[inline]
     fn sub_assign(&mut self, rhs: Self) {
         self.0 -= rhs.0;
@@ -592,21 +591,21 @@ impl MemoryOptionFlags {
     }
 }
 
-impl BitAnd<Self> for MemoryOptionFlags {
+impl const BitAnd<Self> for MemoryOptionFlags {
     type Output = Self;
     fn bitand(self, rhs: Self) -> Self::Output {
         Self(self.0 & rhs.0)
     }
 }
 
-impl BitOr<Self> for MemoryOptionFlags {
+impl const BitOr<Self> for MemoryOptionFlags {
     type Output = Self;
     fn bitor(self, rhs: Self) -> Self::Output {
         Self(self.0 | rhs.0)
     }
 }
 
-impl BitXor<Self> for MemoryOptionFlags {
+impl const BitXor<Self> for MemoryOptionFlags {
     type Output = Self;
     fn bitxor(self, rhs: Self) -> Self::Output {
         Self(self.0 ^ rhs.0)
