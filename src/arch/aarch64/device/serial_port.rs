@@ -1,13 +1,12 @@
 //!
-//! Serial Port Devices
+//! Serial Port Device Controller
 //!
 
-mod devices;
-
-use crate::arch::aarch64::interrupt::gic;
+use crate::arch::target_arch::interrupt::gic;
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
 use crate::kernel::drivers::acpi::table::spcr::SpcrManager;
+use crate::kernel::drivers::device::serial_port::*;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
@@ -17,36 +16,6 @@ use crate::kernel::sync::spin_lock::SpinLockFlag;
 use crate::kernel::tty::Writer;
 
 use core::fmt;
-
-/// Dummy putc Function
-fn dummy_putc(_: usize, _: u8) {}
-
-/// Dummy putc Function
-fn dummy_getc(_: usize) -> Option<u8> {
-    None
-}
-
-/// Dummy wait for buffer function
-fn dummy_wait_buffer(_: usize) -> bool {
-    true
-}
-
-fn dummy_interrupt_setup(_: usize, _: u32, _: fn(usize) -> bool) -> bool {
-    false
-}
-
-struct SerialPortDeviceEntry {
-    interface_type: u8,
-    compatible: &'static str,
-    early_putc_func: fn(base_address: usize, char: u8),
-    putc_func: fn(base_address: usize, char: u8),
-    getc_func: fn(base_address: usize) -> Option<u8>,
-    interrupt_enable:
-        fn(base_address: usize, interrupt_id: u32, handler: fn(usize) -> bool) -> bool,
-    wait_buffer: fn(base_address: usize) -> bool,
-}
-
-const SERIAL_PORT_DEVICES: [SerialPortDeviceEntry; 2] = [devices::PL011, devices::DW_APB_UART];
 
 pub struct SerialPortManager {
     lock: SpinLockFlag,
@@ -66,7 +35,7 @@ impl Default for SerialPortManager {
 }
 
 impl SerialPortManager {
-    const SERIAL_PORT_DEFAULT_PRIORITY: u8 = 0x00;
+    pub const SERIAL_PORT_DEFAULT_PRIORITY: u8 = 0x00;
     pub fn new() -> Self {
         Self {
             lock: SpinLockFlag::new(),
