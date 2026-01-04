@@ -6,7 +6,7 @@
 use super::PAGE_MASK;
 use super::PagingEntry;
 
-use crate::kernel::memory_manager::data_type::PAddress;
+use crate::kernel::memory_manager::data_type::{MSize, PAddress};
 
 pub const PT_MAX_ENTRY: usize = 512;
 
@@ -119,5 +119,9 @@ impl PagingEntry for PTE {
         } else {
             false
         }
+    }
+
+    fn get_map_size(&self) -> MSize {
+        MSize::new(1 << 12)
     }
 }

@@ -29,16 +29,15 @@ use crate::arch::target_arch::context::memory_layout::{
 };
 use crate::arch::target_arch::device::cpu;
 
-use crate::kernel::memory_manager::data_type::*;
-use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use crate::kernel::memory_manager::{data_type::*, physical_memory_manager::PhysicalMemoryManager};
 
-/// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
+/// Default Page Size(Type = MSize)
 pub const PAGE_SIZE: MSize = MSize::new(PAGE_SIZE_USIZE);
 
-/// Default Page Size, the mainly using 4KiB paging.(Type = usize)
+/// Default Page Size(Type = usize)
 pub const PAGE_SIZE_USIZE: usize = 0x1000;
 
-/// PAGE_SIZE = 1 << PAGE_SHIFT(Type = usize)
+/// `PAGE_SIZE = 1 << PAGE_SHIFT` (Type = usize)
 pub const PAGE_SHIFT: usize = 12;
 
 /// if !PAGE_MASK & address !=0 => address is not page aligned.
@@ -77,6 +76,8 @@ pub enum PagingError {
     AddressIsNotAligned,
     AddressIsNotCanonical,
     SizeIsNotAligned,
+    InvalidPageTable,
+    MemoryError,
 }
 
 /// PagingEntry
@@ -102,14 +103,13 @@ trait PagingEntry {
     fn set_no_execute(&mut self, b: bool);
     fn get_address(&self) -> Option<PAddress>;
     fn set_address(&mut self, address: PAddress) -> bool;
+    fn get_map_size(&self) -> MSize;
 }
 
 impl PageManager {
     /// Create InterruptManager with invalid data.
     ///
-    /// Before use, **you must call [`init`]**.
-    ///
-    /// [`init`]: #method.init
+    /// Before use, **you must call [`Self::init`]**.
     pub const fn new() -> PageManager {
         PageManager {
             pml4: VAddress::new(0),
@@ -168,20 +168,18 @@ impl PageManager {
     }
 
     const fn get_top_level_table(&self) -> &mut [PML4E; PML4_MAX_ENTRY] {
-        unsafe { &mut *(self.pml4.to_usize() as *mut [PML4E; PML4_MAX_ENTRY]) }
+        unsafe { &mut *(self.pml4.to::<[PML4E; PML4_MAX_ENTRY]>()) }
     }
 
     /// Search the target PDPTE linked with virtual_address.
     ///
     /// This function calculates the index number of the PDPTE linked with the virtual_address.
-    /// If PML4 does not exist, this will make PML4 (if should_create == true)
-    /// or return PagingError::EntryIsNotFound.
+    /// When PML4 does not exist, this will make PML4 if `should_create_entry` is true,
+    /// otherwise return [`PagingError::EntryIsNotFound`].
     fn get_target_pdpte(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
-        should_set_present: bool,
-        should_set_parent_entry_present: bool,
         should_create_entry: bool,
     ) -> Result<&'static mut PDPTE, PagingError> {
         if (virtual_address.to_usize() & !PAGE_MASK) != 0 {
@@ -194,254 +192,145 @@ impl PageManager {
         let number_of_pdpte = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 2)) & (0x1FF);
 
         let pml4e = &mut pml4_table[number_of_pml4e];
-        if !pml4e.is_address_set() {
+        if !pml4e.is_present() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
             let pdpt_address = Self::alloc_page_table(pm_manager)?;
-            let temp_pdpt =
-                unsafe { &mut *(pdpt_address.to_usize() as *mut [PDPTE; PDPT_MAX_ENTRY]) };
-            for entry in temp_pdpt.iter_mut() {
+            let pdpt = unsafe { &mut *(pdpt_address.to::<[PDPTE; PDPT_MAX_ENTRY]>()) };
+            for entry in pdpt.iter_mut() {
                 entry.init();
             }
             pml4e.init();
             pml4e.set_address(direct_map_to_physical_address(pdpt_address));
-        }
-        if should_set_parent_entry_present {
             pml4e.set_present(true);
         }
 
         let pdpte = &mut unsafe {
-            &mut *(physical_address_to_direct_map(pml4e.get_address().unwrap()).to_usize()
-                as *mut [PDPTE; PDPT_MAX_ENTRY])
+            &mut *(physical_address_to_direct_map(pml4e.get_address().unwrap())
+                .to::<[PDPTE; PDPT_MAX_ENTRY]>())
         }[number_of_pdpte];
-        if should_set_present {
-            pdpte.set_present(true);
-        }
         Ok(pdpte)
     }
 
     /// Search the target PDE linked with virtual_address.
     ///
     /// This function calculates the index number of the PDE linked with the virtual_address.
-    /// If pdpte is none, this will call [`get_target_pdpte`].
-    /// If PML4 or PDPTE does not exist, this will make them (if should_create == true)
-    /// or return PagingError::EntryIsNotFound.
-    ///
-    /// [`get_target_pdpte`]: #method.get_target_pdpte
+    /// If pdpte is none, this will call [`Self::get_target_pdpte`].
+    /// If PML4 or PDPTE does not exist, this will make them if `should_create_entry` is true,
+    /// otherwise return [`PagingError::EntryIsNotFound`].
     fn get_target_pde(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
-        should_set_present: bool,
-        should_set_parent_entry_present: bool,
         should_create_entry: bool,
-        pdpte: Option<&'static mut PDPTE>,
+        pdpte: Option<&mut PDPTE>,
     ) -> Result<&'static mut PDE, PagingError> {
         let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9)) & (0x1FF);
 
         let pdpte = if let Some(p) = pdpte {
             p
         } else {
-            self.get_target_pdpte(
-                pm_manager,
-                virtual_address,
-                should_set_parent_entry_present,
-                should_set_parent_entry_present,
-                should_create_entry,
-            )?
+            self.get_target_pdpte(pm_manager, virtual_address, should_create_entry)?
         };
 
-        if !pdpte.is_address_set() {
+        if !pdpte.is_present() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
             let pd_address = Self::alloc_page_table(pm_manager)?;
-            let temp_pd = unsafe { &mut *(pd_address.to_usize() as *mut [PDE; PD_MAX_ENTRY]) };
-            for entry in temp_pd.iter_mut() {
+            let pd = unsafe { &mut *(pd_address.to::<[PDE; PD_MAX_ENTRY]>()) };
+            for entry in pd.iter_mut() {
                 entry.init();
             }
             pdpte.init();
             pdpte.set_address(direct_map_to_physical_address(pd_address));
-            if should_set_parent_entry_present {
-                pdpte.set_present(true);
-            }
+            pdpte.set_present(true);
         }
         let pde = &mut unsafe {
-            &mut *(physical_address_to_direct_map(pdpte.get_address().unwrap()).to_usize()
-                as *mut [PDE; PD_MAX_ENTRY])
+            &mut *(physical_address_to_direct_map(pdpte.get_address().unwrap())
+                .to::<[PDE; PD_MAX_ENTRY]>())
         }[number_of_pde];
-        if should_set_present {
-            pde.set_present(true);
-        }
         Ok(pde)
     }
 
     /// Search the target PTE linked with virtual_address.
     ///
     /// This function calculates the index number of the PTE linked with the virtual_address.
-    /// If pde is none, this will call [`get_target_pde`].
-    /// If PML4, PDPTE, or PDE does not exist, this will make them (if should_create == true)
-    /// or return PagingError::EntryIsNotFound.
-    ///
-    /// [`get_target_pde`]: #method.get_target_pde
+    /// If pde is none, this will call [`Self::get_target_pde`].
+    /// If PML4, PDPTE, or PDE does not exist, this will make them if `should_create_entry` is true,
+    /// otherwise return [`PagingError::EntryIsNotFound`].
     fn get_target_pte(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
-        should_set_parent_entry_present: bool,
         should_create_entry: bool,
-        pde: Option<&'static mut PDE>,
+        pde: Option<&mut PDE>,
     ) -> Result<&'static mut PTE, PagingError> {
         let number_of_pte = (virtual_address.to_usize() >> PAGE_SHIFT) & (0x1FF);
 
         let pde = if let Some(p) = pde {
             p
         } else {
-            self.get_target_pde(
-                pm_manager,
-                virtual_address,
-                should_set_parent_entry_present,
-                should_set_parent_entry_present,
-                should_create_entry,
-                None,
-            )?
+            self.get_target_pde(pm_manager, virtual_address, should_create_entry, None)?
         };
-        if !pde.is_address_set() {
+        if !pde.is_present() {
             if !should_create_entry {
                 return Err(PagingError::EntryIsNotFound);
             }
             let pt_address = Self::alloc_page_table(pm_manager)?;
-            let temp_pt = unsafe { &mut *(pt_address.to_usize() as *mut [PTE; PT_MAX_ENTRY]) };
-            for entry in temp_pt.iter_mut() {
+            let pt = unsafe { &mut *(pt_address.to::<[PTE; PT_MAX_ENTRY]>()) };
+            for entry in pt.iter_mut() {
                 entry.init();
             }
             pde.init();
             pde.set_address(direct_map_to_physical_address(pt_address));
-            if should_set_parent_entry_present {
-                pde.set_present(true);
-            }
+            pde.set_present(true);
         }
-        Ok(&mut unsafe {
-            &mut *(physical_address_to_direct_map(pde.get_address().unwrap()).to_usize()
-                as *mut [PTE; PT_MAX_ENTRY])
-        }[number_of_pte])
+        let pte = &mut unsafe {
+            &mut *(physical_address_to_direct_map(pde.get_address().unwrap())
+                .to::<[PTE; PT_MAX_ENTRY]>())
+        }[number_of_pte];
+        Ok(pte)
     }
 
     /// Search the target ;aging entry linked with virtual_address.
     ///
     /// This function calculates the index number of the PDPTE, PDE, and PTE linked with the virtual_address.
     /// If huge bit is present(means 1GB or 2MB paging is enabled), return with terminal page entry.
-    /// If PML4 or PDPTE or PDE does not exist, this will make them (if should_create == true)
-    /// or return PagingError::EntryIsNotFound.
-    fn get_target_paging_entry(
+    /// If PML4 or PDPTE or PDE does not exist, this will make them if `should_create_entry` is true,
+    /// otherwise return [`PagingError::EntryIsNotFound`].
+    fn get_target_page_entry(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
-        should_set_present: bool,
-        should_set_parent_entry_present: bool,
         should_create_entry: bool,
     ) -> Result<&'static mut dyn PagingEntry, PagingError> {
-        let pdpte = self.get_target_pdpte(
-            pm_manager,
-            virtual_address,
-            should_set_present,
-            should_set_parent_entry_present,
-            should_create_entry,
-        )?;
-        if pdpte.is_huge() {
-            if should_set_present {
-                pdpte.set_present(true);
-            }
+        let pdpte = self.get_target_pdpte(pm_manager, virtual_address, should_create_entry)?;
+        if pdpte.is_present() && pdpte.is_huge() {
             return Ok(pdpte);
-        }
-        if should_set_parent_entry_present {
-            pdpte.set_present(true);
         }
         let pde = self.get_target_pde(
             pm_manager,
             virtual_address,
-            should_set_present,
-            should_set_parent_entry_present,
             should_create_entry,
             Some(pdpte),
         )?;
-        if pde.is_huge() {
-            if should_set_present {
-                pde.set_present(true);
-            }
+        if pdpte.is_present() && pde.is_huge() {
             return Ok(pde);
         }
-        if should_set_parent_entry_present {
-            pde.set_present(true);
-        }
-        let pte = self.get_target_pte(
-            pm_manager,
-            virtual_address,
-            should_set_parent_entry_present,
-            should_create_entry,
-            Some(pde),
-        )?;
-        if should_set_present {
-            pte.set_present(true);
-        }
+        let pte =
+            self.get_target_pte(pm_manager, virtual_address, should_create_entry, Some(pde))?;
         Ok(pte)
     }
 
-    /// Associate physical address with virtual_address.
-    ///
-    /// This function will get target PTE from virtual_address
-    /// (if not exist, will make)and set physical address.
-    /// "permission" will be used when set the PTE attribute.
-    /// If you want to associate wide area(except physical address is non-linear),
-    /// you should use [`associate_area`].(it may use 2MB paging).
-    ///
-    /// This function does not flush page table and invoke page cache. You should do them manually.
-    ///
-    /// [`associate_area`]: #method.associate_area
-    pub fn associate_address(
-        &self,
-        pm_manager: &mut PhysicalMemoryManager,
-        physical_address: PAddress,
-        virtual_address: VAddress,
-        permission: MemoryPermissionFlags,
-        _: MemoryOptionFlags,
-    ) -> Result<(), PagingError> {
-        if ((physical_address.to_usize() & !PAGE_MASK) != 0)
-            || ((virtual_address.to_usize() & !PAGE_MASK) != 0)
-        {
-            return Err(PagingError::AddressIsNotAligned);
-        }
-        if (virtual_address.to_usize() >> 48) != 0
-            && ((virtual_address.to_usize() >> 48) != 0xffff
-                || ((virtual_address.to_usize() >> 47) & 1) == 0)
-        {
-            return Err(PagingError::AddressIsNotCanonical);
-        }
-
-        let pte = self.get_target_pte(pm_manager, virtual_address, true, true, None)?;
-        pte.init();
-        pte.set_address(physical_address);
-        pte.set_no_execute(!permission.is_executable());
-        pte.set_writable(permission.is_writable());
-        pte.set_user_accessible(permission.is_user_accessible());
-        pte.set_present(true);
-        /* PageManager::reset_paging_local(virtual_address) */
-        Ok(())
-    }
-
-    /// Map virtual_address to physical address with size.
+    /// Map virtual_address to physical address
     ///
     /// This function will map from virtual_address to virtual_address + size.
     /// This function is used to map consecutive physical address.
-    /// This may use 2MB or 1GB paging.
-    /// If you want to map non-consecutive physical address,
-    /// you should call [`associate_address`] repeatedly.
-    ///
-    /// This function does not flush page table and invoke page cache. You should do them manually.
-    ///
-    /// [`associate_address`]: #method.associate_address
-    pub fn associate_area(
+    /// This may use 2MB or 1GB paging when [`MemoryOptionFlags::should_use_huge_page`] or
+    /// [`MemoryOptionFlags::is_device_memory`] or [`MemoryOptionFlags::is_io_map`] is true.
+    pub fn associate_address(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
         physical_address: PAddress,
@@ -457,17 +346,10 @@ impl PageManager {
         } else if (size.to_usize() & !PAGE_MASK) != 0 {
             return Err(PagingError::SizeIsNotAligned);
         }
-        if size == PAGE_SIZE {
-            return self.associate_address(
-                pm_manager,
-                physical_address,
-                virtual_address,
-                permission,
-                option,
-            );
-        }
-
+        let allow_huge =
+            option.should_use_huge_page() || option.is_device_memory() || option.is_io_map();
         let mut processed_size = MSize::new(0);
+
         while processed_size <= size {
             let processing_virtual_address = virtual_address + processed_size;
             let processing_physical_address = physical_address + processed_size;
@@ -475,67 +357,57 @@ impl PageManager {
                 (processing_virtual_address.to_usize() >> (PAGE_SHIFT + 9)) & (0x1FF);
             let number_of_pte = (processing_virtual_address.to_usize() >> PAGE_SHIFT) & (0x1FF);
 
-            if number_of_pde == 0
+            let pdpte = self.get_target_pdpte(pm_manager, processing_virtual_address, true)?;
+
+            if allow_huge
+                && self.is_1gb_paging_supported
+                && number_of_pde == 0
                 && number_of_pte == 0
                 && (processing_physical_address & 0x3FFFFFFF) == 0
                 && (size - processed_size) >= MSize::new(0x40000000)
-                && self.is_1gb_paging_supported
+                && (!pdpte.is_present() || pdpte.is_huge())
             {
-                /* try to apply 1GB paging */
-                let pdpte = self.get_target_pdpte(
-                    pm_manager,
-                    processing_virtual_address,
-                    false,
-                    true,
-                    true,
-                )?;
-                /* check if PDPTE is used */
-                if !pdpte.is_present() {
-                    /* PDPTE is free, we can use 1GB paging! */
-                    pdpte.init();
-                    pdpte.set_huge(true);
-                    pdpte.set_no_execute(!permission.is_executable());
-                    pdpte.set_writable(permission.is_writable());
-                    pdpte.set_user_accessible(permission.is_user_accessible());
-                    pdpte.set_address(processing_physical_address);
-                    pdpte.set_present(true);
-                    processed_size += MSize::new(0x40000000);
-                    continue;
-                }
+                /* Use 1GB paging */
+                pdpte.init();
+                pdpte.set_huge(true);
+                pdpte.set_no_execute(!permission.is_executable());
+                pdpte.set_writable(permission.is_writable());
+                pdpte.set_user_accessible(permission.is_user_accessible());
+                pdpte.set_address(processing_physical_address);
+                pdpte.set_present(true);
+                processed_size += MSize::new(0x40000000);
+                continue;
             }
-            /* try to apply 2MiB paging */
-            if number_of_pte == 0
+
+            let pde =
+                self.get_target_pde(pm_manager, processing_virtual_address, true, Some(pdpte))?;
+
+            if allow_huge
+                && number_of_pte == 0
                 && (processing_physical_address & 0x1FFFFF) == 0
                 && (size - processed_size) >= MSize::new(0x200000)
+                && (!pde.is_present() || pde.is_huge())
             {
-                let pde = self.get_target_pde(
-                    pm_manager,
-                    processing_virtual_address,
-                    false,
-                    true,
-                    true,
-                    None,
-                )?;
-                if !pde.is_present() {
-                    pde.init();
-                    pde.set_huge(true);
-                    pde.set_no_execute(!permission.is_executable());
-                    pde.set_writable(permission.is_writable());
-                    pde.set_user_accessible(permission.is_user_accessible());
-                    pde.set_address(processing_physical_address);
-                    pde.set_present(true);
-                    processed_size += MSize::new(0x200000);
-                    continue;
-                }
+                /* Use 2MB paging */
+                pde.init();
+                pde.set_huge(true);
+                pde.set_no_execute(!permission.is_executable());
+                pde.set_writable(permission.is_writable());
+                pde.set_user_accessible(permission.is_user_accessible());
+                pde.set_address(processing_physical_address);
+                pde.set_present(true);
+                processed_size += MSize::new(0x200000);
+                continue;
             }
+
             /* 4KiB */
-            self.associate_address(
-                pm_manager,
-                processing_physical_address,
-                processing_virtual_address,
-                permission,
-                option,
-            )?;
+            let pte = self.get_target_pte(pm_manager, virtual_address, true, Some(pde))?;
+            pte.init();
+            pte.set_address(physical_address);
+            pte.set_no_execute(!permission.is_executable());
+            pte.set_writable(permission.is_writable());
+            pte.set_user_accessible(permission.is_user_accessible());
+            pte.set_present(true);
             processed_size += PAGE_SIZE;
         }
         Ok(())
@@ -544,125 +416,85 @@ impl PageManager {
     /// Change permission of virtual_address
     ///
     /// This function searches the target page entry(usually PTE) and change permission.
-    /// If virtual_address is not valid, this will return PagingError::EntryIsNotFound.
+    /// If virtual_address is not valid, this will return [`PagingError::EntryIsNotFound`].
     pub fn change_memory_permission(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
+        size: MSize,
         permission: MemoryPermissionFlags,
         _: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if (virtual_address.to_usize() & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);
+        } else if (size.to_usize() & !PAGE_MASK) != 0 {
+            return Err(PagingError::SizeIsNotAligned);
         }
-        let entry =
-            self.get_target_paging_entry(pm_manager, virtual_address, false, false, false)?;
-        entry.set_writable(permission.is_writable());
-        entry.set_no_execute(!permission.is_executable());
-        entry.set_user_accessible(permission.is_user_accessible());
+        let mut s = MSize::new(0);
+        while s != size {
+            let entry = self.get_target_page_entry(pm_manager, virtual_address, false)?;
+            let t = entry.get_map_size();
+            if s + t > size {
+                return Err(PagingError::InvalidPageTable);
+            }
+            entry.set_writable(permission.is_writable());
+            entry.set_no_execute(!permission.is_executable());
+            entry.set_user_accessible(permission.is_user_accessible());
+            s += t;
+        }
         Ok(())
-    }
-
-    /// Unmap virtual_address.
-    ///
-    /// This function searches target page entry(usually PTE) and disable present flag.
-    /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
-    /// If target entry is not exists, this function will ignore it and call [`Self::cleanup_page_table`]
-    /// when entry_may_be_deleted == true, otherwise this will return PagingError:PagingError::EntryIsNotFound.
-    ///
-    /// This does not delete physical address and huge bit from the entry. it disables present flag only.
-    /// It helps [`Self::cleanup_page_table`].
-    pub fn unassociate_address(
-        &self,
-        virtual_address: VAddress,
-        pm_manager: &mut PhysicalMemoryManager,
-        entry_may_be_deleted: bool,
-    ) -> Result<(), PagingError> {
-        match self.get_target_paging_entry(pm_manager, virtual_address, false, false, false) {
-            Ok(entry) => {
-                entry.set_present(false);
-                self.cleanup_page_table(virtual_address, pm_manager)
-            }
-            Err(err) => {
-                if err == PagingError::EntryIsNotFound && entry_may_be_deleted {
-                    self.cleanup_page_table(virtual_address, pm_manager)
-                } else {
-                    Err(err)
-                }
-            }
-        }
     }
 
     /// Unmap virtual_address ~ (virtual_address + size)
     ///
     /// This function searches target page entry(PDPTE, PDE, PTE) and disable present flag.
     /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
-    /// If target entry is not exists, this function will return Error:EntryIsNotFound.
+    /// If target entry is not exists, this function will return [`PagingError:EntryIsNotFound`].
     /// When huge table was used and the mapped size is different from expected size, this will return error.
-    ///
-    /// This does not delete physical address and huge bit from the entry. it disables present flag only.
-    pub fn unassociate_address_width_size(
+    pub fn unassociate_address(
         &self,
         virtual_address: VAddress,
         size: MSize,
         pm_manager: &mut PhysicalMemoryManager,
-        entry_may_be_deleted: bool,
     ) -> Result<(), PagingError> {
         if (size & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);
-        }
-        if size == PAGE_SIZE {
-            return self.unassociate_address(virtual_address, pm_manager, entry_may_be_deleted);
         }
 
         let mut processed_size = MSize::new(0);
         while processed_size < size {
             let processing_virtual_address = virtual_address + processed_size;
-            let pdpte =
-                self.get_target_pdpte(pm_manager, processing_virtual_address, false, false, false)?;
+            let pdpte = self.get_target_pdpte(pm_manager, processing_virtual_address, false)?;
+            if !pdpte.is_present() {
+                return Err(PagingError::EntryIsNotFound);
+            }
             if pdpte.is_huge() {
-                if !pdpte.is_present() {
-                    return Err(PagingError::EntryIsNotFound);
-                }
-                let huge_size = MSize::new(0x40000000);
-                if (size - processed_size) < huge_size {
-                    return Err(PagingError::EntryIsNotFound); /* FIX: to better error name*/
+                let map_size = pdpte.get_map_size();
+                if (size - processed_size) < map_size {
+                    return Err(PagingError::InvalidPageTable);
                 }
                 pdpte.set_present(false);
-                pdpte.set_address_set(false);
-                processed_size += huge_size;
+                processed_size += map_size;
                 self.cleanup_page_table(processing_virtual_address, pm_manager)?;
                 continue;
             }
-            let pde = self.get_target_pde(
-                pm_manager,
-                processing_virtual_address,
-                false,
-                false,
-                false,
-                Some(pdpte),
-            )?;
+            let pde =
+                self.get_target_pde(pm_manager, processing_virtual_address, false, Some(pdpte))?;
+            if !pde.is_present() {
+                return Err(PagingError::EntryIsNotFound);
+            }
             if pde.is_huge() {
-                if !pde.is_present() {
-                    return Err(PagingError::EntryIsNotFound);
-                }
-                let huge_size = MSize::new(0x200000);
-                if (size - processed_size) < huge_size {
-                    return Err(PagingError::EntryIsNotFound); /* FIX: to better error name*/
+                let map_size = pde.get_map_size();
+                if (size - processed_size) < map_size {
+                    return Err(PagingError::InvalidPageTable);
                 }
                 pde.set_present(false);
-                pde.set_address_set(false);
-                processed_size += huge_size;
+                processed_size += map_size;
                 self.cleanup_page_table(processing_virtual_address, pm_manager)?;
                 continue;
             }
-            let pte = self.get_target_pte(
-                pm_manager,
-                processing_virtual_address,
-                false,
-                false,
-                Some(pde),
-            )?;
+            let pte =
+                self.get_target_pte(pm_manager, processing_virtual_address, false, Some(pde))?;
             if !pte.is_present() {
                 return Err(PagingError::EntryIsNotFound);
             }
@@ -686,78 +518,72 @@ impl PageManager {
         let number_of_pdpte = (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * 2)) & (0x1FF);
         let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9)) & (0x1FF);
         let pml4e = &mut self.get_top_level_table()[number_of_pml4e];
-        if !pml4e.is_address_set() {
+        if !pml4e.is_present() {
             return Ok(());
         }
 
         let pdpte = &mut unsafe {
-            &mut *(physical_address_to_direct_map(pml4e.get_address().unwrap()).to_usize()
-                as *mut [PDPTE; PDPT_MAX_ENTRY])
+            &mut *(physical_address_to_direct_map(pml4e.get_address().unwrap())
+                .to::<[PDPTE; PDPT_MAX_ENTRY]>())
         }[number_of_pdpte];
         if pdpte.is_present() && !pdpte.is_huge() {
             let pde = &mut unsafe {
-                &mut *(physical_address_to_direct_map(pdpte.get_address().unwrap()).to_usize()
-                    as *mut [PDE; PD_MAX_ENTRY])
+                &mut *(physical_address_to_direct_map(pdpte.get_address().unwrap())
+                    .to::<[PDE; PD_MAX_ENTRY]>())
             }[number_of_pde];
             if pde.is_present() {
                 /* Try to free PT */
                 if !pde.is_huge() {
-                    for e in unsafe {
-                        &*(physical_address_to_direct_map(pde.get_address().unwrap()).to_usize()
-                            as *const [PTE; PT_MAX_ENTRY])
+                    if unsafe {
+                        &*(physical_address_to_direct_map(pde.get_address().unwrap())
+                            .to::<[PTE; PT_MAX_ENTRY]>())
                     }
                     .iter()
+                    .find(|e| e.is_present())
+                    .is_some()
                     {
-                        if e.is_present() {
-                            return Ok(());
-                        }
+                        return Ok(());
                     }
-                    if let Err(_e) = pm_manager.free(pde.get_address().unwrap(), PAGE_SIZE, false)
-                    /*free PT */
-                    {
-                        return Err(PagingError::MemoryCacheOverflowed);
-                    }
+                    /* Free PT */
+                    pm_manager
+                        .free(pde.get_address().unwrap(), PAGE_SIZE, false)
+                        .or(Err(PagingError::MemoryError))?;
                     pde.set_present(false);
-                    pde.set_address_set(false);
                 }
             }
             /* Try to free PD */
-            for e in unsafe {
-                &*(physical_address_to_direct_map(pdpte.get_address().unwrap()).to_usize()
-                    as *const [PDE; PD_MAX_ENTRY])
+            if unsafe {
+                &*(physical_address_to_direct_map(pdpte.get_address().unwrap())
+                    .to::<[PDE; PD_MAX_ENTRY]>())
             }
             .iter()
+            .find(|e| e.is_present())
+            .is_some()
             {
-                if e.is_present() {
-                    return Ok(());
-                }
-            }
-            if let Err(_e) = pm_manager.free(pdpte.get_address().unwrap(), PAGE_SIZE, false)
-            /* free PD */
-            {
-                return Err(PagingError::MemoryCacheOverflowed);
-            }
-            pdpte.set_present(false);
-            pdpte.set_address_set(false);
-        }
-        /* Try to free PDPT */
-        for e in unsafe {
-            &*(physical_address_to_direct_map(pml4e.get_address().unwrap()).to_usize()
-                as *const [PDPTE; PDPT_MAX_ENTRY])
-        }
-        .iter()
-        {
-            if e.is_present() {
                 return Ok(());
             }
+            /* Free PD */
+            pm_manager
+                .free(pdpte.get_address().unwrap(), PAGE_SIZE, false)
+                .or(Err(PagingError::MemoryError))?;
+            pdpte.set_present(false);
         }
-        if let Err(_e) = pm_manager.free(pml4e.get_address().unwrap(), PAGE_SIZE, false)
-        /*free PDPT*/
+        /* Try to free PDPT */
+        if unsafe {
+            &*(physical_address_to_direct_map(pml4e.get_address().unwrap())
+                .to::<[PDPTE; PDPT_MAX_ENTRY]>())
+        }
+        .iter()
+        .find(|e| e.is_present())
+        .is_some()
         {
-            return Err(PagingError::MemoryCacheOverflowed);
+            return Ok(());
         }
+        /* Free PDPT */
+        pm_manager
+            .free(pml4e.get_address().unwrap(), PAGE_SIZE, false)
+            .or(Err(PagingError::MemoryError))?;
         pml4e.set_present(false);
-        pml4e.set_address_set(false);
 
         Ok(())
     }
@@ -766,6 +592,7 @@ impl PageManager {
         &mut self,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), PagingError> {
+        /* TODO: clean up all user entries and purge page tables */
         pm_manager
             .free(direct_map_to_physical_address(self.pml4), PAGE_SIZE, false)
             .or(Err(PagingError::MemoryCacheOverflowed))?;
@@ -784,9 +611,7 @@ impl PageManager {
     /// Flush page table and apply new page table.
     ///
     /// This function sets PML4 into CR3.
-    /// **This function must call after [`init`], otherwise system may crash.**
-    ///
-    /// [`init`]: #method.init
+    /// **This function must call after [`Self::init`], otherwise system may crash.**
     pub fn flush_page_table(&mut self) {
         unsafe {
             cpu::set_cr3(direct_map_to_physical_address(self.pml4).to_usize());
@@ -796,9 +621,7 @@ impl PageManager {
     /// Flush page table and apply new page table.
     ///
     /// This function will return PML4 address.
-    /// **This function must call after [`init`], otherwise system may crash.**
-    ///
-    /// [`init`]: #method.init
+    /// **This function must call after [`Self::init`], otherwise system may crash.**
     pub fn get_page_table_address(&self) -> PAddress {
         direct_map_to_physical_address(self.pml4)
     }
@@ -863,15 +686,15 @@ impl PageManager {
 
         let pml4_table = self.get_top_level_table();
         for (pml4_count, pml4) in pml4_table.iter().enumerate() {
-            if !pml4.is_address_set() {
+            if !pml4.is_present() {
                 continue;
             }
             let pdpt = unsafe {
-                &*(physical_address_to_direct_map(pml4.get_address().unwrap()).to_usize()
-                    as *const [PDPTE; PDPT_MAX_ENTRY])
+                &*(physical_address_to_direct_map(pml4.get_address().unwrap())
+                    .to::<[PDPTE; PDPT_MAX_ENTRY]>())
             };
             for (pdpte_count, pdpte) in pdpt.iter().enumerate() {
-                if !pdpte.is_address_set() {
+                if !pdpte.is_present() {
                     continue;
                 }
                 if pdpte.is_huge() {
@@ -911,11 +734,11 @@ impl PageManager {
                     continue;
                 }
                 let pd = unsafe {
-                    &*(physical_address_to_direct_map(pdpte.get_address().unwrap()).to_usize()
-                        as *const [PDE; PD_MAX_ENTRY])
+                    &*(physical_address_to_direct_map(pdpte.get_address().unwrap())
+                        .to::<[PDE; PD_MAX_ENTRY]>())
                 };
                 for (pde_count, pde) in pd.iter().enumerate() {
-                    if !pde.is_address_set() {
+                    if !pde.is_present() {
                         continue;
                     }
                     if pde.is_huge() {
@@ -956,8 +779,8 @@ impl PageManager {
                         continue;
                     }
                     let pt = unsafe {
-                        &*(physical_address_to_direct_map(pde.get_address().unwrap()).to_usize()
-                            as *const [PTE; PT_MAX_ENTRY])
+                        &*(physical_address_to_direct_map(pde.get_address().unwrap())
+                            .to::<[PTE; PT_MAX_ENTRY]>())
                     };
                     for (pte_count, pte) in pt.iter().enumerate() {
                         if !pte.is_present() {

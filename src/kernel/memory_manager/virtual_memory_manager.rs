@@ -193,12 +193,12 @@ impl VirtualMemoryManager {
             map_size.to_end_address(start_physical_address).to_usize(),
             map_size.to_usize()
         );
-        self.map_address_into_page_table_with_size(
+        self.map_address_into_page_table(
             start_physical_address,
             start_virtual_address,
             map_size,
             MemoryPermissionFlags::new(true, true, true, false),
-            MemoryOptionFlags::KERNEL,
+            MemoryOptionFlags::KERNEL | MemoryOptionFlags::ALLOW_HUGE,
             pm_manager,
         )
         .expect("Failed to map physical memory");
@@ -317,6 +317,7 @@ impl VirtualMemoryManager {
         let result = self.map_address_into_page_table(
             physical_address,
             virtual_address,
+            size,
             vm_entry.get_permission_flags(),
             vm_entry.get_memory_option_flags(),
             pm_manager,
@@ -334,7 +335,7 @@ impl VirtualMemoryManager {
             vm_entry.get_memory_option_flags(),
         );
         if let Err(e) = result {
-            if let Err(e) = self.unassociate_address(virtual_address, pm_manager) {
+            if let Err(e) = self.unassociate_address(virtual_address, size, pm_manager) {
                 pr_err!("Failed to unmap memory: {:?}", e);
             }
             pr_err!("Failed to insert pages into vm_entry: {:?}", e);
@@ -375,7 +376,8 @@ impl VirtualMemoryManager {
                 }
                 if let Err(e) = self.map_address_into_page_table(
                     p.get_physical_address(),
-                    vm_start_address + i.to_offset(), /* OK? */
+                    vm_start_address + i.to_offset(),
+                    PAGE_SIZE,
                     permission_flags,
                     option_flags,
                     pm_manager,
@@ -387,8 +389,8 @@ impl VirtualMemoryManager {
                         e
                     );
                     for unassociate_i in first_p_index..i {
-                        let address = vm_start_address + unassociate_i.to_offset(); /* OK? */
-                        if let Err(u_e) = self.unassociate_address(address, pm_manager) {
+                        let address = vm_start_address + unassociate_i.to_offset();
+                        if let Err(u_e) = self.unassociate_address(address, PAGE_SIZE, pm_manager) {
                             pr_err!("Failed to rollback paging(VirtualAddress: {}).", address);
                             return Err(u_e);
                         }
@@ -486,7 +488,10 @@ impl VirtualMemoryManager {
         let vm_entry = self.insert_vm_map_entry_into_list(vm_entry, option)?;
 
         if vm_entry.get_memory_option_flags().is_io_map() {
-            if let Err(e) = self.map_address_into_page_table_with_size(
+            vm_entry.set_memory_option_flags(
+                vm_entry.get_memory_option_flags() | MemoryOptionFlags::ALLOW_HUGE,
+            );
+            if let Err(e) = self.map_address_into_page_table(
                 physical_address,
                 vm_start_address,
                 size,
@@ -500,9 +505,7 @@ impl VirtualMemoryManager {
                     physical_address,
                     e
                 );
-                if let Err(e) =
-                    self.unassociate_address_with_size(vm_start_address, size, pm_manager)
-                {
+                if let Err(e) = self.unassociate_address(vm_start_address, size, pm_manager) {
                     pr_err!(
                         "Failed to unmap address(VirtualAddress: {}): {:?}",
                         vm_start_address,
@@ -520,6 +523,7 @@ impl VirtualMemoryManager {
                 if let Err(e) = self.map_address_into_page_table(
                     physical_address + i.to_offset(),
                     vm_start_address + i.to_offset(),
+                    PAGE_SIZE,
                     permission,
                     option,
                     pm_manager,
@@ -532,9 +536,11 @@ impl VirtualMemoryManager {
                     );
 
                     for u_i in MIndex::new(0)..i {
-                        if let Err(e) =
-                            self.unassociate_address(vm_start_address + u_i.to_offset(), pm_manager)
-                        {
+                        if let Err(e) = self.unassociate_address(
+                            vm_start_address + u_i.to_offset(),
+                            PAGE_SIZE,
+                            pm_manager,
+                        ) {
                             pr_err!(
                                 "Failed to unmap address(VirtualAddress: {}): {:?}",
                                 vm_start_address + i.to_offset(),
@@ -605,7 +611,7 @@ impl VirtualMemoryManager {
 
         if vm_entry.get_memory_option_flags().is_io_map() {
             assert!(!vm_entry.get_object().is_shadow_entry());
-            if let Err(e) = self.unassociate_address_with_size(
+            if let Err(e) = self.unassociate_address(
                 vm_entry.get_vm_start_address(),
                 vm_entry.get_size(),
                 pm_manager,
@@ -643,6 +649,7 @@ impl VirtualMemoryManager {
                         if shared_object.get_vm_page(i).is_some()
                             && let Err(e) = self.unassociate_address(
                                 vm_entry.get_vm_start_address() + i.to_offset(),
+                                PAGE_SIZE,
                                 pm_manager,
                             )
                         {
@@ -671,6 +678,7 @@ impl VirtualMemoryManager {
                     if let Some(p) = vm_entry.get_object_mut().remove_vm_page(i) {
                         if let Err(e) = self.unassociate_address(
                             vm_entry.get_vm_start_address() + i.to_offset(),
+                            PAGE_SIZE,
                             pm_manager,
                         ) {
                             pr_err!(
@@ -900,7 +908,7 @@ impl VirtualMemoryManager {
             user_vm_manager.lock.unlock();
             return Err(e);
         }
-        let shared_vm_object = vm_object.unwrap();
+        let shared_vm_object = vm_object?;
         let user_vm_map_entry =
             user_vm_manager.insert_vm_map_entry_into_list(user_vm_map_entry, user_option);
         if let Err(e) = user_vm_map_entry {
@@ -911,7 +919,7 @@ impl VirtualMemoryManager {
             user_vm_manager.lock.unlock();
             return Err(e);
         }
-        let user_vm_map_entry = user_vm_map_entry.unwrap();
+        let user_vm_map_entry = user_vm_map_entry?;
 
         init_struct!(*shared_vm_object, VirtualMemoryObject::new());
         core::mem::swap(shared_vm_object, original_vm_object);
@@ -947,67 +955,34 @@ impl VirtualMemoryManager {
         &mut self,
         physical_address: PAddress,
         virtual_address: VAddress,
-        permission: MemoryPermissionFlags,
-        option: MemoryOptionFlags,
-        pm_manager: &mut PhysicalMemoryManager,
-    ) -> Result<(), MemoryError> {
-        assert!(self.lock.is_locked());
-        self.page_manager.associate_address(
-            pm_manager,
-            physical_address,
-            virtual_address,
-            permission,
-            option,
-        )?;
-        Ok(())
-    }
-
-    fn map_address_into_page_table_with_size(
-        &mut self,
-        physical_address: PAddress,
-        virtual_address: VAddress,
         size: MSize,
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        self.page_manager.associate_area(
-            pm_manager,
-            physical_address,
-            virtual_address,
-            size,
-            permission,
-            option,
-        )?;
-        Ok(())
+        self.page_manager
+            .associate_address(
+                pm_manager,
+                physical_address,
+                virtual_address,
+                size,
+                permission,
+                option,
+            )
+            .map_err(|e| MemoryError::PagingError(e))
     }
 
     fn unassociate_address(
         &self,
         virtual_address: VAddress,
-        pm_manager: &mut PhysicalMemoryManager,
-    ) -> Result<(), MemoryError> {
-        assert!(self.lock.is_locked());
-        self.page_manager
-            .unassociate_address(virtual_address, pm_manager, false)?;
-        Ok(())
-    }
-
-    fn unassociate_address_with_size(
-        &self,
-        virtual_address: VAddress,
         size: MSize,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
-        self.page_manager.unassociate_address_width_size(
-            virtual_address,
-            size,
-            pm_manager,
-            true,
-        )?;
-        Ok(())
+        self.page_manager
+            .unassociate_address(virtual_address, size, pm_manager)
+            .map_err(|e| MemoryError::PagingError(e))
     }
 
     fn try_expand_vm_entry(

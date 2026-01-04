@@ -6,11 +6,9 @@
 use super::PAGE_MASK;
 use super::PagingEntry;
 
-use crate::kernel::memory_manager::data_type::PAddress;
+use crate::kernel::memory_manager::data_type::{MSize, PAddress};
 
 pub const PML4_MAX_ENTRY: usize = 512;
-
-/* 53th bit(1 << 52) of PML4E is used to check if the address is valid. */
 
 #[derive(Clone)]
 pub struct PML4E {
@@ -39,14 +37,6 @@ impl PML4E {
 
     fn get_bit(&self, bit: u64) -> bool {
         (self.flags & bit) != 0
-    }
-
-    pub fn is_address_set(&self) -> bool {
-        self.get_bit(1 << 52)
-    }
-
-    pub fn set_address_set(&mut self, b: bool) {
-        self.set_bit(1 << 52, b);
     }
 
     pub fn set_huge(&mut self, b: bool) {
@@ -117,7 +107,7 @@ impl PagingEntry for PML4E {
     }
 
     fn get_address(&self) -> Option<PAddress> {
-        if self.is_address_set() {
+        if self.is_present() {
             Some(PAddress::new((self.flags & 0x000F_FFFF_FFFF_F000) as usize))
         } else {
             None
@@ -127,10 +117,13 @@ impl PagingEntry for PML4E {
     fn set_address(&mut self, address: PAddress) -> bool {
         if (address & !PAGE_MASK) == 0 {
             self.set_bit((address & 0x000F_FFFF_FFFF_F000) as u64, true);
-            self.set_address_set(true);
             true
         } else {
             false
         }
+    }
+
+    fn get_map_size(&self) -> MSize {
+        MSize::new(1 << 39)
     }
 }

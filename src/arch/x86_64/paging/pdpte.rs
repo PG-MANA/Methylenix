@@ -6,11 +6,9 @@
 use super::PAGE_MASK;
 use super::PagingEntry;
 
-use crate::kernel::memory_manager::data_type::PAddress;
+use crate::kernel::memory_manager::data_type::{MSize, PAddress};
 
 pub const PDPT_MAX_ENTRY: usize = 512;
-
-/* 53th bit(1 << 52) of PDPTE is used to check if the address is valid. */
 
 pub struct PDPTE {
     flags: u64,
@@ -38,14 +36,6 @@ impl PDPTE {
 
     fn get_bit(&self, bit: u64) -> bool {
         (self.flags & bit) != 0
-    }
-
-    pub fn is_address_set(&self) -> bool {
-        self.get_bit(1 << 52)
-    }
-
-    pub fn set_address_set(&mut self, b: bool) {
-        self.set_bit(1 << 52, b);
     }
 
     pub fn is_huge(&self) -> bool {
@@ -121,7 +111,7 @@ impl PagingEntry for PDPTE {
     }
 
     fn get_address(&self) -> Option<PAddress> {
-        if self.is_address_set() {
+        if self.is_present() {
             if self.is_huge() {
                 Some(PAddress::new((self.flags & 0x000F_FFFF_C000_0000) as usize))
             } else {
@@ -139,10 +129,13 @@ impl PagingEntry for PDPTE {
             } else {
                 self.set_bit((address & 0x000F_FFFF_FFFF_F000) as u64, true);
             }
-            self.set_address_set(true);
             true
         } else {
             false
         }
+    }
+
+    fn get_map_size(&self) -> MSize {
+        MSize::new(1 << 30)
     }
 }

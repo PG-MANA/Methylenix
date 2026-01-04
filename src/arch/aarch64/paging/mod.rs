@@ -16,16 +16,15 @@ use crate::arch::target_arch::context::memory_layout::{
 };
 use crate::arch::target_arch::device::cpu;
 
-use crate::kernel::memory_manager::data_type::*;
-use crate::kernel::memory_manager::physical_memory_manager::PhysicalMemoryManager;
+use crate::kernel::memory_manager::{data_type::*, physical_memory_manager::PhysicalMemoryManager};
 
-/// Default Page Size, the mainly using 4KiB paging.(Type = MSize)
+/// Default Page Size (Type = MSize)
 pub const PAGE_SIZE: MSize = MSize::new(PAGE_SIZE_USIZE);
 
-/// Default Page Size, the mainly using 4KiB paging.(Type = usize)
+/// Default Page Size (Type = usize)
 pub const PAGE_SIZE_USIZE: usize = 0x1000;
 
-/// PAGE_SIZE = 1 << PAGE_SHIFT(Type = usize)
+/// `PAGE_SIZE = 1 << PAGE_SHIFT` (Type = usize)
 pub const PAGE_SHIFT: usize = 12;
 
 /// if !PAGE_MASK & address !=0 => address is not page aligned.
@@ -34,10 +33,10 @@ pub const PAGE_MASK: usize = !0xFFF;
 /// Default page cache size for paging
 pub const PAGING_CACHE_LENGTH: usize = 64;
 
-/// Max virtual address of AArch64(Type = VAddress)
+/// Max virtual address of AArch64 (Type = VAddress)
 pub const MAX_VIRTUAL_ADDRESS: VAddress = VAddress::new(MAX_VIRTUAL_ADDRESS_USIZE);
 
-/// Max virtual address of AArch64(Type = usize)
+/// Max virtual address of AArch64 (Type = usize)
 pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0xFFFF_FFFF_FFFF_FFFF;
 
 pub const NEED_COPY_HIGH_MEMORY_PAGE_TABLE: bool = false;
@@ -84,6 +83,13 @@ pub enum PagingError {
     AddressIsNotCanonical,
     SizeIsNotAligned,
     InvalidPageTable,
+    MemoryError,
+}
+
+impl Default for PageManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PageManager {
@@ -185,7 +191,7 @@ impl PageManager {
     fn get_canonical_address(address: VAddress) -> Result<VAddress, PagingError> {
         let high_memory_start_address =
             unsafe { *((&raw const HIGH_MEMORY_START_ADDRESS).as_ref().unwrap()) };
-        if address.to_usize() & (1 << (u64::BITS - 1)) != 1 {
+        if address.to_usize() & (1usize << (u64::BITS - 1)) != 0 {
             if address >= high_memory_start_address {
                 Ok(VAddress::new(
                     address.to_usize() - high_memory_start_address.to_usize(),
@@ -198,85 +204,19 @@ impl PageManager {
         }
     }
 
-    fn _get_target_level3_descriptor(
+    fn get_target_descriptor(
         &self,
-        pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
         table_address: VAddress,
         shift_level: u8,
-        should_create_entry: bool,
-    ) -> Result<&'static mut TableEntry, PagingError> {
+    ) -> Result<(&'static mut TableEntry, MSize), PagingError> {
         let index = (virtual_address.to_usize() >> shift_level) & (NUM_OF_TABLE_ENTRIES - 1);
         let table =
             unsafe { &mut *(table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES]) };
-        if shift_level == PAGE_SHIFT as u8 {
-            return Ok(&mut table[index]);
-        }
-        if !table[index].is_table_descriptor() {
-            if table[index].is_block_descriptor() || !should_create_entry {
-                return Err(PagingError::EntryIsNotFound);
-            }
-            let new_table_address = Self::alloc_page_table(pm_manager)?;
-            let result = self._get_target_level3_descriptor(
-                pm_manager,
-                virtual_address,
-                new_table_address,
-                shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
-                should_create_entry,
-            );
-            table[index] =
-                TableEntry::create_table_entry(direct_map_to_physical_address(new_table_address));
-            result
-        } else {
-            self._get_target_level3_descriptor(
-                pm_manager,
-                virtual_address,
-                physical_address_to_direct_map(table[index].get_next_table_address()),
-                shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
-                should_create_entry,
-            )
-        }
-    }
-
-    fn get_target_level3_descriptor(
-        &self,
-        pm_manager: &mut PhysicalMemoryManager,
-        virtual_address: VAddress,
-        should_create_entry: bool,
-    ) -> Result<&'static mut TableEntry, PagingError> {
-        let (table_address, initial_shift) =
-            self.get_table_and_initial_shit_level(virtual_address)?;
-        self._get_target_level3_descriptor(
-            pm_manager,
-            Self::get_canonical_address(virtual_address)?,
-            table_address,
-            initial_shift,
-            should_create_entry,
-        )
-    }
-
-    fn _get_target_descriptor(
-        &self,
-        pm_manager: &mut PhysicalMemoryManager,
-        virtual_address: VAddress,
-        table_address: VAddress,
-        shift_level: u8,
-    ) -> Result<&'static mut TableEntry, PagingError> {
-        if shift_level == PAGE_SHIFT as u8 {
-            let index = (virtual_address.to_usize() >> shift_level) & (NUM_OF_TABLE_ENTRIES - 1);
-            let table_address = unsafe {
-                &mut *(table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES])
-            };
-            return Ok(&mut table_address[index]);
-        }
-        let index = (virtual_address.to_usize() >> shift_level) & (NUM_OF_TABLE_ENTRIES - 1);
-        let table =
-            unsafe { &mut *(table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES]) };
-        if table[index].is_block_descriptor() {
-            Ok(&mut table[index])
+        if shift_level == PAGE_SHIFT as u8 || table[index].is_block_descriptor() {
+            Ok((&mut table[index], MSize::new(1 << shift_level)))
         } else if table[index].is_table_descriptor() {
-            self._get_target_descriptor(
-                pm_manager,
+            self.get_target_descriptor(
                 virtual_address,
                 physical_address_to_direct_map(table[index].get_next_table_address()),
                 shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
@@ -284,21 +224,6 @@ impl PageManager {
         } else {
             Err(PagingError::EntryIsNotFound)
         }
-    }
-
-    fn get_target_descriptor_descriptor(
-        &self,
-        pm_manager: &mut PhysicalMemoryManager,
-        virtual_address: VAddress,
-    ) -> Result<&'static mut TableEntry, PagingError> {
-        let (table_address, initial_shift) =
-            self.get_table_and_initial_shit_level(virtual_address)?;
-        self._get_target_descriptor(
-            pm_manager,
-            Self::get_canonical_address(virtual_address)?,
-            table_address,
-            initial_shift,
-        )
     }
 
     fn set_permission_and_options(
@@ -309,46 +234,15 @@ impl PageManager {
         e.set_permission(p);
         if o.is_device_memory() || o.is_io_map() {
             e.set_memory_attribute_index(unsafe { MAIR_DEVICE_MEMORY_INDEX });
-            e.set_shareability(SHAREABILITY_NON_SHAREABLE); /* OK..? */
+            e.set_shareability(SHAREABILITY_NON_SHAREABLE);
         } else {
             e.set_memory_attribute_index(unsafe { MAIR_NORMAL_MEMORY_INDEX });
             e.set_shareability(SHAREABILITY_INNER_SHAREABLE);
         }
     }
 
-    /// Associate physical address with virtual_address.
-    ///
-    /// This function will get target page table entry from virtual_address
-    /// (if not exist, will make) and set physical address.
-    /// "Permission" will be used when set the page table entry attribute.
-    /// If you want to associate wide area (except physical address is non-linear),
-    /// you should use [`Self::associate_area`]. (it may use 2MB paging).
-    ///
-    /// This function does not flush page table and invoke page cache. You should do them manually.
-    pub fn associate_address(
-        &self,
-        pm_manager: &mut PhysicalMemoryManager,
-        physical_address: PAddress,
-        virtual_address: VAddress,
-        permission: MemoryPermissionFlags,
-        option: MemoryOptionFlags,
-    ) -> Result<(), PagingError> {
-        if ((physical_address.to_usize() & !PAGE_MASK) != 0)
-            || ((virtual_address.to_usize() & !PAGE_MASK) != 0)
-        {
-            return Err(PagingError::AddressIsNotAligned);
-        }
-
-        let entry = self.get_target_level3_descriptor(pm_manager, virtual_address, true)?;
-        entry.init();
-        entry.set_output_address(physical_address);
-        Self::set_permission_and_options(entry, permission, option);
-        entry.validate_as_level3_descriptor();
-        cpu::flush_data_cache_all();
-        Ok(())
-    }
-
-    fn _associate_area(
+    #[allow(clippy::too_many_arguments)]
+    fn _associate_address(
         &self,
         shift_level: u8,
         table_address: VAddress,
@@ -360,98 +254,63 @@ impl PageManager {
         option: MemoryOptionFlags,
         is_unassociation: bool,
     ) -> Result<(), PagingError> {
-        if shift_level == PAGE_SHIFT as u8 {
-            let mut index =
-                (virtual_address.to_usize() >> shift_level) & (NUM_OF_TABLE_ENTRIES - 1);
-            let table = unsafe {
-                &mut *(table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES])
-            };
-            let mut entry = TableEntry::new();
-            Self::set_permission_and_options(&mut entry, permission, option);
-            if is_unassociation {
-                entry.invalidate();
-            } else {
-                entry.validate_as_level3_descriptor();
-            }
-            let entry = entry;
-            while !(*size).is_zero() && index < NUM_OF_TABLE_ENTRIES {
-                let mut e = entry.clone();
-                e.set_output_address(*physical_address);
-                table[index] = e;
-
-                let mapped_size = MSize::new(1 << shift_level);
-                *size -= mapped_size;
-                *physical_address += mapped_size;
-                *virtual_address += mapped_size;
-                index += 1;
-            }
-            return Ok(());
-        }
-        let mut index = (virtual_address.to_usize() >> shift_level) & (NUM_OF_TABLE_ENTRIES - 1);
+        let index = (virtual_address.to_usize() >> shift_level) & (NUM_OF_TABLE_ENTRIES - 1);
         let table =
             unsafe { &mut *(table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES]) };
-        while !(*size).is_zero() && index < NUM_OF_TABLE_ENTRIES {
-            if (shift_level <= BLOCK_ENTRY_ENABLED_SHIFT_LEVEL)
-                && ((*physical_address & ((1 << shift_level) - 1)) == 0)
-                && (*size >= MSize::new(1 << shift_level))
+        let target_range = MSize::new(1 << shift_level);
+        let allow_block =
+            option.should_use_huge_page() || option.is_device_memory() || option.is_io_map();
+        let mut base = TableEntry::new();
+        if !is_unassociation {
+            Self::set_permission_and_options(&mut base, permission, option);
+        }
+
+        for e in &mut table[index..] {
+            if size.is_zero() {
+                return Ok(());
+            }
+            if shift_level == PAGE_SHIFT as _ {
+                if is_unassociation {
+                    e.invalidate();
+                } else {
+                    let mut entry = base.clone();
+                    entry.set_output_address(*physical_address);
+                    entry.validate_as_level3_descriptor();
+                    *e = entry;
+                }
+                *size -= target_range;
+                *physical_address += target_range;
+                *virtual_address += target_range;
+            } else if (allow_block
+                && (shift_level <= BLOCK_ENTRY_ENABLED_SHIFT_LEVEL)
+                && ((*physical_address & (target_range.to_usize() - 1)) == 0)
+                && (*size >= target_range))
+                || (is_unassociation && e.is_block_descriptor())
             {
                 /* Block Entry */
-                let mut entry = TableEntry::new();
-                Self::set_permission_and_options(&mut entry, permission, option);
                 if is_unassociation {
-                    entry.invalidate();
+                    e.invalidate();
                 } else {
+                    let mut entry = base.clone();
+                    entry.set_output_address(*physical_address);
                     entry.validate_as_block_descriptor();
+                    *e = entry;
                 }
-                let entry = entry;
-                while !(*size).is_zero()
-                    && index < NUM_OF_TABLE_ENTRIES
-                    && *size >= MSize::new(1 << shift_level)
-                {
-                    let mut e = entry.clone();
-                    e.set_output_address(*physical_address);
-                    table[index] = e;
-
-                    let mapped_size = MSize::new(1 << shift_level);
-                    *size -= mapped_size;
-                    *physical_address += mapped_size;
-                    *virtual_address += mapped_size;
-                    index += 1;
-                }
-                if (*size).is_zero() || index == NUM_OF_TABLE_ENTRIES {
-                    return Ok(());
-                }
-            }
-            if !table[index].is_table_descriptor() {
-                if table[index].is_block_descriptor() || is_unassociation {
-                    return Err(PagingError::EntryIsNotFound);
-                }
-                let new_table_address = Self::alloc_page_table(pm_manager)?;
-                if let Err(e) = self._associate_area(
-                    shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
-                    new_table_address,
-                    pm_manager,
-                    physical_address,
-                    virtual_address,
-                    size,
-                    permission,
-                    option,
-                    is_unassociation,
-                ) {
-                    let _ = pm_manager.free(
-                        direct_map_to_physical_address(new_table_address),
-                        PAGE_SIZE,
-                        false,
-                    );
-                    return Err(e);
-                }
-                table[index] = TableEntry::create_table_entry(direct_map_to_physical_address(
-                    new_table_address,
-                ));
+                *size -= target_range;
+                *physical_address += target_range;
+                *virtual_address += target_range;
             } else {
-                self._associate_area(
+                let table_address = if !e.is_table_descriptor() {
+                    if e.is_block_descriptor() || is_unassociation {
+                        return Err(PagingError::EntryIsNotFound);
+                    }
+                    Self::alloc_page_table(pm_manager)?
+                } else {
+                    physical_address_to_direct_map(e.get_next_table_address())
+                };
+                let r = self._associate_address(
                     shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
-                    physical_address_to_direct_map(table[index].get_next_table_address()),
+                    table_address,
                     pm_manager,
                     physical_address,
                     virtual_address,
@@ -459,9 +318,23 @@ impl PageManager {
                     permission,
                     option,
                     is_unassociation,
-                )?;
+                );
+
+                if !e.is_table_descriptor() {
+                    if r.is_err() {
+                        let _ = pm_manager.free(
+                            direct_map_to_physical_address(table_address),
+                            PAGE_SIZE,
+                            false,
+                        );
+                    } else {
+                        *e = TableEntry::create_table_entry(direct_map_to_physical_address(
+                            table_address,
+                        ));
+                    }
+                }
+                r?;
             }
-            index += 1;
         }
         Ok(())
     }
@@ -470,12 +343,10 @@ impl PageManager {
     ///
     /// This function will map from virtual_address to virtual_address + size.
     /// This function is used to map consecutive physical address.
-    /// This may use 2MB or 1GB paging.
-    /// If you want to map non-consecutive physical address,
-    /// you should call [`Self::associate_address`] repeatedly.
-    ///
+    /// This may use 2MB or 1GB paging when [`MemoryOptionFlags::should_use_huge_page`] or
+    /// [`MemoryOptionFlags::is_device_memory`] or [`MemoryOptionFlags::is_io_map`] is true.
     /// This function does not flush page table and invoke page cache. You should do them manually.
-    pub fn associate_area(
+    pub fn associate_address(
         &self,
         pm_manager: &mut PhysicalMemoryManager,
         mut physical_address: PAddress,
@@ -491,19 +362,10 @@ impl PageManager {
         } else if (size.to_usize() & !PAGE_MASK) != 0 {
             return Err(PagingError::SizeIsNotAligned);
         }
-        if size == PAGE_SIZE {
-            return self.associate_address(
-                pm_manager,
-                physical_address,
-                virtual_address,
-                permission,
-                option,
-            );
-        }
         let (table_address, initial_shift) =
             self.get_table_and_initial_shit_level(virtual_address)?;
 
-        self._associate_area(
+        self._associate_address(
             initial_shift,
             table_address,
             pm_manager,
@@ -514,90 +376,63 @@ impl PageManager {
             option,
             false,
         )?;
-        if !size.is_zero() {
-            Err(PagingError::EntryIsNotFound)
-        } else {
-            cpu::flush_data_cache_all();
-            Ok(())
-        }
+        assert!(size.is_zero());
+
+        cpu::flush_data_cache_all();
+        Ok(())
     }
 
     /// Change permission of virtual_address
     ///
     /// This function searches the target page table entry and changes the permission.
-    /// If virtual_address is not valid, this will return PagingError::EntryIsNotFound.
+    /// If virtual_address is not valid, this will return [`PagingError::EntryIsNotFound`].
     pub fn change_memory_permission(
         &self,
-        pm_manager: &mut PhysicalMemoryManager,
+        _pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
+        size: MSize,
         permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
     ) -> Result<(), PagingError> {
         if (virtual_address.to_usize() & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);
+        } else if (size.to_usize() & !PAGE_MASK) != 0 {
+            return Err(PagingError::SizeIsNotAligned);
         }
-        let entry = self.get_target_descriptor_descriptor(pm_manager, virtual_address)?;
-        entry.set_permission(permission);
+        let mut s = MSize::new(0);
+        let (table, shift_level) = self.get_table_and_initial_shit_level(virtual_address)?;
+        while s != size {
+            let (entry, t) = self.get_target_descriptor(virtual_address, table, shift_level)?;
+            if s + t > size {
+                return Err(PagingError::InvalidPageTable);
+            }
+            Self::set_permission_and_options(entry, permission, option);
+            s += t;
+        }
         cpu::flush_data_cache_all();
         Ok(())
-    }
-
-    /// Unmap virtual_address.
-    ///
-    /// This function searches target page table entry and disable present flag.
-    /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
-    /// If target entry does not exist, this function will ignore it and call [`Self::cleanup_page_table`]
-    /// when entry_may_be_deleted == true, otherwise this will return [`PagingError::EntryIsNotFound`].
-    ///
-    /// This does not delete physical address and huge bit from the entry. It disables the present flag only.
-    /// It helps [`Self::cleanup_page_table`].
-    pub fn unassociate_address(
-        &self,
-        virtual_address: VAddress,
-        pm_manager: &mut PhysicalMemoryManager,
-        entry_may_be_deleted: bool,
-    ) -> Result<(), PagingError> {
-        match self.get_target_level3_descriptor(pm_manager, virtual_address, false) {
-            Ok(entry) => {
-                entry.invalidate();
-                cpu::flush_data_cache_all();
-                self.cleanup_page_table(virtual_address, pm_manager)
-            }
-            Err(err) => {
-                if err == PagingError::EntryIsNotFound && entry_may_be_deleted {
-                    self.cleanup_page_table(virtual_address, pm_manager)
-                } else {
-                    Err(err)
-                }
-            }
-        }
     }
 
     /// Unmap virtual_address ~ (virtual_address + size)
     ///
     /// This function searches target page entries and disable present flag.
     /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
-    /// If target entry does not exist, this function will return Error:EntryIsNotFound.
+    /// If target entry does not exist, this function will return [`PagingError::EntryIsNotFound`].
     /// When a huge table was used and the mapped size is different from expected size, this will return error.
-    ///
-    /// This does not delete physical address and huge bit from the entry.
-    pub fn unassociate_address_width_size(
+    pub fn unassociate_address(
         &self,
         virtual_address: VAddress,
         mut size: MSize,
         pm_manager: &mut PhysicalMemoryManager,
-        entry_may_be_deleted: bool,
     ) -> Result<(), PagingError> {
         if (size & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);
-        }
-        if size == PAGE_SIZE {
-            return self.unassociate_address(virtual_address, pm_manager, entry_may_be_deleted);
         }
         let (table_address, initial_shift) =
             self.get_table_and_initial_shit_level(virtual_address)?;
         let virtual_address = Self::get_canonical_address(virtual_address)?;
         let mut v = virtual_address;
-        self._associate_area(
+        self._associate_address(
             initial_shift,
             table_address,
             pm_manager,
@@ -608,16 +443,12 @@ impl PageManager {
             MemoryOptionFlags::KERNEL,
             true,
         )?;
+        assert!(size.is_zero());
 
-        if !size.is_zero() {
-            return Err(PagingError::InvalidPageTable);
-        }
+        self._cleanup_page_tables(initial_shift, table_address, pm_manager, virtual_address)?;
         cpu::flush_data_cache_all();
-        if self._cleanup_page_tables(initial_shift, table_address, pm_manager, virtual_address)? {
-            Err(PagingError::InvalidPageTable)
-        } else {
-            Ok(())
-        }
+        cpu::tlbi_vmalle1is();
+        Ok(())
     }
 
     fn _cleanup_page_tables(
@@ -627,21 +458,10 @@ impl PageManager {
         pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
     ) -> Result<bool, PagingError> {
-        if shift_level == PAGE_SHIFT as u8 {
-            let table = unsafe {
-                &*(table_address.to_usize() as *const [TableEntry; NUM_OF_TABLE_ENTRIES])
-            };
-            for e in table {
-                if e.is_validated() {
-                    return Ok(false);
-                }
-            }
-            return Ok(true);
-        }
         let index = (virtual_address.to_usize() >> shift_level) & (NUM_OF_TABLE_ENTRIES - 1);
-        let table =
-            unsafe { &mut *(table_address.to_usize() as *mut [TableEntry; NUM_OF_TABLE_ENTRIES]) };
-        if table[index].is_table_descriptor() {
+        let table = unsafe { &mut *(table_address.to::<[TableEntry; NUM_OF_TABLE_ENTRIES]>()) };
+
+        if shift_level != PAGE_SHIFT as _ && table[index].is_table_descriptor() {
             let next_table_address = table[index].get_next_table_address();
             if !self._cleanup_page_tables(
                 shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
@@ -651,21 +471,13 @@ impl PageManager {
             )? {
                 return Ok(false);
             }
-            table[index].invalidate();
+            table[index] = TableEntry::new();
             /* Free this table */
-            if let Err(_e) = pm_manager.free(next_table_address, PAGE_SIZE, false) {
-                return Err(PagingError::MemoryCacheOverflowed);
-            }
+            pm_manager
+                .free(next_table_address, PAGE_SIZE, false)
+                .or(Err(PagingError::MemoryError))?;
         }
-        if table[index].is_validated() {
-            return Ok(false);
-        }
-        for index in 0..NUM_OF_TABLE_ENTRIES {
-            if table[index].is_validated() {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+        Ok(table.iter().find(|e| e.is_validated()).is_none())
     }
 
     /// Clean up the page table.
@@ -695,6 +507,38 @@ impl PageManager {
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), PagingError> {
         if let PageTableType::User(t) = self.page_table {
+            fn purge_table(
+                table: VAddress,
+                shift_level: u8,
+                pm_manager: &mut PhysicalMemoryManager,
+            ) -> Result<(), PagingError> {
+                if shift_level == PAGE_SHIFT as _ {
+                    return Ok(());
+                }
+                let table = unsafe { &mut *(table.to::<[TableEntry; NUM_OF_TABLE_ENTRIES]>()) };
+                for e in table {
+                    if e.is_table_descriptor() {
+                        let next_table_address = e.get_next_table_address();
+                        purge_table(
+                            physical_address_to_direct_map(next_table_address),
+                            shift_level - NUM_OF_TABLE_ENTRIES.trailing_zeros() as u8,
+                            pm_manager,
+                        )?;
+                        *e = TableEntry::new();
+                        /* Free this table */
+                        pm_manager
+                            .free(next_table_address, PAGE_SIZE, false)
+                            .or(Err(PagingError::MemoryError))?;
+                    }
+                }
+                Ok(())
+            }
+
+            let (table_address, initial_shift) =
+                self.get_table_and_initial_shit_level(VAddress::new(0))?;
+            assert_eq!(table_address, t);
+            purge_table(table_address, initial_shift, pm_manager)?;
+
             pm_manager
                 .free(direct_map_to_physical_address(t), PAGE_SIZE, false)
                 .or(Err(PagingError::MemoryCacheOverflowed))?;
@@ -735,8 +579,6 @@ impl PageManager {
     /// This function sets page_table into TTBR.
     /// If Self is for kernel page manager, this function does nothing.
     /// **This function must call after [`Self::init`], otherwise the system may crash.**
-    ///
-    /// [`init`]: #method.init
     pub fn flush_page_table(&mut self) {
         cpu::flush_data_cache_all();
         match self.page_table {
@@ -797,6 +639,7 @@ impl PageManager {
         cpu::tlbi_vmalle1is();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn _dump_table(
         &self,
         start_address: VAddress,
@@ -826,9 +669,8 @@ impl PageManager {
             );
         };
         let size = MSize::new(1 << shift);
-        let table = unsafe {
-            &*(table_address.to_usize() as *const [TableEntry; NUM_OF_TOP_LEVEL_TABLE_ENTRIES])
-        };
+        let table =
+            unsafe { &*(table_address.to::<[TableEntry; NUM_OF_TOP_LEVEL_TABLE_ENTRIES]>()) };
         for e in table {
             if *virtual_address >= end_address {
                 return;
@@ -914,11 +756,11 @@ impl PageManager {
                 return;
             }
             PageTableType::User(_) => {
-                if let Some(s) = start {
-                    if s >= unsafe { HIGH_MEMORY_START_ADDRESS } {
-                        kprintln!("Invalid start_address: {}", s);
-                        return;
-                    }
+                if let Some(s) = start
+                    && s >= unsafe { HIGH_MEMORY_START_ADDRESS }
+                {
+                    kprintln!("Invalid start_address: {}", s);
+                    return;
                 }
                 (
                     self.get_table_and_initial_shit_level(VAddress::new(0))
@@ -927,11 +769,11 @@ impl PageManager {
                 )
             }
             PageTableType::Kernel(_) => {
-                if let Some(e) = end {
-                    if e < unsafe { HIGH_MEMORY_START_ADDRESS } {
-                        kprintln!("Invalid end_address: {}", e);
-                        return;
-                    }
+                if let Some(e) = end
+                    && e < unsafe { HIGH_MEMORY_START_ADDRESS }
+                {
+                    kprintln!("Invalid end_address: {}", e);
+                    return;
                 }
                 (
                     self.get_table_and_initial_shit_level(unsafe { HIGH_MEMORY_START_ADDRESS })

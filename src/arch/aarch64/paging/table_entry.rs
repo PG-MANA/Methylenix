@@ -30,10 +30,6 @@ impl TableEntry {
         Self(0)
     }
 
-    pub fn init(&mut self) {
-        *self = Self::new();
-    }
-
     pub const fn create_table_entry(table_address: PAddress) -> Self {
         Self((table_address.to_usize() as u64) | 0b11)
     }
