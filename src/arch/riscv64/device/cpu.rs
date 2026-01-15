@@ -23,6 +23,12 @@ pub const SBI_FID_SEND_IPI: u64 = 0;
 pub const SBI_EID_HART_START: u64 = 0x48534D;
 pub const SBI_FID_HART_START: u64 = 0;
 
+pub const SCAUSE_INTERRUPT: u64 = 1 << 63;
+pub const SCAUSE_SUPERVISOR_SOFTWARE_INTERRUPT: u64 = 1;
+pub const SCAUSE_SUPERVISOR_TIMER_INTERRUPT: u64 = 5;
+pub const SCAUSE_SUPERVISOR_EXTERNAL_INTERRUPT: u64 = 9;
+pub const SCAUSE_ENVIRONMENT_CALL_U_MODE: u64 = 8;
+
 #[inline(always)]
 pub unsafe fn enable_interrupt() {
     unsafe { asm!("csrrs x0, sie, {}", in(reg) MIE_SMASK) };
@@ -95,6 +101,13 @@ pub unsafe fn set_satp(satp: u64) {
 pub fn get_stvec() -> u64 {
     let result: u64;
     unsafe { asm!("csrr {}, stvec", out(reg) result) };
+    result
+}
+
+#[inline(always)]
+pub fn get_scause() -> u64 {
+    let result: u64;
+    unsafe { asm!("csrr {}, scause", out(reg) result) };
     result
 }
 

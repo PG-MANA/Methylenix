@@ -16,18 +16,16 @@ use core::arch::global_asm;
 
 struct InterruptInformation {
     lock: IrqSaveSpinLockFlag,
-    handlers: [usize; u8::MAX as _],
+    handlers: [usize; u32::MAX as _],
 }
 static mut INTERRUPT_INFO: InterruptInformation = InterruptInformation {
     lock: IrqSaveSpinLockFlag::new(),
-    handlers: [0usize; u8::MAX as _],
+    handlers: [0usize; u32::MAX as _],
 };
 
 fn get_interrupt_info_mut() -> &'static mut InterruptInformation {
     unsafe { (&raw mut INTERRUPT_INFO).as_mut().unwrap() }
 }
-
-const MSI_DEFAULT_PRIORITY: u8 = 0x30;
 
 trait InterruptController {
     fn set_priority(&self, interrupt_id: u32, priority: u32);
@@ -51,13 +49,9 @@ pub struct StoredIrqData {
 }
 
 impl InterruptManager {
-    const RESCHEDULE_SGI: u32 = 15;
-
     /// Create InterruptManager with invalid data.
     ///
-    /// Before use, **you must call [`init`]**.
-    ///
-    /// [`init`]: #method.init
+    /// Before use, **you must call [`Self::init`]**.
     pub const fn new() -> InterruptManager {
         InterruptManager {
             lock: IrqSaveSpinLockFlag::new(),
@@ -134,7 +128,7 @@ impl InterruptManager {
         let _self_lock = self.lock.lock();
         let _lock = interrupt_info.lock.lock();
         let mut interrupt_id = 0u32;
-        for (i, e) in interrupt_info.handlers[32..].iter_mut().enumerate() {
+        for (i, e) in interrupt_info.handlers.iter_mut().enumerate() {
             if *e == 0 {
                 *e = function as *const fn() as usize;
                 cpu::synchronize(e);
@@ -201,10 +195,8 @@ impl InterruptManager {
         };
     }
 
-    #[allow(dead_code)]
-    fn reschedule_ipi_handler(_: usize) -> bool {
-        /* Do nothing */
-        true
+    fn reschedule_ipi_handler() -> bool {
+        get_cpu_manager_cluster().run_queue.should_call_schedule()
     }
 
     fn send_eoi(&self, interrupt_id: u32) {
@@ -215,18 +207,43 @@ impl InterruptManager {
     }
 
     /// Interrupt Handler from the userland
-    extern "C" fn interrupt_user(context_data: *mut ContextData) {
-        todo!();
-        if get_cpu_manager_cluster().run_queue.should_call_schedule() {
-            get_cpu_manager_cluster()
-                .run_queue
-                .schedule(Some(unsafe { &*(context_data as *const ContextData) }));
-        }
-    }
+    extern "C" fn interrupt_handler(context_data: *mut ContextData, _from_user: bool) {
+        let scause = cpu::get_scause();
+        let is_interrupt = (scause & cpu::SCAUSE_INTERRUPT) == cpu::SCAUSE_INTERRUPT;
+        let reason = scause & !cpu::SCAUSE_INTERRUPT;
 
-    /// Interrupt Handler from the userland
-    extern "C" fn interrupt_kernel(context_data: *mut ContextData) {
-        todo!();
+        pr_debug!(
+            "SCAUSE: {scause:#X}(I: {is_interrupt}, Reason: {reason:#X}), FromUser: {_from_user}"
+        );
+        if is_interrupt {
+            match reason {
+                cpu::SCAUSE_SUPERVISOR_SOFTWARE_INTERRUPT => {
+                    if !Self::reschedule_ipi_handler() {
+                        pr_err!("Unknown IPI");
+                    }
+                }
+                cpu::SCAUSE_SUPERVISOR_TIMER_INTERRUPT => {}
+                cpu::SCAUSE_SUPERVISOR_EXTERNAL_INTERRUPT => {
+                    // TODO: detect dynamically
+                    let ic = &mut get_kernel_manager_cluster().arch_depend_data.plic;
+                    let int_id = ic.claim_interrupt(cpu::get_hartid() as _);
+                    pr_debug!("Int ID: {int_id}");
+                }
+                _ => {
+                    pr_err!("Unknown Exception: {reason}");
+                }
+            }
+        } else {
+            match reason {
+                cpu::SCAUSE_ENVIRONMENT_CALL_U_MODE => {
+                    crate::kernel::system_call::system_call_handler(unsafe { &mut *context_data });
+                }
+                _ => {
+                    unimplemented!("Unimplemented Exception: {reason}");
+                }
+            }
+        }
+
         if get_cpu_manager_cluster().run_queue.should_call_schedule() {
             get_cpu_manager_cluster()
                 .run_queue
@@ -295,7 +312,8 @@ interrupt_vector:
 
     // Call the handler
     mv      a0, sp
-    call     {interrupt_user}
+    mv      a1, 1
+    call     {interrupt_handler}
 
     // Restore interrupt status
     ld      t0, (8 * 31)(sp)
@@ -390,7 +408,8 @@ interrupt_vector:
 
     // Call the handler
     mv      a0, sp
-    call    {interrupt_kernel}
+    mv      a1, 0
+    call    {interrupt_handler}
 
     // Restore interrupt status
     ld      t0, (8 * 31)(sp)
@@ -434,6 +453,5 @@ interrupt_vector:
 ",
     c = const size_of::<ContextData>(),
     set_cpu_manager_cluster_gp = sym set_cpu_manager_cluster_gp,
-    interrupt_user = sym InterruptManager::interrupt_user,
-    interrupt_kernel = sym InterruptManager::interrupt_kernel,
+    interrupt_handler = sym InterruptManager::interrupt_handler,
 );
