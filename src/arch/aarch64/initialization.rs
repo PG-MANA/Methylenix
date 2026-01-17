@@ -531,6 +531,9 @@ fn init_local_timer_ap() {
                 .arch_depend_data
                 .generic_timer,
         );
+    get_cpu_manager_cluster()
+        .local_timer_manager
+        .set_source_timer(&get_cpu_manager_cluster().arch_depend_data.generic_timer);
 }
 
 /// Init TaskManager
