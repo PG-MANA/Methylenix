@@ -38,10 +38,6 @@ impl PDPTE {
         (self.flags & bit) != 0
     }
 
-    pub fn is_huge(&self) -> bool {
-        self.get_bit(1 << 7)
-    }
-
     pub fn set_huge(&mut self, b: bool) {
         assert!(!self.is_present());
         self.set_bit(1 << 7, b);
@@ -108,6 +104,10 @@ impl PagingEntry for PDPTE {
 
     fn set_no_execute(&mut self, b: bool) {
         self.set_bit(1 << 63, b);
+    }
+
+    fn is_huge(&self) -> bool {
+        self.get_bit(1 << 7)
     }
 
     fn get_address(&self) -> Option<PAddress> {

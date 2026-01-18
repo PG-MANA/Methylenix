@@ -161,21 +161,22 @@ impl VirtualMemoryManager {
     ) -> Result<(), MemoryError> {
         if let Some(p) = physical_address
             && p & !PAGE_MASK != 0
+        /* Physical Address allows zero */
         {
-            pr_err!("Physical Address({}) is not aligned.", p);
+            pr_err!("Physical Address({p}) is not aligned.");
             return Err(MemoryError::NotAligned);
         }
         if let Some(v) = virtual_address
-            && v & !PAGE_MASK != 0
+            && (v.is_zero() || v & !PAGE_MASK != 0)
         {
-            pr_err!("Virtual Address({}) is not aligned.", v);
+            pr_err!("Virtual Address({v}) is zero or not aligned.");
             return Err(MemoryError::NotAligned);
         }
         if let Some(s) = size
-            && s & !PAGE_MASK != 0
+            && (s.is_zero() || (s & !PAGE_MASK != 0))
         {
-            pr_err!("Size({}) is not aligned.", s);
-            return Err(MemoryError::NotAligned);
+            pr_err!("Size({s}) is zero or not aligned.");
+            return Err(MemoryError::InvalidSize);
         }
         Ok(())
     }

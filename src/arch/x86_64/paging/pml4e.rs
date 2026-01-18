@@ -106,6 +106,10 @@ impl PagingEntry for PML4E {
         self.set_bit(1 << 63, b);
     }
 
+    fn is_huge(&self) -> bool {
+        false
+    }
+
     fn get_address(&self) -> Option<PAddress> {
         if self.is_present() {
             Some(PAddress::new((self.flags & 0x000F_FFFF_FFFF_F000) as usize))

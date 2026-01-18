@@ -101,6 +101,7 @@ trait PagingEntry {
     fn set_global(&mut self, b: bool);
     fn is_no_execute(&self) -> bool;
     fn set_no_execute(&mut self, b: bool);
+    fn is_huge(&self) -> bool;
     fn get_address(&self) -> Option<PAddress>;
     fn set_address(&mut self, address: PAddress) -> bool;
     fn get_map_size(&self) -> MSize;
@@ -205,6 +206,10 @@ impl PageManager {
             pml4e.set_address(direct_map_to_physical_address(pdpt_address));
             pml4e.set_present(true);
         }
+        if pml4e.is_huge() {
+            pr_err!("PML4E does not have the next page table");
+            return Err(PagingError::InvalidPageTable);
+        }
 
         let pdpte = &mut unsafe {
             &mut *(physical_address_to_direct_map(pml4e.get_address().unwrap())
@@ -247,6 +252,10 @@ impl PageManager {
             pdpte.set_address(direct_map_to_physical_address(pd_address));
             pdpte.set_present(true);
         }
+        if pdpte.is_huge() {
+            pr_err!("PDPTE does not have the next page table");
+            return Err(PagingError::InvalidPageTable);
+        }
         let pde = &mut unsafe {
             &mut *(physical_address_to_direct_map(pdpte.get_address().unwrap())
                 .to::<[PDE; PD_MAX_ENTRY]>())
@@ -286,6 +295,10 @@ impl PageManager {
             pde.init();
             pde.set_address(direct_map_to_physical_address(pt_address));
             pde.set_present(true);
+        }
+        if pde.is_huge() {
+            pr_err!("PDE does not have the next page table");
+            return Err(PagingError::InvalidPageTable);
         }
         let pte = &mut unsafe {
             &mut *(physical_address_to_direct_map(pde.get_address().unwrap())
@@ -351,19 +364,18 @@ impl PageManager {
         let mut processed_size = MSize::new(0);
 
         while processed_size <= size {
-            let processing_virtual_address = virtual_address + processed_size;
-            let processing_physical_address = physical_address + processed_size;
-            let number_of_pde =
-                (processing_virtual_address.to_usize() >> (PAGE_SHIFT + 9)) & (0x1FF);
-            let number_of_pte = (processing_virtual_address.to_usize() >> PAGE_SHIFT) & (0x1FF);
+            let virtual_address = virtual_address + processed_size;
+            let physical_address = physical_address + processed_size;
+            let number_of_pde = (virtual_address.to_usize() >> (PAGE_SHIFT + 9)) & (0x1FF);
+            let number_of_pte = (virtual_address.to_usize() >> PAGE_SHIFT) & (0x1FF);
 
-            let pdpte = self.get_target_pdpte(pm_manager, processing_virtual_address, true)?;
+            let pdpte = self.get_target_pdpte(pm_manager, virtual_address, true)?;
 
             if allow_huge
                 && self.is_1gb_paging_supported
                 && number_of_pde == 0
                 && number_of_pte == 0
-                && (processing_physical_address & 0x3FFFFFFF) == 0
+                && (physical_address & 0x3FFFFFFF) == 0
                 && (size - processed_size) >= MSize::new(0x40000000)
                 && (!pdpte.is_present() || pdpte.is_huge())
             {
@@ -373,18 +385,17 @@ impl PageManager {
                 pdpte.set_no_execute(!permission.is_executable());
                 pdpte.set_writable(permission.is_writable());
                 pdpte.set_user_accessible(permission.is_user_accessible());
-                pdpte.set_address(processing_physical_address);
+                pdpte.set_address(physical_address);
                 pdpte.set_present(true);
                 processed_size += MSize::new(0x40000000);
                 continue;
             }
 
-            let pde =
-                self.get_target_pde(pm_manager, processing_virtual_address, true, Some(pdpte))?;
+            let pde = self.get_target_pde(pm_manager, virtual_address, true, Some(pdpte))?;
 
             if allow_huge
                 && number_of_pte == 0
-                && (processing_physical_address & 0x1FFFFF) == 0
+                && (physical_address & 0x1FFFFF) == 0
                 && (size - processed_size) >= MSize::new(0x200000)
                 && (!pde.is_present() || pde.is_huge())
             {
@@ -394,7 +405,7 @@ impl PageManager {
                 pde.set_no_execute(!permission.is_executable());
                 pde.set_writable(permission.is_writable());
                 pde.set_user_accessible(permission.is_user_accessible());
-                pde.set_address(processing_physical_address);
+                pde.set_address(physical_address);
                 pde.set_present(true);
                 processed_size += MSize::new(0x200000);
                 continue;
