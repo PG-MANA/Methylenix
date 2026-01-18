@@ -88,6 +88,10 @@ pub fn init_interrupt(kernel_code_segment: u16, user_code_segment: u16) {
             .io_apic_manager,
         Mutex::new(io_apic_manager)
     );
+    get_cpu_manager_cluster().cpu_id = get_cpu_manager_cluster()
+        .interrupt_manager
+        .get_local_apic_manager()
+        .get_apic_id() as _;
 }
 
 /// Init Timer
@@ -211,14 +215,7 @@ pub fn wake_up_application_processors() {
     }
     let madt_manager = madt_manager.unwrap();
     let apic_id_list_iter = madt_manager.find_apic_id_list();
-
-    /* Set BSP Local APIC ID into cpu_manager */
-    let cpu_manager = get_cpu_manager_cluster();
-    let bsp_apic_id = get_cpu_manager_cluster()
-        .interrupt_manager
-        .get_local_apic_manager()
-        .get_apic_id();
-    cpu_manager.cpu_id = bsp_apic_id as usize;
+    let bsp_apic_id = get_cpu_manager_cluster().cpu_id as u32;
 
     /* Extern Assembly Symbols */
     unsafe extern "C" {
@@ -344,7 +341,6 @@ pub extern "C" fn ap_boot_main() -> ! {
 
     /* Setup CPU Manager, it contains individual data of CPU */
     let cpu_manager = setup_cpu_manager_cluster(None);
-    pr_info!("Booted (CPU ID: {:#X})", cpu_manager.cpu_id);
 
     /* Setup memory management system */
     let mut memory_allocator = MemoryAllocator::new();
@@ -373,6 +369,8 @@ pub extern "C" fn ap_boot_main() -> ! {
     init_local_timer();
     init_task_ap(ap_idle);
     init_work_queue();
+
+    pr_info!("Booted (CPU ID: {:#X})", cpu_manager.cpu_id);
 
     /* Switch to ap_idle task with own stack */
     cpu_manager.run_queue.start()

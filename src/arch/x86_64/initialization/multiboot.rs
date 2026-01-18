@@ -47,6 +47,23 @@ pub fn init_memory_by_multiboot_information(
         );
     }
     for entry in multiboot_information.memory_map_info.clone() {
+        pr_info!(
+            "[{:#016X}~{:#016X}] {}",
+            entry.addr,
+            MSize::new(entry.length as usize)
+                .to_end_address(PAddress::new(entry.addr as usize))
+                .to_usize(),
+            match entry.m_type {
+                1 => "Available",
+                3 => "ACPI information",
+                4 => "Reserved(must save on hibernation)",
+                5 => "Defective RAM",
+                _ => "Reserved",
+            }
+        );
+        if entry.length == 0 {
+            continue;
+        }
         if entry.m_type == 1 {
             /* Available memory */
             physical_memory_manager
@@ -57,25 +74,21 @@ pub fn init_memory_by_multiboot_information(
                 )
                 .expect("Failed to free available memory");
         }
-        let area_name = match entry.m_type {
-            1 => "Available",
-            3 => "ACPI information",
-            4 => "Reserved(must save on hibernation)",
-            5 => "Defective RAM",
-            _ => "Reserved",
-        };
-        pr_info!(
-            "[{:#016X}~{:#016X}] {}",
-            entry.addr,
-            MSize::new(entry.length as usize)
-                .to_end_address(PAddress::new(entry.addr as usize))
-                .to_usize(),
-            area_name
-        );
     }
 
     /* Reserve EFI Memory Area */
     for entry in multiboot_information.efi_memory_map_info.clone() {
+        pr_info!(
+            "[{:#016X}~{:#016X}] {}",
+            entry.physical_start,
+            MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT)
+                .to_end_address(PAddress::new(entry.physical_start))
+                .to_usize(),
+            entry.memory_type
+        );
+        if entry.number_of_pages == 0 {
+            continue;
+        }
         match entry.memory_type {
             EfiMemoryType::EfiReservedMemoryType |
             EfiMemoryType::EfiBootServicesData/* for BGRT */ |
@@ -98,25 +111,27 @@ pub fn init_memory_by_multiboot_information(
             }
             _ => {}
         }
-        pr_info!(
-            "[{:#016X}~{:#016X}] {}",
-            entry.physical_start,
-            MSize::new((entry.number_of_pages as usize) << PAGE_SHIFT)
-                .to_end_address(PAddress::new(entry.physical_start))
-                .to_usize(),
-            entry.memory_type
-        );
     }
 
     /* Reserve kernel code and data area to avoid using this area */
     for section in multiboot_information.elf_info.clone() {
-        if section.is_section_allocate() && ((section.get_address() as usize) & !PAGE_MASK) == 0 {
+        if section.is_section_allocate()
+            && section.get_size() != 0
+            && ((section.get_address() as usize) & !PAGE_MASK) == 0
+        {
             let virtual_address = VAddress::new(section.get_address() as usize);
             let physical_address = if virtual_address >= KERNEL_MAP_START_ADDRESS {
                 kernel_area_to_physical_address(virtual_address)
             } else {
                 unsafe { virtual_address.to_direct_mapped_p_address() }
             };
+            pr_info!(
+                "Reserve Kernel Area: [{:#016X}~{:#016X}] (VA: [{:#016X}~{:#016X}])",
+                physical_address.to_usize(),
+                physical_address.to_usize() + (section.get_size() as usize),
+                virtual_address.to_usize(),
+                virtual_address.to_usize() + (section.get_size() as usize),
+            );
             physical_memory_manager
                 .reserve_memory(
                     physical_address,
@@ -127,6 +142,11 @@ pub fn init_memory_by_multiboot_information(
         }
     }
     /* reserve Multiboot Information area */
+    pr_debug!(
+        "Reserve Multiboot Information Area: [{:#016X} ~ {:#016X}].",
+        multiboot_information.address,
+        multiboot_information.address + multiboot_information.size
+    );
     physical_memory_manager
         .reserve_memory(
             PAddress::new(multiboot_information.address),
@@ -142,7 +162,12 @@ pub fn init_memory_by_multiboot_information(
 
     /* Reserve Multiboot modules area */
     for e in multiboot_information.modules.iter() {
-        if e.start_address != 0 && e.end_address != 0 {
+        if e.start_address != 0 && e.end_address != 0 && e.start_address < e.end_address {
+            pr_debug!(
+                "Reserve Multiboot Module Area: [{:#016X} ~ {:#016X}].",
+                e.start_address,
+                e.end_address
+            );
             physical_memory_manager
                 .reserve_memory(
                     PAddress::new(e.start_address),
@@ -166,7 +191,10 @@ pub fn init_memory_by_multiboot_information(
 
     for section in multiboot_information.elf_info.clone() {
         let section_address = section.get_address() as usize;
-        if !section.is_section_allocate() || (section_address & !PAGE_MASK) != 0 {
+        if !section.is_section_allocate()
+            || section.get_size() == 0
+            || (section_address & !PAGE_MASK) != 0
+        {
             continue;
         }
         let aligned_size = MSize::new((section.get_size() as usize - 1) & PAGE_MASK) + PAGE_SIZE;
@@ -182,30 +210,27 @@ pub fn init_memory_by_multiboot_information(
         } else {
             unsafe { virtual_address.to_direct_mapped_p_address() }
         };
-        /* 初期化の段階で1 << order 分のメモリ管理を行ってはいけない。他の領域と重なる可能性がある。*/
         match virtual_memory_manager.map_address(
             physical_address,
             Some(virtual_address),
             aligned_size,
             permission,
-            MemoryOptionFlags::KERNEL,
+            MemoryOptionFlags::KERNEL | MemoryOptionFlags::ALLOW_HUGE,
             get_physical_memory_manager(),
         ) {
             Ok(address) => {
-                if address == VAddress::new(section_address) {
-                    continue;
+                if address != VAddress::new(section_address) {
+                    panic!(
+                        "Virtual Address is different from Physical Address: V:{:#X} P:{:#X}",
+                        address.to_usize(),
+                        section_address
+                    );
                 }
-                pr_err!(
-                    "Virtual Address is different from Physical Address: V:{:#X} P:{:#X}",
-                    address.to_usize(),
-                    section_address
-                );
             }
             Err(e) => {
-                pr_err!("Mapping ELF Section was failed: {:?}", e);
+                panic!("Mapping ELF Section was failed: {:?}", e);
             }
         };
-        panic!("Cannot map virtual memory correctly.");
     }
 
     let aligned_multiboot = MemoryManager::page_align(
