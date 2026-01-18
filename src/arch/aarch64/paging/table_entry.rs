@@ -13,7 +13,7 @@ pub const NUM_OF_TABLE_ENTRIES: usize = 512;
 pub struct TableEntry(u64);
 
 impl TableEntry {
-    const TABLE_ADDRESS_MASK: u64 = ((1 << 52) - 1) & (PAGE_MASK as u64);
+    const TABLE_ADDRESS_MASK: u64 = ((1 << 50) - 1) & (PAGE_MASK as u64);
     const OUTPUT_ADDRESS_MASK: u64 = ((1 << 50) - 1) & (PAGE_MASK as u64);
     const XN_OFFSET: u64 = 54;
     const XN: u64 = 1 << Self::XN_OFFSET;
