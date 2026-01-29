@@ -104,33 +104,7 @@ impl ContextData {
         data.registers.elr = entry_address as u64;
         data.registers.spsr = SPSR_M_EL0T;
         data.registers.sp = stack as u64;
-        if !arguments.is_empty() {
-            data.registers.x0 = arguments[0] as u64;
-        }
-        if arguments.len() > 1 {
-            data.registers.x1 = arguments[1] as u64;
-        }
-        if arguments.len() > 2 {
-            data.registers.x2 = arguments[2] as u64;
-        }
-        if arguments.len() > 3 {
-            data.registers.x3 = arguments[3] as u64;
-        }
-        if arguments.len() > 4 {
-            data.registers.x4 = arguments[4] as u64;
-        }
-        if arguments.len() > 5 {
-            data.registers.x5 = arguments[5] as u64;
-        }
-        if arguments.len() > 6 {
-            data.registers.x6 = arguments[6] as u64;
-        }
-        if arguments.len() > 7 {
-            data.registers.x7 = arguments[7] as u64;
-        }
-        if arguments.len() > 8 {
-            pr_err!("Too many arguments.");
-        }
+        data.set_function_call_arguments(arguments);
         data
     }
     /// Create ContextData for system from 'original_context'.
@@ -144,30 +118,62 @@ impl ContextData {
         forked_data
     }
 
-    pub fn set_function_call_arguments(&mut self, arguments: &[u64]) {
+    pub fn set_function_call_arguments<T: TryInto<u64> + Clone>(&mut self, arguments: &[T]) {
         if !arguments.is_empty() {
-            self.registers.x0 = arguments[0];
+            self.registers.x0 = arguments[0]
+                .clone()
+                .try_into()
+                .map_err(|_| pr_warn!("Failed to set argument."))
+                .unwrap_or(0);
         }
         if arguments.len() > 1 {
-            self.registers.x1 = arguments[1];
+            self.registers.x1 = arguments[1]
+                .clone()
+                .try_into()
+                .map_err(|_| pr_warn!("Failed to set argument."))
+                .unwrap_or(0);
         }
         if arguments.len() > 2 {
-            self.registers.x2 = arguments[2];
+            self.registers.x2 = arguments[2]
+                .clone()
+                .try_into()
+                .map_err(|_| pr_warn!("Failed to set argument."))
+                .unwrap_or(0);
         }
         if arguments.len() > 3 {
-            self.registers.x3 = arguments[3];
+            self.registers.x3 = arguments[3]
+                .clone()
+                .try_into()
+                .map_err(|_| pr_warn!("Failed to set argument."))
+                .unwrap_or(0);
         }
         if arguments.len() > 4 {
-            self.registers.x4 = arguments[4];
+            self.registers.x4 = arguments[4]
+                .clone()
+                .try_into()
+                .map_err(|_| pr_warn!("Failed to set argument."))
+                .unwrap_or(0);
         }
         if arguments.len() > 5 {
-            self.registers.x5 = arguments[5];
+            self.registers.x5 = arguments[5]
+                .clone()
+                .try_into()
+                .map_err(|_| pr_warn!("Failed to set argument."))
+                .unwrap_or(0);
         }
         if arguments.len() > 6 {
-            self.registers.x6 = arguments[6];
+            self.registers.x6 = arguments[6]
+                .clone()
+                .try_into()
+                .map_err(|_| pr_warn!("Failed to set argument."))
+                .unwrap_or(0);
         }
         if arguments.len() > 7 {
-            self.registers.x7 = arguments[7];
+            self.registers.x7 = arguments[7]
+                .clone()
+                .try_into()
+                .map_err(|_| pr_warn!("Failed to set argument."))
+                .unwrap_or(0);
         }
         if arguments.len() > 8 {
             pr_err!("Too many arguments.");

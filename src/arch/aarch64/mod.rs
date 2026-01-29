@@ -1,7 +1,5 @@
 //!
-//! AArch64 Boot Entry
-//!
-//! Boot entry codes
+//! Armv8-A(AArch64) Boot Routines
 //!
 
 mod boot_info;

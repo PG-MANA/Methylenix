@@ -1,7 +1,5 @@
 //!
-//! x86_64 Boot Entry
-//!
-//! Boot entry code from assembly.
+//! x86_64 Boot Routines
 //!
 
 pub mod boot;
