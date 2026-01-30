@@ -515,19 +515,19 @@ impl MemoryPermissionFlags {
         Self::new(true, true, false, true)
     }
 
-    pub fn is_readable(&self) -> bool {
+    pub const fn is_readable(&self) -> bool {
         self.0 & (1 << 0) != 0
     }
 
-    pub fn is_writable(&self) -> bool {
+    pub const fn is_writable(&self) -> bool {
         self.0 & (1 << 1) != 0
     }
 
-    pub fn is_executable(&self) -> bool {
+    pub const fn is_executable(&self) -> bool {
         self.0 & (1 << 2) != 0
     }
 
-    pub fn is_user_accessible(&self) -> bool {
+    pub const fn is_user_accessible(&self) -> bool {
         self.0 & (1 << 3) != 0
     }
 }
@@ -547,51 +547,51 @@ impl MemoryOptionFlags {
     pub const STACK: Self = Self(1 << 9);
     pub const ALLOW_HUGE: Self = Self(1 << 10);
 
-    pub fn is_for_kernel(&self) -> bool {
+    pub const fn is_for_kernel(&self) -> bool {
         !self.is_for_user()
     }
 
-    pub fn is_for_user(&self) -> bool {
+    pub const fn is_for_user(&self) -> bool {
         (*self & Self::USER).0 != 0
     }
 
-    pub fn is_pre_reserved(&self) -> bool {
+    pub const fn is_pre_reserved(&self) -> bool {
         (*self & Self::PRE_RESERVED).0 != 0
     }
 
-    pub fn should_not_free_phy_address(&self) -> bool {
+    pub const fn should_not_free_phy_address(&self) -> bool {
         (*self & Self::DO_NOT_FREE_PHYSICAL_ADDRESS).0 != 0
     }
 
-    pub fn is_wired(&self) -> bool {
+    pub const fn is_wired(&self) -> bool {
         (*self & Self::WIRED).0 != 0
     }
 
-    pub fn is_io_map(&self) -> bool {
+    pub const fn is_io_map(&self) -> bool {
         (*self & Self::IO_MAP).0 != 0
     }
 
-    pub fn is_alloc_area(&self) -> bool {
+    pub const fn is_alloc_area(&self) -> bool {
         (*self & Self::ALLOC).0 != 0
     }
 
-    pub fn is_no_wait(&self) -> bool {
+    pub const fn is_no_wait(&self) -> bool {
         (*self & Self::NO_WAIT).0 != 0
     }
 
-    pub fn is_critical(&self) -> bool {
+    pub const fn is_critical(&self) -> bool {
         (*self & Self::CRITICAL).0 != 0
     }
 
-    pub fn is_device_memory(&self) -> bool {
+    pub const fn is_device_memory(&self) -> bool {
         (*self & Self::DEVICE_MEMORY).0 != 0
     }
 
-    pub fn is_stack(&self) -> bool {
+    pub const fn is_stack(&self) -> bool {
         (*self & Self::STACK).0 != 0
     }
 
-    pub fn should_use_huge_page(&self) -> bool {
+    pub const fn should_use_huge_page(&self) -> bool {
         (*self & Self::ALLOW_HUGE).0 != 0
     }
 }

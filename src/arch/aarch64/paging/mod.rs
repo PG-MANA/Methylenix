@@ -477,7 +477,7 @@ impl PageManager {
                 .free(next_table_address, PAGE_SIZE, false)
                 .or(Err(PagingError::MemoryError))?;
         }
-        Ok(table.iter().find(|e| e.is_validated()).is_none())
+        Ok(!table.iter().any(|e| e.is_validated()))
     }
 
     /// Clean up the page table.

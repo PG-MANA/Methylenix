@@ -550,8 +550,7 @@ impl PageManager {
                             .to::<[PTE; PT_MAX_ENTRY]>())
                     }
                     .iter()
-                    .find(|e| e.is_present())
-                    .is_some()
+                    .any(|e| e.is_present())
                     {
                         return Ok(());
                     }
@@ -568,8 +567,7 @@ impl PageManager {
                     .to::<[PDE; PD_MAX_ENTRY]>())
             }
             .iter()
-            .find(|e| e.is_present())
-            .is_some()
+            .any(|e| e.is_present())
             {
                 return Ok(());
             }
@@ -585,8 +583,7 @@ impl PageManager {
                 .to::<[PDPTE; PDPT_MAX_ENTRY]>())
         }
         .iter()
-        .find(|e| e.is_present())
-        .is_some()
+        .any(|e| e.is_present())
         {
             return Ok(());
         }
