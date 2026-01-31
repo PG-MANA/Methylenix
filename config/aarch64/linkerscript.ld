@@ -19,23 +19,25 @@ SECTIONS {
     *(.rodata .rodata.*)
   }
 
+  .got : ALIGN(__ALIGN_SIZE) {
+    *(.got.plt)
+    *(.got)
+    *(.igot)
+    *(.igot.plt)
+  }
+
+  /*.rela : ALIGN(__ALIGN_SIZE) {
+    *(.rela.dyn .rela.dyn.*)
+    *(.rela*)
+  }*/
+
   .bss : ALIGN(__ALIGN_SIZE) {
     *(.bss .bss.*)
   }
 
-  .got : ALIGN(__ALIGN_SIZE) {
-    *(.got .got.*)
-  }
-
-  .eh_frame : ALIGN(__ALIGN_SIZE) {
-    *(.eh_frame .eh_frame.*)
-  }
-
-  .eh_frame_hdr : ALIGN(__ALIGN_SIZE) {
-    *(.eh_frame_hdr .eh_frame_hdr.*)
-  }
-
   /DISCARD/ : {
     *(.comment .comment.*)
+    *(.eh_frame .eh_frame.*)
+    *(.eh_frame_hdr .eh_frame_hdr.*)
   }
 }

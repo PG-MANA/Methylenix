@@ -3,14 +3,19 @@ rustflags = [
     "-C", "link-arg=-Tconfig/x86_64/linkerscript.ld",
     "-C", "code-model=kernel",
     "-C", "relocation-model=dynamic-no-pic",
-    "-C", "no-redzone=yes"
+    "-C", "no-redzone=yes",
+    "-C", "relro-level=partial",
 ]
 
 [target.aarch64-unknown-none-softfloat]
 rustflags = [
     "-C", "link-arg=-Tconfig/aarch64/linkerscript.ld",
+    "-C", "relocation-model=pie",
     "-C", "code-model=large",
-    "-C", "no-redzone=yes"
+    "-C", "no-redzone=yes",
+    "-C", "linker-plugin-lto=yes",
+    "-C", "lto=yes",
+    "-C", "relro-level=full",
 ]
 
 [alias]

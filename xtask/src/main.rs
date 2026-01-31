@@ -31,15 +31,19 @@ fn build(cargo: &str, base_dir: &Path) -> i32 {
         output_dir: &Path,
         build_type: &str,
     ) -> i32;
+    let additional_build_flags: &[&str];
+
     /* The compiler emits compile errors when we wrote like `(target_arch, loader) = match ...` */
     match env::args().nth(2).as_deref() {
         Some("x86_64") => {
             target_arch = "x86_64-unknown-none";
             loader = build_loader_x86_64;
+            additional_build_flags = &[];
         }
         Some("aarch64") => {
             target_arch = "aarch64-unknown-none-softfloat";
             loader = build_loader_aarch64;
+            additional_build_flags = &[];
         }
         Some(a) => {
             eprintln!("Unknown architecture: {a}");
@@ -72,6 +76,7 @@ fn build(cargo: &str, base_dir: &Path) -> i32 {
             "--target",
             target_arch,
         ])
+        .args(additional_build_flags)
         .status();
     if !matches!(status.as_ref().map(|s| s.success()), Ok(true)) {
         eprintln!("Building the kernel is failed: {status:?}");

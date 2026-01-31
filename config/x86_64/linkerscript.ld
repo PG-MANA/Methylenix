@@ -9,7 +9,7 @@ SECTIONS {
   . = 0x100000 + SIZEOF_HEADERS;
 
   .headers : ALIGN(8) {
-    KEEP(*(.header.*)) /*使われてないとリンクされなくなるので*/
+    KEEP(*(.header.*))
   }
 
   .boot32 : ALIGN(8) {
@@ -36,27 +36,27 @@ SECTIONS {
   }
 
   . = ALIGN(__ALIGN_SIZE);
+  .got : AT(ADDR(.got) - __KERNEL_MAP_START_ADDRESS) {
+    *(.got.plt)
+    *(.got)
+    *(.igot)
+    *(.igot.plt)
+  }
+
+  /*. = ALIGN(__ALIGN_SIZE);
+  .rela : AT(ADDR(.rela) - __KERNEL_MAP_START_ADDRESS) {
+    *(.rela.dyn .rela.dyn.*)
+    *(.rela*)
+  }*/
+
+  . = ALIGN(__ALIGN_SIZE);
   .bss : AT(ADDR(.bss) - __KERNEL_MAP_START_ADDRESS) {
     *(.bss .bss.*)
   }
 
-  . = ALIGN(__ALIGN_SIZE);
-  .got : AT(ADDR(.got) - __KERNEL_MAP_START_ADDRESS) {
-    *(.got .got.*)
-  }
-
-  . = ALIGN(__ALIGN_SIZE);
-  .eh_frame : AT(ADDR(.eh_frame) - __KERNEL_MAP_START_ADDRESS) {
-    *(.eh_frame .eh_frame.*)
-  }
-
-  . = ALIGN(__ALIGN_SIZE);
-  .eh_frame_hdr : AT(ADDR(.eh_frame_hdr) - __KERNEL_MAP_START_ADDRESS) {
-    *(.eh_frame_hdr .eh_frame_hdr.*)
-  }
-
-
   /DISCARD/ : {
     *(.comment .comment.*)
+    *(.eh_frame .eh_frame.*)
+    *(.eh_frame_hdr .eh_frame_hdr.*)
   }
 }
