@@ -1,0 +1,145 @@
+//!
+//! RISC-V Boot Routines
+//!
+
+mod boot_info;
+pub mod context;
+
+pub mod device {
+    pub mod acpi;
+    pub mod cpu;
+    pub mod jh7110_timer;
+    pub mod pci;
+    pub mod serial_port;
+    pub mod text;
+}
+
+mod initialization;
+pub mod interrupt;
+pub mod paging;
+pub mod system_call;
+
+use self::{
+    boot_info::BootInformation,
+    device::{jh7110_timer::Jh7110Timer, serial_port::SerialPortManager},
+    initialization::*,
+};
+
+pub use crate::kernel::file_manager::elf::ELF_MACHINE_RISCV as ELF_MACHINE_DEFAULT;
+use crate::kernel::{
+    collections::{init_struct, ptr_linked_list::PtrLinkedList},
+    drivers::dtb::DtbManager,
+    graphic_manager::GraphicManager,
+    initialization::*,
+    manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
+    memory_manager::data_type::VAddress,
+    tty::TtyManager,
+};
+
+pub struct ArchDependedKernelManagerCluster {
+    dtb_manager: DtbManager,
+    plic: interrupt::plicv1::PlatformLevelInterruptController, /* TODO: Dynamic Value*/
+}
+
+pub struct ArchDependedCpuManagerCluster {
+    jh7110_timer: Jh7110Timer, /* TODO: Dynamic Value*/
+}
+
+pub const TARGET_ARCH_NAME: &str = "riscv64";
+
+#[unsafe(no_mangle)]
+extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
+    let mut boot_information = unsafe { &*boot_information }.clone();
+
+    /* Initialize Kernel TTY (Early) */
+    init_struct!(
+        get_kernel_manager_cluster().kernel_tty_manager[0],
+        TtyManager::new()
+    );
+    init_struct!(
+        get_kernel_manager_cluster().kernel_tty_manager[1],
+        TtyManager::new()
+    );
+
+    /* Init Early Serial Port */
+    init_struct!(
+        get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new()
+    );
+
+    /* If you want to use the early debug console, please uncomment the below code
+        and fill `SERIAL_PORT_ADDRESS` and `SERIAL_PORT_DEVICES_INDEX`.
+       (`SERIAL_PORT_ADDRESS` must be mapped.)
+    */
+    /* unsafe {
+        get_kernel_manager_cluster()
+            .serial_port_manager
+            .init_early(SERIAL_PORT_ADDRESS, SERIAL_PORT_DEVICES_INDEX)
+    }; */
+
+    get_kernel_manager_cluster().kernel_tty_manager[0]
+        .open(&get_kernel_manager_cluster().serial_port_manager);
+
+    /* Setup BSP cpu manager */
+    init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
+    setup_cpu_manager_cluster(Some(VAddress::from(
+        &get_kernel_manager_cluster().boot_strap_cpu_manager as *const _,
+    )));
+
+    /* Initialize Memory System */
+    init_memory_by_boot_information(&mut boot_information);
+
+    /* Initialize ACPI and DTB */
+    let acpi_available = false; //init_acpi_early_by_boot_information(&boot_information);
+    let dtb_available = init_dtb(&boot_information);
+    if !acpi_available && !dtb_available {
+        panic!("Neither ACPI nor DTB is available");
+    }
+
+    /* Detect serial port*/
+    if !init_serial_port(acpi_available, dtb_available) {
+        pr_err!("Failed to setup the serial port");
+    }
+
+    /* Initialize Graphic */
+    init_struct!(
+        get_kernel_manager_cluster().graphic_manager,
+        GraphicManager::new()
+    );
+    get_kernel_manager_cluster().kernel_tty_manager[1]
+        .open(&get_kernel_manager_cluster().graphic_manager);
+
+    kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
+    pr_info!("BootInformation: ACPI: {acpi_available}, DTB: {dtb_available}");
+
+    init_interrupt(acpi_available, dtb_available);
+    init_local_timer(acpi_available, dtb_available);
+    init_global_timer();
+
+    /* Set up the task management system */
+    init_task(main_arch_depend_initialization_process, idle);
+    init_work_queue();
+
+    wake_up_application_processors(acpi_available, dtb_available);
+
+    /* Switch to the main process */
+    get_cpu_manager_cluster().run_queue.start()
+    /* Never return to here */
+}
+
+fn main_arch_depend_initialization_process() -> ! {
+    /* TODO: detect dynamically */
+    get_cpu_manager_cluster()
+        .arch_depend_data
+        .jh7110_timer
+        .start_interrupt();
+
+    if !get_kernel_manager_cluster()
+        .serial_port_manager
+        .setup_interrupt()
+    {
+        pr_err!("Failed to setup interrupt of SerialPort");
+    }
+
+    main_initialization_process()
+}
