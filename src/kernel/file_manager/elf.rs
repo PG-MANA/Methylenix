@@ -22,6 +22,7 @@ const ELF_TYPE_EXECUTABLE: u16 = 2;
 
 pub const ELF_MACHINE_AMD64: u16 = 62;
 pub const ELF_MACHINE_AA64: u16 = 183;
+pub const ELF_MACHINE_RISCV: u16 = 243;
 
 pub const ELF64_HEADER_SIZE: usize = size_of::<Elf64Header>();
 
