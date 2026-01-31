@@ -23,3 +23,14 @@ build_aarch64:
   artifacts:
     paths:
       - bin/
+
+build_risv64:
+  stage:  build
+  script:
+    - rustup default nightly
+    - rustup target add riscv64imac-unknown-none-elf
+    - rustup component add rust-src
+    - cargo xtask build riscv64 --release
+  artifacts:
+    paths:
+      - bin/
