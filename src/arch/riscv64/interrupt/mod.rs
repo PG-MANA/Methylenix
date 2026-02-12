@@ -18,11 +18,11 @@ use core::arch::global_asm;
 
 struct InterruptInformation {
     lock: IrqSaveSpinLockFlag,
-    handlers: [usize; u32::MAX as _],
+    handlers: [usize; 1024],
 }
 static mut INTERRUPT_INFO: InterruptInformation = InterruptInformation {
     lock: IrqSaveSpinLockFlag::new(),
-    handlers: [0usize; u32::MAX as _],
+    handlers: [0usize; 1024],
 };
 
 fn get_interrupt_info_mut() -> &'static mut InterruptInformation {
