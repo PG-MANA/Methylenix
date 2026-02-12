@@ -3,6 +3,8 @@
 //!
 //! Supported Sv39, Sv48
 
+use super::{PAGE_MASK, PAGE_SHIFT};
+
 use crate::kernel::memory_manager::data_type::{Address, MemoryPermissionFlags, PAddress};
 
 pub const NUM_OF_TABLE_ENTRIES: usize = 512;
@@ -11,6 +13,7 @@ pub const NUM_OF_TABLE_ENTRIES: usize = 512;
 pub struct PageTableEntry(u64);
 
 impl PageTableEntry {
+    const PPN_MASK: u64 = ((1 << 54) - 1) & !((1 << 10) - 1);
     const PPN_OFFSET: usize = 10;
     //const RSW_OFFSET: usize = 8;
     //const RSW: u64 = 0b11 << Self::RSW_OFFSET;
@@ -43,8 +46,9 @@ impl PageTableEntry {
     }
 
     pub fn validate(&mut self) {
-        self.0 |= !Self::VALID;
+        self.0 |= Self::VALID;
     }
+
     pub fn invalidate(&mut self) {
         self.0 &= !Self::VALID;
     }
@@ -58,16 +62,17 @@ impl PageTableEntry {
     }
 
     pub const fn get_next_table_address(&self) -> PAddress {
-        PAddress::new((self.0 & (1 << Self::PPN_OFFSET)) as usize)
+        PAddress::new((((self.0 & Self::PPN_MASK) >> Self::PPN_OFFSET) << PAGE_SHIFT) as usize)
     }
 
     pub const fn get_output_address(&self) -> PAddress {
-        PAddress::new((self.0 & (1 << Self::PPN_OFFSET)) as usize)
+        PAddress::new((((self.0 & Self::PPN_MASK) >> Self::PPN_OFFSET) << PAGE_SHIFT) as usize)
     }
 
     pub fn set_output_address(&mut self, output_address: PAddress) {
-        assert_eq!(output_address & ((1 << Self::PPN_OFFSET) - 1), 0);
-        self.0 = (self.0 & !((1 << Self::PPN_OFFSET) - 1)) | (output_address.to_usize() as u64);
+        assert_eq!(output_address.to_usize() & !PAGE_MASK, 0);
+        self.0 = (self.0 & !Self::PPN_MASK)
+            | (((output_address.to_usize() as u64) >> PAGE_SHIFT) << Self::PPN_OFFSET);
     }
 
     pub const fn get_permission(&self) -> MemoryPermissionFlags {

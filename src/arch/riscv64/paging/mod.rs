@@ -1,7 +1,7 @@
 //!
 //! Paging Manager
 //!
-//! These modules treat the paging system of AArch64.
+//! These modules treat the paging system of RISC-V.
 //!
 //! This does not handle memory status(which process using what memory area).
 //! This is the back-end of VirtualMemoryManager.
@@ -35,10 +35,10 @@ pub const PAGE_MASK: usize = !0xFFF;
 /// Default page cache size for paging
 pub const PAGING_CACHE_LENGTH: usize = 64;
 
-/// Max virtual address of AArch64(Type = VAddress)
+/// Max virtual address(Type = VAddress)
 pub const MAX_VIRTUAL_ADDRESS: VAddress = VAddress::new(MAX_VIRTUAL_ADDRESS_USIZE);
 
-/// Max virtual address of AArch64(Type = usize)
+/// Max virtual address(Type = usize)
 pub const MAX_VIRTUAL_ADDRESS_USIZE: usize = 0xFFFF_FFFF_FFFF_FFFF;
 
 pub const NEED_COPY_HIGH_MEMORY_PAGE_TABLE: bool = true;
@@ -71,6 +71,8 @@ pub enum PagingError {
 }
 
 impl PageManager {
+    const PFN_BITS: usize = 9;
+
     /// Create System Page Manager
     /// Before use, **you must call [`Self::init`]**.
     pub const fn new() -> Self {
@@ -113,8 +115,7 @@ impl PageManager {
     pub fn copy_system_area(&mut self, system_page_manager: &Self) -> Result<(), PagingError> {
         let high_memory_address = get_high_memory_base_address();
         let (table, level) = self.get_table_and_initial_level(high_memory_address)?;
-        let high_area_start = (high_memory_address.to_usize() >> (PAGE_SHIFT + 9 * level as usize))
-            & (table.len() - 1);
+        let high_area_start = Self::get_table_index(table, level, high_memory_address);
         let (system_table, system_level) =
             system_page_manager.get_table_and_initial_level(high_memory_address)?;
         if level != system_level {
@@ -129,19 +130,39 @@ impl PageManager {
         Ok(())
     }
 
-    pub fn get_canonical_address(address: VAddress) -> Result<VAddress, PagingError> {
-        Ok(address)
+    const fn get_table_index(
+        table: &[table_entry::PageTableEntry],
+        level: u8,
+        virtual_address: VAddress,
+    ) -> usize {
+        (virtual_address.to_usize() >> (PAGE_SHIFT + Self::PFN_BITS * level as usize))
+            & (table.len() - 1)
+    }
+
+    const fn get_block_size(level: u8) -> MSize {
+        MSize::new(1 << (PAGE_SHIFT + Self::PFN_BITS * (level as usize)))
+    }
+
+    pub fn get_canonical_address(&self, address: VAddress) -> Result<VAddress, PagingError> {
+        let lsb = PAGE_SHIFT + Self::PFN_BITS * self.get_initial_level()? as usize;
+        if ((address.to_usize() >> lsb) & 1) != 0 {
+            Ok(VAddress::new(address.to_usize() | !((1 << lsb) - 1)))
+        } else {
+            Ok(address)
+        }
+    }
+
+    const fn get_initial_level(&self) -> Result<u8, PagingError> {
+        if self.mode < 8 || self.mode > 10 {
+            return Err(PagingError::InvalidPageTable);
+        }
+        Ok(self.mode - 8 + 2)
     }
 
     fn get_table_and_initial_level(
         &self,
         _virtual_address: VAddress,
     ) -> Result<(&'static mut [PageTableEntry], u8), PagingError> {
-        if self.mode < 8 || self.mode > 10 {
-            return Err(PagingError::InvalidPageTable);
-        }
-        let level = self.mode - 8 + 3;
-
         Ok((
             unsafe {
                 from_raw_parts_mut(
@@ -149,7 +170,7 @@ impl PageManager {
                     NUM_OF_TABLE_ENTRIES,
                 )
             },
-            level,
+            self.get_initial_level()?,
         ))
     }
 
@@ -160,14 +181,10 @@ impl PageManager {
         virtual_address: VAddress,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(&'a mut PageTableEntry, MSize), PagingError> {
-        let index =
-            (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * level as usize)) & (table.len() - 1);
+        let index = Self::get_table_index(table, level, virtual_address);
 
         if table[index].is_leaf() {
-            Ok((
-                &mut table[index],
-                MSize::new(1usize << (PAGE_SHIFT + 9 * (level as usize))),
-            ))
+            Ok((&mut table[index], Self::get_block_size(level)))
         } else if table[index].has_next() {
             assert_ne!(level, 0);
             self.get_target_entry(
@@ -214,9 +231,8 @@ impl PageManager {
         option: MemoryOptionFlags,
         remove: bool,
     ) -> Result<(), PagingError> {
-        let index =
-            (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * level as usize)) & (table.len() - 1);
-        let block_size = MSize::new(1 << (PAGE_SHIFT + 9 * level as usize));
+        let index = Self::get_table_index(table, level, *virtual_address);
+        let block_size = Self::get_block_size(level);
         for e in table[index..].iter_mut() {
             if size.is_zero() {
                 break;
@@ -306,7 +322,7 @@ impl PageManager {
             level,
             pm_manager,
             &mut physical_address,
-            &mut Self::get_canonical_address(virtual_address)?,
+            &mut self.get_canonical_address(virtual_address)?,
             &mut size,
             permission,
             option,
@@ -370,7 +386,7 @@ impl PageManager {
             return Err(PagingError::SizeIsNotAligned);
         }
 
-        let virtual_address = Self::get_canonical_address(virtual_address)?;
+        let virtual_address = self.get_canonical_address(virtual_address)?;
         let (table, level) = self.get_table_and_initial_level(virtual_address)?;
         let mut v = virtual_address;
         self._associate_address(
@@ -406,8 +422,7 @@ impl PageManager {
         if level == 0 {
             return Ok(!table.iter().any(|e| e.is_valid()));
         }
-        let index =
-            (virtual_address.to_usize() >> (PAGE_SHIFT + 9 * level as usize)) & (table.len() - 1);
+        let index = Self::get_table_index(table, level, virtual_address);
         if table[index].has_next() {
             let next_table_address = table[index].get_next_table_address();
             if !self._cleanup_page_tables(
@@ -445,7 +460,7 @@ impl PageManager {
         if self._cleanup_page_tables(
             table,
             level,
-            Self::get_canonical_address(virtual_address)?,
+            self.get_canonical_address(virtual_address)?,
             pm_manager,
         )? {
             Err(PagingError::InvalidPageTable)
@@ -541,9 +556,10 @@ impl PageManager {
     ) {
         let print_normal = |v: VAddress, p: PAddress, pm: MemoryPermissionFlags| {
             kprintln!(
-                "VA: {:>#16X} => PA: {:>#16X}, W:{:>5}, E:{:>5}, U:{:>5}",
+                "VA: {:>#18X} => PA: {:>#18X}, R:{:>5}, W:{:>5}, E:{:>5}, U:{:>5}",
                 v.to_usize(),
                 p.to_usize(),
+                pm.is_readable(),
                 pm.is_writable(),
                 pm.is_executable(),
                 pm.is_user_accessible()
@@ -551,12 +567,12 @@ impl PageManager {
         };
         let print_omitted = |v: VAddress, p: PAddress| {
             kprintln!(
-                "... {:>#16X}        {:>#16X} (fin)",
+                "... {:>#18X}        {:>#18X} (fin)",
                 v.to_usize(),
                 p.to_usize()
             );
         };
-        let block_size = MSize::new(1 << (PAGE_SHIFT + 9 * level as usize));
+        let block_size = Self::get_block_size(level);
         for e in table {
             if *virtual_address >= end_address {
                 return;
@@ -567,7 +583,11 @@ impl PageManager {
             if !e.is_valid() {
                 *virtual_address += block_size;
                 if *omitted {
-                    print_omitted(continued_address.0, continued_address.1);
+                    print_omitted(
+                        self.get_canonical_address(continued_address.0)
+                            .unwrap_or(MAX_VIRTUAL_ADDRESS),
+                        continued_address.1,
+                    );
                     *omitted = false;
                 }
                 continue;
@@ -580,7 +600,11 @@ impl PageManager {
                         || pa != continued_address.1
                         || p != continued_address.2
                     {
-                        print_omitted(continued_address.0, continued_address.1);
+                        print_omitted(
+                            self.get_canonical_address(continued_address.0)
+                                .unwrap_or(MAX_VIRTUAL_ADDRESS),
+                            continued_address.1,
+                        );
                         *omitted = false;
                     } else {
                         continued_address.0 += block_size;
@@ -598,7 +622,12 @@ impl PageManager {
                     *omitted = true;
                     continue;
                 } else {
-                    print_normal(*virtual_address, pa, p);
+                    print_normal(
+                        self.get_canonical_address(*virtual_address)
+                            .unwrap_or(MAX_VIRTUAL_ADDRESS),
+                        pa,
+                        p,
+                    );
                     *virtual_address += block_size;
                     continued_address.0 = *virtual_address;
                     continued_address.1 = pa + block_size;
@@ -630,16 +659,16 @@ impl PageManager {
     pub fn dump_table(&self, start: Option<VAddress>, end: Option<VAddress>) {
         let print_omitted = |v: VAddress, p: PAddress| {
             kprintln!(
-                "... {:>#16X}        {:>#16X} (end)",
+                "... {:>#18X}        {:>#18X} (end)",
                 v.to_usize(),
                 p.to_usize()
             );
         };
         let start = start
-            .map(|a| Self::get_canonical_address(a).unwrap_or(VAddress::new(0)))
+            .map(|a| self.get_canonical_address(a).unwrap_or(VAddress::new(0)))
             .unwrap_or(VAddress::new(0));
         let end = end
-            .map(|a| Self::get_canonical_address(a).unwrap_or(MAX_VIRTUAL_ADDRESS))
+            .map(|a| self.get_canonical_address(a).unwrap_or(MAX_VIRTUAL_ADDRESS))
             .unwrap_or(MAX_VIRTUAL_ADDRESS);
         let Ok((table, level)) = self.get_table_and_initial_level(start) else {
             return;
@@ -661,7 +690,11 @@ impl PageManager {
             &mut omitted,
         );
         if omitted {
-            print_omitted(continued_address.0, continued_address.1);
+            print_omitted(
+                self.get_canonical_address(continued_address.0)
+                    .unwrap_or(MAX_VIRTUAL_ADDRESS),
+                continued_address.1,
+            );
         }
     }
 }
