@@ -1,5 +1,4 @@
 OUTPUT_FORMAT(binary)
-/* OUTPUT_FORMAT(elf64-littleriscv) */
 ENTRY(_start)
 
 SECTIONS {
@@ -35,6 +34,7 @@ SECTIONS {
     *(.rodata .rodata.*)
   }
 
+  . = ALIGN(8);
   __BSS_START = .;
   .bss : {
     KEEP(*(.bss .bss.*))

@@ -84,7 +84,7 @@ impl PageTableEntry {
     }
 
     pub const fn set_permission(&mut self, permission: MemoryPermissionFlags) {
-        self.0 = self.0 & !(Self::R | Self::W | Self::X | Self::U);
+        self.0 &= !(Self::R | Self::W | Self::X | Self::U);
         if permission.is_readable() {
             self.0 |= Self::R;
         }

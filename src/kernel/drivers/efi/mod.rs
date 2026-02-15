@@ -1,6 +1,6 @@
-//!
-//! EFI Functions
-//!
+//
+// EFI Functions
+//
 
 pub mod protocol {
     pub mod file_protocol;
