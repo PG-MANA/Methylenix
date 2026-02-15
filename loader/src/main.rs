@@ -70,40 +70,37 @@ static mut BOOT_INFO: MaybeUninit<boot_information::BootInformation> = MaybeUnin
 /// The main function booted without UEFI
 ///
 /// # Function's Argument
-/// - argc: the number of arguments, must be more than one.
-/// - argv: the array of arguments, each points the null terminated string.
+/// - argc: The number of arguments, must be more than one.
+/// - argv: The array of arguments, each points the null terminated string.
+/// - loader_base_address: The base addres of the loader which will be set by `_start`
+/// - loader_end_address : The end address of the loader which will be set by `_start`
 ///
 /// # Boot Arguments
-/// - argv[0] : Ignored
-/// - argv[1] : The device tree address
-/// - argv[2] : (Optional) The UART address to write
-/// - argv[3] : (Optional) The offset of TX Empty Register
-/// - argv[4] : (Optional) The value to wait UART FIFO
+/// - argv\[0\] : Ignored
+/// - argv\[1\] : The device tree address
+/// - argv\[2\] : (Optional) The UART address to write
+/// - argv\[3\] : (Optional) The offset of TX Empty Register
+/// - argv\[4\] : (Optional) The value to wait UART FIFO
 ///
 /// # UART control
-/// `println!` will write *(argv[2] as *mut u32).
-/// If argcv[3] and argv[4] are specfied, the printer will wait
+/// `println!` will write chars into `*(argv[2] as *mut u32)`.
+/// If argv\[3\] and argv\[4\] are specified, the printer will wait
 /// while `(*((argv[2] + argv[3]) as *const u32) & argv[4]) == 0`
 #[cfg(target_os = "none")]
-extern "C" fn baremetal_main(argc: usize, argv: *const *const u8) -> ! {
+extern "C" fn baremetal_main(
+    argc: usize,
+    argv: *const *const u8,
+    loader_base_address: usize,
+    loader_end_address: usize,
+) -> ! {
     use core::ffi::CStr;
     unsafe extern "C" {
         static __LOADER_END: usize;
     }
     let stack_base_address =
         (cpu::get_stack_pointer() & PAGE_MASK) - PAGE_SIZE_USIZE * LOADER_STACK_PAGES;
-    let stack_end_address = stack_base_address + PAGE_SIZE_USIZE * LOADER_STACK_PAGES;
-    let loader_base_address = cpu::get_instruction_pointer() & PAGE_MASK;
-    let loader_end_address = loader_base_address
-        + ((&raw const __LOADER_END as *const _ as usize - 1) & PAGE_MASK)
-        + PAGE_SIZE_USIZE;
-    let loader_area = [
-        (
-            loader_base_address,
-            loader_end_address - loader_base_address,
-        ),
-        (stack_base_address, stack_end_address - stack_base_address),
-    ];
+    let stack_end_address = stack_base_address + PAGE_SIZE_USIZE * (LOADER_STACK_PAGES + 1);
+    let loader_end_address = (loader_end_address & PAGE_MASK) + PAGE_SIZE_USIZE;
 
     /* Parse arguments */
     let args = unsafe { core::slice::from_raw_parts(argv, argc) };
@@ -112,7 +109,7 @@ extern "C" fn baremetal_main(argc: usize, argv: *const *const u8) -> ! {
             unsafe { CStr::from_ptr(args[n]) }
                 .to_str()
                 .ok()
-                .and_then(|s| str_to_usize(s))
+                .and_then(str_to_usize)
         } else {
             None
         }
@@ -121,13 +118,16 @@ extern "C" fn baremetal_main(argc: usize, argv: *const *const u8) -> ! {
     let dtb_address = get_arg(1).expect("Invalid arguments: expected dtb_address");
     assert_ne!(dtb_address, 0);
 
+    /* Detect UART */
+    let mut uart_address = None;
     if argc >= 3 {
-        let uart_address = get_arg(2).expect("Failed to get the UART address");
-        assert_ne!(uart_address, 0);
+        let address = get_arg(2).expect("Failed to get the UART address");
+        assert_ne!(address, 0);
         let wait_offset = get_arg(3).map(|o| o as u32);
         let wait_value = get_arg(4).map(|v| v as u32);
 
-        print::set_uart_address(uart_address, wait_offset, wait_value);
+        print::set_uart_address(address, wait_offset, wait_value);
+        uart_address = Some(address);
     }
 
     println!("Boot Loader version {}", env!("CARGO_PKG_VERSION"));
@@ -138,7 +138,18 @@ extern "C" fn baremetal_main(argc: usize, argv: *const *const u8) -> ! {
     let dtb = dtb::DtbManager::new(dtb_address).expect("Failed to get DTB");
 
     /* Initialize memory allocator */
-
+    let loader_area = [
+        (
+            loader_base_address,
+            loader_end_address - loader_base_address,
+        ),
+        (stack_base_address, stack_end_address - stack_base_address),
+        (
+            dtb_address & PAGE_MASK,
+            ((dtb.get_total_size() as usize + (dtb_address & !PAGE_MASK) - 1) & PAGE_MASK)
+                + PAGE_SIZE_USIZE,
+        ),
+    ];
     memory::init_memory_allocator(&dtb, loader_area.as_slice(), unsafe {
         &mut boot_information.assume_init_mut().ram_map
     });
@@ -166,6 +177,9 @@ extern "C" fn baremetal_main(argc: usize, argv: *const *const u8) -> ! {
     });
     map_direct_area(&mut pm_manager, &page_manager);
     map_loader(&mut pm_manager, &page_manager, loader_area.as_slice());
+    if let Some(uart_address) = uart_address {
+        map_uart(&mut pm_manager, &page_manager, uart_address);
+    }
 
     println!("Dump the initial page table for the kernel");
     page_manager.dump_table(None, None);
@@ -186,12 +200,15 @@ extern "C" fn baremetal_main(argc: usize, argv: *const *const u8) -> ! {
     println!("Jump to the kernel...");
     cpu::flush_all_cache();
     unsafe { cpu::disable_interrupt() };
-    arch::target_arch::jump_to_kernel(
-        entry_point,
-        boot_information.as_mut_ptr() as usize,
-        kernel_stack,
-        page_manager,
-    )
+    unsafe {
+        arch::target_arch::jump_to_kernel(
+            entry_point,
+            dtb_address,
+            boot_information.as_ptr() as _,
+            kernel_stack,
+            page_manager,
+        )
+    }
 }
 
 fn load_kernel<F>(
@@ -254,7 +271,10 @@ where
         let file_offset = entry.get_file_offset() as usize;
         let alignment = entry.get_align().max(1) as usize;
 
-        if segment_type != elf::ELF_PROGRAM_HEADER_SEGMENT_LOAD || memory_size == 0 {
+        if (segment_type != elf::ELF_PROGRAM_HEADER_SEGMENT_LOAD
+            && segment_type != elf::ELF_PROGRAM_HEADER_SEGMENT_RELRO)
+            || memory_size == 0
+        {
             continue;
         }
 
@@ -325,7 +345,7 @@ where
 fn init_paging(pm_manager: &mut PhysicalMemoryManager) -> Result<PageManager, ()> {
     let mut page_manager = PageManager::new();
     page_manager.init(pm_manager).map_err(|e| {
-        println!("Initializiting the page table was failed: {:?}", e);
+        println!("Initializing the page table was failed: {:?}", e);
     })?;
     Ok(page_manager)
 }
@@ -402,6 +422,24 @@ fn map_loader(
             )
             .expect("Failed to map the loader area");
     }
+}
+
+fn map_uart(
+    pm_manager: &mut PhysicalMemoryManager,
+    page_manager: &PageManager,
+    uart_address: usize,
+) {
+    let address = PAddress::new(uart_address & PAGE_MASK);
+    page_manager
+        .associate_address(
+            pm_manager,
+            address,
+            unsafe { address.to_direct_mapped_v_address() },
+            PAGE_SIZE,
+            MemoryPermissionFlags::new(true, true, false, false),
+            MemoryOptionFlags::IO_MAP | MemoryOptionFlags::DEVICE_MEMORY,
+        )
+        .expect("Failed to map the serial port area");
 }
 
 fn adjust_boot_info(_boot_info: &mut boot_information::BootInformation) {}

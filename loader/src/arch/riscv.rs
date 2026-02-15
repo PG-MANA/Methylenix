@@ -67,7 +67,9 @@ pub fn setup_environment() {}
 /// `a0` and `a1` must be reserved.
 extern "C" fn _start() {
     core::arch::naked_asm!("
-    .extern  __REL_START, __REL_END
+    .extern __REL_START, __REL_END
+    .extern __BSS_START, __BSS_END
+    .extern __LOADER_END
     // This must be the first instruction
     auipc   t0, 0
     lla     t1, __REL_START
@@ -87,21 +89,32 @@ extern "C" fn _start() {
     bne     t1, t2, 1b
 
     // Clear .bss
-    lla     t0, __BSS_START
-    lla     t1, __BSS_END
+    lla     t1, __BSS_START
+    lla     t2, __BSS_END
 3:
-    sd      x0, (t0)
-    addi    t0, t0, 8
-    bne     t0, t1, 3b
+    sd      x0, (t1)
+    addi    t1, t1, 8
+    bne     t1, t2, 3b
 
     // Jump to main
+    mv      a2, t0
+    lla     a3, __LOADER_END
+    //xor     a3, a3, t4
+    //add     a3, a3, a2
     j {main}", main = sym crate::baremetal_main);
 }
 
+/// Jump to the kernel
+///
+/// # Kernel arguments
+/// - a0: hartid (U-Boot will set mhartid to tp)
+/// - a1: dtb address
+/// - a2: pointer of [`crate::kernel::drivers::boot_information::BootInformation`]
 #[inline(always)]
-pub fn jump_to_kernel(
+pub unsafe fn jump_to_kernel(
     entry_point: usize,
-    argument: usize,
+    dtb_address: usize,
+    boot_info: usize,
     stack: usize,
     mut page_manager: paging::PageManager,
 ) -> ! {
@@ -110,8 +123,11 @@ pub fn jump_to_kernel(
     unsafe {
         core::arch::asm!("
             mv  sp, {stack}
+            mv  a0, tp
             jr  {entry_point}",
-            in("a0") argument,
+            in("a0") 0,
+            in("a1") dtb_address,
+            in("a2") boot_info,
             stack = in(reg) stack,
             entry_point = in(reg) entry_point,
             options(noreturn)

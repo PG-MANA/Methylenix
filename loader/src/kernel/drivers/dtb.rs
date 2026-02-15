@@ -133,6 +133,10 @@ impl DtbManager {
         Ok(false)
     }
 
+    pub fn get_total_size(&self) -> u32 {
+        u32::from_be(unsafe { &*(self.base_address as *const FdtHeader) }.total_size)
+    }
+
     fn get_struct_offset(&self) -> usize {
         self.base_address
             + (u32::from_be(unsafe { &*(self.base_address as *const FdtHeader) }.off_dt_struct)
