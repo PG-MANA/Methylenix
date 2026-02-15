@@ -1,0 +1,8 @@
+[target.'cfg(all(target_arch = "riscv64", target_os = "none"))']
+rustflags = [
+    "-C", "code-model=medium",
+    "-C", "relocation-model=pie",
+    "-C", "no-redzone=yes",
+    "-C", "panic=abort",
+    "-C", "link-arg=-Tsrc/arch/riscv/baremetal.ld",
+]

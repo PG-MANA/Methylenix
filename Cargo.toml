@@ -1,5 +1,5 @@
 [workspace]
-members = ["src/arch/aarch64/bootloader", "xtask"]
+members = ["src/arch/aarch64/bootloader", "loader", "xtask"]
 default-members = ["."]
 
 [workspace.package]
