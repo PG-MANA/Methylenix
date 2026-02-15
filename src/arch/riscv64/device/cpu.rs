@@ -8,6 +8,7 @@
 //
 
 use crate::arch::target_arch::context::context_data::ContextData;
+use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
@@ -96,13 +97,13 @@ pub fn is_interrupt_enabled() -> bool {
 #[inline(always)]
 pub fn get_cpu_base_address() -> usize {
     let gp: usize;
-    unsafe { asm!("mv {}, gp", out(reg) gp) };
+    unsafe { asm!("mv {}, tp", out(reg) gp) };
     gp
 }
 
 #[inline(always)]
 pub unsafe fn set_cpu_base_address(address: u64) {
-    unsafe { asm!("mv gp, {}", in(reg) address) };
+    unsafe { asm!("mv tp, {}", in(reg) address) };
 }
 
 #[inline(always)]
@@ -201,13 +202,6 @@ pub fn synchronize<T>(target_virtual_address: *const T) {
     );
 }
 
-#[inline(always)]
-pub fn get_hartid() -> u64 {
-    let result: u64;
-    unsafe { asm!("csrr {}, mhartid", out(reg) result) };
-    result
-}
-
 /// Execute SMC #0 with Secure Monitor Call Conversation
 #[inline(always)]
 pub unsafe fn sbi_call(
@@ -247,21 +241,30 @@ pub unsafe extern "C" fn run_task(_context_data_address: *const ContextData) {
     ld      t1, (8 * 32)(a0)
     csrw    sstatus, t0
     csrw    sepc, t1
-    // Set the a0 to sscratch
-    ld      t0, (8 * 9)(a0)
-    csrw    sscratch, t0
+    // Check if the next task is kernel or user
+    andi    t0, t0, {SSTATUS_SPP}
+    bnez    t0, 2f
+    // Jump to the user
+    // Get the interrupt stack and store tp to the top of it
+    mv      s0, a0
+    call    {get_interrupt_stack}
+    sd      tp, (8 * -1)(a0)
+    csrw    sscratch, a0
+    mv      a0, s0
+    // Restore user's tp(x4)
+    ld      x4, (8 * 3)(a0)
+2:
     // Set general registers
     ld      x1, (8 * 0)(a0)
     ld      x2, (8 * 1)(a0)
     ld      x3, (8 * 2)(a0)
-    ld      x4, (8 * 3)(a0)
+    // If jump to the kernel, tp(x4) will not changed
     ld      x5, (8 * 4)(a0)
     ld      x6, (8 * 5)(a0)
     ld      x7, (8 * 6)(a0)
     ld      x8, (8 * 7)(a0)
     ld      x9, (8 * 8)(a0)
-    // x10 is a0 register, set later
-    ld      x10, (8 * 9)(a0)
+    // x10 is the a0 register, set later
     ld      x11, (8 * 10)(a0)
     ld      x12, (8 * 11)(a0)
     ld      x13, (8 * 12)(a0)
@@ -283,11 +286,10 @@ pub unsafe extern "C" fn run_task(_context_data_address: *const ContextData) {
     ld      x29, (8 * 28)(a0)
     ld      x30, (8 * 29)(a0)
     ld      x31, (8 * 30)(a0)
-    // Set sscratch to a0
-    ld      a0, (8 * 33)(a0)
-    // Swap a0 and sscratch, .
-    csrrw   a0, sscratch, a0
-    sret"
+    ld      x10, (8 * 9)(a0)
+    sret",
+        SSTATUS_SPP = const SSTATUS_SPP,
+        get_interrupt_stack = sym InterruptManager::get_interrupt_stack,
     )
 }
 
@@ -295,8 +297,6 @@ pub unsafe extern "C" fn run_task(_context_data_address: *const ContextData) {
 ///
 /// This function is called by ContextManager.
 /// This function does not return until another process switches to now_context_data.
-/// This function assumes 1st argument is passed by "x0" and 2nd is passed by "x1".
-/// now_context_data_address.registers.spsr_el1 must be set by caller.
 #[inline(never)]
 pub unsafe extern "C" fn task_switch(
     next_context_data_address: *const ContextData,

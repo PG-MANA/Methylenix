@@ -5,6 +5,7 @@
 //!
 
 use crate::arch::target_arch::device::cpu;
+use crate::arch::target_arch::get_hartid;
 
 use crate::kernel::drivers::dtb::{DtbManager, DtbNodeInfo};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
@@ -37,9 +38,8 @@ macro_rules! read_register {
     ($s:expr, $reg:ident) => {
         unsafe {
             read_volatile(
-                &((&*($s.base_address
-                    + MSize::new(Self::CHANNEL_SIZE * (cpu::get_hartid() as usize)))
-                .to::<Channel>())
+                &((&*($s.base_address + MSize::new(Self::CHANNEL_SIZE * (get_hartid() as usize)))
+                    .to::<Channel>())
                     .$reg) as *const _,
             )
         }
@@ -51,7 +51,7 @@ macro_rules! write_register {
         unsafe {
             write_volatile(
                 &mut ((&mut *($s.base_address
-                    + MSize::new(Self::CHANNEL_SIZE * (cpu::get_hartid() as usize)))
+                    + MSize::new(Self::CHANNEL_SIZE * (get_hartid() as usize)))
                 .to::<Channel>())
                     .$reg) as *mut _,
                 $val,
@@ -119,7 +119,7 @@ impl Jh7110Timer {
         };
         self.base_address = address;
         self.range = MSize::new(size);
-        if let Some(interrupt_id) = interrupts.get(cpu::get_hartid() as usize) {
+        if let Some(interrupt_id) = interrupts.get(get_hartid() as usize) {
             if get_cpu_manager_cluster()
                 .interrupt_manager
                 .set_device_interrupt_function(Self::interrupt_handler, *interrupt_id as _, 0, true)
@@ -135,7 +135,7 @@ impl Jh7110Timer {
     }
 
     pub fn init_ap(&mut self, original: &Self) {
-        assert!(cpu::get_hartid() < Self::NUMBER_OF_CHANNEL as u64);
+        assert!(get_hartid() < Self::NUMBER_OF_CHANNEL as u64);
         self.base_address = original.base_address;
         self.range = original.range;
         self.frequency = original.frequency;
@@ -167,7 +167,7 @@ impl Jh7110Timer {
     fn interrupt_handler(_interrupt_id: usize) -> bool {
         // TODO: get dynamically
         let timer = &mut get_cpu_manager_cluster().arch_depend_data.jh7110_timer;
-        if (read_register!(timer, int_status) & (1u32 << cpu::get_hartid() as u8)) == 0u32 {
+        if (read_register!(timer, int_status) & (1u32 << get_hartid() as u8)) == 0u32 {
             pr_warn!("Timer interrupt is not fired...");
             return false;
         }

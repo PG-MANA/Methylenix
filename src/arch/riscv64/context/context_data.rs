@@ -16,40 +16,40 @@ pub struct ContextData {
 #[derive(Default, Clone)]
 pub struct Registers {
     /* x0 is the zero register */
-    pub x1: u64,       /* +  0 */
-    pub x2: u64,       /* +  1 (stack pointer) */
-    pub x3: u64,       /* +  2 */
-    pub x4: u64,       /* +  3 */
-    pub x5: u64,       /* +  4 */
-    pub x6: u64,       /* +  5 */
-    pub x7: u64,       /* +  6 */
-    pub x8: u64,       /* +  7 */
-    pub x9: u64,       /* +  8 */
-    pub x10: u64,      /* +  9 */
-    pub x11: u64,      /* + 10 */
-    pub x12: u64,      /* + 11 */
-    pub x13: u64,      /* + 12 */
-    pub x14: u64,      /* + 13 */
-    pub x15: u64,      /* + 14 */
-    pub x16: u64,      /* + 15 */
-    pub x17: u64,      /* + 16 */
-    pub x18: u64,      /* + 17 */
-    pub x19: u64,      /* + 18 */
-    pub x20: u64,      /* + 19 */
-    pub x21: u64,      /* + 20 */
-    pub x22: u64,      /* + 21 */
-    pub x23: u64,      /* + 22 */
-    pub x24: u64,      /* + 23 */
-    pub x25: u64,      /* + 24 */
-    pub x26: u64,      /* + 25 */
-    pub x27: u64,      /* + 26 */
-    pub x28: u64,      /* + 27 */
-    pub x29: u64,      /* + 28 */
-    pub x30: u64,      /* + 29 */
-    pub x31: u64,      /* + 30 */
-    pub sstatus: u64,  /* + 31 */
-    pub sepc: u64,     /* + 32 */
-    pub sscratch: u64, /* + 33 */
+    pub x1: u64,      /* +  0 */
+    pub x2: u64,      /* +  1 (stack pointer) */
+    pub x3: u64,      /* +  2 */
+    pub x4: u64,      /* +  3 (thread pointer) */
+    pub x5: u64,      /* +  4 */
+    pub x6: u64,      /* +  5 */
+    pub x7: u64,      /* +  6 */
+    pub x8: u64,      /* +  7 */
+    pub x9: u64,      /* +  8 */
+    pub x10: u64,     /* +  9 */
+    pub x11: u64,     /* + 10 */
+    pub x12: u64,     /* + 11 */
+    pub x13: u64,     /* + 12 */
+    pub x14: u64,     /* + 13 */
+    pub x15: u64,     /* + 14 */
+    pub x16: u64,     /* + 15 */
+    pub x17: u64,     /* + 16 */
+    pub x18: u64,     /* + 17 */
+    pub x19: u64,     /* + 18 */
+    pub x20: u64,     /* + 19 */
+    pub x21: u64,     /* + 20 */
+    pub x22: u64,     /* + 21 */
+    pub x23: u64,     /* + 22 */
+    pub x24: u64,     /* + 23 */
+    pub x25: u64,     /* + 24 */
+    pub x26: u64,     /* + 25 */
+    pub x27: u64,     /* + 26 */
+    pub x28: u64,     /* + 27 */
+    pub x29: u64,     /* + 28 */
+    pub x30: u64,     /* + 29 */
+    pub x31: u64,     /* + 30 */
+    pub sstatus: u64, /* + 31 */
+    pub sepc: u64,    /* + 32 */
+    padding: u64,     /* + 33 (in the interrupt stack, it's the kernel's tp) */
 }
 
 impl ContextData {
@@ -65,10 +65,10 @@ impl ContextData {
     const fn check_registers_size() -> usize {
         if size_of::<Registers>() != 34 * size_of::<u64>() {
             panic!(
-                "GeneralRegisters was changed.\nYou must check task_switch function and interrupt handler."
+                "Registers was changed.\nYou must check task_switch function and interrupt handler."
             );
         } else if (size_of::<Registers>() / size_of::<u64>()) & 1 != 0 {
-            panic!("GeneralRegisters is not 16byte aligned.");
+            panic!("Registers is not 16byte aligned.");
         }
         size_of::<Registers>() / size_of::<u64>()
     }

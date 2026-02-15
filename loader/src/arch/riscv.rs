@@ -43,6 +43,16 @@ pub mod context {
     }
 }
 
+mod interrupt {
+    pub struct InterruptManager {}
+
+    impl InterruptManager {
+        pub extern "C" fn get_interrupt_stack() -> usize {
+            unimplemented!()
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub mod device {
     pub mod cpu {

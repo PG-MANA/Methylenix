@@ -6,12 +6,13 @@ pub mod plicv1;
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
-use crate::arch::target_arch::initialization::set_cpu_manager_cluster_gp;
+use crate::arch::target_arch::get_hartid;
+use crate::arch::target_arch::paging::PAGE_SIZE;
 
 use crate::kernel::drivers::dtb::{DtbManager, DtbNodeInfo};
 use crate::kernel::drivers::pci::msi::MsiInfo;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{Address, PAddress};
+use crate::kernel::memory_manager::{alloc_pages, data_type::*};
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use core::arch::global_asm;
@@ -64,14 +65,28 @@ impl InterruptManager {
         unsafe extern "C" {
             fn interrupt_vector();
         }
+        get_cpu_manager_cluster().arch_depend_data.interrupt_stack = alloc_pages!(
+            MPageOrder::new(0),
+            MemoryPermissionFlags::data(),
+            MemoryOptionFlags::KERNEL | MemoryOptionFlags::WIRED
+        )
+        .expect("Failed to allocate the interrupt stack")
+            + PAGE_SIZE;
         unsafe { cpu::set_stvec(interrupt_vector as *const fn() as usize as u64) };
     }
 
     pub fn init_ap(&mut self) {
-        unsafe extern "C" {
-            fn interrupt_vector();
-        }
-        unsafe { cpu::set_stvec(interrupt_vector as *const fn() as usize as u64) };
+        self.init()
+    }
+
+    /// Get the interrupt stack address
+    ///
+    /// When jump to the user land, [`cpu::run_task`] will be set into `sscratch`
+    pub extern "C" fn get_interrupt_stack() -> usize {
+        get_cpu_manager_cluster()
+            .arch_depend_data
+            .interrupt_stack
+            .to_usize()
     }
 
     pub fn init_ipi(&self) {
@@ -114,7 +129,7 @@ impl InterruptManager {
         // TODO: detect dynamically
         let ic = &mut get_kernel_manager_cluster().arch_depend_data.plic;
         ic.set_priority(interrupt_id, priority);
-        ic.set_enable(interrupt_id, cpu::get_hartid() as u32, true);
+        ic.set_enable(interrupt_id, get_hartid() as u32, true);
         drop(_lock);
         drop(_self_lock);
         Ok(interrupt_id as usize)
@@ -143,7 +158,7 @@ impl InterruptManager {
         // TODO: detect dynamically
         let ic = &mut get_kernel_manager_cluster().arch_depend_data.plic;
         ic.set_priority(interrupt_id, priority);
-        ic.set_enable(interrupt_id, cpu::get_hartid() as u32, true);
+        ic.set_enable(interrupt_id, get_hartid() as u32, true);
         let (address, data) = ic.get_pending_register_address_and_data(interrupt_id);
 
         drop(_self_lock);
@@ -223,7 +238,7 @@ impl InterruptManager {
         get_kernel_manager_cluster()
             .arch_depend_data
             .plic
-            .send_eoi(cpu::get_hartid() as u32, interrupt_id);
+            .send_eoi(get_hartid() as u32, interrupt_id);
     }
 
     /// Interrupt Handler from the userland
@@ -246,7 +261,7 @@ impl InterruptManager {
                 cpu::SCAUSE_SUPERVISOR_EXTERNAL_INTERRUPT => {
                     // TODO: detect dynamically
                     let ic = &mut get_kernel_manager_cluster().arch_depend_data.plic;
-                    let int_id = ic.claim_interrupt(cpu::get_hartid() as _);
+                    let int_id = ic.claim_interrupt(get_hartid() as _);
                     pr_debug!("Int ID: {int_id}");
                 }
                 _ => {
@@ -281,6 +296,7 @@ global_asm!(
 interrupt_vector:
     // Save sp to sscratch and load the kernel stack.
     // When sscratch is zero, it indicates the interrupt from kernel.
+    // Otherwise, sscratch must have a valid kernel interrupt stack.
     csrrw   sp, sscratch, sp
     beqz    sp, 1f
     // From user
@@ -316,25 +332,25 @@ interrupt_vector:
     sd      x29, (8 * 28)(sp)
     sd      x30, (8 * 29)(sp)
     sd      x31, (8 * 30)(sp)
-    // Store the status
+    // Store the status and sepc
     csrr    t0, sstatus
     csrr    t1, sepc
     sd      t0, (8 * 31)(sp)
     sd      t1, (8 * 32)(sp)
-    // Store original sscratch
-    addi    t0, sp, {c}
-    sd      t0, (8 * 33)(sp)
-    // Store the user stack and Clear sscratch to indicate the kernel mode
+    // Restore CPU's tp from the top of sscratch
+    ld      tp, (8 * 33)(sp)
+    // All regiters except user stack were saved,
+    // then store the user stack and clear sscratch to indicate the kernel mode
     csrrw   t0, sscratch, x0
     sd      t0, (8 * 1)(sp)
-    // Load Kernel Stack and Global Pointer
-    call     {set_cpu_manager_cluster_gp}
 
     // Call the handler
     mv      a0, sp
     li      a1, 1
     call     {interrupt_handler}
 
+    // Store CPU's tp to the top of sscratch
+    sd      tp, (8 * 33)(sp)
     // Restore interrupt status
     ld      t0, (8 * 31)(sp)
     ld      t1, (8 * 32)(sp)
@@ -374,9 +390,8 @@ interrupt_vector:
     ld      x29, (8 * 28)(sp)
     ld      x30, (8 * 29)(sp)
     ld      x31, (8 * 30)(sp)
-    // Restore kernel stack to sp (which may be changed, it will be used at the next interrupt)
-    ld      sp, (8 * 33)(sp)
-    // Restore user sp and kernel stack.
+    addi    sp, sp, {c}
+    // Restore user sp and set the kernel interrupt stack into sscratch
     csrrw   sp, sscratch, sp
     sret
 1:
@@ -420,11 +435,9 @@ interrupt_vector:
     csrr    t1, sepc
     sd      t0, (8 * 31)(sp)
     sd      t1, (8 * 32)(sp)
-    // Store sscratch (= zero)
-    sd      x0, (8 * 33)(sp)
-    // Store the original stack and Clear sscratch to indicate the kernel mode
     addi    t0, sp, {c}
     sd      t0, (8 * 1)(sp)
+    // tp must have a vaild pointer
 
     // Call the handler
     mv      a0, sp
@@ -439,7 +452,8 @@ interrupt_vector:
     // Restore general registers
     ld      x1, (8 * 0)(sp)
     ld      x3, (8 * 2)(sp)
-    ld      x4, (8 * 3)(sp)
+    // tp must not be changed
+    // ld      x4, (8 * 3)(sp)
     ld      x5, (8 * 4)(sp)
     ld      x6, (8 * 5)(sp)
     ld      x7, (8 * 6)(sp)
@@ -467,11 +481,10 @@ interrupt_vector:
     ld      x29, (8 * 28)(sp)
     ld      x30, (8 * 29)(sp)
     ld      x31, (8 * 30)(sp)
-    ld      x1, (8 * 1)(sp)
+    addi    sp, sp, {c}
     sret
 .size       interrupt_vector, . - interrupt_vector
 ",
     c = const size_of::<ContextData>(),
-    set_cpu_manager_cluster_gp = sym set_cpu_manager_cluster_gp,
     interrupt_handler = sym InterruptManager::interrupt_handler,
 );
