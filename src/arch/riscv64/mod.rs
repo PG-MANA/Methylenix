@@ -40,6 +40,8 @@ pub struct ArchDependedKernelManagerCluster {
 }
 
 pub struct ArchDependedCpuManagerCluster {
+    interrupt_stack: VAddress,
+    hartid: u64,
     jh7110_timer: Jh7110Timer, /* TODO: Dynamic Value*/
 }
 
@@ -84,9 +86,12 @@ extern "C" fn boot_main(
 
     /* Setup BSP cpu manager */
     init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
-    setup_cpu_manager_cluster(Some(VAddress::from(
-        &get_kernel_manager_cluster().boot_strap_cpu_manager as *const _,
-    )));
+    setup_cpu_manager_cluster(
+        Some(VAddress::from(
+            &get_kernel_manager_cluster().boot_strap_cpu_manager as *const _,
+        )),
+        hartid,
+    );
 
     /* Initialize Memory System */
     init_memory_by_boot_information(&mut boot_information);
@@ -127,6 +132,14 @@ extern "C" fn boot_main(
     /* Switch to the main process */
     get_cpu_manager_cluster().run_queue.start()
     /* Never return to here */
+}
+
+/// Get `hartid`
+///
+/// Supervisor cannot access `hartid` register,
+/// therefore, [`crate::kernel::manager_cluster::CpuManagerCluster`] has it.
+fn get_hartid() -> u64 {
+    get_cpu_manager_cluster().arch_depend_data.hartid
 }
 
 fn main_arch_depend_initialization_process() -> ! {

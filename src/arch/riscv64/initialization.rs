@@ -34,7 +34,6 @@ use crate::kernel::{
     timer_manager::LocalTimerManager,
 };
 
-use core::mem::offset_of;
 use core::sync::atomic::AtomicBool;
 
 /// Memory Areas for PhysicalMemoryManager
@@ -47,6 +46,7 @@ pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 /// This function must be called on the cpu that is going to own returned manager.
 pub fn setup_cpu_manager_cluster(
     cpu_manager_address: Option<VAddress>,
+    hartid: u64,
 ) -> &'static mut CpuManagerCluster<'static> {
     let cpu_manager_address = cpu_manager_address.unwrap_or_else(|| {
         /* ATTENTION: BSP must be sleeping. */
@@ -57,33 +57,21 @@ pub fn setup_cpu_manager_cluster(
             .expect("Failed to alloc CpuManagerCluster")
     });
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to::<CpuManagerCluster>()) };
+    /* Initialize some essential members */
+    init_struct!(cpu_manager.memory_allocator, MemoryAllocator::new());
+    init_struct!(cpu_manager.run_queue, RunQueue::new());
+    init_struct!(cpu_manager.interrupt_manager, InterruptManager::new());
+    init_struct!(cpu_manager.list, PtrLinkedListNode::new());
 
     unsafe { cpu::set_cpu_base_address(cpu_manager as *const _ as u64) };
-    init_struct!(cpu_manager.list, PtrLinkedListNode::new());
     unsafe {
         get_kernel_manager_cluster()
             .cpu_list
             .insert_tail(&mut cpu_manager.list)
     };
-    cpu_manager.cpu_id = cpu::get_hartid() as usize;
+    cpu_manager.cpu_id = hartid as usize;
+    cpu_manager.arch_depend_data.hartid = hartid;
     cpu_manager
-}
-
-pub extern "C" fn set_cpu_manager_cluster_gp() {
-    let id = cpu::get_hartid();
-
-    for c in unsafe {
-        get_kernel_manager_cluster()
-            .cpu_list
-            .iter(offset_of!(CpuManagerCluster, list))
-    } {
-        if c.cpu_id == id as _ {
-            let c = c as *const _ as usize;
-            unsafe { cpu::set_cpu_base_address(c as u64) };
-            return;
-        }
-    }
-    panic!("Invalid HartID({id:#X}");
 }
 
 /// Init memory system based on boot information.
@@ -426,10 +414,10 @@ pub fn wake_up_application_processors(_acpi_available: bool, _dtb_available: boo
     pr_info!("TODO: Wake up application processors...");
 }
 
-pub extern "C" fn ap_boot_main() -> ! {
+pub extern "C" fn ap_boot_main(hartid: u64) -> ! {
     /* Setup CPU Manager, it contains individual data of CPU */
-    let cpu_manager = setup_cpu_manager_cluster(None);
-    pr_info!("Booted (CPU ID: {:#X})", cpu_manager.cpu_id);
+    let cpu_manager = setup_cpu_manager_cluster(None, hartid);
+    pr_info!("Booted (hartid: {:#X})", hartid);
 
     /* Set up the memory management system */
     let mut memory_allocator = MemoryAllocator::new();
