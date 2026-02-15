@@ -29,6 +29,7 @@ fn build(cargo: &str, base_dir: &Path) -> i32 {
         base_dir: &Path,
         target_dir: &Path,
         output_dir: &Path,
+        target_arch: &str,
         build_type: &str,
     ) -> i32;
     let additional_build_flags: &[&str];
@@ -80,6 +81,12 @@ fn build(cargo: &str, base_dir: &Path) -> i32 {
             format!("--{build_type}").as_str(),
             "--target",
             target_arch,
+            "--config",
+            base_dir
+                .join(".cargo")
+                .join("kernel.toml")
+                .to_str()
+                .unwrap(),
         ])
         .args(additional_build_flags)
         .status();
@@ -100,6 +107,7 @@ fn build(cargo: &str, base_dir: &Path) -> i32 {
         base_dir,
         target_dir.as_path(),
         output_dir.as_path(),
+        target_arch,
         build_type,
     );
     if status != 0 {
@@ -113,6 +121,7 @@ fn build_loader_x86_64(
     base_dir: &Path,
     _target_dir: &Path,
     output_dir: &Path,
+    _target_arch: &str,
     _build_type: &str,
 ) -> i32 {
     let iso_dir = output_dir.join("iso");
@@ -161,6 +170,7 @@ fn build_loader_aarch64(
     _base_dir: &Path,
     target_dir: &Path,
     output_dir: &Path,
+    _target_arch: &str,
     build_type: &str,
 ) -> i32 {
     let loader_path = "src/arch/aarch64/bootloader";
@@ -195,12 +205,48 @@ fn build_loader_aarch64(
 }
 
 fn build_loader_riscv64(
-    _cargo: &str,
-    _base_dir: &Path,
-    _target_dir: &Path,
-    _output_dir: &Path,
-    _build_type: &str,
+    cargo: &str,
+    base_dir: &Path,
+    target_dir: &Path,
+    output_dir: &Path,
+    target_arch: &str,
+    build_type: &str,
 ) -> i32 {
+    let loader_path = "loader";
+    let loader_name = "kernel_loader";
+    let deploy_name = "Kernel";
+
+    let status = Command::new(cargo)
+        .current_dir(loader_path)
+        .args([
+            "build",
+            format!("--{build_type}").as_str(),
+            "--target",
+            target_arch,
+            "-Z",
+            "build-std=core",
+            "--config",
+            base_dir
+                .join(".cargo")
+                .join("loader.toml")
+                .to_str()
+                .unwrap(),
+        ])
+        .status();
+    if !matches!(status.as_ref().map(|s| s.success()), Ok(true)) {
+        eprintln!("Building the boot loader is failed: {status:?}");
+        return status.map_or(-1, |s| s.code().unwrap_or(-1));
+    }
+
+    /* Copy the loader to the output dir */
+    let binary_path = target_dir
+        .join(target_arch)
+        .join(build_type)
+        .join(loader_name);
+    if let Err(err) = fs::copy(binary_path, output_dir.join(deploy_name)) {
+        eprintln!("Failed to copy the kernel: {err:?}");
+        return -1;
+    }
     0
 }
 

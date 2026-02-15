@@ -4,5 +4,5 @@ rustflags = [
     "-C", "relocation-model=pie",
     "-C", "no-redzone=yes",
     "-C", "panic=abort",
-    "-C", "link-arg=-Tconfig/baremetal.ld",
+    "-C", "link-arg=-Tconfig/loader/baremetal.ld",
 ]
