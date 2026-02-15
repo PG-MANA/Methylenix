@@ -1,9 +1,11 @@
-//!
-//! RISC-V Specific Instruction
-//!
-//! This module is the collection of inline assembly functions.
-//! All functions are unsafe, please be careful.  
-//!
+//
+// RISC-V Specific Instruction
+//
+// This module is the collection of inline assembly functions.
+// All functions are unsafe, please be careful.
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
@@ -32,6 +34,20 @@ pub const SCAUSE_ENVIRONMENT_CALL_U_MODE: u64 = 8;
 pub const SSTATUS_SPP: u64 = 1 << 8;
 pub const SSTATUS_SPIE: u64 = 1 << 5;
 pub const SSTATUS_SIE: u64 = 1 << 1;
+
+#[inline(always)]
+pub fn get_instruction_pointer() -> usize {
+    let result: u64;
+    unsafe { asm!("auipc {}, 0", out(reg) result) };
+    result as usize
+}
+
+#[inline(always)]
+pub fn get_stack_pointer() -> usize {
+    let result: u64;
+    unsafe { asm!("mv {}, sp", out(reg) result) };
+    result as usize
+}
 
 #[inline(always)]
 pub unsafe fn enable_interrupt() {

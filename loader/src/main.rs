@@ -10,26 +10,35 @@ mod print;
 
 mod memory;
 
+/// Those modules are imported from the kernel source code.
+/// The symbolic link may be invalid on some environments,
+/// therefore [`include!`] macro must be used.
 #[allow(dead_code)]
 pub mod kernel {
     pub mod drivers {
-        #[allow(dead_code)]
-        pub mod boot_information; // TODO: copied from the kernel
-        #[allow(dead_code)]
-        pub mod dtb; // TODO: Copy from the kernel
+        /// Currently, there is some differences
+        /// TODO: Link to the kernel one
+        pub mod boot_information;
+        /// Currently, there is some differences
+        /// TODO: Link to the kernel one
+        pub mod dtb;
     }
 
     pub mod file_manager {
-        pub mod elf; // Copied from the kernel
+        pub mod elf {
+            include!("../../src/kernel/file_manager/elf.rs");
+        }
     }
     pub mod memory_manager {
-        pub mod data_type; // Copied from the kernel
+        pub mod data_type {
+            include!("../../src/kernel/memory_manager/data_type.rs");
+        }
+        /// The loader's Physical Memory Manager is different from the kernel one.
         pub mod physical_memory_manager;
     }
 }
 
 pub mod arch {
-    #![allow(dead_code)]
     #[cfg(target_arch = "riscv64")]
     pub mod riscv;
 
@@ -324,9 +333,9 @@ fn init_paging(pm_manager: &mut PhysicalMemoryManager) -> Result<PageManager, ()
 fn map_kernel(
     pm_manager: &mut PhysicalMemoryManager,
     page_manager: &PageManager,
-    progmram_headers: &[elf::Elf64ProgramHeader],
+    program_headers: &[elf::Elf64ProgramHeader],
 ) {
-    for entry in progmram_headers.iter() {
+    for entry in program_headers.iter() {
         let segment_type = entry.get_segment_type();
         let virtual_address = VAddress::new(entry.get_virtual_address() as usize);
         let physical_address = PAddress::new(entry.get_physical_address() as usize);
@@ -435,6 +444,6 @@ pub fn panic(info: &core::panic::PanicInfo) -> ! {
         println!("Message: {}", info.message());
     }
     loop {
-        unsafe { crate::arch::target_arch::device::cpu::idle() };
+        unsafe { cpu::idle() };
     }
 }

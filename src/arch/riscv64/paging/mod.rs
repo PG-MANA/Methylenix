@@ -1,10 +1,13 @@
-//!
-//! Paging Manager
-//!
-//! These modules treat the paging system of RISC-V.
-//!
-//! This does not handle memory status(which process using what memory area).
-//! This is the back-end of VirtualMemoryManager.
+//
+// Paging Manager
+//
+// These modules treat the paging system of RISC-V.
+//
+// This does not handle memory status(which process using what memory area).
+// This is the back-end of VirtualMemoryManager.
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 mod table_entry;
 

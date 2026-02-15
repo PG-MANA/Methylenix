@@ -1,10 +1,6 @@
 //!
-//! RISC-V Arch depend functions
+//! RISC-V Arch specific functions
 //!
-
-pub mod device {
-    pub mod cpu;
-}
 
 pub mod context {
     pub mod context_data {
@@ -47,7 +43,17 @@ pub mod context {
     }
 }
 
-pub mod paging; // Copied from the kernel
+#[allow(dead_code)]
+pub mod device {
+    pub mod cpu {
+        include!("../../../src/arch/riscv64/device/cpu.rs");
+    }
+}
+
+#[allow(dead_code)]
+pub mod paging {
+    include!("../../../src/arch/riscv64/paging/mod.rs");
+}
 
 pub const ELF_MACHINE_NATIVE: u16 = crate::kernel::file_manager::elf::ELF_MACHINE_RISCV;
 
