@@ -70,7 +70,15 @@ pub struct Elf64ProgramHeader {
     p_align: u64,
 }
 
-pub struct Elf64ProgramHeaderIter {
+pub struct Elf64ProgramHeaderIter<'a> {
+    phantom: core::marker::PhantomData<&'a Self>,
+    pointer: usize,
+    size: u16,
+    remaining: u16,
+}
+
+pub struct Elf64ProgramHeaderIterMut<'a> {
+    phantom: core::marker::PhantomData<&'a Self>,
     pointer: usize,
     size: u16,
     remaining: u16,
@@ -103,7 +111,7 @@ impl Elf64SectionHeader {
     }
 }
 
-impl Elf64Header {
+impl<'a> Elf64Header {
     fn is_legal(&self) -> Result<(), ()> {
         if self.e_ident[0..4] == ELF_MAGIC
             && self.e_ident[4] == ELF_CLASS
@@ -125,8 +133,11 @@ impl Elf64Header {
         Ok(s)
     }
 
-    pub unsafe fn from_address(address: *const u8) -> Result<&'static Self, ()> {
-        let s = unsafe { &*(address as *const Self) };
+    pub unsafe fn from_ptr_mut(address: &mut [u8]) -> Result<&mut Self, ()> {
+        if address.len() < size_of::<Self>() {
+            return Err(());
+        }
+        let s = unsafe { &mut *(address.as_ptr() as *mut Self) };
         s.is_legal()?;
         Ok(s)
     }
@@ -147,7 +158,7 @@ impl Elf64Header {
         self.e_entry
     }
 
-    const fn get_num_of_program_headers(&self) -> u16 {
+    pub const fn get_num_of_program_headers(&self) -> u16 {
         self.e_phnum
     }
 
@@ -159,12 +170,25 @@ impl Elf64Header {
         self.get_num_of_program_headers() as u64 * self.get_program_headers_entry_size() as u64
     }
 
-    const fn get_program_headers_entry_size(&self) -> u16 {
+    pub const fn get_program_headers_entry_size(&self) -> u16 {
         self.e_phentsize
     }
 
-    pub fn get_program_headers_iter(&self, base_address: usize) -> Elf64ProgramHeaderIter {
+    pub fn get_program_headers_iter(&self, base_address: usize) -> Elf64ProgramHeaderIter<'a> {
         Elf64ProgramHeaderIter {
+            phantom: core::marker::PhantomData,
+            pointer: base_address,
+            size: self.get_program_headers_entry_size(),
+            remaining: self.get_num_of_program_headers(),
+        }
+    }
+
+    pub fn get_program_headers_iter_mut(
+        &self,
+        base_address: usize,
+    ) -> Elf64ProgramHeaderIterMut<'a> {
+        Elf64ProgramHeaderIterMut {
+            phantom: core::marker::PhantomData,
             pointer: base_address,
             size: self.get_program_headers_entry_size(),
             remaining: self.get_num_of_program_headers(),
@@ -172,14 +196,29 @@ impl Elf64Header {
     }
 }
 
-impl Iterator for Elf64ProgramHeaderIter {
-    type Item = &'static Elf64ProgramHeader;
+impl<'a> Iterator for Elf64ProgramHeaderIter<'a> {
+    type Item = &'a Elf64ProgramHeader;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining == 0 {
             None
         } else {
             let r = unsafe { &*(self.pointer as *const Elf64ProgramHeader) };
+            self.pointer += self.size as usize;
+            self.remaining -= 1;
+            Some(r)
+        }
+    }
+}
+
+impl<'a> Iterator for Elf64ProgramHeaderIterMut<'a> {
+    type Item = &'a mut Elf64ProgramHeader;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            None
+        } else {
+            let r = unsafe { &mut *(self.pointer as *mut Elf64ProgramHeader) };
             self.pointer += self.size as usize;
             self.remaining -= 1;
             Some(r)
@@ -202,6 +241,10 @@ impl Elf64ProgramHeader {
 
     pub const fn get_physical_address(&self) -> u64 {
         self.p_paddr
+    }
+
+    pub fn set_physical_address(&mut self, address: u64) {
+        self.p_paddr = address;
     }
 
     pub const fn get_memory_size(&self) -> u64 {
