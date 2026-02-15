@@ -19,6 +19,8 @@ use crate::kernel::{
     },
 };
 
+use core::slice::from_raw_parts;
+
 const DEFAULT_PRIVILEGE_LEVEL: u8 = 3;
 const DEFAULT_PRIORITY_LEVEL: u8 = 2;
 
@@ -54,7 +56,12 @@ pub fn load_and_execute(
         return Err(());
     }
 
-    let header = match unsafe { Elf64Header::from_address(head_data.to_usize() as *const u8) } {
+    let header = match unsafe {
+        Elf64Header::from_ptr(from_raw_parts(
+            head_data.to::<u8>(),
+            head_read_size.to_usize(),
+        ))
+    } {
         Ok(e) => e,
         Err(err) => {
             pr_err!("File is not valid ELF file: {:?}", err);
