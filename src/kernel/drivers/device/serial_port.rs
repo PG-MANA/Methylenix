@@ -3,10 +3,8 @@
 //!
 
 pub mod dw_apb;
+pub mod ns16550a;
 pub mod pl011;
-
-use dw_apb::DW_APB_UART;
-use pl011::PL011;
 
 /// Dummy putc Function
 pub fn dummy_putc(_: usize, _: u8) {}
@@ -36,4 +34,5 @@ pub struct SerialPortDeviceEntry {
     pub wait_buffer: fn(base_address: usize) -> bool,
 }
 
-pub const SERIAL_PORT_DEVICES: [SerialPortDeviceEntry; 2] = [PL011, DW_APB_UART];
+pub const SERIAL_PORT_DEVICES: [SerialPortDeviceEntry; 3] =
+    [pl011::PL011, dw_apb::DW_APB_UART, ns16550a::NS16550A];
