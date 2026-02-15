@@ -2,7 +2,6 @@
 //! RISC-V Boot Routines
 //!
 
-mod boot_info;
 pub mod context;
 
 pub mod device {
@@ -20,7 +19,6 @@ pub mod paging;
 pub mod system_call;
 
 use self::{
-    boot_info::BootInformation,
     device::{jh7110_timer::Jh7110Timer, serial_port::SerialPortManager},
     initialization::*,
 };
@@ -28,7 +26,7 @@ use self::{
 pub use crate::kernel::file_manager::elf::ELF_MACHINE_RISCV as ELF_MACHINE_DEFAULT;
 use crate::kernel::{
     collections::{init_struct, ptr_linked_list::PtrLinkedList},
-    drivers::dtb::DtbManager,
+    drivers::{boot_information::BootInformation, dtb::DtbManager},
     graphic_manager::GraphicManager,
     initialization::*,
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
@@ -48,7 +46,11 @@ pub struct ArchDependedCpuManagerCluster {
 pub const TARGET_ARCH_NAME: &str = "riscv64";
 
 #[unsafe(no_mangle)]
-extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
+extern "C" fn boot_main(
+    hartid: u64,
+    dtb_address: usize,
+    boot_information: *const BootInformation,
+) -> ! {
     let mut boot_information = unsafe { &*boot_information }.clone();
 
     /* Initialize Kernel TTY (Early) */
@@ -91,7 +93,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
 
     /* Initialize ACPI and DTB */
     let acpi_available = false; //init_acpi_early_by_boot_information(&boot_information);
-    let dtb_available = init_dtb(&boot_information);
+    let dtb_available = init_dtb(&boot_information, Some(dtb_address));
     if !acpi_available && !dtb_available {
         panic!("Neither ACPI nor DTB is available");
     }

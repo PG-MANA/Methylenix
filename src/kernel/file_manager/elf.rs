@@ -1,6 +1,8 @@
-//!
-//! ELF
-//!
+//
+// ELF
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 const ELF_MAGIC: [u8; 4] = [0x7f, 0x45, 0x4c, 0x46];
 const ELF_CLASS: u8 = 0x02;
@@ -10,6 +12,7 @@ const ELF_HEADER_VERSION: u8 = 0x01;
 const ELF_SUPPORTED_VERSION: u32 = 1;
 
 pub const ELF_PROGRAM_HEADER_SEGMENT_LOAD: u32 = 0x01;
+pub const ELF_PROGRAM_HEADER_SEGMENT_RELRO: u32 = 0x60000000 + 0x474e552;
 const ELF_PROGRAM_HEADER_FLAGS_EXECUTABLE: u32 = 0x01;
 const ELF_PROGRAM_HEADER_FLAGS_WRITABLE: u32 = 0x02;
 const ELF_PROGRAM_HEADER_FLAGS_READABLE: u32 = 0x04;
@@ -59,6 +62,7 @@ pub struct Elf64SectionHeader {
 }
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct Elf64ProgramHeader {
     p_type: u32,
     p_flags: u32,

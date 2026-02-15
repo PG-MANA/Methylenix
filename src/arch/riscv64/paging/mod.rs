@@ -1,10 +1,13 @@
-//!
-//! Paging Manager
-//!
-//! These modules treat the paging system of RISC-V.
-//!
-//! This does not handle memory status(which process using what memory area).
-//! This is the back-end of VirtualMemoryManager.
+//
+// Paging Manager
+//
+// These modules treat the paging system of RISC-V.
+//
+// This does not handle memory status(which process using what memory area).
+// This is the back-end of VirtualMemoryManager.
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 mod table_entry;
 
@@ -131,7 +134,7 @@ impl PageManager {
     }
 
     const fn get_table_index(
-        table: &[table_entry::PageTableEntry],
+        table: &[PageTableEntry],
         level: u8,
         virtual_address: VAddress,
     ) -> usize {
@@ -439,7 +442,7 @@ impl PageManager {
                     PagingError::MemoryError
                 })?;
         }
-        return Ok(!table.iter().any(|e| e.is_valid()));
+        Ok(!table.iter().any(|e| e.is_valid()))
     }
 
     /// Clean up the page table.
@@ -536,6 +539,7 @@ impl PageManager {
         // TODO: flush TLB
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn _dump_table(
         &self,
         start_address: VAddress,

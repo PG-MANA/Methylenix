@@ -1,7 +1,9 @@
-//!
-//! Memory Manager Data Type
-//!
-//! This module has basic data types for Memory Manager.
+//
+// Memory Manager Data Type
+//
+// This module has basic data types for Memory Manager.
+//
+// This comment is not the doc comment because this file is included by the loader.
 
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE};
 
