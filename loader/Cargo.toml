@@ -1,0 +1,10 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+name = "kernel_loader"
+
+[features]
+
+[dependencies]
