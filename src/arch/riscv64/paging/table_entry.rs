@@ -75,6 +75,18 @@ impl PageTableEntry {
             | (((output_address.to_usize() as u64) >> PAGE_SHIFT) << Self::PPN_OFFSET);
     }
 
+    pub const fn set_dirty_flag(&mut self) {
+        self.0 |= Self::D;
+    }
+
+    pub const fn set_access_flag(&mut self) {
+        self.0 |= Self::A;
+    }
+
+    pub const fn set_global_flag(&mut self) {
+        self.0 |= Self::G;
+    }
+
     pub const fn get_permission(&self) -> MemoryPermissionFlags {
         let r = (self.0 & Self::R) != 0;
         let w = (self.0 & Self::W) != 0;
