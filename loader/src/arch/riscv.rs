@@ -26,7 +26,7 @@ pub mod context {
         }
 
         pub fn get_high_memory_base_address() -> VAddress {
-            VAddress::new(0xffff_ff80_0000_0000)
+            VAddress::new(0xffff_fff8_0000_0000)
         }
 
         pub fn get_direct_map_start_address() -> VAddress {
@@ -34,7 +34,7 @@ pub mod context {
         }
 
         pub fn get_direct_map_end_address() -> VAddress {
-            VAddress::new(0xffff_ffbf_ffff_ffff)
+            VAddress::new(0xffff_ffff_bfff_ffff)
         }
 
         pub fn get_direct_map_size() -> MSize {
