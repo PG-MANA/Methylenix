@@ -91,7 +91,7 @@ impl PageManager {
     /// This function must be called only once on boot time.
     pub fn init(&mut self, pm_manager: &mut PhysicalMemoryManager) -> Result<(), PagingError> {
         self.page_table = Self::alloc_page_table(pm_manager)?;
-        self.mode = 9; // TODO: set dynamically
+        self.mode = 8; // TODO: set dynamically
 
         Ok(())
     }
@@ -147,7 +147,7 @@ impl PageManager {
     }
 
     pub fn get_canonical_address(&self, address: VAddress) -> Result<VAddress, PagingError> {
-        let lsb = PAGE_SHIFT + Self::PFN_BITS * self.get_initial_level()? as usize;
+        let lsb = PAGE_SHIFT + Self::PFN_BITS * (self.get_initial_level()? + 1) as usize - 1;
         if ((address.to_usize() >> lsb) & 1) != 0 {
             Ok(VAddress::new(address.to_usize() | !((1 << lsb) - 1)))
         } else {
