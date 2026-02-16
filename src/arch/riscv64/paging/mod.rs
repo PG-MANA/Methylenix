@@ -213,12 +213,14 @@ impl PageManager {
         o: MemoryOptionFlags,
     ) {
         e.set_permission(p);
-        e.set_permission(p);
-        if o.is_device_memory() || o.is_io_map() {
-            /* todo: */
-        } else {
-            /* todo: */
+        if o.is_for_kernel() {
+            e.set_access_flag();
+            e.set_global_flag();
+            if p.is_writable() {
+                e.set_dirty_flag();
+            }
         }
+        if o.is_device_memory() { /* todo: */ }
     }
 
     #[allow(clippy::too_many_arguments)]

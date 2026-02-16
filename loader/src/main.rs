@@ -437,7 +437,9 @@ fn map_uart(
             unsafe { address.to_direct_mapped_v_address() },
             PAGE_SIZE,
             MemoryPermissionFlags::new(true, true, false, false),
-            MemoryOptionFlags::IO_MAP | MemoryOptionFlags::DEVICE_MEMORY,
+            MemoryOptionFlags::KERNEL
+                | MemoryOptionFlags::IO_MAP
+                | MemoryOptionFlags::DEVICE_MEMORY,
         )
         .expect("Failed to map the serial port area");
 }
