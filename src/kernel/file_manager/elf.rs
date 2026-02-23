@@ -62,6 +62,7 @@ pub struct Elf64SectionHeader {
 }
 
 #[repr(C)]
+#[derive(Clone)]
 pub struct Elf64ProgramHeader {
     p_type: u32,
     p_flags: u32,

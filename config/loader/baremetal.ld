@@ -34,6 +34,7 @@ SECTIONS {
     *(.rodata .rodata.*)
   }
 
+  . = ALIGN(8);
   __BSS_START = .;
   .bss : {
     KEEP(*(.bss .bss.*))

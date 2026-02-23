@@ -15,13 +15,22 @@ mod memory;
 /// therefore [`include!`] macro must be used.
 #[allow(dead_code)]
 pub mod kernel {
+    pub mod collections {
+        pub mod guid {
+            include!("../../src/kernel/collections/guid.rs");
+        }
+    }
+
     pub mod drivers {
-        /// Currently, there is some differences
-        /// TODO: Link to the kernel one
-        pub mod boot_information;
+        pub mod boot_information {
+            include!("../../src/kernel/drivers/boot_information.rs");
+        }
         /// Currently, there is some differences
         /// TODO: Link to the kernel one
         pub mod dtb;
+        pub mod efi {
+            include!("../../src/kernel/drivers/efi/mod.rs");
+        }
     }
 
     pub mod file_manager {
@@ -150,9 +159,7 @@ extern "C" fn baremetal_main(
                 + PAGE_SIZE_USIZE,
         ),
     ];
-    memory::init_memory_allocator(&dtb, loader_area.as_slice(), unsafe {
-        &mut boot_information.assume_init_mut().ram_map
-    });
+    memory::init_memory_allocator(&dtb, loader_area.as_slice());
     let mut pm_manager = PhysicalMemoryManager::new();
 
     /* Load kernel ELF and map them */
@@ -189,6 +196,9 @@ extern "C" fn baremetal_main(
         .expect("Failed to allocate the stack")
         + (KERNEL_STACK_PAGES * PAGE_SIZE_USIZE)
         + memory_layout::get_direct_map_start_address().to_usize();
+
+    /* Store the memory map and freeze the memory allocator */
+    memory::store_memory_map(unsafe { &mut boot_information.assume_init_mut().memory_map });
 
     /* Adjust the address to the direct mapped address */
     adjust_boot_info(unsafe { boot_information.assume_init_mut() });

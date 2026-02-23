@@ -3,6 +3,7 @@
 //!
 
 pub mod acpi;
+pub mod boot_information;
 pub mod efi;
 pub mod device {
     #![allow(dead_code)]

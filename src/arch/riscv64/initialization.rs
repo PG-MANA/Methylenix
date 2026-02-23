@@ -6,7 +6,6 @@
 //!
 
 use crate::arch::target_arch::{
-    boot_info::BootInformation,
     context::{ContextManager, memory_layout::physical_address_to_direct_map},
     device::{cpu, jh7110_timer::Jh7110Timer},
     interrupt::{InterruptManager, plicv1::PlatformLevelInterruptController},
@@ -16,13 +15,11 @@ use crate::arch::target_arch::{
 use crate::kernel::{
     collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::{
+        boot_information::BootInformation,
         dtb::DtbManager,
-        efi::{
-            EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE,
-            memory_map::{EfiMemoryDescriptor, EfiMemoryType},
-        },
+        efi::{EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE, memory_map::EfiMemoryType},
     },
-    file_manager::elf::{ELF_PROGRAM_HEADER_SEGMENT_LOAD, Elf64Header},
+    file_manager::elf::ELF_PROGRAM_HEADER_SEGMENT_LOAD,
     initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{CpuManagerCluster, get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
@@ -93,16 +90,11 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
     }
 
     let mut max_usable_memory_address = PAddress::new(0);
-    let mut entry_base_address = boot_information.memory_info.efi_memory_map_address;
 
     /* Free usable memory area */
-    while entry_base_address
-        < (boot_information.memory_info.efi_memory_map_address
-            + boot_information.memory_info.efi_memory_map_size)
-    {
-        let entry = unsafe { &*(entry_base_address as *const EfiMemoryDescriptor) };
-        entry_base_address += boot_information.memory_info.efi_descriptor_size;
+    for entry in boot_information.memory_map.iter() {
         match entry.memory_type {
+            EfiMemoryType::EfiMaxMemoryType => continue,
             EfiMemoryType::EfiConventionalMemory
             | EfiMemoryType::EfiBootServicesCode
             | EfiMemoryType::EfiLoaderCode => {
@@ -136,8 +128,7 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
         .system_memory_manager
         .init_pools(&mut virtual_memory_manager);
 
-    let elf_header = unsafe { Elf64Header::from_ptr(&boot_information.elf_header_buffer) }.unwrap();
-    for entry in elf_header.get_program_headers_iter(boot_information.elf_program_headers_address) {
+    for entry in boot_information.elf_program_headers.iter() {
         let virtual_address = entry.get_virtual_address() as usize;
         let physical_address = entry.get_physical_address() as usize;
         if entry.get_segment_type() != ELF_PROGRAM_HEADER_SEGMENT_LOAD
@@ -195,18 +186,18 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
 
     /* Adjust Memory Pointer */
     /* `efi_memory_map_address` and `elf_program_headers_address` are already direct mapped. */
-    boot_information.efi_system_table.set_configuration_table(
-        physical_address_to_direct_map(PAddress::new(
-            boot_information.efi_system_table.get_configuration_table(),
-        ))
-        .to_usize(),
-    );
-    boot_information.font_address = boot_information.font_address.map(|a| {
+    if let Some(system_table) = &mut boot_information.efi_system_table {
+        system_table.set_configuration_table(
+            physical_address_to_direct_map(PAddress::new(system_table.get_configuration_table()))
+                .to_usize(),
+        );
+    }
+    /*boot_information.font_address = boot_information.font_address.map(|a| {
         (
             (physical_address_to_direct_map(PAddress::new(a.0)).to_usize()),
             a.1,
         )
-    });
+    });*/
 
     /* Apply paging */
     get_kernel_manager_cluster()
@@ -289,17 +280,16 @@ pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
 }
 
 /// Init Device Tree Blob Manager
-pub fn init_dtb(boot_information: &BootInformation) -> bool {
+pub fn init_dtb(boot_information: &BootInformation, mut dtb_address: Option<usize>) -> bool {
     let mut dtb_manager = DtbManager::new();
-    let mut dtb_address: Option<usize> = None;
-    for e in unsafe {
-        boot_information
-            .efi_system_table
-            .get_configuration_table_slice()
-    } {
-        if e.vendor_guid == EFI_DTB_TABLE_GUID {
-            dtb_address = Some(e.vendor_table);
-            break;
+    if dtb_address.is_none()
+        && let Some(system_table) = &boot_information.efi_system_table
+    {
+        for e in unsafe { system_table.get_configuration_table_slice() } {
+            if e.vendor_guid == EFI_DTB_TABLE_GUID {
+                dtb_address = Some(e.vendor_table);
+                break;
+            }
         }
     }
     if dtb_address.is_none() {

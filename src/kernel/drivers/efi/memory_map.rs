@@ -57,7 +57,7 @@ pub enum EfiMemoryAttribute {
     EfiMemoryRuntime = 0x8000000000000000,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct EfiMemoryDescriptor {
     pub memory_type: EfiMemoryType,

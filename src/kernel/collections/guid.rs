@@ -1,6 +1,8 @@
-//!
-//! Globally Unique Identifier
-//!
+//
+// Globally Unique Identifier
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 use core::fmt::Formatter;
 
