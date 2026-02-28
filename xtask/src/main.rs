@@ -75,21 +75,28 @@ fn build(cargo: &str, base_dir: &Path) -> i32 {
     }
 
     /* Build the kernel */
-    let status = Command::new(cargo)
-        .args([
-            "build",
-            format!("--{build_type}").as_str(),
-            "--target",
-            target_arch,
-            "--config",
-            base_dir
-                .join(".cargo")
-                .join("kernel.toml")
-                .to_str()
-                .unwrap(),
-        ])
-        .args(additional_build_flags)
-        .status();
+    let mut cargo_build = Command::new(cargo);
+    cargo_build.args([
+        "build",
+        format!("--{build_type}").as_str(),
+        "--target",
+        target_arch,
+        "--config",
+        base_dir
+            .join(".cargo")
+            .join("kernel.toml")
+            .to_str()
+            .unwrap(),
+    ]);
+    cargo_build.args(additional_build_flags);
+    if let Some(feature_flags) = env::args()
+        .rposition(|arg| arg == "--features")
+        .and_then(|i| env::args().nth(i + 1))
+    {
+        eprintln!("Features: {feature_flags}");
+        cargo_build.args(["--features", feature_flags.as_str()]);
+    }
+    let status = cargo_build.status();
     if !matches!(status.as_ref().map(|s| s.success()), Ok(true)) {
         eprintln!("Building the kernel is failed: {status:?}");
         return status.map_or(-1, |s| s.code().unwrap_or(-1));
