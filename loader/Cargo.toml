@@ -6,5 +6,4 @@ version.workspace = true
 name = "kernel_loader"
 
 [features]
-
-[dependencies]
+riscv_privileged_110 = [] # For the CPU implemented with Privileged ISA version 1.10 or older

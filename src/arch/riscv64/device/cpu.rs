@@ -172,6 +172,13 @@ pub fn instruction_barrier() {
 }
 
 #[inline(always)]
+#[cfg(feature = "riscv_privileged_110")]
+pub fn get_envcfg() -> u64 {
+    0
+}
+
+#[inline(always)]
+#[cfg(not(feature = "riscv_privileged_110"))]
 pub fn get_envcfg() -> u64 {
     let result: u64;
     unsafe { asm!("csrr {}, senvcfg", out(reg) result) };

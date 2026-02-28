@@ -18,6 +18,9 @@ description = "A operating system written in Rust"
 keywords = ["os", "operating-system", "kernel", "seccamp", "security-camp"]
 categories = ["os"]
 
+[features]
+riscv_privileged_110 = [] # For the CPU implemented with Privileged ISA version 1.10 or older
+
 [profile.release]
 lto = true
 opt-level = 2
