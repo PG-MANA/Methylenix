@@ -228,17 +228,16 @@ pub fn synchronize<T>(target_virtual_address: *const T) {
     );
 }
 
-/// Execute SMC #0 with Secure Monitor Call Conversation
 #[inline(always)]
-pub unsafe fn sbi_call(
+pub unsafe fn ecall(
     mut arg0: u64,
     mut arg1: u64,
     arg2: u64,
     arg3: u64,
     arg4: u64,
     arg5: u64,
-    function_id: u64,
-    extension_id: u64,
+    arg6: u64,
+    arg7: u64,
 ) -> (u64, u64) {
     unsafe {
         asm!(
@@ -249,8 +248,8 @@ pub unsafe fn sbi_call(
             in("a3") arg3,
             in("a4") arg4,
             in("a5") arg5,
-            in("a6") function_id,
-            in("a7") extension_id,
+            in("a6") arg6,
+            in("a7") arg7,
             clobber_abi("C")
         )
     }

@@ -7,7 +7,7 @@
 
 use crate::arch::target_arch::{
     context::{ContextManager, memory_layout::physical_address_to_direct_map},
-    device::{cpu, jh7110_timer::Jh7110Timer},
+    device::{cpu, jh7110_timer::Jh7110Timer, sbi},
     interrupt::{InterruptManager, plicv1::PlatformLevelInterruptController},
     paging::{PAGE_MASK, PAGE_SIZE_USIZE},
 };
@@ -35,6 +35,8 @@ use crate::kernel::{
 };
 
 use core::sync::atomic::AtomicBool;
+
+use alloc::boxed::Box;
 
 /// Memory Areas for PhysicalMemoryManager
 static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; PAGE_SIZE_USIZE * 2];
@@ -329,62 +331,84 @@ pub fn init_dtb(boot_information: &BootInformation, mut dtb_address: Option<usiz
     true
 }
 
-pub fn init_local_timer(_acpi_available: bool, dtb_available: bool) {
-    init_struct!(
-        get_cpu_manager_cluster().local_timer_manager,
-        LocalTimerManager::new()
-    );
-    /* TODO: support various controller */
-    init_struct!(
-        get_cpu_manager_cluster().arch_depend_data.jh7110_timer,
-        Jh7110Timer::new()
-    );
-
-    let jh7110_timer = &mut get_cpu_manager_cluster().arch_depend_data.jh7110_timer;
-    // TODO: Implement Timet trait to jh7110_timer
-    // let local_timer_manager = &mut get_cpu_manager_cluster().local_timer_manager;
-
+fn init_jh7110_timer(_acpi_available: bool, dtb_available: bool) -> bool {
+    let mut jh7110_timer = Jh7110Timer::new();
     if dtb_available {
         let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
         let mut node = None;
 
         while let Some(info) = dtb_manager.search_node(b"timer", node.as_ref()) {
-            if dtb_manager.is_node_operational(&info) {
-                if jh7110_timer.init_with_dtb(dtb_manager, &info) {
-                    // local_timer_manager.set_source_timer(jh7110_timer);
-                    return;
-                }
+            if dtb_manager.is_node_operational(&info)
+                && jh7110_timer.init_with_dtb(dtb_manager, &info)
+            {
+                init_struct!(
+                    get_cpu_manager_cluster().arch_depend_data.timer,
+                    Box::new(jh7110_timer)
+                );
+                return true;
             }
             node = Some(info);
         }
     }
-    panic!("Failed to initialize the local timer");
+    false
 }
 
-fn init_local_timer_ap() {
+fn init_sbi_timer(_acpi_available: bool, dtb_available: bool) -> bool {
+    if dtb_available {
+        let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
+        if let Some(frequency) = dtb_manager
+            .search_node(b"cpus", None)
+            .and_then(|node| dtb_manager.get_property(&node, b"timebase-frequency"))
+            .and_then(|p| dtb_manager.read_property_as_u32(&p, 0))
+        {
+            pr_info!("CPU's timer frequency: {frequency:#X}");
+            return match sbi::SbiTimer::new(frequency as u64) {
+                Ok(t) => {
+                    let t = Box::new(t);
+                    /*get_cpu_manager_cluster()
+                    .local_timer_manager
+                    .set_source_timer(t.as_ref());*/
+                    init_struct!(get_cpu_manager_cluster().arch_depend_data.timer, t);
+                    true
+                }
+                Err(e) => {
+                    pr_info!("SBI Timer Extension is not supported: {e:#?}");
+                    false
+                }
+            };
+        } else {
+            pr_warn!("Failed to get CPU's timer frequency")
+        }
+    }
+    false
+}
+
+pub fn init_local_timer(acpi_available: bool, dtb_available: bool) {
     init_struct!(
         get_cpu_manager_cluster().local_timer_manager,
         LocalTimerManager::new()
     );
     /* TODO: support various controller */
-    init_struct!(
-        get_cpu_manager_cluster().arch_depend_data.jh7110_timer,
-        Jh7110Timer::new()
-    );
+    if init_jh7110_timer(acpi_available, dtb_available) {
+        return;
+    }
+    if init_sbi_timer(acpi_available, dtb_available) {
+        return;
+    }
+    panic!("Failed to initialize the local timer");
+}
 
-    get_cpu_manager_cluster()
+fn init_local_timer_ap() {
+    let acpi_available = get_kernel_manager_cluster()
+        .acpi_manager
+        .lock()
+        .unwrap()
+        .is_available();
+    let dtb_available = get_kernel_manager_cluster()
         .arch_depend_data
-        .jh7110_timer
-        .init_ap(
-            &get_kernel_manager_cluster()
-                .boot_strap_cpu_manager
-                .arch_depend_data
-                .jh7110_timer,
-        );
-
-    /*get_cpu_manager_cluster()
-    .local_timer_manager
-    .set_source_timer(&get_cpu_manager_cluster().arch_depend_data.jh7110_timer);*/
+        .dtb_manager
+        .is_available();
+    init_local_timer(acpi_available, dtb_available);
 }
 
 /// Init TaskManager
@@ -442,7 +466,7 @@ fn ap_idle() -> ! {
     AP_BOOT_COMPLETE_FLAG.store(true, core::sync::atomic::Ordering::Relaxed);
     get_cpu_manager_cluster()
         .arch_depend_data
-        .jh7110_timer
+        .timer
         .start_interrupt();
     idle()
 }
