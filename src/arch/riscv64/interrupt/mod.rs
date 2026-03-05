@@ -5,7 +5,7 @@
 pub mod plicv1;
 
 use crate::arch::target_arch::context::context_data::ContextData;
-use crate::arch::target_arch::device::cpu;
+use crate::arch::target_arch::device::{cpu, sbi};
 use crate::arch::target_arch::get_hartid;
 use crate::arch::target_arch::paging::PAGE_SIZE;
 
@@ -239,19 +239,8 @@ impl InterruptManager {
         // Using SBI IPI
         // TODO: implement Local Interrupt Controller
         let _lock = self.lock.lock();
-        let mask = 1 << cpu_id;
-        unsafe {
-            cpu::sbi_call(
-                mask,
-                0,
-                0,
-                0,
-                0,
-                0,
-                cpu::SBI_FID_SEND_IPI,
-                cpu::SBI_EID_SEND_IPI,
-            )
-        };
+        let _ = sbi::send_ipi(cpu_id as _)
+            .inspect_err(|e| pr_warn!("Failed to send reschedule ipi: {e:#?}"));
     }
 
     fn reschedule_ipi_handler() -> bool {

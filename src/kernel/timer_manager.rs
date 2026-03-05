@@ -413,7 +413,10 @@ pub trait IntervalTimer {
     fn stop_interrupt(&mut self) -> bool;
     fn reload_timer(&mut self);
 
-    fn common_handler() {
+    fn common_handler()
+    where
+        Self: Sized,
+    {
         get_cpu_manager_cluster()
             .local_timer_manager
             .local_timer_handler();

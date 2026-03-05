@@ -8,11 +8,14 @@ use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::get_hartid;
 
 use crate::kernel::drivers::dtb::{DtbManager, DtbNodeInfo};
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{MSize, MemoryPermissionFlags, PAddress, VAddress};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
+};
 use crate::kernel::memory_manager::io_remap;
-use crate::kernel::timer_manager::GlobalTimerManager;
+use crate::kernel::timer_manager::{GlobalTimerManager, IntervalTimer};
 
+use core::any::Any;
 use core::ptr::{read_volatile, write_volatile};
 
 #[repr(C)]
@@ -36,26 +39,33 @@ pub struct Jh7110Timer {
 
 macro_rules! read_register {
     ($s:expr, $reg:ident) => {
-        unsafe {
-            read_volatile(
-                &((&*($s.base_address + MSize::new(Self::CHANNEL_SIZE * (get_hartid() as usize)))
+        if !$s.base_address.is_zero() {
+            unsafe {
+                read_volatile(
+                    &((&*($s.base_address
+                        + MSize::new(Self::CHANNEL_SIZE * (get_hartid() as usize)))
                     .to::<Channel>())
-                    .$reg) as *const _,
-            )
+                        .$reg) as *const _,
+                )
+            }
+        } else {
+            0
         }
     };
 }
 
 macro_rules! write_register {
     ($s:expr, $reg:ident, $val:expr) => {
-        unsafe {
-            write_volatile(
-                &mut ((&mut *($s.base_address
-                    + MSize::new(Self::CHANNEL_SIZE * (get_hartid() as usize)))
-                .to::<Channel>())
-                    .$reg) as *mut _,
-                $val,
-            )
+        if !$s.base_address.is_zero() {
+            unsafe {
+                write_volatile(
+                    &mut ((&mut *($s.base_address
+                        + MSize::new(Self::CHANNEL_SIZE * (get_hartid() as usize)))
+                    .to::<Channel>())
+                        .$reg) as *mut _,
+                    $val,
+                )
+            }
         }
     };
 }
@@ -143,47 +153,49 @@ impl Jh7110Timer {
         self.init_timer();
     }
 
-    pub fn start_interrupt(&self) {
-        /* Disable Timer Interrupt */
-        write_register!(self, timer_interrupt_mask, 1u32);
-        self.clear_interrupt();
-        self.reload_timeout_value();
-        /* Enable Interrupt and unmask */
-        write_register!(self, enable, 1u32);
-        write_register!(self, timer_interrupt_clear, 0u32);
-    }
-
-    pub fn reload_timeout_value(&self) {
-        let reset_value = (GlobalTimerManager::TIMER_INTERVAL_MS * self.frequency as u64) / 1000;
-        write_register!(self, load_value, reset_value);
-        cpu::memory_barrier();
-        write_register!(self, timer_interrupt_clear, 1u32);
-    }
-
     fn clear_interrupt(&self) {
         write_register!(self, timer_interrupt_clear, 1u32);
     }
 
     fn interrupt_handler(_interrupt_id: usize) -> bool {
-        // TODO: get dynamically
-        let timer = &mut get_cpu_manager_cluster().arch_depend_data.jh7110_timer;
+        let timer = (&mut get_cpu_manager_cluster().arch_depend_data.timer as &mut dyn Any)
+            .downcast_mut::<Self>()
+            .unwrap();
         if (read_register!(timer, int_status) & (1u32 << get_hartid() as u8)) == 0u32 {
             pr_warn!("Timer interrupt is not fired...");
             return false;
         }
 
-        get_cpu_manager_cluster()
-            .local_timer_manager
-            .local_timer_handler();
-        if get_kernel_manager_cluster().boot_strap_cpu_manager.cpu_id
-            == get_cpu_manager_cluster().cpu_id
-        {
-            get_kernel_manager_cluster()
-                .global_timer_manager
-                .global_timer_handler();
-        }
+        Self::common_handler();
         timer.clear_interrupt();
-        timer.reload_timeout_value();
+        timer.reload_timer();
         true
+    }
+}
+
+impl IntervalTimer for Jh7110Timer {
+    fn start_interrupt(&mut self) -> bool {
+        /* Disable Timer Interrupt */
+        write_register!(self, timer_interrupt_mask, 1u32);
+        self.clear_interrupt();
+        self.reload_timer();
+        /* Enable Interrupt and unmask */
+        write_register!(self, enable, 1u32);
+        write_register!(self, timer_interrupt_clear, 0u32);
+        true
+    }
+
+    fn stop_interrupt(&mut self) -> bool {
+        /* Disable Timer Interrupt */
+        write_register!(self, timer_interrupt_mask, 1u32);
+        self.clear_interrupt();
+        true
+    }
+
+    fn reload_timer(&mut self) {
+        let reset_value = (GlobalTimerManager::TIMER_INTERVAL_MS * self.frequency as u64) / 1000;
+        write_register!(self, load_value, reset_value);
+        cpu::memory_barrier();
+        write_register!(self, timer_interrupt_clear, 1u32);
     }
 }

@@ -9,6 +9,7 @@ pub mod device {
     pub mod cpu;
     pub mod jh7110_timer;
     pub mod pci;
+    pub mod sbi;
     pub mod serial_port;
     pub mod text;
 }
@@ -18,10 +19,7 @@ pub mod interrupt;
 pub mod paging;
 pub mod system_call;
 
-use self::{
-    device::{jh7110_timer::Jh7110Timer, serial_port::SerialPortManager},
-    initialization::*,
-};
+use self::{device::serial_port::SerialPortManager, initialization::*};
 
 pub use crate::kernel::file_manager::elf::ELF_MACHINE_RISCV as ELF_MACHINE_DEFAULT;
 use crate::kernel::{
@@ -31,8 +29,11 @@ use crate::kernel::{
     initialization::*,
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::data_type::VAddress,
+    timer_manager::IntervalTimer,
     tty::TtyManager,
 };
+
+use alloc::boxed::Box;
 
 pub struct ArchDependedKernelManagerCluster {
     dtb_manager: DtbManager,
@@ -42,7 +43,7 @@ pub struct ArchDependedKernelManagerCluster {
 pub struct ArchDependedCpuManagerCluster {
     interrupt_stack: VAddress,
     hartid: u64,
-    jh7110_timer: Jh7110Timer, /* TODO: Dynamic Value*/
+    timer: Box<dyn IntervalTimer>,
 }
 
 pub const TARGET_ARCH_NAME: &str = "riscv64";
@@ -119,6 +120,9 @@ extern "C" fn boot_main(
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
     pr_info!("BootInformation: ACPI: {acpi_available}, DTB: {dtb_available}");
 
+    /* Dump SBI information if presents */
+    device::sbi::dump_sbi_extension();
+
     init_interrupt(acpi_available, dtb_available);
     init_local_timer(acpi_available, dtb_available);
     init_global_timer();
@@ -143,11 +147,13 @@ fn get_hartid() -> u64 {
 }
 
 fn main_arch_depend_initialization_process() -> ! {
-    /* TODO: detect dynamically */
-    get_cpu_manager_cluster()
-        .arch_depend_data
-        .jh7110_timer
-        .start_interrupt();
+    assert!(
+        get_cpu_manager_cluster()
+            .arch_depend_data
+            .timer
+            .start_interrupt(),
+        "Failed to start the timer!"
+    );
 
     if !get_kernel_manager_cluster()
         .serial_port_manager

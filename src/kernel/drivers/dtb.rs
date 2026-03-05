@@ -73,6 +73,10 @@ impl DtbManager {
         }
     }
 
+    pub const fn is_available(&self) -> bool {
+        !self.base_address.is_zero()
+    }
+
     pub fn init(&mut self, dtb_header_address: PAddress) -> bool {
         const INITIAL_MAP_SIZE: MSize = PAGE_SIZE;
         self.base_address = match io_remap!(
