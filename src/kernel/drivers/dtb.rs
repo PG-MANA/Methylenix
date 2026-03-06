@@ -143,23 +143,23 @@ impl DtbManager {
         Ok(false)
     }
 
+    fn skip_name(&self, pointer: &mut usize) {
+        while unsafe { *(*pointer as *const u8) } != b'\0' {
+            *pointer += 1;
+        }
+        *pointer += 1; /* Move next of '\0' */
+        self.skip_padding(pointer);
+    }
+
     fn compare_string(
         &self,
         pointer: &mut usize,
         name: &[u8],
         delimiter: &[u8],
     ) -> Result<bool, ()> {
-        let skip = |p: &mut usize| {
-            while unsafe { *(*p as *const u8) } != b'\0' {
-                *p += 1;
-            }
-            *p += 1; /* Move next of '\0' */
-            self.skip_padding(p);
-        };
-
         for c in name {
             if *c != unsafe { *(*pointer as *const u8) } {
-                skip(pointer);
+                self.skip_name(pointer);
                 return Ok(false);
             }
             *pointer += 1;
@@ -167,11 +167,11 @@ impl DtbManager {
         let l = unsafe { *(*pointer as *const u8) };
         for e in delimiter.iter().chain(b"\0") {
             if *e == l {
-                skip(pointer);
+                self.skip_name(pointer);
                 return Ok(true);
             }
         }
-        skip(pointer);
+        self.skip_name(pointer);
         Ok(false)
     }
 
@@ -314,6 +314,7 @@ impl DtbManager {
             match *self.read_node(*pointer)? {
                 Self::FDT_BEGIN_NODE => {
                     *pointer += Self::FDT_NODE_BYTE;
+                    self.skip_name(pointer);
                     self._skip_to_next_node(pointer)?;
                 }
                 Self::FDT_END => {
