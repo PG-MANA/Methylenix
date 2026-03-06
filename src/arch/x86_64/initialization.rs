@@ -178,6 +178,11 @@ pub fn setup_cpu_manager_cluster(
             .expect("Failed to alloc CpuManagerCluster")
     });
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to_usize() as *mut CpuManagerCluster) };
+    /* Initialize some essential members */
+    init_struct!(cpu_manager.memory_allocator, MemoryAllocator::new());
+    init_struct!(cpu_manager.run_queue, RunQueue::new());
+    init_struct!(cpu_manager.interrupt_manager, InterruptManager::new());
+    init_struct!(cpu_manager.list, PtrLinkedListNode::new());
     /*
         "mov rax, gs:0" is the same as "let rax = *(gs as *const u64)".
         We cannot load gs.base by "lea rax, [gs:0]" because lea cannot use gs register in x86_64.
@@ -189,7 +194,6 @@ pub fn setup_cpu_manager_cluster(
             &cpu_manager.arch_depend_data.self_pointer as *const _ as u64,
         )
     };
-    init_struct!(cpu_manager.list, PtrLinkedListNode::new());
     unsafe {
         get_kernel_manager_cluster()
             .cpu_list

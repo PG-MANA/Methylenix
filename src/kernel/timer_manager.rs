@@ -182,7 +182,7 @@ impl Default for LocalTimerManager<'_> {
 }
 
 impl<'a> LocalTimerManager<'a> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             timer_list: PtrLinkedList::new(),
             timer_list_pool: LocalSlabAllocator::new(),

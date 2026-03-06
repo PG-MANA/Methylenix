@@ -69,9 +69,13 @@ pub fn setup_cpu_manager_cluster(
             .expect("Failed to alloc CpuManagerCluster")
     });
     let cpu_manager = unsafe { &mut *(cpu_manager_address.to::<CpuManagerCluster>()) };
+    /* Initialize some essential members */
+    init_struct!(cpu_manager.memory_allocator, MemoryAllocator::new());
+    init_struct!(cpu_manager.run_queue, RunQueue::new());
+    init_struct!(cpu_manager.interrupt_manager, InterruptManager::new());
+    init_struct!(cpu_manager.list, PtrLinkedListNode::new());
 
     unsafe { cpu::set_cpu_base_address(cpu_manager as *const _ as u64) };
-    init_struct!(cpu_manager.list, PtrLinkedListNode::new());
     unsafe {
         get_kernel_manager_cluster()
             .cpu_list
@@ -650,6 +654,9 @@ pub fn wake_up_application_processors(acpi_available: bool, dtb_available: bool)
         ap_boot_main as *const fn() as usize as u64,
         0,
     ];
+    assert!(
+        MSize::new((ap_entry_end_address - ap_entry_address) + size_of_val(&boot_data)) < PAGE_SIZE
+    );
 
     unsafe {
         *((virtual_address.to_usize() + (ap_entry_end_address - ap_entry_address)) as *mut _) =
