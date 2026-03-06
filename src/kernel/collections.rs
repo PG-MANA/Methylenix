@@ -11,6 +11,7 @@ pub mod ring_buffer;
 
 macro_rules! init_struct {
     ($st:expr_2021, $v:expr) => {
+        #[allow(clippy::forget_non_drop, clippy::mem_replace_with_default)]
         core::mem::forget(core::mem::replace(&mut $st, $v))
     };
 }
