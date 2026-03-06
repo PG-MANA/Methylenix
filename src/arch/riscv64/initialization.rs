@@ -8,13 +8,15 @@
 use crate::arch::target_arch::{
     context::{ContextManager, memory_layout::physical_address_to_direct_map},
     device::{cpu, jh7110_timer::Jh7110Timer, sbi},
+    get_hartid,
     interrupt::{InterruptManager, plicv1::PlatformLevelInterruptController},
-    paging::{PAGE_MASK, PAGE_SIZE_USIZE},
+    paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
 use crate::kernel::{
     collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::{
+        acpi::table::madt::MadtManager,
         boot_information::BootInformation,
         dtb::DtbManager,
         efi::{EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE, memory_map::EfiMemoryType},
@@ -23,8 +25,9 @@ use crate::kernel::{
     initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{CpuManagerCluster, get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
-        MemoryManager,
+        MemoryManager, alloc_pages, alloc_pages_with_physical_address,
         data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
+        free_pages,
         memory_allocator::MemoryAllocator,
         physical_memory_manager::PhysicalMemoryManager,
         system_memory_manager::{SystemMemoryManager, get_physical_memory_manager},
@@ -434,8 +437,130 @@ pub fn init_task(main_process: fn() -> !, idle_process: fn() -> !) {
     init_struct!(get_kernel_manager_cluster().task_manager, task_manager);
 }
 
-pub fn wake_up_application_processors(_acpi_available: bool, _dtb_available: bool) {
-    pr_info!("TODO: Wake up application processors...");
+pub fn wake_up_application_processors(acpi_available: bool, dtb_available: bool) {
+    /* For ACPI */
+    let acpi_madt_manager;
+    /* For Devicetree */
+    let mut dtb_cpu_node = None;
+
+    /* Prepare the structs needed by `mpidr_iter` */
+    if acpi_available {
+        acpi_madt_manager = get_kernel_manager_cluster()
+            .acpi_manager
+            .lock()
+            .unwrap()
+            .get_table_manager()
+            .get_table_manager::<MadtManager>();
+        if acpi_madt_manager.is_none() {
+            pr_info!("ACPI does not have MADT.");
+            return;
+        };
+        unimplemented!();
+    } else if dtb_available {
+        /* Do nothing */
+    } else {
+        pr_info!("Failed to get processors information");
+        return;
+    }
+
+    let mut hartid_iter = || {
+        if acpi_available {
+            unimplemented!()
+        } else if dtb_available {
+            let dtb_manager = &get_kernel_manager_cluster().arch_depend_data.dtb_manager;
+            if let Some(n) = dtb_manager.search_node(b"cpu", dtb_cpu_node.as_ref()) {
+                let hartid = dtb_manager
+                    .read_reg_property(&n, 0)
+                    .map(|(hartid, _)| hartid as u64);
+                dtb_cpu_node = Some(n);
+                hartid
+            } else {
+                None
+            }
+        } else {
+            unreachable!();
+        }
+    };
+
+    /* Extern Assembly Symbols */
+    unsafe extern "C" {
+        /* device/cpu.rs */
+        fn ap_entry();
+        fn ap_entry_end();
+        fn ap_temporary_interrupt_vector();
+    }
+    let ap_entry_address = ap_entry as *const fn() as usize;
+    let ap_entry_end_address = ap_entry_end as *const fn() as usize;
+    let (virtual_address, physical_address) = alloc_pages_with_physical_address!(
+        PAGE_SIZE.to_order(None).to_page_order(),
+        MemoryPermissionFlags::data(),
+        MemoryOptionFlags::KERNEL
+    )
+    .expect("Failed to allocate memory for AP");
+    /* Copy boot code for application processors */
+    assert!(
+        (ap_entry_end_address - ap_entry_address) <= PAGE_SIZE_USIZE,
+        "The size of ap_entry:{:#X}",
+        (ap_entry_end_address - ap_entry_address)
+    );
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            ap_entry as *const u8,
+            virtual_address.to_usize() as *mut u8,
+            ap_entry_end_address - ap_entry_address,
+        )
+    };
+
+    /* Allocate and set temporary stack */
+    let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_SYSTEM);
+    let stack = alloc_pages!(stack_size.to_order(None).to_page_order())
+        .expect("Failed to alloc the initial stack for AP");
+    let boot_data = [
+        cpu::get_atp(),
+        ap_temporary_interrupt_vector as *const fn() as usize as u64,
+        (stack + stack_size).to_usize() as u64,
+        ap_boot_main as *const fn() as usize as u64,
+    ];
+    assert!(
+        MSize::new((ap_entry_end_address - ap_entry_address) + size_of_val(&boot_data)) < PAGE_SIZE
+    );
+    unsafe {
+        *((virtual_address.to_usize() + (ap_entry_end_address - ap_entry_address)) as *mut _) =
+            boot_data
+    };
+    cpu::flush_data_cache_all();
+
+    let bsp_hartid = get_hartid();
+    let mut num_of_cpu = 1usize;
+
+    'ap_init_loop: while let Some(hartid) = hartid_iter() {
+        if hartid == bsp_hartid {
+            continue;
+        }
+        pr_info!("Boot the CPU (HartID: {hartid:#X})");
+        AP_BOOT_COMPLETE_FLAG.store(false, core::sync::atomic::Ordering::Relaxed);
+        cpu::synchronize(AP_BOOT_COMPLETE_FLAG.as_ptr());
+        if let Err(e) = sbi::hart_start(hartid as _, physical_address.to_usize(), 0) {
+            pr_err!("Failed to startup the CPU: {e:?}");
+            continue;
+        }
+        loop {
+            cpu::synchronize(AP_BOOT_COMPLETE_FLAG.as_ptr());
+            if AP_BOOT_COMPLETE_FLAG.load(core::sync::atomic::Ordering::Relaxed) {
+                num_of_cpu += 1;
+                continue 'ap_init_loop;
+            }
+            core::hint::spin_loop();
+        }
+    }
+
+    let _ = free_pages!(virtual_address);
+    let _ = free_pages!(stack);
+
+    if num_of_cpu != 1 {
+        pr_info!("Found {} CPUs", num_of_cpu);
+    }
 }
 
 pub extern "C" fn ap_boot_main(hartid: u64) -> ! {

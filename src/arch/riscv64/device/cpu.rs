@@ -12,7 +12,7 @@ use crate::arch::target_arch::interrupt::InterruptManager;
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
-use core::arch::{asm, naked_asm};
+use core::arch::{asm, global_asm, naked_asm};
 
 const MIE_SEIE: u64 = 1 << 9;
 const MIE_STIE: u64 = 1 << 5;
@@ -358,3 +358,35 @@ pub unsafe extern "C" fn task_switch(
         )
     };
 }
+
+global_asm!(
+    "
+.global     ap_entry, ap_entry_end
+.section    .data
+.type       ap_entry, %function
+.align      2
+ap_entry:
+    /* a0: hartid, a1: zero */
+    lla     t0, ap_entry_end
+    ld      t1, (8 * 0)(t0) /* satp */
+    ld      t2, (8 * 1)(t0) /* tvec */
+    ld      sp, (8 * 2)(t0) /* initial stack */
+    ld      t4, (8 * 3)(t0) /* entry point */
+
+    csrw    stvec, t2
+    csrw    satp, t1
+    /* This instruction may not be fetched, then ap_temporary_interrupt_vector will be called. */
+    jr      t4
+.align      8
+ap_entry_end:
+.size       ap_entry, ap_entry_end - ap_entry
+
+.section    .text
+.global     ap_temporary_interrupt_vector
+.align      8
+ap_temporary_interrupt_vector:
+    csrw    sepc, t4
+    sret
+.size       ap_temporary_interrupt_vector, . - ap_temporary_interrupt_vector
+"
+);
