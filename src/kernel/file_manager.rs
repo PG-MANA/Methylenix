@@ -257,6 +257,9 @@ impl FileManager {
             }
         }
 
+        if f_i.partition.is_null() {
+            return Err(FileError::FileNotFound);
+        }
         let partition = unsafe { &mut *(f_i.partition) };
         let mut f = partition
             .driver
