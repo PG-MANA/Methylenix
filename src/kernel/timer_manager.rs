@@ -47,7 +47,7 @@ pub struct LocalTimerManager<'a> {
     timer_list: PtrLinkedList<TimerList>,
     timer_list_pool: LocalSlabAllocator<TimerList>,
     last_processed_timeout: u64,
-    source_timer: Option<&'a dyn Timer>,
+    source_timer: Option<&'a dyn CountTimer>,
 }
 
 const TIMER_LIST_FLAGS_WAITING: u8 = 0;
@@ -296,7 +296,7 @@ impl<'a> LocalTimerManager<'a> {
         get_cpu_manager_cluster().run_queue.tick();
     }
 
-    pub fn set_source_timer(&mut self, timer: &'static dyn Timer) {
+    pub fn set_source_timer(&mut self, timer: &'static dyn CountTimer) {
         self.source_timer = Some(timer);
     }
 
@@ -351,7 +351,7 @@ impl<'a> LocalTimerManager<'a> {
     }
 }
 
-pub trait Timer {
+pub trait CountTimer {
     fn get_count(&self) -> usize;
     fn get_frequency_hz(&self) -> usize;
     fn is_count_up_timer(&self) -> bool;
@@ -404,6 +404,26 @@ pub trait Timer {
             while self.get_count() > end_counter_value {
                 spin_loop();
             }
+        }
+    }
+}
+
+pub trait IntervalTimer {
+    fn start_interrupt(&mut self) -> bool;
+    fn stop_interrupt(&mut self) -> bool;
+    fn reload_timer(&mut self);
+
+    fn common_handler() {
+        get_cpu_manager_cluster()
+            .local_timer_manager
+            .local_timer_handler();
+
+        if get_cpu_manager_cluster().cpu_id
+            == get_kernel_manager_cluster().boot_strap_cpu_manager.cpu_id
+        {
+            get_kernel_manager_cluster()
+                .global_timer_manager
+                .global_timer_handler();
         }
     }
 }

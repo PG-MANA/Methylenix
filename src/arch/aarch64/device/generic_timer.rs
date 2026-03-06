@@ -10,7 +10,7 @@ use crate::kernel::memory_manager::data_type::{
     Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress,
 };
 use crate::kernel::memory_manager::io_remap;
-use crate::kernel::timer_manager::{GlobalTimerManager, Timer};
+use crate::kernel::timer_manager::{CountTimer, GlobalTimerManager, IntervalTimer};
 
 const SYSTEM_COUNTER_MEMORY_SIZE: MSize = MSize::new(0x1000);
 
@@ -152,42 +152,15 @@ impl GenericTimer {
         );
     }
 
-    pub fn start_interrupt(&self) {
-        if self.is_non_secure_timer {
-            self.reload_timeout_value();
-            unsafe { cpu::set_cntp_ctl(Self::CNTP_CTL_EL0_ENABLE) };
-        } else {
-            unimplemented!()
-        }
-    }
-
-    pub fn reload_timeout_value(&self) {
-        let reset_value =
-            (GlobalTimerManager::TIMER_INTERVAL_MS * self.get_frequency_hz() as u64) / 1000;
-        assert!(reset_value <= i32::MAX as u64);
-        if self.is_non_secure_timer {
-            unsafe { cpu::set_cntp_tval(reset_value) };
-        }
-    }
-
     fn interrupt_handler(_interrupt_id: usize) -> bool {
         let generic_timer = &mut get_cpu_manager_cluster().arch_depend_data.generic_timer;
-        get_cpu_manager_cluster()
-            .local_timer_manager
-            .local_timer_handler();
-        if get_kernel_manager_cluster().boot_strap_cpu_manager.cpu_id
-            == get_cpu_manager_cluster().cpu_id
-        {
-            get_kernel_manager_cluster()
-                .global_timer_manager
-                .global_timer_handler();
-        }
-        generic_timer.reload_timeout_value();
+        Self::common_handler();
+        generic_timer.reload_timer();
         true
     }
 }
 
-impl Timer for GenericTimer {
+impl CountTimer for GenericTimer {
     fn get_count(&self) -> usize {
         cpu::get_cntpct() as usize
     }
@@ -221,5 +194,31 @@ impl Timer for GenericTimer {
 
     fn get_max_counter_value(&self) -> usize {
         u64::MAX as usize
+    }
+}
+
+impl IntervalTimer for GenericTimer {
+    fn start_interrupt(&mut self) -> bool {
+        if self.is_non_secure_timer {
+            self.reload_timer();
+            unsafe { cpu::set_cntp_ctl(Self::CNTP_CTL_EL0_ENABLE) };
+            true
+        } else {
+            pr_warn!("Secure Timer is not supported");
+            false
+        }
+    }
+
+    fn stop_interrupt(&mut self) -> bool {
+        unimplemented!()
+    }
+
+    fn reload_timer(&mut self) {
+        let reset_value =
+            (GlobalTimerManager::TIMER_INTERVAL_MS * self.get_frequency_hz() as u64) / 1000;
+        assert!(reset_value <= i32::MAX as u64);
+        if self.is_non_secure_timer {
+            unsafe { cpu::set_cntp_tval(reset_value) };
+        }
     }
 }

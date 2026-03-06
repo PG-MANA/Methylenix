@@ -37,6 +37,7 @@ use crate::kernel::{
     initialization::*,
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::data_type::VAddress,
+    timer_manager::IntervalTimer,
     tty::TtyManager,
 };
 

@@ -44,7 +44,7 @@ use crate::kernel::{
     },
     sync::spin_lock::Mutex,
     task_manager::{TaskManager, run_queue::RunQueue},
-    timer_manager::LocalTimerManager,
+    timer_manager::{IntervalTimer, LocalTimerManager},
 };
 
 use core::sync::atomic::AtomicBool;

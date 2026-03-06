@@ -27,6 +27,7 @@ use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
 use crate::kernel::sync::spin_lock::Mutex;
+use crate::kernel::timer_manager::IntervalTimer;
 use crate::kernel::tty::TtyManager;
 
 pub struct ArchDependedCpuManagerCluster {
@@ -158,11 +159,7 @@ fn main_arch_depend_initialization_process() -> ! {
     get_cpu_manager_cluster()
         .arch_depend_data
         .local_apic_timer
-        .start_interrupt(
-            get_cpu_manager_cluster()
-                .interrupt_manager
-                .get_local_apic_manager(),
-        );
+        .start_interrupt();
 
     main_initialization_process()
 }

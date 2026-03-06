@@ -14,8 +14,8 @@ use crate::arch::target_arch::device::cpu::{cpuid, rdmsr, rdtsc, wrmsr};
 use crate::arch::target_arch::device::local_apic::{LocalApicManager, LocalApicRegisters};
 use crate::arch::target_arch::interrupt::InterruptManager;
 
-use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::timer_manager::{GlobalTimerManager, Timer};
+use crate::kernel::manager_cluster::get_cpu_manager_cluster;
+use crate::kernel::timer_manager::{CountTimer, GlobalTimerManager, IntervalTimer};
 
 /// LocalApicTimer
 ///
@@ -65,34 +65,25 @@ impl LocalApicTimer {
     /// Operate local apic timer interruption process.
     ///
     /// This function is called when the interrupt occurred.
-    /// Currently, this function sends end of interrupt and switches to next thread.
     pub fn local_apic_timer_handler(_: usize) -> bool {
+        let s = &mut get_cpu_manager_cluster().arch_depend_data.local_apic_timer;
         loop {
-            if get_cpu_manager_cluster().cpu_id
-                == get_kernel_manager_cluster().boot_strap_cpu_manager.cpu_id
-            {
-                /* Temporary */
-                get_kernel_manager_cluster()
-                    .global_timer_manager
-                    .global_timer_handler();
-            }
+            Self::common_handler();
 
-            get_cpu_manager_cluster()
-                .local_timer_manager
-                .local_timer_handler();
-
-            if !get_cpu_manager_cluster()
-                .arch_depend_data
-                .local_apic_timer
-                .update_deadline_and_compare_with_current_tsc(GlobalTimerManager::TIMER_INTERVAL_MS)
+            if !s.is_deadline_mode_enabled
+                || !s.update_deadline_and_compare_with_current_tsc(
+                    GlobalTimerManager::TIMER_INTERVAL_MS,
+                )
             {
                 break;
             }
         }
-        get_cpu_manager_cluster()
-            .arch_depend_data
-            .local_apic_timer
-            .write_deadline();
+        if s.is_deadline_mode_enabled {
+            get_cpu_manager_cluster()
+                .arch_depend_data
+                .local_apic_timer
+                .write_deadline();
+        }
         true
     }
 
@@ -131,11 +122,13 @@ impl LocalApicTimer {
     /// Check if TSC-Deadline mode is enabled, and set new deadline(millisecond).
     /// If the mode is not enabled, this will return false.
     fn write_deadline(&self) -> bool {
-        if !self.is_deadline_mode_enabled || self.frequency == 0 {
-            return false;
+        assert!(self.is_deadline_mode_enabled);
+        if self.frequency != 0 {
+            unsafe { wrmsr(Self::TSC_DEADLINE_MSR, self.reload_value) };
+            true
+        } else {
+            false
         }
-        unsafe { wrmsr(Self::TSC_DEADLINE_MSR, self.reload_value) };
-        true
     }
 
     /// Enable TSC-Deadline mode.
@@ -199,7 +192,7 @@ impl LocalApicTimer {
     ///
     /// This does not set up Interrupt Manager, you must set manually.
     /// After that, to start the interruption, [`Self::start_interrupt`].
-    pub fn set_up_interrupt<T: Timer>(
+    pub fn set_up_interrupt<T: CountTimer>(
         &mut self,
         vector: u16,
         local_apic: &LocalApicManager,
@@ -222,16 +215,42 @@ impl LocalApicTimer {
         true
     }
 
+    /// Return interrupt status.
+    pub const fn is_interrupt_enabled(&self) -> bool {
+        self.is_interrupt_enabled
+    }
+
+    /// Set reload value for interval mode.
+    ///
+    /// Set [`Self::reload_value`] and set into Local APIC Register.
+    /// If TSC-Deadline mode is enabled, this will do nothing.
+    fn set_interval(&mut self, interval_ms: u64, local_apic: &LocalApicManager) -> bool {
+        if self.is_deadline_mode_enabled || self.frequency == 0 {
+            return false;
+        }
+        self.reload_value = (self.frequency / 1000) as u64 * interval_ms;
+        local_apic.write_apic_register(
+            LocalApicRegisters::TimerInitialCount,
+            self.reload_value as u32,
+        );
+        true
+    }
+}
+
+impl IntervalTimer for LocalApicTimer {
     /// Set the register to start interruption.
     ///
     /// Before calling it, ensure the interruption is set up.
     /// Currently, this function set 1000ms as the interval, in the future, it will be variable.
-    pub fn start_interrupt(&mut self, local_apic: &LocalApicManager) -> bool {
+    fn start_interrupt(&mut self) -> bool {
         let irq = InterruptManager::save_and_disable_local_irq();
         if self.is_interrupt_enabled || self.frequency == 0 {
             InterruptManager::restore_local_irq(irq);
             return false;
         }
+        let local_apic = get_cpu_manager_cluster()
+            .interrupt_manager
+            .get_local_apic_manager();
 
         if self.is_deadline_mode_enabled {
             let mut lvt = local_apic.read_apic_register(LocalApicRegisters::LvtTimer);
@@ -254,30 +273,22 @@ impl LocalApicTimer {
         true
     }
 
-    /// Return interrupt status.
-    pub const fn is_interrupt_enabled(&self) -> bool {
-        self.is_interrupt_enabled
+    fn stop_interrupt(&mut self) -> bool {
+        unimplemented!()
     }
 
-    /// Set reload value for interval mode.
-    ///
-    /// Set [`Self::reload_value`] and set into Local APIC Register.
-    /// If TSC-Deadline mode is enabled, this will do nothing.
-    /// This function assumes that [`Self::lock`] is locked.
-    fn set_interval(&mut self, interval_ms: u64, local_apic: &LocalApicManager) -> bool {
-        if self.is_deadline_mode_enabled || self.frequency == 0 {
-            return false;
+    fn reload_timer(&mut self) {
+        if self.is_deadline_mode_enabled {
+            while self
+                .update_deadline_and_compare_with_current_tsc(GlobalTimerManager::TIMER_INTERVAL_MS)
+            {
+            }
+            self.write_deadline();
         }
-        self.reload_value = (self.frequency / 1000) as u64 * interval_ms;
-        local_apic.write_apic_register(
-            LocalApicRegisters::TimerInitialCount,
-            self.reload_value as u32,
-        );
-        true
     }
 }
 
-impl Timer for LocalApicTimer {
+impl CountTimer for LocalApicTimer {
     fn get_count(&self) -> usize {
         if self.is_deadline_mode_enabled {
             unsafe { rdtsc() as usize }

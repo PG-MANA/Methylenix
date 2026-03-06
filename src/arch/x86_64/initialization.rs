@@ -25,7 +25,7 @@ use crate::kernel::{
     },
     sync::spin_lock::Mutex,
     task_manager::{TaskManager, run_queue::RunQueue},
-    timer_manager::{LocalTimerManager, Timer},
+    timer_manager::{CountTimer, IntervalTimer, LocalTimerManager},
 };
 
 use core::sync::atomic::AtomicBool;
@@ -381,10 +381,6 @@ fn ap_idle() -> ! {
     get_cpu_manager_cluster()
         .arch_depend_data
         .local_apic_timer
-        .start_interrupt(
-            get_cpu_manager_cluster()
-                .interrupt_manager
-                .get_local_apic_manager(),
-        );
+        .start_interrupt();
     idle()
 }

@@ -321,7 +321,7 @@ impl AcpiManager {
     }
 
     pub fn shutdown_test(&mut self) -> ! {
-        use crate::kernel::timer_manager::Timer;
+        use crate::kernel::timer_manager::CountTimer;
 
         /* for debug */
         unsafe { disable_interrupt() };

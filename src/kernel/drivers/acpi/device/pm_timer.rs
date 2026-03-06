@@ -6,7 +6,7 @@
 
 use crate::arch::target_arch::device::acpi::read_io_dword;
 
-use crate::kernel::timer_manager::Timer;
+use crate::kernel::timer_manager::CountTimer;
 
 #[derive(Clone)] /* Temporary */
 pub struct AcpiPmTimer {
@@ -23,7 +23,7 @@ impl AcpiPmTimer {
     }
 }
 
-impl Timer for AcpiPmTimer {
+impl CountTimer for AcpiPmTimer {
     fn get_count(&self) -> usize {
         let mut result = read_io_dword(self.port as _);
         if !self.is_32_bit_counter {

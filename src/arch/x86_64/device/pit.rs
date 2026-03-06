@@ -8,7 +8,7 @@
 use crate::arch::target_arch::device::cpu;
 
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-use crate::kernel::timer_manager::Timer;
+use crate::kernel::timer_manager::CountTimer;
 
 /// PitManager
 ///
@@ -58,7 +58,7 @@ impl PitManager {
     }
 }
 
-impl Timer for PitManager {
+impl CountTimer for PitManager {
     #[inline(always)]
     fn get_count(&self) -> usize {
         /*let _lock = self.lock.lock();*/
