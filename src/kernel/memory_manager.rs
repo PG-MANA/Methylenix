@@ -165,9 +165,10 @@ impl MemoryManager {
         let physical_address =
             Self::allocate_physical_memory(size, MOrder::new(PAGE_SHIFT), pm_manager)?;
 
-        match self.virtual_memory_manager.alloc_and_map_virtual_address(
-            size,
+        match self.virtual_memory_manager.map_address(
             physical_address,
+            None,
+            size,
             permission,
             option,
             pm_manager,

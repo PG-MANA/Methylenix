@@ -226,39 +226,92 @@ impl VirtualMemoryManager {
         PageManager::update_page_cache_all();
     }
 
-    /// Allocate the virtual address and map the given physical address
-    ///
-    /// This function will search available virtual address
-    /// to map physical_address ~ physical_address + size, and then map physical_address linearly.
-    /// This does not flush page table cache.
-    /// If map non-linearly, use [`alloc_virtual_address`].
-    pub fn alloc_and_map_virtual_address(
+    fn _alloc_virtual_address(
         &mut self,
         size: MSize,
-        physical_address: PAddress,
         permission: MemoryPermissionFlags,
         option: MemoryOptionFlags,
-        pm_manager: &mut PhysicalMemoryManager,
-    ) -> Result<VAddress, MemoryError> {
-        Self::check_align(Some(physical_address), None, Some(size))?;
-        self.lock.lock();
-        let vm_start_address = if let Some(address) = self.find_usable_memory_area(size, option) {
-            address
+    ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
+        assert!(self.lock.is_locked());
+        // Allocate vm_entry to reserve memory area
+        let vm_entry = self.alloc_vm_entry(option)?;
+
+        // Find available memory area
+        let (virtual_address_limit_start, virtual_address_limit_end) = if option.is_io_map() {
+            (MAP_START_ADDRESS, MAP_END_ADDRESS)
+        } else if option.is_alloc_area() {
+            (MALLOC_START_ADDRESS, MALLOC_END_ADDRESS)
+        } else if option.is_for_user() && option.is_stack() {
+            (USER_STACK_START_ADDRESS, USER_STACK_END_ADDRESS)
         } else {
-            self.lock.unlock();
-            pr_warn!("Virtual Address is not available.");
-            return Err(MemoryError::AddressNotAvailable);
+            unimplemented!()
         };
-        let result = self._map_address(
-            physical_address,
-            Some(vm_start_address),
-            size,
-            permission,
-            option,
-            pm_manager,
+        const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
+        let mut available_start_address = virtual_address_limit_start;
+
+        for e in unsafe { self.vm_entry.iter(OFFSET) } {
+            if e.get_vm_end_address() < virtual_address_limit_start {
+                continue;
+            }
+            let end_address = size.to_end_address(available_start_address);
+            if end_address > virtual_address_limit_end {
+                get_kernel_manager_cluster()
+                    .system_memory_manager
+                    .free_vm_entry(vm_entry);
+                return Err(MemoryError::AddressNotAvailable);
+            }
+            if !Self::is_overlapped(
+                &(available_start_address..=end_address),
+                &(e.get_vm_start_address()..=e.get_vm_end_address()),
+            ) {
+                assert!(
+                    e.list
+                        .get_next(OFFSET)
+                        .map(|n| {
+                            let n = unsafe { &*n };
+                            !Self::is_overlapped(
+                                &(available_start_address..=end_address),
+                                &(n.get_vm_start_address()..=n.get_vm_end_address()),
+                            )
+                        })
+                        .unwrap_or(true)
+                );
+                assert!(
+                    e.list
+                        .get_prev(OFFSET)
+                        .map(|p| {
+                            let p = unsafe { &*p };
+                            !Self::is_overlapped(
+                                &(available_start_address..=end_address),
+                                &(p.get_vm_start_address()..=p.get_vm_end_address()),
+                            )
+                        })
+                        .unwrap_or(true)
+                );
+                break;
+            }
+            available_start_address = e.get_vm_end_address() + MSize::new(1);
+        }
+        let end_address = size.to_end_address(available_start_address);
+        if end_address > virtual_address_limit_end {
+            get_kernel_manager_cluster()
+                .system_memory_manager
+                .free_vm_entry(vm_entry);
+            return Err(MemoryError::AddressNotAvailable);
+        }
+
+        // Insert vm_entry to reserve memory area
+        init_struct!(
+            *vm_entry,
+            VirtualMemoryEntry::new(available_start_address, end_address, permission, option)
         );
-        self.lock.unlock();
-        result
+        self.insert_vm_map_entry_into_list(vm_entry)
+            .inspect_err(|_| {
+                get_kernel_manager_cluster()
+                    .system_memory_manager
+                    .free_vm_entry(vm_entry)
+            })?;
+        Ok(vm_entry)
     }
 
     /// Allocate the available virtual address and return inserted VirtualMemoryEntry
@@ -274,15 +327,7 @@ impl VirtualMemoryManager {
     ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
         Self::check_align(None, None, Some(size))?;
         self.lock.lock();
-        let entry = if let Some(address) = self.find_usable_memory_area(size, option) {
-            VirtualMemoryEntry::new(address, size.to_end_address(address), permission, option)
-        } else {
-            self.lock.unlock();
-            pr_warn!("Virtual Address is not available.");
-            return Err(MemoryError::AddressNotAvailable);
-        };
-
-        let result = self.insert_vm_map_entry_into_list(entry, option);
+        let result = self._alloc_virtual_address(size, permission, option);
         self.lock.unlock();
         result
     }
@@ -290,7 +335,7 @@ impl VirtualMemoryManager {
     /// Map virtual_address to physical_address with size.
     ///
     /// This function maps virtual_address to physical_address into vm_entry.
-    /// vm_entry must be inserted in [`Self::vm_entry`]. (use the entry from [`alloc_virtual_address`])
+    /// vm_entry must be inserted in [`Self::vm_entry`]. (use the entry from [`Self::alloc_virtual_address`])
     /// virtual_address, physical_address, and size must be page aligned.
     /// This function also map the page into page table.
     pub(super) fn map_physical_address_into_vm_entry_and_page_table(
@@ -408,6 +453,11 @@ impl VirtualMemoryManager {
         Ok(())
     }
 
+    /// Map the given physical address
+    ///
+    /// This function will search available virtual address if `virtual_address` is `None`.
+    /// This does not flush page table cache.
+    /// If map non-linearly, use [`Self::alloc_virtual_address`].
     pub fn map_address(
         &mut self,
         physical_address: PAddress,
@@ -417,6 +467,7 @@ impl VirtualMemoryManager {
         option: MemoryOptionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<VAddress, MemoryError> {
+        Self::check_align(Some(physical_address), virtual_address, Some(size))?;
         self.lock.lock();
         let result = self._map_address(
             physical_address,
@@ -436,14 +487,66 @@ impl VirtualMemoryManager {
         virtual_address: Option<VAddress>,
         size: MSize,
         permission: MemoryPermissionFlags,
-        mut option: MemoryOptionFlags,
+        option: MemoryOptionFlags,
         pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<VAddress, MemoryError> {
         assert!(self.lock.is_locked());
-        Self::check_align(Some(physical_address), virtual_address, Some(size))?;
+        let vm_entry = if let Some(vm_start_address) = virtual_address {
+            /* assume virtual address is usable. */
+            /*if !self.check_if_usable_address_range(address, address + size - 1) {
+                return Err("Virtual Address is not usable.");
+            }*/
+            let vm_entry = self.alloc_vm_entry(option).inspect_err(|e| {
+                pr_err!("Failed to allocate virtual memory entry: {e:?}");
+            })?;
+            init_struct!(
+                *vm_entry,
+                VirtualMemoryEntry::new(
+                    vm_start_address,
+                    size.to_end_address(vm_start_address),
+                    permission,
+                    option
+                )
+            );
+            self.insert_vm_map_entry_into_list(vm_entry)
+                .inspect_err(|e| {
+                    get_kernel_manager_cluster()
+                        .system_memory_manager
+                        .free_vm_entry(vm_entry);
+                    pr_err!("Failed to insert virtual memory entry: {e:?}");
+                })?;
+            vm_entry
+        } else {
+            self._alloc_virtual_address(size, permission, option)
+                .inspect_err(|e| pr_err!("Failed to allocate address: {e:?}"))?
+        };
+        let address = vm_entry.get_vm_start_address();
+        if let Err(e) = self.__map_address(physical_address, vm_entry, pm_manager) {
+            unsafe { self.vm_entry.remove(&mut vm_entry.list) };
+            get_kernel_manager_cluster()
+                .system_memory_manager
+                .free_vm_entry(vm_entry);
+            Err(e)
+        } else {
+            Ok(address)
+        }
+    }
+
+    fn __map_address(
+        &mut self,
+        physical_address: PAddress,
+        vm_entry: &mut VirtualMemoryEntry,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        assert!(self.lock.is_locked());
+        Self::check_align(Some(physical_address), None, None)?;
+        let vm_start_address = vm_entry.get_vm_start_address();
+        let size = vm_entry.get_size();
+        let option = vm_entry.get_memory_option_flags();
+        let permission = vm_entry.get_permission_flags();
 
         if !option.is_for_kernel() && !option.is_for_user() {
-            option = option | MemoryOptionFlags::KERNEL;
+            vm_entry.set_memory_option_flags(option | MemoryOptionFlags::KERNEL);
         }
         if option.is_for_kernel() && permission.is_user_accessible() {
             pr_err!("Invalid Memory Permission");
@@ -453,40 +556,13 @@ impl VirtualMemoryManager {
             pr_err!("Invalid Memory Permission");
             return Err(MemoryError::InternalError);
         }
-
-        let mut vm_entry = if let Some(vm_start_address) = virtual_address {
-            /* assume virtual address is usable. */
-            /*if !self.check_if_usable_address_range(address, address + size - 1) {
-                return Err("Virtual Address is not usable.");
-            }*/
-            VirtualMemoryEntry::new(
-                vm_start_address,
-                size.to_end_address(vm_start_address),
-                permission,
-                option,
-            )
-        } else if let Some(vm_start_address) = self.find_usable_memory_area(size, option) {
-            VirtualMemoryEntry::new(
-                vm_start_address,
-                size.to_end_address(vm_start_address),
-                permission,
-                option,
-            )
-        } else {
-            pr_err!("Virtual Address is not available.");
-            return Err(MemoryError::AddressNotAvailable);
-        };
-
-        let vm_start_address = vm_entry.get_vm_start_address();
         self.insert_pages_into_vm_entry(
-            &mut vm_entry,
+            vm_entry,
             physical_address,
             vm_start_address,
             size,
             option,
         )?;
-
-        let vm_entry = self.insert_vm_map_entry_into_list(vm_entry, option)?;
 
         if vm_entry.get_memory_option_flags().is_io_map() {
             vm_entry.set_memory_option_flags(
@@ -513,10 +589,6 @@ impl VirtualMemoryManager {
                         e
                     );
                 }
-                unsafe { self.vm_entry.remove(&mut vm_entry.list) };
-                get_kernel_manager_cluster()
-                    .system_memory_manager
-                    .free_vm_entry(vm_entry);
                 return Err(e);
             }
         } else {
@@ -549,15 +621,11 @@ impl VirtualMemoryManager {
                             );
                         }
                     }
-                    unsafe { self.vm_entry.remove(&mut vm_entry.list) };
-                    get_kernel_manager_cluster()
-                        .system_memory_manager
-                        .free_vm_entry(vm_entry);
                     return Err(e);
                 }
             }
         }
-        Ok(vm_start_address)
+        Ok(())
     }
 
     pub fn free_address(
@@ -715,23 +783,24 @@ impl VirtualMemoryManager {
         Ok(())
     }
 
-    /// Allocate VirtualMemoryEntry from the pool and chain it into [`Self::vm_entry`]
-    fn insert_vm_map_entry_into_list(
+    /// Allocate VirtualMemoryEntry from the pool
+    ///
+    /// Allocating entry may cause nested memory allocations for the pools when they short.
+    /// Then, the memory map may be changed. This function does not care about it.
+    fn alloc_vm_entry(
         &mut self,
-        source: VirtualMemoryEntry,
         option: MemoryOptionFlags,
     ) -> Result<&'static mut VirtualMemoryEntry, MemoryError> {
         assert!(self.lock.is_locked());
-        let vm_entry;
         loop {
-            vm_entry = match get_kernel_manager_cluster()
+            match get_kernel_manager_cluster()
                 .system_memory_manager
                 .alloc_vm_entry(self.is_kernel_virtual_memory_manager(), option)
             {
-                Ok(e) => Ok(e),
+                Ok(e) => return Ok(e),
                 Err(MemoryError::EntryPoolRunOut) => {
                     if option.is_no_wait() {
-                        Err(MemoryError::EntryPoolRunOut)
+                        return Err(MemoryError::EntryPoolRunOut);
                     } else {
                         if self.is_kernel_virtual_memory_manager() {
                             self.lock.unlock();
@@ -745,12 +814,15 @@ impl VirtualMemoryManager {
                         continue;
                     }
                 }
-                Err(e) => Err(e),
+                Err(e) => return Err(e),
             };
-            break;
         }
-        let vm_entry = vm_entry?;
-        *vm_entry = source;
+    }
+
+    fn insert_vm_map_entry_into_list(
+        &mut self,
+        vm_entry: &mut VirtualMemoryEntry,
+    ) -> Result<(), MemoryError> {
         if self.vm_entry.is_empty() {
             unsafe { self.vm_entry.insert_head(&mut vm_entry.list) };
         } else if let Some(prev_entry) =
@@ -774,7 +846,7 @@ impl VirtualMemoryManager {
             return Err(MemoryError::InternalError);
         }
         self.adjust_vm_entries();
-        Ok(vm_entry)
+        Ok(())
     }
 
     /// Insert pages into VirtualMemoryEntry without applying PageManager.
@@ -865,15 +937,9 @@ impl VirtualMemoryManager {
             user_vm_manager.lock.unlock();
             return Err(MemoryError::InvalidAddress);
         };
-        /* Assume user_virtual_address is usable. */
-        let user_vm_map_entry = VirtualMemoryEntry::new(
-            user_virtual_address,
-            kernel_vm_entry
-                .get_size()
-                .to_end_address(user_virtual_address),
-            user_permission,
-            user_option,
-        );
+        let user_virtual_end_address = kernel_vm_entry
+            .get_size()
+            .to_end_address(user_virtual_address);
 
         let original_vm_object = kernel_vm_entry.get_object_mut();
         if original_vm_object.is_shadow_entry() {
@@ -904,23 +970,45 @@ impl VirtualMemoryManager {
             };
             break;
         }
-        if let Err(e) = vm_object {
+        let Ok(shared_vm_object) = vm_object else {
             self.lock.unlock();
             user_vm_manager.lock.unlock();
-            return Err(e);
-        }
-        let shared_vm_object = vm_object?;
-        let user_vm_map_entry =
-            user_vm_manager.insert_vm_map_entry_into_list(user_vm_map_entry, user_option);
-        if let Err(e) = user_vm_map_entry {
-            get_kernel_manager_cluster()
-                .system_memory_manager
-                .free_vm_object(shared_vm_object);
-            self.lock.unlock();
-            user_vm_manager.lock.unlock();
-            return Err(e);
-        }
-        let user_vm_map_entry = user_vm_map_entry?;
+            return vm_object.map(|_| ());
+        };
+
+        /* Assume user_virtual_address is usable. */
+        let user_vm_map_entry = user_vm_manager
+            .alloc_vm_entry(user_option)
+            .inspect_err(|e| {
+                get_kernel_manager_cluster()
+                    .system_memory_manager
+                    .free_vm_object(shared_vm_object);
+                self.lock.unlock();
+                user_vm_manager.lock.unlock();
+                pr_err!("Failed to allocate virtual memory entry: {e:?}");
+            })?;
+        init_struct!(
+            *user_vm_map_entry,
+            VirtualMemoryEntry::new(
+                user_virtual_address,
+                user_virtual_end_address,
+                user_permission,
+                user_option,
+            )
+        );
+        user_vm_manager
+            .insert_vm_map_entry_into_list(user_vm_map_entry)
+            .inspect_err(|e| {
+                get_kernel_manager_cluster()
+                    .system_memory_manager
+                    .free_vm_entry(user_vm_map_entry);
+                get_kernel_manager_cluster()
+                    .system_memory_manager
+                    .free_vm_object(shared_vm_object);
+                self.lock.unlock();
+                user_vm_manager.lock.unlock();
+                pr_err!("Failed to insert virtual memory entry: {e:?}");
+            })?;
 
         init_struct!(*shared_vm_object, VirtualMemoryObject::new());
         core::mem::swap(shared_vm_object, original_vm_object);
@@ -1154,68 +1242,6 @@ impl VirtualMemoryManager {
             self.lock.unlock();
             pr_err!("Entry is not found.");
             Err(MemoryError::InvalidAddress)
-        }
-    }
-
-    fn find_usable_memory_area(&self, size: MSize, option: MemoryOptionFlags) -> Option<VAddress> {
-        let (virtual_address_limit_start, virtual_address_limit_end) = if option.is_io_map() {
-            (MAP_START_ADDRESS, MAP_END_ADDRESS)
-        } else if option.is_alloc_area() {
-            (MALLOC_START_ADDRESS, MALLOC_END_ADDRESS)
-        } else if option.is_for_user() && option.is_stack() {
-            (USER_STACK_START_ADDRESS, USER_STACK_END_ADDRESS)
-        } else {
-            unimplemented!()
-        };
-        const OFFSET: usize = offset_of!(VirtualMemoryEntry, list);
-        let mut available_start_address = virtual_address_limit_start;
-
-        for e in unsafe { self.vm_entry.iter(OFFSET) } {
-            if e.get_vm_end_address() < virtual_address_limit_start {
-                continue;
-            }
-            let end_address = size.to_end_address(available_start_address);
-            if end_address > virtual_address_limit_end {
-                return None;
-            }
-            if !Self::is_overlapped(
-                &(available_start_address..=end_address),
-                &(e.get_vm_start_address()..=e.get_vm_end_address()),
-            ) {
-                assert!(
-                    e.list
-                        .get_next(OFFSET)
-                        .map(|n| {
-                            let n = unsafe { &*n };
-                            !Self::is_overlapped(
-                                &(available_start_address..=end_address),
-                                &(n.get_vm_start_address()..=n.get_vm_end_address()),
-                            )
-                        })
-                        .unwrap_or(true)
-                );
-                assert!(
-                    e.list
-                        .get_prev(OFFSET)
-                        .map(|p| {
-                            let p = unsafe { &*p };
-                            !Self::is_overlapped(
-                                &(available_start_address..=end_address),
-                                &(p.get_vm_start_address()..=p.get_vm_end_address()),
-                            )
-                        })
-                        .unwrap_or(true)
-                );
-
-                return Some(available_start_address);
-            }
-            available_start_address = e.get_vm_end_address() + MSize::new(1);
-        }
-        let end_address = size.to_end_address(available_start_address);
-        if end_address > virtual_address_limit_end {
-            None
-        } else {
-            Some(available_start_address)
         }
     }
 

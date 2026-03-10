@@ -276,6 +276,7 @@ impl SystemMemoryManager {
             let result = self.vm_page_pool.alloc().map(|e| unsafe { &mut *e });
             if let Ok(e) = result {
                 if count - 1 <= Self::VM_PAGE_LOW
+                    && !is_system_memory_manager
                     && let Err(err) = get_cpu_manager_cluster().work_queue.add_work(WorkList::new(
                         Self::pool_alloc_worker,
                         Self::ALLOC_VM_PAGE_FLAG,
