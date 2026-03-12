@@ -14,6 +14,7 @@ use crate::kernel::memory_manager::data_type::Address;
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 
 use core::arch::global_asm;
+use core::ops::RangeInclusive;
 
 struct InterruptInformation {
     lock: IrqSaveSpinLockFlag,
@@ -59,6 +60,16 @@ pub enum InterruptGroup {
 }
 
 impl InterruptManager {
+    const SGI_BASE: u32 = 0;
+    const SGI_END: u32 = 15;
+    const SGI_RANGE: RangeInclusive<u32> = Self::SGI_BASE..=Self::SGI_END;
+    const PPI_BASE: u32 = 16;
+    const PPI_END: u32 = 31;
+    const PPI_RANGE: RangeInclusive<u32> = Self::PPI_BASE..=Self::PPI_END;
+    const SPI_BASE: u32 = 32;
+    const SPI_END: u32 = 1019;
+    const SPI_RANGE: RangeInclusive<u32> = Self::SPI_BASE..=Self::SPI_END;
+
     const RESCHEDULE_SGI: u32 = 15;
 
     /// Create InterruptManager with invalid data.
@@ -112,7 +123,7 @@ impl InterruptManager {
     ) -> Result<usize, ()> {
         let interrupt_info = get_interrupt_info_mut();
         if interrupt_id as usize >= interrupt_info.handlers.len() {
-            pr_err!("Invalid interrupt id: {:#X}", interrupt_id);
+            pr_err!("Invalid interrupt id: {interrupt_id:#X}");
             return Err(());
         }
         let _self_lock = self.lock.lock();
@@ -121,13 +132,13 @@ impl InterruptManager {
         let handler_address = interrupt_info.handlers[interrupt_id as usize];
         if handler_address != 0 {
             if handler_address == function as *const fn(usize) as usize {
-                if interrupt_id > 31 {
+                if Self::SPI_RANGE.contains(&interrupt_id) {
                     return Ok(interrupt_id as usize);
                 }
             } else {
                 drop(_lock);
                 drop(_self_lock);
-                pr_err!("Index is in use.");
+                pr_err!("Interrupt Table[{interrupt_id:#X}] is already used.");
                 return Err(());
             }
         } else {
@@ -135,8 +146,7 @@ impl InterruptManager {
             cpu::synchronize(&interrupt_info.handlers[interrupt_id as usize]);
         }
 
-        if interrupt_id < 32 {
-            /* Setup SGI/PPI */
+        if Self::SGI_RANGE.contains(&interrupt_id) || Self::PPI_RANGE.contains(&interrupt_id) {
             let redistributor = &mut get_cpu_manager_cluster()
                 .arch_depend_data
                 .gic_redistributor_manager;
@@ -144,8 +154,7 @@ impl InterruptManager {
             redistributor.set_group(interrupt_id, group);
             redistributor.set_trigger_mode(interrupt_id, is_level_trigger);
             redistributor.set_enable(interrupt_id, true);
-        } else if interrupt_id < 1020 {
-            /* Setup SPI */
+        } else if Self::SPI_RANGE.contains(&interrupt_id) {
             let gic_distributor = &get_kernel_manager_cluster().arch_depend_data.gic_manager;
             gic_distributor.set_priority(interrupt_id, priority_level);
             gic_distributor.set_group(interrupt_id, group);
@@ -153,7 +162,10 @@ impl InterruptManager {
             gic_distributor.set_trigger_mode(interrupt_id, is_level_trigger);
             gic_distributor.set_enable(interrupt_id, true);
         } else {
-            unimplemented!()
+            drop(_lock);
+            drop(_self_lock);
+            pr_err!("Invalid interrupt id: {interrupt_id:#X}");
+            return Err(());
         }
         drop(_lock);
         drop(_self_lock);
@@ -171,11 +183,14 @@ impl InterruptManager {
         let _self_lock = self.lock.lock();
         let _lock = interrupt_info.lock.lock();
         let mut interrupt_id = 0u32;
-        for (i, e) in interrupt_info.handlers[32..].iter_mut().enumerate() {
+        for (i, e) in interrupt_info.handlers[(Self::SPI_BASE as usize)..]
+            .iter_mut()
+            .enumerate()
+        {
             if *e == 0 {
                 *e = function as *const fn() as usize;
                 cpu::synchronize(e);
-                interrupt_id = i as u32;
+                interrupt_id = (i as u32) + Self::SPI_BASE;
                 break;
             }
         }
@@ -292,9 +307,8 @@ impl InterruptManager {
         }
         let address = get_interrupt_info_mut().handlers[index as usize];
         if address != 0 {
-            if unsafe {
-                (core::mem::transmute::<usize, fn(usize) -> bool>(address))(index as usize)
-            } {
+            if unsafe { core::mem::transmute::<usize, fn(usize) -> bool>(address)(index as usize) }
+            {
                 get_cpu_manager_cluster()
                     .interrupt_manager
                     .send_eoi(index, group);
@@ -319,7 +333,7 @@ interrupt_vector:
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
-    mov     x1, {synchronouns_current_mark}
+    mov     x1, {synchronous_current_mark}
     b       interrupt_entry
 
 .balign 0x080
@@ -351,7 +365,7 @@ interrupt_vector:
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
-    mov     x1, {synchronouns_current_mark}
+    mov     x1, {synchronous_current_mark}
     b       interrupt_entry
 
 .balign 0x080
@@ -383,7 +397,7 @@ interrupt_vector:
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
-    mov     x1, {synchronouns_lower_mark}
+    mov     x1, {synchronous_lower_mark}
     b       interrupt_entry
 
 .balign 0x080
@@ -504,8 +518,8 @@ interrupt_entry:
     el0 = const cpu::SPSR_M_EL0T,
     irq_mark = const ExceptionReason::Irq as usize,
     fiq_mark = const ExceptionReason::Fiq as usize,
-    synchronouns_lower_mark = const ExceptionReason::SynchronousLower as usize,
-    synchronouns_current_mark = const ExceptionReason::SynchronousCurrent as usize,
+    synchronous_lower_mark = const ExceptionReason::SynchronousLower as usize,
+    synchronous_current_mark = const ExceptionReason::SynchronousCurrent as usize,
     s_error_lower_mark = const ExceptionReason::SErrorLower as usize,
     s_error_current_mark = const ExceptionReason::SErrorCurrent as usize,
     interrupt_handler = sym InterruptManager::interrupt_handler,
