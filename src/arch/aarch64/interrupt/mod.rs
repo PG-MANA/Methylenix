@@ -28,9 +28,16 @@ fn get_interrupt_info_mut() -> &'static mut InterruptInformation {
     unsafe { (&raw mut INTERRUPT_INFO).as_mut().unwrap() }
 }
 
-const INTERRUPT_FROM_IRQ: u64 = cpu::SPSR_I;
-const INTERRUPT_FROM_FIQ: u64 = cpu::SPSR_F;
-const INTERRUPT_FROM_SYNCHRONOUS_LOWER: u64 = 0x01;
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(usize)]
+enum ExceptionReason {
+    Irq,
+    Fiq,
+    SynchronousLower,
+    SynchronousCurrent,
+    SErrorLower,
+    SErrorCurrent,
+}
 
 const MSI_DEFAULT_PRIORITY: u8 = 0x30;
 
@@ -238,15 +245,35 @@ impl InterruptManager {
     }
 
     /// IRQ/FIQ Handler
-    extern "C" fn interrupt_handler(context_data: *mut ContextData, from_mark: u64) {
-        match from_mark {
-            INTERRUPT_FROM_FIQ | INTERRUPT_FROM_IRQ => {
-                Self::irq_fiq_handler(context_data, from_mark);
+    extern "C" fn interrupt_handler(context_data: *mut ContextData, reason: ExceptionReason) {
+        match reason {
+            ExceptionReason::Fiq | ExceptionReason::Irq => {
+                Self::irq_fiq_handler(context_data);
             }
-            INTERRUPT_FROM_SYNCHRONOUS_LOWER => {
-                crate::kernel::system_call::system_call_handler(unsafe { &mut *context_data });
+            ExceptionReason::SynchronousLower => {
+                let esr = cpu::get_esr();
+                let ec = (esr & cpu::ESR_EL1_EC) >> cpu::ESR_EL1_EC_OFFSET;
+                if ec == cpu::ESR_EL1_EC_SVC {
+                    crate::kernel::system_call::system_call_handler(unsafe { &mut *context_data });
+                } else {
+                    pr_err!("Unhandled lower exception: EC = {ec:#b}");
+                }
             }
-            _ => { /* Do nothing */ }
+            ExceptionReason::SynchronousCurrent => {
+                let esr = cpu::get_esr();
+                let ec = (esr & cpu::ESR_EL1_EC) >> cpu::ESR_EL1_EC_OFFSET;
+                kprintln!("\n\n!!! Kernel Synchronous Exception !!!");
+                kprintln!("Fault Reason(ESR):         {:#18X}", esr);
+                kprintln!("|- Exception Class(EC):    {:#18b}", ec);
+                kprintln!("Fault Address(FAR):        {:#18X}", cpu::get_far());
+                kprintln!("Target Instruction(ELR):   {:#18X}", cpu::get_elr());
+                panic!("Kernel Synchronous Exception");
+            }
+            ExceptionReason::SErrorCurrent | ExceptionReason::SErrorLower => {
+                kprintln!("\n\n!!! S Error Exception !!!");
+                kprintln!("Fault Reason(ESR):         {:#18X}", cpu::get_esr());
+                panic!("S Error Exception");
+            }
         }
         if get_cpu_manager_cluster().run_queue.should_call_schedule() {
             get_cpu_manager_cluster()
@@ -255,7 +282,7 @@ impl InterruptManager {
         }
     }
 
-    fn irq_fiq_handler(_context_data: *mut ContextData, _from_mark: u64) {
+    fn irq_fiq_handler(_context_data: *mut ContextData) {
         let redistributor = &get_cpu_manager_cluster()
             .arch_depend_data
             .gic_redistributor_manager;
@@ -289,7 +316,11 @@ global_asm!(
 .balign     0x800
 interrupt_vector:
 /* synchronous_current_el_stack_pointer_0 */
-    b       interrupt_vector
+    sub     sp,  sp, {c}
+    stp     x0,  x1, [sp, #(16 * 0)]
+    stp     x2,  x3, [sp, #(16 * 1)]
+    mov     x1, {synchronouns_current_mark}
+    b       interrupt_entry
 
 .balign 0x080
 /* irq_current_el_stack_pointer_0 */
@@ -309,11 +340,19 @@ interrupt_vector:
 
 .balign 0x080
 /* s_error_current_el_stack_pointer_0 */
-    b       interrupt_vector
+    sub     sp,  sp, {c}
+    stp     x0,  x1, [sp, #(16 * 0)]
+    stp     x2,  x3, [sp, #(16 * 1)]
+    mov     x1, {s_error_current_mark}
+    b       interrupt_entry
 
 .balign 0x080
 /* synchronous_current_el_stack_pointer_x */
-    b       interrupt_vector
+    sub     sp,  sp, {c}
+    stp     x0,  x1, [sp, #(16 * 0)]
+    stp     x2,  x3, [sp, #(16 * 1)]
+    mov     x1, {synchronouns_current_mark}
+    b       interrupt_entry
 
 .balign 0x080
 /* irq_current_el_stack_pointer_x */
@@ -333,14 +372,18 @@ interrupt_vector:
 
 .balign 0x080
 /* s_error_current_el_stack_pointer_x */
-    b       interrupt_vector
+    sub     sp,  sp, {c}
+    stp     x0,  x1, [sp, #(16 * 0)]
+    stp     x2,  x3, [sp, #(16 * 1)]
+    mov     x1, {s_error_current_mark}
+    b       interrupt_entry
 
 .balign 0x080
 /* synchronous_lower_el_aarch64 */
     sub     sp,  sp, {c}
     stp     x0,  x1, [sp, #(16 * 0)]
     stp     x2,  x3, [sp, #(16 * 1)]
-    mov     x1, {synchronous_lower}
+    mov     x1, {synchronouns_lower_mark}
     b       interrupt_entry
 
 .balign 0x080
@@ -361,7 +404,11 @@ interrupt_vector:
 
 .balign 0x080
 /* s_error_lower_el_aarch64 */
-    b       interrupt_vector
+    sub     sp,  sp, {c}
+    stp     x0,  x1, [sp, #(16 * 0)]
+    stp     x2,  x3, [sp, #(16 * 1)]
+    mov     x1, {s_error_lower_mark}
+    b       interrupt_entry
 
 .balign 0x080
 /* synchronous_lower_el_aarch32 */
@@ -455,8 +502,11 @@ interrupt_entry:
     c = const size_of::<ContextData>(),
     m = const cpu::SPSR_M,
     el0 = const cpu::SPSR_M_EL0T,
-    irq_mark = const INTERRUPT_FROM_IRQ,
-    fiq_mark = const INTERRUPT_FROM_FIQ,
-    synchronous_lower = const INTERRUPT_FROM_SYNCHRONOUS_LOWER,
+    irq_mark = const ExceptionReason::Irq as usize,
+    fiq_mark = const ExceptionReason::Fiq as usize,
+    synchronouns_lower_mark = const ExceptionReason::SynchronousLower as usize,
+    synchronouns_current_mark = const ExceptionReason::SynchronousCurrent as usize,
+    s_error_lower_mark = const ExceptionReason::SErrorLower as usize,
+    s_error_current_mark = const ExceptionReason::SErrorCurrent as usize,
     interrupt_handler = sym InterruptManager::interrupt_handler,
 );

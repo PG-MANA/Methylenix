@@ -43,6 +43,10 @@ pub const CTR_EL0_DMIN_LINE: u64 = 0b1111 << CTR_EL0_DMIN_LINE_OFFSET;
 
 pub const SMC_PSCI_CPU_ON: u64 = 0xC4000003;
 
+pub const ESR_EL1_EC_OFFSET: u64 = 26;
+pub const ESR_EL1_EC: u64 = 0b111111 << ESR_EL1_EC_OFFSET;
+pub const ESR_EL1_EC_SVC: u64 = 0b010101;
+
 //pub const ID_AA64MMFR0_EL1_PA_RANGE_OFFSET: u64 = 0;
 //pub const ID_AA64MMFR0_EL1_PA_RANGE: u64 = 0b1111 << ID_AA64MMFR0_EL1_PA_RANGE_OFFSET;
 
@@ -309,6 +313,27 @@ pub fn get_ctr_el0() -> u64 {
 #[inline(always)]
 pub unsafe fn set_vbar(address: u64) {
     unsafe { asm!("msr vbar_el1, {:x}", in(reg) address) };
+}
+
+#[inline(always)]
+pub fn get_esr() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, esr_el1", out(reg) result) };
+    result
+}
+
+#[inline(always)]
+pub fn get_far() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, far_el1", out(reg) result) };
+    result
+}
+
+#[inline(always)]
+pub fn get_elr() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {:x}, elr_el1", out(reg) result) };
+    result
 }
 
 #[inline(always)]
