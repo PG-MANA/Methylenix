@@ -226,7 +226,7 @@ impl AmlStream {
 
     fn read<T: ?Sized + Copy>(&mut self) -> Result<T, AmlError> {
         self.check_pointer(size_of::<T>())?;
-        let d = unsafe { *(self.pointer.to_usize() as *const T) };
+        let d = unsafe { core::ptr::read_unaligned(self.pointer.to_usize() as *const T) };
         self.pointer += MSize::new(size_of::<T>());
         Ok(d)
     }
