@@ -24,7 +24,7 @@ build_aarch64:
     paths:
       - bin/
 
-build_risv64:
+build_riscv64:
   stage:  build
   script:
     - rustup default nightly
