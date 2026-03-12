@@ -60,6 +60,7 @@ pub enum TaskStatus {
     New,
     Interruptible,
     Uninterruptible,
+    Waking,
     Running,
     Stopped,
 }
@@ -218,9 +219,9 @@ impl TaskManager {
         drop(_lock);
     }
 
-    /// Fork `thread` and create `ThreadEntry`.
+    /// Fork `thread` and create [`ThreadEntry`].
     ///
-    /// This function copies data from `thread` and alloc `ThreadEntry` from `Self::thread_entry_pool`.
+    /// This function copies data from `thread` and alloc [`ThreadEntry`] from `Self::thread_entry_pool`.
     /// `thread` must be unlocked.
     fn fork_system_thread(
         &mut self,
@@ -279,7 +280,7 @@ impl TaskManager {
     /// Fork current thread and create new thread.
     ///
     /// This function forks the current thread and adds into RunQueue if needed.
-    /// This function assumes RunQueue::running_thread.is_some() == TRUE.
+    /// This function assumes [`RunQueue`]`::running_thread.is_some() == TRUE`.
     pub fn create_kernel_thread(
         &mut self,
         entry_address: fn() -> !,
@@ -314,7 +315,7 @@ impl TaskManager {
     /// Fork current thread and create new thread with an argument
     ///
     /// This function forks the current thread and adds into RunQueue if needed.
-    /// This function assumes RunQueue::running_thread.is_some() == TRUE.
+    /// This function assumes [`RunQueue`]`::running_thread.is_some() == TRUE`.
     pub fn create_kernel_thread_with_argument(
         &mut self,
         entry_address: fn(argument: usize) -> !,
@@ -507,16 +508,25 @@ impl TaskManager {
     }
 
     fn update_next_p_id(&mut self) {
-        assert!(self.next_process_id <= usize::MAX);
-        self.next_process_id += 1;
+        self.next_process_id = self.next_process_id.wrapping_add(1);
     }
 
-    /// Add thread into RunQueue with checking each CPU's load.
+    /// Add `thread` into [`RunQueue`] with checking each CPU's load.
+    /// Therefore, the thread may be assigned another CPU.
+    ///
+    /// This does not check `ThreadEntry::sleep_list`.
     ///
     /// `thread` must be unlocked.
-    fn add_thread_into_run_queue(&self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
-        assert!(self.lock.is_locked());
+    pub fn wake_up_thread(&self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
+        let _lock = self.lock.lock();
         let _thread_lock = thread.lock.lock();
+        if thread.get_task_status() == TaskStatus::Running {
+            /* The thread will be going to sleep, so set the status to Waking and prevent it. */
+            thread.set_task_status(TaskStatus::Waking);
+            drop(_thread_lock);
+            drop(_lock);
+            return Ok(());
+        }
         let current_cpu_load = get_cpu_manager_cluster()
             .run_queue
             .get_number_of_running_threads();
@@ -528,8 +538,23 @@ impl TaskManager {
             } {
                 let load = cpu.run_queue.get_number_of_running_threads();
                 if load < current_cpu_load {
-                    let should_interrupt_cpu = cpu.run_queue.assign_thread(thread)?;
+                    let should_interrupt_cpu = match cpu.run_queue.assign_thread(thread) {
+                        Ok(b) => b,
+                        Err(TaskError::ThreadLockError) => {
+                            drop(_thread_lock);
+                            // Another RunQueue will lock `thread`
+                            drop(_lock);
+                            // Retry
+                            return self.wake_up_thread(thread);
+                        }
+                        Err(e) => {
+                            drop(_thread_lock);
+                            drop(_lock);
+                            return Err(e);
+                        }
+                    };
                     drop(_thread_lock);
+                    drop(_lock);
                     if should_interrupt_cpu {
                         get_cpu_manager_cluster()
                             .interrupt_manager
@@ -541,19 +566,8 @@ impl TaskManager {
         }
 
         /* Add into Current CPU */
-
-        get_cpu_manager_cluster().run_queue.add_thread(thread)
-    }
-
-    /// Set `thread` to `RunQueueManager`.
-    ///
-    /// This function sets `thread` to `RunQueueManager`(it may be different CPU's one).
-    /// This does not check `ThreadEntry::sleep_list`.
-    ///
-    /// `thread` must be unlocked.
-    pub fn wake_up_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
-        let _lock = self.lock.lock();
-        let result = self.add_thread_into_run_queue(thread);
+        let result = get_cpu_manager_cluster().run_queue.add_thread(thread);
+        drop(_thread_lock);
         drop(_lock);
         result
     }

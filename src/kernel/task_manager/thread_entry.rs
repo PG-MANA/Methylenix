@@ -149,6 +149,10 @@ impl ThreadEntry {
         }
     }
 
+    pub const fn get_time_slice(&self) -> u64 {
+        self.time_slice
+    }
+
     pub fn set_time_slice(&mut self, number_of_threads: usize, timer_interval: u64) {
         self.time_slice = self.scheduling_class.calculate_time_slice(
             self.priority_level,

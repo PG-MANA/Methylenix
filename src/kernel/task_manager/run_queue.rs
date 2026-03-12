@@ -137,38 +137,13 @@ impl RunQueue {
         Err(TaskError::InvalidThreadEntry)
     }
 
-    /// Sleep running thread and switch to the next thread.
+    /// Set the current thread's status to Sleeping and call [`Self::schedule`].
     ///
-    /// This function will remove `thread` from run_queue_manager.
-    /// This function assumes [Self::lock] must be lockable.
-    /// This function will not change thread.task_status.
-    ///
-    /// `thread` must be locked and **`thread` must not be running thread**.
-    #[allow(dead_code)]
-    pub(super) fn remove_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
-        assert!(thread.lock.is_locked());
-        assert!(!self.lock.is_locked());
-        let irq = InterruptManager::save_and_disable_local_irq();
-        let _lock = self.lock.lock();
-        let result = try {
-            if thread.get_task_status() == TaskStatus::Running {
-                Err(TaskError::InvalidThreadEntry)?;
-            }
-            self.remove_target_thread(thread)?;
-            self.number_of_threads -= 1;
-        };
-        drop(_lock);
-        InterruptManager::restore_local_irq(irq);
-        result
-    }
-
-    /// Set the current thread's status to Sleeping and call [Self::schedule].
-    ///
-    /// This function changes [Self::running_thread] to Sleep and call [Self::schedule].
+    /// This function changes `Self::running_thread` to Sleep and call [`Self::schedule`].
     /// `task_status` is set into the current thread (it must not be Running).
     /// This does not check `ThreadEntry::sleep_list`.
     ///
-    /// [Self::running_thread] must be unlocked.
+    /// `Self::running_thread` must be unlocked.
     ///
     /// **Ensure that SpinLocks are unlocked before calling this function.**
     pub fn sleep_current_thread(
@@ -176,11 +151,15 @@ impl RunQueue {
         interrupt_flag: Option<StoredIrqData>,
         task_status: TaskStatus,
     ) -> Result<(), TaskError> {
+        assert_ne!(task_status, TaskStatus::Running);
+        assert_ne!(task_status, TaskStatus::Waking);
         let irq = interrupt_flag.unwrap_or_else(InterruptManager::save_and_disable_local_irq);
         let lock = self.lock.lock();
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let _running_thread_lock = running_thread.lock.lock();
-        running_thread.set_task_status(task_status);
+        if running_thread.get_task_status() != TaskStatus::Waking {
+            running_thread.set_task_status(task_status);
+        }
         self._schedule(None, Some(irq), Some(lock), Some(_running_thread_lock));
         Ok(())
     }
@@ -298,7 +277,7 @@ impl RunQueue {
         }
 
         if !is_expired_list {
-            thread.set_task_status(TaskStatus::Running);
+            thread.set_task_status(TaskStatus::Waking);
             if self
                 .running_thread
                 .map(|r| thread.get_priority_level() > unsafe { &*r }.get_priority_level())
@@ -325,9 +304,24 @@ impl RunQueue {
         assert!(thread.lock.is_locked());
         let irq = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock();
-        let result = self._add_thread(thread, false);
+        let status = thread.get_task_status();
+        let result = match status {
+            TaskStatus::Running => {
+                thread.set_task_status(TaskStatus::Waking);
+                Ok(())
+            }
+            TaskStatus::Waking => Ok(()),
+            TaskStatus::Interruptible | TaskStatus::Uninterruptible | TaskStatus::New => {
+                self._add_thread(thread, false)
+            }
+            TaskStatus::Stopped => Err(TaskError::InvalidThreadEntry),
+        };
         drop(_lock);
         InterruptManager::restore_local_irq(irq);
+        if result == Err(TaskError::ThreadLockError) {
+            /* Retry */
+            return self.add_thread(thread);
+        }
         result
     }
 
@@ -339,6 +333,7 @@ impl RunQueue {
     /// `thread` must be locked.
     pub fn assign_thread(&mut self, thread: &mut ThreadEntry) -> Result<bool, TaskError> {
         assert!(thread.lock.is_locked());
+        assert_ne!(thread.get_task_status(), TaskStatus::Running);
         let irq = InterruptManager::save_and_disable_local_irq();
         let _lock = self.lock.lock(); /* To avoid task switch holding other CPU's run_queue_lock */
         self._add_thread(thread, false)?;
@@ -406,6 +401,23 @@ impl RunQueue {
                     None
                 }
             };
+        let reschedule_running_thread = |s: &mut RunQueue, running_thread: &mut ThreadEntry| {
+            let status = running_thread.get_task_status();
+            if status == TaskStatus::Running || status == TaskStatus::Waking {
+                if running_thread.get_time_slice() == 0 {
+                    s.remove_target_thread(running_thread)
+                        .expect("Failed to remove running thread from RunList");
+                    running_thread
+                        .set_time_slice(s.number_of_threads, GlobalTimerManager::TIMER_INTERVAL_MS);
+                    s.set_thread_to_expired_thread(running_thread)
+                        .expect("Failed to add running thread to expired list");
+                }
+            } else {
+                assert_ne!(running_thread.get_task_status(), TaskStatus::New);
+                s.remove_target_thread(running_thread)
+                    .expect("Failed to remove running thread from RunList");
+            }
+        };
         let running_thread = unsafe { &mut *self.running_thread.unwrap() };
         let _running_thread_lock =
             running_thread_lock.unwrap_or_else(|| running_thread.lock.lock());
@@ -429,22 +441,15 @@ impl RunQueue {
             .get_next_mut(offset_of!(ThreadEntry, run_list))
             .map(|t| unsafe { &mut *t })
         {
-            assert!(!core::ptr::eq(running_thread, self.idle_thread));
+            assert!(
+                (running_thread as *mut ThreadEntry).ne(&self.idle_thread),
+                "RunQueue has been broken"
+            );
 
             let _next_thread_lock = next_thread.lock.lock();
             let _prev_lock = get_prev_thread_lock(running_thread);
-            self.remove_target_thread(running_thread)
-                .expect("Cannot remove running thread from RunList");
 
-            if running_thread.get_task_status() == TaskStatus::Running {
-                running_thread.set_time_slice(
-                    self.number_of_threads,
-                    GlobalTimerManager::TIMER_INTERVAL_MS,
-                );
-                self.set_thread_to_expired_thread(running_thread)
-                    .expect("Failed to add running thread to expired list");
-            }
-
+            reschedule_running_thread(self, running_thread);
             if self.should_recheck_priority {
                 self.should_recheck_priority = false;
                 get_highest_priority_thread!(self.run_list).unwrap_or(next_thread)
@@ -452,24 +457,14 @@ impl RunQueue {
                 next_thread
             }
         } else {
-            if running_thread as *mut _ == self.idle_thread {
+            if (running_thread as *mut ThreadEntry).eq(&self.idle_thread) {
                 running_thread.set_time_slice(
                     self.number_of_threads,
                     GlobalTimerManager::TIMER_INTERVAL_MS,
                 );
             } else {
                 let _prev_lock = get_prev_thread_lock(running_thread);
-                self.remove_target_thread(running_thread)
-                    .expect("Cannot remove running thread from RunList");
-
-                if running_thread.get_task_status() == TaskStatus::Running {
-                    running_thread.set_time_slice(
-                        self.number_of_threads,
-                        GlobalTimerManager::TIMER_INTERVAL_MS,
-                    );
-                    self.set_thread_to_expired_thread(running_thread)
-                        .expect("Failed to add running thread to expired list");
-                }
+                reschedule_running_thread(self, running_thread);
             }
             get_next_thread!()
         };
@@ -477,6 +472,9 @@ impl RunQueue {
         let running_thread_p_id = running_thread.get_process().get_pid();
         let next_thread_p_id = next_thread.get_process().get_pid();
 
+        if next_thread.get_task_status() == TaskStatus::Waking {
+            next_thread.set_task_status(TaskStatus::Running);
+        }
         assert_eq!(next_thread.get_task_status(), TaskStatus::Running);
 
         if running_thread.get_t_id() == next_thread.get_t_id()
