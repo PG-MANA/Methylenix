@@ -350,12 +350,12 @@ pub fn main_initialization_process() -> ! {
     init_block_devices_and_file_system_early();
     init_network_manager_early();
 
-    if init_pci_early() {
-        if !init_acpi_later() {
-            pr_err!("Cannot init ACPI devices.");
-        }
-    } else {
+    if !init_pci_early() {
         pr_err!("Cannot init PCI Manager.");
+    }
+
+    if !init_acpi_later() {
+        pr_err!("Cannot init ACPI devices.");
     }
 
     if !init_pci_later() {
