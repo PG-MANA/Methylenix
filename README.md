@@ -43,8 +43,9 @@ Therefore, I named this OS Methylene-nix, Methylenix.
 
 ## Supported Architectures
 
-* x86_64
-* AArch64
+- x86_64
+- AArch64
+- RISC-V 64 (RV64IMAC)
 
 ## License
 
@@ -99,27 +100,69 @@ The kernel will be placed in `bin/`.
 
 You can download built images from https://repo.taprix.org/pg_mana/methylenix/images/aarch64 .
 
+### RISC-V 64
+
+```shell
+git clone https://github.com/PG-MANA/Methylenix.git
+cd Methylenix
+rustup target add riscv64imac-unknown-none-elf
+cargo xtask build riscv64 --release
+```
+
+The kernel will be placed in `bin/` and the bootable image will be placed at `bin/Kernel`.
+
+You can download built images from https://repo.taprix.org/pg_mana/methylenix/images/riscv64 .
+
 ## Run on the QEMU
 
 ### x86_64
 
 ```shell
-qemu-system-x86_64 -cpu qemu64,+fsgsbase --cdrom bin/img/boot.iso
+qemu-system-x86_64  -cpu qemu64,+fsgsbase -m 2G --cdrom bin/img/boot.iso
 
 # or (OVMF)
-qemu-system-x86_64 --cdrom bin/img/boot.iso -cpu qemu64,+fsgsbase -smp 2 -m 512M -bios /usr/bin/OVMF/OVMF.fd
+qemu-system-x86_64  -cpu qemu64,+fsgsbase -m 2G --cdrom bin/img/boot.iso \
+                    -bios /usr/bin/OVMF/OVMF.fd
 
 # or (to emulate host cpu)
-qemu-system-x86_64 --cdrom bin/img/boot.iso  -cpu host -smp 2 -m 512M -bios /usr/bin/OVMF/OVMF.fd --enable-kvm
+qemu-system-x86_64  -cpu host --enable-kvm -smp 4 -m 2G --cdrom bin/img/boot.iso \
+                    -bios /usr/bin/OVMF/OVMF.fd
 
 # NIC and NVMe Emulation
-qemu-system-x86_64 -drive if=pflash,format=raw,readonly=on,file=/path/to/OVMF_CODE.fd -drive if=pflash,format=raw,file=/path/to/QEMU_VARS.fd -m 1G -cdrom bin/img/boot.iso -smp 4 --enable-kvm -cpu host -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56 -drive file=/path/to/img.qcow2,if=none,id=nvm1 -device nvme,serial=12345678,drive=nvm -device nvme,id=nvm,serial=deadbeef -device nvme-ns,drive=nvm1
+qemu-system-x86_64  -cpu host --enable-kvm -smp 4 -m 2G -M q35 -nographic \
+                    -bios /usr/bin/OVMF/OVMF.fd  \
+                    -device nvme,serial=12345678 -device nvme-ns,drive=nvm1 -device nvme-ns,drive=nvm2 \
+                    -drive file=/path/to/main.qcow2,format=qcow2,if=none,media=disk,id=nvm1 \
+                    -drive file=fat:ro:/path/to/bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
+                    -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56
 ```
 
 ### AArch64
 
 ```shell
-qemu-system-aarch64 -m 1G -cpu a64fx -machine virt,gic-version=3 -smp 2 -nographic -bios /usr/bin/OVMF/OVMF_AARCH64.fd  -drive file=fat:rw:bin/,format=raw,media=disk
+# NIC and NVMe Emulation
+qemu-system-aarch64 -cpu cortex-a55 -smp 4 -m 2G -M virt,gic-version=3,secure=off,virtualization=on -nographic \
+                    -bios /path/to/OVMF_AA64.fd  \
+                    -device nvme,serial=12345678 -device nvme-ns,drive=nvm1 -device nvme-ns,drive=nvm2 \
+                    -drive file=/path/to/main.qcow2,format=qcow2,if=none,media=disk,id=nvm1 \
+                    -drive file=fat:ro:/path/to/bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
+                    -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56
+```
+
+### RISC-V 64
+
+```shell
+# NIC and NVMe Emulation
+# You can load `Kernel` and run it
+# For example:
+# fatload nvme 0 $kernel_addr_r Kernel
+# go $kernel_addr_r 0x$fdtcontroladdr
+qemu-system-aarch64 -cpu max -smp 4 -m 2G -M virt -nographic \
+                    -bios /path/to/fw_payload.bin \
+                    -device nvme,serial=12345678 -device nvme-ns,drive=nvm1 -device nvme-ns,drive=nvm2 \
+                    -drive file=/path/to/main.qcow2,format=qcow2,if=none,media=disk,id=nvm1 \
+                    -drive file=fat:ro:/path/to/bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
+                    -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56
 ```
 
 ## Documents
