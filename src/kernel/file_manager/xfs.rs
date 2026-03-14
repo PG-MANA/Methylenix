@@ -99,16 +99,15 @@ struct DInodeCore {
     n_link: u32,
     projid: u16,
     projid_hi: u16,
-    pad: [u8; 6],
-    flush_iter: u16,
+    big_next_entries: u64,
     atime: XfsTimestamp,
     mtime: XfsTimestamp,
     ctime: XfsTimestamp,
     size: XfsFSize,
     n_blocks: XfsRfsBlock,
     ext_size: XfsExtLen,
-    next_entries: XfsExtNum,
-    a_next_entries: XfsAExtNum,
+    next_entries: XfsExtNum,    /* or big_a_next_entries */
+    a_next_entries: XfsAExtNum, /* or nrext64_pad */
     fork_off: u8,
     a_format: i8,
     d_mev_mask: u32,
@@ -117,13 +116,13 @@ struct DInodeCore {
     generation: u32,
     be_next_unlinked: u32,
     crc: u32,
-    be_change_count: u64,
-    be_lsn: u64,
-    be_flags2: u64,
-    be_cow_ext_size: u32,
+    change_count: u64,
+    lsn: u64,
+    flags2: u64,
+    cow_ext_size: u32,
     pad2: [u8; 12],
     crtime: XfsTimestamp,
-    be_ino: u64,
+    full_inode_number: u64,
     uuid: [u8; 16],
 }
 
@@ -143,6 +142,12 @@ const XFS_D_INODE_CORE_VERSION_V3: u8 = 3;
 
 const XFS_D_INODE_CORE_FORMAT_LOCAL: u8 = 1;
 const XFS_D_INODE_CORE_FORMAT_EXTENTS: u8 = 2;
+
+// const XFS_DIFLAG2_DAX: u64 = 1 << 0;
+// const XFS_DIFLAG2_REFLINK: u64 = 1 << 1;
+// const XFS_DIFLAG2_COWEXTSIZE: u64 = 1 << 2;
+// const XFS_DIFLAG2_BIGTIME: u64 = 1 << 3;
+const XFS_DIFLAG2_NREXT64: u64 = 1 << 4;
 
 const XFS_DIR3_FT_DIR: u8 = 2;
 
@@ -186,12 +191,6 @@ impl XfsDriver {
     fn list_files(&self, partition_info: &PartitionInfo, inode_number: u64, indent: usize) {
         let inode_block = self.get_inode_block(inode_number);
         let inode_offset = self.get_inode_offset(inode_number);
-        pr_debug!(
-            "Inode: Block: {:#X}, Offset: {:#X}, AG: {:#X}",
-            inode_block,
-            inode_offset,
-            self.get_ag(inode_number)
-        );
         let inode_buffer = match alloc_non_linear_pages!(
             MSize::new((1 << self.inode_size_log2) as usize).page_align_up()
         ) {
@@ -239,11 +238,6 @@ impl XfsDriver {
         let inode_sf_hdr = unsafe {
             &*((inode as *const _ as usize + size_of::<DInodeCore>()) as *const XfsDir2SfHdr)
         };
-        pr_debug!(
-            "Number of entries: {:#X}(Is64bit: {:#X})",
-            inode_sf_hdr.count,
-            inode_sf_hdr.i8_count
-        );
 
         let dir_entries_base_address = inode_sf_hdr as *const _ as usize
             + size_of::<XfsDir2SfHdr>()
@@ -388,10 +382,27 @@ impl XfsDriver {
         buffer: VAddress,
     ) -> Result<MSize, FileError> {
         let extent_list_base = inode as *const _ as usize + size_of::<DInodeCore>();
-        let number_of_extent_records = u32::from_be(inode.next_entries) as usize;
+        let number_of_blocks = u64::from_be(inode.n_blocks) as usize;
+        let flag2 = u64::from_be(inode.flags2);
+        let number_of_extent_records = if (flag2 & XFS_DIFLAG2_NREXT64) != 0 {
+            u64::from_be(inode.big_next_entries) as usize
+        } else {
+            u32::from_be(inode.next_entries) as usize
+        };
         let mut buffer_pointer = MSize::new(0);
         let mut page_buffer = VAddress::new(0);
         let mut page_buffer_size = MSize::new(0);
+
+        if number_of_blocks == 0 {
+            return if length.is_zero() {
+                Ok(MSize::new(0))
+            } else {
+                Err(FileError::InvalidFile)
+            };
+        } else if number_of_extent_records == 0 {
+            pr_err!("The number of extent records is zero");
+            return Err(FileError::InvalidFile);
+        }
 
         for i in 0..number_of_extent_records {
             let record = unsafe { &*((extent_list_base + i * (128 / 8)) as *const [u8; 16]) };
@@ -450,7 +461,13 @@ impl XfsDriver {
             let total_read_size = read_length + MSize::new(data_offset as usize);
             let number_of_blocks =
                 (total_read_size.to_usize() as u64 - 1) / partition_info.lba_block_size + 1;
-
+            if (partition_info.starting_lba + number_of_blocks) > partition_info.ending_lba {
+                pr_err!("The data block is broken");
+                if !page_buffer_size.is_zero() {
+                    bug_on_err!(free_pages!(page_buffer));
+                }
+                return Err(FileError::InvalidFile);
+            }
             if total_read_size > page_buffer_size {
                 let new_allocation_size = total_read_size.page_align_up();
                 if !page_buffer_size.is_zero() {
@@ -465,12 +482,19 @@ impl XfsDriver {
                 };
                 page_buffer_size = new_allocation_size;
             }
-            get_kernel_manager_cluster().block_device_manager.read_lba(
-                partition_info.device_id,
-                page_buffer,
-                partition_info.starting_lba + lba_base,
-                number_of_blocks,
-            )?;
+            get_kernel_manager_cluster()
+                .block_device_manager
+                .read_lba(
+                    partition_info.device_id,
+                    page_buffer,
+                    partition_info.starting_lba + lba_base,
+                    number_of_blocks,
+                )
+                .inspect_err(|_| {
+                    if !page_buffer_size.is_zero() {
+                        bug_on_err!(free_pages!(page_buffer));
+                    }
+                })?;
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     (page_buffer.to_usize() + data_offset as usize) as *const u8,
@@ -594,6 +618,13 @@ impl PartitionManager for XfsDriver {
             );
             bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::BadSignature);
+        } else if u64::from_be(inode.full_inode_number) != current_directory_inode {
+            pr_err!(
+                "Expected inode number is {current_directory_inode}, but the actual is {}",
+                u64::from_be(inode.full_inode_number)
+            );
+            bug_on_err!(free_pages!(inode_buffer));
+            return Err(FileError::BadSignature);
         }
 
         let mut file_info: FileInfo;
@@ -667,6 +698,14 @@ impl PartitionManager for XfsDriver {
                 "Invalid inode version(number: {:#X}, Version: {:#X})",
                 file_info.get_inode_number(),
                 inode.version
+            );
+            bug_on_err!(free_pages!(inode_buffer));
+            return Err(FileError::BadSignature);
+        } else if u64::from_be(inode.full_inode_number) != file_info.get_inode_number() {
+            pr_err!(
+                "Expected inode number is {}, but the actual is {}",
+                file_info.get_inode_number(),
+                u64::from_be(inode.full_inode_number)
             );
             bug_on_err!(free_pages!(inode_buffer));
             return Err(FileError::BadSignature);
