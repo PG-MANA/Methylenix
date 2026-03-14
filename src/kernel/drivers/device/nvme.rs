@@ -2,6 +2,7 @@
 //! NVMe Driver
 //!
 
+use crate::arch::target_arch::device::cpu::flush_data_cache;
 use crate::arch::target_arch::interrupt::InterruptManager;
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE_USIZE};
 
@@ -14,12 +15,7 @@ use crate::kernel::drivers::pci::{
 };
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::{
-    alloc_pages_with_physical_address,
-    data_type::{
-        Address, MIndex, MPageOrder, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress,
-        VAddress,
-    },
-    free_pages, io_remap, kfree, kmalloc,
+    alloc_pages_with_physical_address, data_type::*, free_pages, io_remap, kfree, kmalloc,
 };
 use crate::kernel::sync::spin_lock::IrqSaveSpinLockFlag;
 use crate::kernel::task_manager::{TaskStatus, ThreadEntry};
@@ -41,6 +37,7 @@ pub struct NvmeManager {
     controller_properties_size: MSize,
     admin_queue: Queue,
     stride: usize,
+    max_transfer_size: usize,
     namespace_list: Vec<NameSpace>,
     io_queue_list: Vec<Queue>,
 }
@@ -389,10 +386,6 @@ impl PciDeviceDriver for NvmeManager {
             .unwrap_or("Unknown")
         );
 
-        let max_transfer_size =
-            unsafe { *((identify_info_virtual_address.to_usize() + 77) as *const u8) };
-        pr_debug!("Max Transfer Size: 2^{}", max_transfer_size);
-
         /* Add I/O Completion/Submission Queue */
         let io_queue_size = MSize::new(0x1000);
         let (io_submission_queue_virtual_address, io_submission_queue_physical_address) = match alloc_pages_with_physical_address!(
@@ -573,7 +566,8 @@ impl BlockDeviceDriver for NvmeManager {
         base_lba: u64,
         number_of_blocks: u64,
     ) -> Result<(), BlockDeviceError> {
-        self._read_data_lba(
+        self.operate_read_write(
+            false,
             0x01,
             info.device_id as u32,
             buffer,
@@ -621,6 +615,9 @@ impl NvmeManager {
 
     const SPIN_WAIT_TIMEOUT_MS: usize = 1500;
 
+    /// Transfer limit per one operation (128KiB)
+    const TRANSFER_THRESHOLD: usize = 128 * 1024;
+
     const fn new(
         controller_properties_base_address: VAddress,
         controller_properties_size: MSize,
@@ -632,6 +629,8 @@ impl NvmeManager {
             controller_properties_size,
             admin_queue,
             stride,
+            /* TODO: detect dynamically */
+            max_transfer_size: Self::TRANSFER_THRESHOLD,
             namespace_list: Vec::new(),
             io_queue_list: Vec::new(),
         }
@@ -966,8 +965,9 @@ impl NvmeManager {
         })
     }
 
-    fn _read_data_lba(
+    fn operate_read_write(
         &mut self,
+        is_write: bool,
         queue_id: u16,
         name_space_list_index: u32,
         buffer: VAddress,
@@ -1002,107 +1002,138 @@ impl NvmeManager {
             return Err(BlockDeviceError::InvalidOperation);
         }
 
-        let mut command = [0u32; 16];
-        command[0] = 0x02;
-        command[1] = name_space.id;
+        let block_size_exp = name_space.lba_block_size_exp;
+        let name_space_id = name_space.id;
+        let max_transfer_size = self.max_transfer_size;
+        let mut remaining_size = (number_of_blocks << block_size_exp) as usize;
+        let mut buffer_offset = MIndex::new(0);
 
-        let mut pre_list_virtual_address: Option<VAddress> = None;
-        let read_size = (number_of_blocks << name_space.lba_block_size_exp) as usize;
-        if read_size <= PAGE_SIZE_USIZE * 2 {
-            let num_of_pages = if read_size <= PAGE_SIZE_USIZE { 1 } else { 2 };
-            let mut list = [PAddress::new(0); 2];
-            let result = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .get_physical_address_list(
-                    buffer,
-                    MIndex::new(0),
-                    MIndex::new(num_of_pages),
-                    &mut list,
-                );
-            if let Err(err) = result {
-                pr_err!("Failed to get physical address list: {:?}", err);
-                return Err(BlockDeviceError::MemoryError(err));
-            } else if result.unwrap() < num_of_pages {
-                pr_err!("buffer is smaller than read size.");
-                return Err(BlockDeviceError::InvalidBuffer);
-            }
+        while remaining_size > 0 {
+            let mut allocated_address: Option<VAddress> = None;
+            let mut command = [0u32; 16];
+            let processing_size;
+            command[0] = if is_write { 0x01 } else { 0x02 };
+            command[1] = name_space_id;
 
-            *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[6]) }) =
-                (list[0].to_usize() as u64).to_le();
-            if num_of_pages == 2 {
-                *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[8]) }) =
-                    (list[1].to_usize() as u64).to_le()
-            }
-        } else {
-            let (v, prp_list_physical_address) = match alloc_pages_with_physical_address!(
-                MPageOrder::new(0),
-                MemoryPermissionFlags::data(),
-                MemoryOptionFlags::DEVICE_MEMORY
-            ) {
-                Ok(a) => a,
-                Err(err) => {
-                    pr_err!("Failed to alloc memory for the  PRP List: {:?}", err);
-                    return Err(BlockDeviceError::MemoryError(err));
+            if remaining_size <= PAGE_SIZE_USIZE * 2 {
+                let num_of_pages = if remaining_size <= PAGE_SIZE_USIZE {
+                    1
+                } else {
+                    2
+                };
+                let mut list = [PAddress::new(0); 2];
+                let result = get_kernel_manager_cluster()
+                    .kernel_memory_manager
+                    .get_physical_address_list(
+                        buffer,
+                        buffer_offset,
+                        MIndex::new(num_of_pages),
+                        &mut list,
+                    )
+                    .map_err(|e| {
+                        pr_err!("Failed to get physical address list: {:?}", e);
+                        BlockDeviceError::MemoryError(e)
+                    })?;
+                if result < num_of_pages {
+                    pr_err!("buffer is smaller than read size.");
+                    return Err(BlockDeviceError::InvalidBuffer);
                 }
-            };
-            let list = unsafe {
-                &mut *(v.to_usize() as *mut [PAddress; PAGE_SIZE_USIZE / size_of::<PAddress>()])
-            };
-            let result = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .get_physical_address_list(
-                    buffer,
-                    MIndex::new(0),
-                    MSize::new(read_size).page_align_up().to_index(),
-                    list,
-                );
-            if let Err(err) = result {
-                pr_err!("Failed to get physical address list: {:?}", err);
-                return Err(BlockDeviceError::MemoryError(err));
-            } else if (result.unwrap() << PAGE_SHIFT) < read_size {
-                pr_err!(
-                    "Expected {:#X} bytes for buffer, but its size is {:#X} bytes",
-                    read_size,
-                    result.unwrap() << PAGE_SHIFT
-                );
-                bug_on_err!(free_pages!(v));
-                return Err(BlockDeviceError::InvalidBuffer);
-            }
-            let prp1 = (list[0].to_usize() as u64).to_le();
-            for i in 0..(result.unwrap() - 1) {
-                list[i] = list[i + 1];
-            }
-            unsafe {
-                *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) = prp1;
-                *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
-                    (prp_list_physical_address.to_usize() as u64).to_le();
-            }
-            pre_list_virtual_address = Some(v);
-        }
 
-        command[10] = (base_lba & u32::MAX as u64) as u32; /* LBA[0:31] */
-        command[11] = (base_lba >> 32) as u32; /* LBA[32:63] */
-        command[12] = (number_of_blocks - 1) as u32; /* [0:15]: Number of Logical Blocks */
-        let result = self.submit_command_and_wait(queue_id, command);
-        if result.is_err() {
-            pr_err!("Failed to execute the command");
-            return Err(BlockDeviceError::DeviceError);
-        }
+                *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[6]) }) =
+                    (list[0].to_usize() as u64).to_le();
+                if num_of_pages == 2 {
+                    *(unsafe { core::mem::transmute::<&mut u32, &mut u64>(&mut command[8]) }) =
+                        (list[1].to_usize() as u64).to_le();
+                }
+                processing_size = remaining_size;
+            } else {
+                processing_size = remaining_size.min(max_transfer_size);
+                /* Construct PRP List  */
+                assert_eq!(size_of::<usize>(), size_of::<u64>());
+                let number_of_pages = MSize::new(processing_size).page_align_up().to_index();
+                let prp_list_size = MSize::new(size_of::<u64>() * number_of_pages.to_usize());
+                let (prp_list_virtual_address, prp_list_physical_address) =
+                    alloc_pages_with_physical_address!(
+                        prp_list_size.to_order(None).to_page_order(),
+                        MemoryPermissionFlags::data(),
+                        MemoryOptionFlags::DEVICE_MEMORY
+                    )
+                    .map_err(|e| {
+                        pr_err!("Failed to alloc memory for the  PRP List: {:?}", e);
+                        BlockDeviceError::MemoryError(e)
+                    })?;
 
-        let result = result.unwrap();
-        if !Self::is_command_successful(&result) {
-            pr_err!(
-                "Failed the read command is failed:  {:#X?}(Status: {:#X})",
-                result,
-                (result[3] >> 16) & !1
+                let prp_list = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        prp_list_virtual_address.to::<PAddress>(),
+                        number_of_pages.to_usize(),
+                    )
+                };
+                let n = get_kernel_manager_cluster()
+                    .kernel_memory_manager
+                    .get_physical_address_list(buffer, buffer_offset, number_of_pages, prp_list)
+                    .map_err(|e| {
+                        pr_err!("Failed to get physical address list: {:?}", e);
+                        bug_on_err!(free_pages!(prp_list_virtual_address));
+                        BlockDeviceError::MemoryError(e)
+                    })?;
+                if n < number_of_pages.to_usize() {
+                    pr_err!("Expected {number_of_pages} pages, but only {n} pages");
+                    bug_on_err!(free_pages!(prp_list_virtual_address));
+                    return Err(BlockDeviceError::InvalidBuffer);
+                }
+                let prp1 = (prp_list[0].to_usize() as u64).to_le();
+                for i in 0..(prp_list.len() - 1) {
+                    prp_list[i] = PAddress::new(prp_list[i + 1].to_usize().to_le());
+                }
+                flush_data_cache(prp_list_virtual_address, prp_list_size);
+                /* MPTR */
+                unsafe {
+                    *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[4])) =
+                        (prp_list_physical_address.to_usize() as u64).to_le();
+                }
+                /* PRP1 */
+                unsafe { *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[6])) = prp1 };
+                /* PRP2 */
+                unsafe {
+                    *(core::mem::transmute::<&mut u32, &mut u64>(&mut command[8])) =
+                        (prp_list_physical_address.to_usize() as u64).to_le();
+                }
+                allocated_address = Some(prp_list_virtual_address);
+            }
+
+            assert_eq!(processing_size & ((1 << block_size_exp) - 1), 0);
+            let lba = base_lba + ((buffer_offset.to_offset().to_usize()) >> block_size_exp) as u64;
+            command[10] = (lba & u32::MAX as u64) as u32; /* LBA[0:31] */
+            command[11] = (lba >> 32) as u32; /* LBA[32:63] */
+            command[12] = ((processing_size >> block_size_exp) - 1) as u32; /* [0:15]: Number of Logical Blocks */
+            flush_data_cache(
+                buffer + buffer_offset.to_offset(),
+                MSize::new(processing_size),
             );
-            if let Some(v) = pre_list_virtual_address {
+            flush_data_cache(
+                VAddress::new(command.as_ptr() as _),
+                MSize::new(size_of_val(&command)),
+            );
+            let result = self.submit_command_and_wait(queue_id, command);
+            if let Some(v) = allocated_address {
                 bug_on_err!(free_pages!(v));
             }
-            return Err(BlockDeviceError::DeviceError);
-        }
-        if let Some(v) = pre_list_virtual_address {
-            bug_on_err!(free_pages!(v));
+            let result = result.map_err(|_| {
+                pr_err!("Failed to execute the command");
+                BlockDeviceError::DeviceError
+            })?;
+            if !Self::is_command_successful(&result) {
+                pr_err!(
+                    "Failed the read command is failed:  {:#X?}(Status: {:#X}, Code: {:#X})",
+                    result,
+                    result[3] >> 17,
+                    (result[3] >> 17) & 0xFF
+                );
+                return Err(BlockDeviceError::DeviceError);
+            }
+            remaining_size -= processing_size;
+            buffer_offset += MSize::new(processing_size).to_index();
         }
         Ok(())
     }
