@@ -134,9 +134,7 @@ extern "efiapi" fn efi_main(
     assert_eq!(r, Success, "Failed to exit boot services: {r:?}");
 
     match cpu::get_current_el() >> 2 {
-        1 => {
-            set_page_table();
-        }
+        1 => { /* Do nothing, just jump to the kernel */ }
         2 => {
             if (cpu::get_id_aa64mmfr1_el1() & (0b1111 << 8)) != 0 {
                 /* FEAT_VHE is supported */
@@ -146,14 +144,12 @@ extern "efiapi" fn efi_main(
                         (0b11 << 24) /* SMEN */ | (0b11 << 20) /* FPEN */ | (0b11 << 16), /* ZEN */
                     );
                     /* Disable the paging to enable E2H */
-                    cpu::set_sctlr_el2(cpu::get_sctlr_el2() & !1);
+                    cpu::set_sctlr_el2(cpu::get_sctlr_el2() & !1 /* M */);
                     /* Enable E2H */
                     cpu::set_hcr_el2(
                         (1 << 34) /* E2H */ | (1 << 31) /* RW */ | (1 << 27), /* TGE */
                     );
                 }
-                /* Set page table and enable it */
-                set_page_table();
             } else {
                 /* Enable FP accesses */
                 unsafe {
@@ -161,8 +157,6 @@ extern "efiapi" fn efi_main(
                         (0b11 << 24)/* SMEN */|(0b11 << 20)/* FPEN */ | (0b11 << 16), /* ZEN */
                     )
                 };
-                /* Set page table and enable it */
-                set_page_table();
                 unsafe { cpu::jump_to_el1() };
             }
         }
@@ -178,10 +172,17 @@ extern "efiapi" fn efi_main(
         isb
         mov x0, {arg}
         mov sp, {stack}
+        msr vbar_el1, {entry}
+        msr tcr_el1, {tcr_el1}
+        msr ttbr1_el1, {ttbr1_el1}
+        msr sctlr_el1, {sctlr_el1}
         br {entry}",
         arg = in(reg) boot_info as *mut _ as usize + DIRECT_MAP_START_ADDRESS,
         stack = in(reg) kernel_stack + DIRECT_MAP_START_ADDRESS,
         entry = in(reg) entry_point,
+        tcr_el1 = in(reg) paging::TCR_EL1,
+        sctlr_el1 = in(reg) paging::SCTLR_EL1,
+        ttbr1_el1 = in(reg) paging::TTBR1_EL1,
         options(noreturn))
     }
 }

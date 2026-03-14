@@ -10,9 +10,9 @@ pub const PAGE_SIZE: usize = 0x1000;
 pub const PAGE_SHIFT: usize = 12;
 
 /* Settings */
-static mut TTBR1_EL1: u64 = 0;
-static mut TCR_EL1: u64 = 0;
-static mut SCTLR_EL1: u64 = 0;
+pub static mut TTBR1_EL1: u64 = 0;
+pub static mut TCR_EL1: u64 = 0;
+pub static mut SCTLR_EL1: u64 = 0;
 static mut MAIR_INDEX: u8 = 0;
 static mut MINIMUM_TXSZ: u8 = 16;
 static mut TTBR1_INITIAL_SHIFT: u8 = 0;
@@ -127,15 +127,6 @@ pub fn init_paging(top_level_page_table: usize) {
         TTBR1_EL1 = top_level_page_table as u64;
         TCR_EL1 = tcr_el1;
         SCTLR_EL1 = sctlr_el1;
-    }
-}
-
-pub fn set_page_table() {
-    unsafe {
-        set_ttbr1_el1(TTBR1_EL1);
-        set_sctlr_el1(SCTLR_EL1);
-        set_tcr_el1(TCR_EL1);
-        tlbi_asid_el1(0);
     }
 }
 

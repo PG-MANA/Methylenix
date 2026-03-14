@@ -26,20 +26,10 @@ pub fn get_id_aa64mmfr1_el1() -> u64 {
 }
 
 #[inline(always)]
-pub unsafe fn set_ttbr1_el1(address: u64) {
-    unsafe { asm!("msr ttbr1_el1, {}", in(reg) address) };
-}
-
-#[inline(always)]
 pub fn get_tcr_el1() -> u64 {
     let result: u64;
     unsafe { asm!("mrs {}, tcr_el1", out(reg) result) };
     result
-}
-
-#[inline(always)]
-pub unsafe fn set_tcr_el1(tcr_el1: u64) {
-    unsafe { asm!("msr tcr_el1, {}", in(reg) tcr_el1) };
 }
 
 #[inline(always)]
@@ -54,11 +44,6 @@ pub fn get_sctlr_el1() -> u64 {
     let result: u64;
     unsafe { asm!("mrs {}, sctlr_el1", out(reg) result) };
     result
-}
-
-#[inline(always)]
-pub unsafe fn set_sctlr_el1(sctlr_el1: u64) {
-    unsafe { asm!("msr sctlr_el1, {}", in(reg) sctlr_el1) };
 }
 
 #[inline(always)]
@@ -112,11 +97,6 @@ pub unsafe fn cli() {
             msr DAIF, {t}
             ", t = out(reg) _)
     };
-}
-
-#[inline(always)]
-pub unsafe fn tlbi_asid_el1(asid: u64) {
-    unsafe { asm!("tlbi aside1, {}", in(reg) asid) };
 }
 
 #[inline(always)]
@@ -183,14 +163,14 @@ pub unsafe fn jump_to_el1() {
             mrs {tmp}, vbar_el2
             msr vbar_el1, {tmp}
             mrs {tmp}, sctlr_el2
+            bic {tmp}, {tmp}, 1 /* M */
             msr sctlr_el1, {tmp}
             mrs {tmp}, mair_el2
             msr mair_el1, {tmp}
             mov {tmp}, 0xC5
             msr spsr_el2, {tmp}
-            mov {tmp}, (1 << 47) | (1 << 41) | (1 << 40)
-            orr {tmp}, {tmp}, (1 << 31)
-            orr {tmp}, {tmp}, (1 << 19)
+            mov {tmp}, (1 << 47) /* FIEN */ | (1 << 41) /* API */ | (1 << 40) /* APK */
+            orr {tmp}, {tmp}, (1 << 31) /* RW */
             msr hcr_el2, {tmp}
             isb
             eret
