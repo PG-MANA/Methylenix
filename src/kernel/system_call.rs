@@ -2,15 +2,11 @@
 //! System Call Handler
 //!
 
-mod system_call_number;
-
-use system_call_number::*;
-
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::context::memory_layout::is_user_memory_area;
 use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::interrupt::InterruptManager;
-use crate::arch::target_arch::system_call;
+use crate::arch::target_arch::system_call::{self, system_call_number::*};
 
 use crate::kernel::file_manager::{FILE_PERMISSION_READ, File, FileSeekOrigin, PathInfo};
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};

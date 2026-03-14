@@ -2,6 +2,8 @@
 //! Arch Depend System Call Handler
 //!
 
+pub mod system_call_number;
+
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
 
