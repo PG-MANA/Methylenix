@@ -9,7 +9,7 @@ use crate::arch::target_arch::{
 
 use crate::kernel::{
     collections::auxiliary_vector,
-    file_manager::elf::{ELF_PROGRAM_HEADER_SEGMENT_LOAD, Elf64Header},
+    file_manager::elf::*,
     file_manager::{FILE_PERMISSION_READ, FILE_PERMISSION_WRITE, FileSeekOrigin, PathInfo},
     manager_cluster::get_kernel_manager_cluster,
     memory_manager::{
@@ -103,11 +103,10 @@ pub fn load_and_execute(
         for program_header in header.get_program_headers_iter(
             head_data.to_usize() + header.get_program_header_offset() as usize,
         ) {
-            /* TODO: delete the process when failed. */
-            if program_header.get_segment_type() == ELF_PROGRAM_HEADER_SEGMENT_LOAD {
+            let segment_type = program_header.get_segment_type();
+            if segment_type == ELF_PROGRAM_HEADER_SEGMENT_LOAD {
                 pr_debug!(
-                    "PA: {:#X}, VA: {:#X}, MS: {:#X}, FS: {:#X}, FO: {:#X}, AL: {}, R:{}, W: {}, E:{}",
-                    program_header.get_physical_address(),
+                    "VA: {:#18X}, MS: {:#18X}, FS: {:#18X}, FO: {:#18X}, AL: {:#10X}, R:{}, W: {}, E:{}",
                     program_header.get_virtual_address(),
                     program_header.get_memory_size(),
                     program_header.get_file_size(),
@@ -124,12 +123,10 @@ pub fn load_and_execute(
                 if alignment != 1
                     && (align_offset.to_usize()
                         != (program_header.get_file_offset() & (alignment - 1)) as usize
-                        || !alignment.is_power_of_two())
+                        || !alignment.is_power_of_two()
+                        || (alignment as usize) < PAGE_SIZE_USIZE)
                 {
                     pr_err!("Invalid Alignment: {:#X}", alignment);
-                    Err(())?
-                } else if alignment as usize > PAGE_SIZE_USIZE {
-                    pr_err!("Unsupported Align: {:#X}", alignment);
                     Err(())?
                 } else if program_header.get_memory_size() == 0 {
                     continue;
@@ -197,8 +194,15 @@ pub fn load_and_execute(
                     bug_on_err!(free_pages!(allocated_memory));
                     Err(())?
                 }
-
                 bug_on_err!(free_pages!(allocated_memory));
+            } else if segment_type == ELF_PROGRAM_HEADER_SEGMENT_RELRO {
+                pr_debug!(
+                    "VA: {:#18X}, FS: {:#18X}, FO: {:#18X}, AL: {:#10X}: Relocation(TODO)",
+                    program_header.get_virtual_address(),
+                    program_header.get_file_size(),
+                    program_header.get_file_offset(),
+                    program_header.get_align(),
+                );
             }
         }
     };
@@ -240,12 +244,12 @@ pub fn load_and_execute(
 
     /* Calculate the position of "ap" for _start */
     let mut ap_offset_from_stack_top = 0;
-    ap_offset_from_stack_top += file_name.as_bytes().len() + 1;
+    ap_offset_from_stack_top += file_name.len() + 1;
     for e in arguments {
-        ap_offset_from_stack_top += e.as_bytes().len() + 1;
+        ap_offset_from_stack_top += e.len() + 1;
     }
     for e in environments {
-        ap_offset_from_stack_top += e.0.as_bytes().len() + 1 + e.1.as_bytes().len() + 1;
+        ap_offset_from_stack_top += e.0.len() + 1 + e.1.len() + 1;
     }
     ap_offset_from_stack_top +=
         auxiliary_vector_list.len() * size_of::<auxiliary_vector::AuxiliaryVector>();
@@ -268,7 +272,7 @@ pub fn load_and_execute(
 
     /* Write arguments */
     for e in [file_name].iter().chain(arguments.iter()) {
-        let len = e.as_bytes().len();
+        let len = e.len();
         unsafe {
             core::ptr::copy_nonoverlapping(
                 e.as_bytes().as_ptr(),
@@ -286,24 +290,24 @@ pub fn load_and_execute(
 
     /* Write environment variables */
     for e in environments {
-        let mut len = e.0.as_bytes().len() + 1 + e.1.as_bytes().len();
+        let mut len = e.0.len() + 1 + e.1.len();
         unsafe {
             core::ptr::copy_nonoverlapping(
                 e.0.as_bytes().as_ptr(),
                 (stack_top_address - argv_env_pointer - len - 1) as *mut u8,
-                e.0.as_bytes().len(),
+                e.0.len(),
             );
-            len -= e.0.as_bytes().len();
+            len -= e.0.len();
             *((stack_top_address - argv_env_pointer - len - 1) as *mut u8) = b'=';
             len -= 1;
             core::ptr::copy_nonoverlapping(
                 e.1.as_bytes().as_ptr(),
                 (stack_top_address - argv_env_pointer - len - 1) as *mut u8,
-                e.1.as_bytes().len(),
+                e.1.len(),
             );
             *((stack_top_address - argv_env_pointer - 1) as *mut u8) = 0;
         }
-        argv_env_pointer += e.0.as_bytes().len() + 1 + e.1.as_bytes().len() + 1;
+        argv_env_pointer += e.0.len() + 1 + e.1.len() + 1;
         unsafe { *(ap as *mut u64) = (stack_top_address_user - argv_env_pointer) as u64 };
         ap += size_of::<u64>();
     }
@@ -364,18 +368,15 @@ pub fn load_and_execute(
     use crate::kernel::tty;
     process.add_file(
         get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
-            .open_tty_as_file(FILE_PERMISSION_READ)
-            .unwrap(),
+            .open_tty_as_file(FILE_PERMISSION_READ)?,
     ); /* stdin */
     process.add_file(
         get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
-            .open_tty_as_file(FILE_PERMISSION_WRITE)
-            .unwrap(),
+            .open_tty_as_file(FILE_PERMISSION_WRITE)?,
     ); /* stderr */
     process.add_file(
         get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
-            .open_tty_as_file(FILE_PERMISSION_WRITE)
-            .unwrap(),
+            .open_tty_as_file(FILE_PERMISSION_WRITE)?,
     ); /* stderr */
 
     pr_debug!("Execute {}", file_name);
