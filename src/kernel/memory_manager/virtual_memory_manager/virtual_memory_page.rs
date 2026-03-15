@@ -6,11 +6,9 @@
 use super::super::data_type::{MIndex, MemoryOptionFlags, PAddress};
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
-use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 pub struct VirtualMemoryPage {
     pub(super) list: PtrLinkedListNode<Self>,
-    pub(super) lock: SpinLockFlag,
     status: PageStatus,
     p_index: MIndex,
     physical_address: PAddress,
@@ -27,7 +25,6 @@ enum PageStatus {
 impl VirtualMemoryPage {
     pub fn new(physical_address: PAddress, p_index: MIndex) -> Self {
         Self {
-            lock: SpinLockFlag::new(),
             list: PtrLinkedListNode::new(),
             status: PageStatus::InActive,
             p_index,
@@ -37,13 +34,15 @@ impl VirtualMemoryPage {
 
     pub fn set_page_status(&mut self, option: MemoryOptionFlags) {
         if option.is_wired() {
-            let _lock = self.lock.lock();
             self.status = PageStatus::Unswappable
         }
     }
 
+    pub const fn is_activated(&self) -> bool {
+        matches!(self.status, PageStatus::Active)
+    }
+
     pub fn activate(&mut self) {
-        let _lock = self.lock.lock();
         assert!(self.status != PageStatus::Free);
         if self.status == PageStatus::InActive {
             self.status = PageStatus::Active;
@@ -51,7 +50,6 @@ impl VirtualMemoryPage {
     }
 
     pub fn inactivate(&mut self) {
-        let _lock = self.lock.lock();
         if self.status == PageStatus::Active {
             self.status = PageStatus::InActive;
         }

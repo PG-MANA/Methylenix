@@ -308,6 +308,7 @@ impl SystemMemoryManager {
         self.vm_entry_pool.free(vm_entry)
     }
 
+    /// Only shadow object can be freed
     pub fn free_vm_object(&mut self, vm_object: &mut VirtualMemoryObject) {
         let _lock = self.lock.lock();
         self.vm_object_pool.free(vm_object)

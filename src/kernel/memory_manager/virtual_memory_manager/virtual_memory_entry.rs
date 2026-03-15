@@ -8,14 +8,12 @@ use super::super::data_type::{
 use super::virtual_memory_object::VirtualMemoryObject;
 
 use crate::kernel::collections::ptr_linked_list::PtrLinkedListNode;
-use crate::kernel::sync::spin_lock::SpinLockFlag;
 
 use core::mem::offset_of;
 
 #[allow(dead_code)]
 pub struct VirtualMemoryEntry {
     pub(super) list: PtrLinkedListNode<Self>,
-    lock: SpinLockFlag,
     start_address: VAddress,
     end_address: VAddress,
     is_shared: bool,
@@ -25,7 +23,6 @@ pub struct VirtualMemoryEntry {
     object: VirtualMemoryObject,
     offset: MOffset,
 }
-// ADD: thread chain
 
 impl VirtualMemoryEntry {
     pub const ENTRY_SIZE: usize = size_of::<Self>();
@@ -37,7 +34,6 @@ impl VirtualMemoryEntry {
         option: MemoryOptionFlags,
     ) -> Self {
         Self {
-            lock: SpinLockFlag::new(),
             list: PtrLinkedListNode::new(),
             start_address: vm_start_address,
             end_address: vm_end_address,
@@ -59,7 +55,6 @@ impl VirtualMemoryEntry {
     }
 
     pub fn set_vm_end_address(&mut self, new_end_address: VAddress) {
-        let _lock = self.lock.lock();
         if let Some(next_entry) = self
             .list
             .get_next(offset_of!(VirtualMemoryEntry, list))
@@ -91,7 +86,6 @@ impl VirtualMemoryEntry {
     }
 
     pub fn set_memory_option_flags(&mut self, flags: MemoryOptionFlags) {
-        let _lock = self.lock.lock();
         self.option_flags = flags;
     }
 
@@ -100,10 +94,8 @@ impl VirtualMemoryEntry {
     }
 
     pub fn set_disabled(&mut self) {
-        let _lock = self.lock.lock();
         self.start_address = VAddress::new(0);
         self.end_address = VAddress::new(0);
-        self.object.set_disabled();
     }
 
     pub fn get_object(&self) -> &VirtualMemoryObject {

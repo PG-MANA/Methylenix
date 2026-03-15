@@ -547,7 +547,8 @@ impl MemoryOptionFlags {
     pub const CRITICAL: Self = Self(1 << 7);
     pub const DEVICE_MEMORY: Self = Self(1 << 8);
     pub const STACK: Self = Self(1 << 9);
-    pub const ALLOW_HUGE: Self = Self(1 << 10);
+    pub const HEAP: Self = Self(1 << 10);
+    pub const ALLOW_HUGE: Self = Self(1 << 11);
 
     pub const fn is_for_kernel(&self) -> bool {
         !self.is_for_user()
@@ -591,6 +592,10 @@ impl MemoryOptionFlags {
 
     pub const fn is_stack(&self) -> bool {
         (*self & Self::STACK).0 != 0
+    }
+
+    pub const fn is_heap(&self) -> bool {
+        (*self & Self::HEAP).0 != 0
     }
 
     pub const fn should_use_huge_page(&self) -> bool {
