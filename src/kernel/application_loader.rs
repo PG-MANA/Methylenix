@@ -4,13 +4,13 @@
 
 use crate::arch::target_arch::{
     context::{ContextManager, memory_layout::USER_STACK_END_ADDRESS},
-    paging::PAGE_SIZE_USIZE,
+    paging::{PAGE_MASK, PAGE_SIZE_USIZE},
 };
 
 use crate::kernel::{
     collections::auxiliary_vector,
     file_manager::elf::*,
-    file_manager::{FILE_PERMISSION_READ, FILE_PERMISSION_WRITE, FileSeekOrigin, PathInfo},
+    file_manager::*,
     manager_cluster::get_kernel_manager_cluster,
     memory_manager::{
         MemoryManager, alloc_non_linear_pages,
@@ -34,7 +34,8 @@ pub fn load_and_execute(
     let result = get_kernel_manager_cluster().file_manager.open_file(
         PathInfo::new(file_name),
         None,
-        FILE_PERMISSION_READ,
+        FILE_PERMISSION_READ | FILE_PERMISSION_EXECUTE,
+        0,
     );
     if let Err(err) = result {
         pr_err!("{} is not found: {:?}", file_name, err);
@@ -175,12 +176,14 @@ pub fn load_and_execute(
                         )
                     }
                 }
+                let user_address =
+                    VAddress::new(program_header.get_virtual_address() as usize) - align_offset;
                 if let Err(err) = get_kernel_manager_cluster()
                     .kernel_memory_manager
                     .share_kernel_memory_with_user(
                         process_memory_manager,
                         allocated_memory,
-                        VAddress::new(program_header.get_virtual_address() as usize) - align_offset,
+                        user_address,
                         MemoryPermissionFlags::new(
                             program_header.is_segment_readable(),
                             program_header.is_segment_writable(),
@@ -208,8 +211,8 @@ pub fn load_and_execute(
     };
     drop(file_descriptor);
 
+    bug_on_err!(kfree!(head_data, head_read_size));
     if result.is_err() {
-        bug_on_err!(kfree!(head_data, head_read_size));
         bug_on_err!(
             get_kernel_manager_cluster()
                 .task_manager
@@ -217,24 +220,21 @@ pub fn load_and_execute(
         );
         return Err(());
     }
+
+    /* Setup stack */
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_USER);
-    let stack_address = match alloc_non_linear_pages!(stack_size) {
-        Ok(v) => v,
-        Err(e) => {
-            pr_err!("Failed to alloc stack: {:?}", e);
-            bug_on_err!(kfree!(head_data, head_read_size));
-            bug_on_err!(
-                get_kernel_manager_cluster()
-                    .task_manager
-                    .delete_user_process(process)
-            );
-            return Err(());
-        }
-    };
+    let stack_user_top_address = USER_STACK_END_ADDRESS.to_usize() + 1;
+    let stack_kernel_address = alloc_non_linear_pages!(stack_size).map_err(|e| {
+        pr_err!("Failed to alloc stack: {:?}", e);
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+        );
+    })?;
+    let stack_kernel_top_address = (stack_kernel_address + stack_size).to_usize();
 
     /* Build Arguments */
-    let stack_top_address = (stack_address + stack_size).to_usize();
-
     /* Auxiliary Vector */
     let auxiliary_vector_list: [auxiliary_vector::AuxiliaryVector; 1] =
         [auxiliary_vector::AuxiliaryVector {
@@ -260,8 +260,7 @@ pub fn load_and_execute(
         * size_of::<u64>();
 
     let ap_offset_from_stack_top = ap_offset_from_stack_top;
-    let stack_top_address_user = USER_STACK_END_ADDRESS.to_usize() + 1;
-    let mut ap = stack_top_address - ap_offset_from_stack_top;
+    let mut ap = stack_kernel_top_address - ap_offset_from_stack_top;
     let mut argv_env_pointer = 0;
 
     /* Write argc */
@@ -276,13 +275,13 @@ pub fn load_and_execute(
         unsafe {
             core::ptr::copy_nonoverlapping(
                 e.as_bytes().as_ptr(),
-                (stack_top_address - argv_env_pointer - len - 1) as *mut u8,
+                (stack_kernel_top_address - argv_env_pointer - len - 1) as *mut u8,
                 len,
             );
-            *((stack_top_address - argv_env_pointer - 1) as *mut u8) = 0;
+            *((stack_kernel_top_address - argv_env_pointer - 1) as *mut u8) = 0;
         }
         argv_env_pointer += len + 1;
-        unsafe { *(ap as *mut u64) = (stack_top_address_user - argv_env_pointer) as u64 };
+        unsafe { *(ap as *mut u64) = (stack_user_top_address - argv_env_pointer) as u64 };
         ap += size_of::<u64>();
     }
     unsafe { *(ap as *mut u64) = 0u64 };
@@ -294,26 +293,26 @@ pub fn load_and_execute(
         unsafe {
             core::ptr::copy_nonoverlapping(
                 e.0.as_bytes().as_ptr(),
-                (stack_top_address - argv_env_pointer - len - 1) as *mut u8,
+                (stack_kernel_top_address - argv_env_pointer - len - 1) as *mut u8,
                 e.0.len(),
             );
             len -= e.0.len();
-            *((stack_top_address - argv_env_pointer - len - 1) as *mut u8) = b'=';
+            *((stack_kernel_top_address - argv_env_pointer - len - 1) as *mut u8) = b'=';
             len -= 1;
             core::ptr::copy_nonoverlapping(
                 e.1.as_bytes().as_ptr(),
-                (stack_top_address - argv_env_pointer - len - 1) as *mut u8,
+                (stack_kernel_top_address - argv_env_pointer - len - 1) as *mut u8,
                 e.1.len(),
             );
-            *((stack_top_address - argv_env_pointer - 1) as *mut u8) = 0;
+            *((stack_kernel_top_address - argv_env_pointer - 1) as *mut u8) = 0;
         }
         argv_env_pointer += e.0.len() + 1 + e.1.len() + 1;
-        unsafe { *(ap as *mut u64) = (stack_top_address_user - argv_env_pointer) as u64 };
+        unsafe { *(ap as *mut u64) = (stack_user_top_address - argv_env_pointer) as u64 };
         ap += size_of::<u64>();
     }
     unsafe { *(ap as *mut u64) = 0u64 };
 
-    assert!(ap < (stack_top_address - argv_env_pointer));
+    assert!(ap < (stack_kernel_top_address - argv_env_pointer));
 
     /* Write auxiliary vector */
     for e in auxiliary_vector_list {
@@ -325,15 +324,14 @@ pub fn load_and_execute(
         .kernel_memory_manager
         .share_kernel_memory_with_user(
             process_memory_manager,
-            stack_address,
-            VAddress::new(stack_top_address_user) - stack_size,
+            stack_kernel_address,
+            VAddress::new(stack_user_top_address) - stack_size,
             MemoryPermissionFlags::new(true, true, false, true),
             MemoryOptionFlags::USER | MemoryOptionFlags::STACK,
         )
     {
         pr_err!("Failed to map stack into user: {:?}", e);
-        bug_on_err!(free_pages!(stack_address));
-        bug_on_err!(kfree!(head_data, head_read_size));
+        bug_on_err!(free_pages!(stack_kernel_address));
         bug_on_err!(
             get_kernel_manager_cluster()
                 .task_manager
@@ -341,20 +339,19 @@ pub fn load_and_execute(
         );
         return Err(());
     }
-    bug_on_err!(free_pages!(stack_address));
+    bug_on_err!(free_pages!(stack_kernel_address));
 
     let thread = get_kernel_manager_cluster()
         .task_manager
         .create_user_thread(
             process,
             header.get_entry_point() as usize,
-            &[stack_top_address_user - ap_offset_from_stack_top],
-            VAddress::new(stack_top_address_user - ap_offset_from_stack_top),
+            &[stack_user_top_address - ap_offset_from_stack_top],
+            VAddress::new(stack_user_top_address - ap_offset_from_stack_top),
             DEFAULT_PRIORITY_LEVEL,
         );
     if let Err(e) = thread {
         pr_err!("Failed to add thread: {:?}", e);
-        bug_on_err!(kfree!(head_data, head_read_size));
         bug_on_err!(
             get_kernel_manager_cluster()
                 .task_manager
@@ -362,7 +359,6 @@ pub fn load_and_execute(
         );
         return Err(());
     }
-    bug_on_err!(kfree!(head_data, head_read_size));
 
     /* Add stdout/stdin */
     use crate::kernel::tty;
