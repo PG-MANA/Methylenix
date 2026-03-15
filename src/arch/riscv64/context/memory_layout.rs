@@ -4,6 +4,8 @@
 //! This module defines memory layout of kernel.
 //! Supported: Sv39, Sv47, Sv56
 
+use crate::arch::target_arch::paging::PAGE_SIZE;
+
 use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 
 // The below constants are for Sv47
@@ -22,6 +24,7 @@ pub const KERNEL_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_ffe0_0000_00
 
 pub const USER_STACK_START_ADDRESS: VAddress = VAddress::new(0x0000_7000_0000_0000);
 pub const USER_STACK_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff);
+pub const USER_START_ADDRESS: VAddress = VAddress::new(0) + PAGE_SIZE;
 pub const USER_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff);
 */
 
@@ -40,6 +43,7 @@ pub const KERNEL_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_ffff_e000_00
 
 pub const USER_STACK_START_ADDRESS: VAddress = VAddress::new(0x0000_0070_0000_0000);
 pub const USER_STACK_END_ADDRESS: VAddress = VAddress::new(0x0000_007f_8fff_ffff);
+pub const USER_START_ADDRESS: VAddress = VAddress::new(0) + PAGE_SIZE;
 pub const USER_END_ADDRESS: VAddress = VAddress::new(0x0000_007f_8fff_ffff);
 
 pub fn get_high_memory_base_address() -> VAddress {

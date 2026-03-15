@@ -3,6 +3,8 @@
 //!
 //! This module defines memory layout of kernel.
 
+use crate::arch::target_arch::paging::PAGE_SIZE;
+
 use crate::kernel::memory_manager::data_type::{Address, MSize, PAddress, VAddress};
 
 use core::ops::RangeInclusive;
@@ -21,6 +23,7 @@ pub const KERNEL_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_ff80_0000_00
 //pub const KERNEL_MAP_END_ADDRESS: VAddress = VAddress::new(0xffff_ffef_ffff_ffff);
 pub const USER_STACK_START_ADDRESS: VAddress = VAddress::new(0x0000_7000_0000_0000);
 pub const USER_STACK_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff);
+pub const USER_START_ADDRESS: VAddress = VAddress::new(0) + PAGE_SIZE;
 pub const USER_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff);
 const CANONICAL_AREA_LOW: RangeInclusive<VAddress> =
     VAddress::new(0)..=VAddress::new(0x0000_7fff_ffff_ffff);
