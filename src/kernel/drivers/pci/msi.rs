@@ -39,7 +39,6 @@ pub fn setup_msi(
     let capability = get_kernel_manager_cluster()
         .pci_manager
         .read_data(pci_dev, 0x34, 1)?;
-    pr_debug!("Capability: {:#X}", capability);
     let mut usable_capability = capability;
     let mut message_control: u32;
     loop {
@@ -49,7 +48,6 @@ pub fn setup_msi(
                 .read_data(pci_dev, usable_capability, 4)?;
 
         if (message_control & 0xff) != 0x05 {
-            pr_debug!("Capability ID is not for MSI");
         } else if (message_control & (1 << 16)) != 0 {
             pr_debug!("Capability Pointer: {:#X} is in use.", usable_capability);
         } else {
@@ -57,7 +55,6 @@ pub fn setup_msi(
         }
         usable_capability = (message_control >> 8) & (u8::MAX as u32);
         if usable_capability == 0 {
-            pr_err!("No usable capability pointer");
             return Err(());
         }
     }
@@ -108,7 +105,6 @@ pub fn setup_msi_x(
     let capability = get_kernel_manager_cluster()
         .pci_manager
         .read_data(pci_dev, 0x34, 1)?;
-    pr_debug!("Capability: {:#X}", capability);
     let mut msi_x_capability = if capability == 0 { 0x80 } else { capability };
     let mut message_control: u32;
     loop {
@@ -122,7 +118,6 @@ pub fn setup_msi_x(
         }
         msi_x_capability = (message_control >> 8) & (u8::MAX as u32);
         if msi_x_capability == 0 {
-            pr_err!("No usable capability pointer");
             return Err(());
         }
     }
@@ -133,7 +128,6 @@ pub fn setup_msi_x(
             .read_data(pci_dev, msi_x_capability + 0x04, 4)?;
     let bir = table_offset & 0b111;
     let table_offset = table_offset & !0b111;
-    pr_debug!("BIR: {bir}, Table Offset: {:#X}", table_offset);
 
     let msi_x_table_address = get_kernel_manager_cluster()
         .pci_manager
@@ -164,7 +158,7 @@ pub fn setup_msi_x(
     ) {
         Ok(a) => a,
         Err(e) => {
-            pr_debug!("Failed to map MSI-X table: {:?}", e);
+            pr_err!("Failed to map MSI-X table: {:?}", e);
             return Err(());
         }
     };
