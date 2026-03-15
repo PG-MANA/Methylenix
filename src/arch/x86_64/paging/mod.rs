@@ -652,29 +652,41 @@ impl PageManager {
     ///
     /// This function shows the status of paging, it prints a lot.
     pub fn dump_table(&self, start: Option<VAddress>, end: Option<VAddress>) {
-        let mut permission = (false /* writable */, false /* no_execute */);
+        #[derive(Copy, Clone, PartialEq, Eq)]
+        struct Permission {
+            writable: bool,
+            executable: bool,
+            user_accessible: bool,
+            accessed: bool,
+            dirty: bool,
+        }
+        let mut permission = Permission {
+            writable: false,
+            executable: false,
+            user_accessible: false,
+            accessed: false,
+            dirty: false,
+        };
         let mut omitted = false;
         let mut last_address = (
             VAddress::new(0), /* virtual address */
             PAddress::new(0), /* physical address */
         );
-        let print_normal = |v: usize, p: usize, w: bool, e: bool, a: bool, s: &str| {
+        let print_normal = |v: usize, p: usize, m: &Permission, s: &str| {
             kprintln!(
-                "Linear addresses: {:>#16X} => Physical Address: {:>#16X}, W:{:>5}, E:{:>5}, A:{:>5} {}",
+                "Linear: {:>#18X} => Physical: {:>#18X}, W: {:>5}, E: {:>5}, U: {:>5}, A: {:>5}, D: {:>5} | {}",
                 v,
                 p,
-                w,
-                e,
-                a,
+                m.writable,
+                m.executable,
+                m.user_accessible,
+                m.accessed,
+                m.dirty,
                 s
             );
         };
         let print_omitted = |v: usize, p: usize| {
-            kprintln!(
-                "...               {:>#16X}                      {:>#16X} (fin)",
-                v,
-                p
-            );
+            kprintln!("...     {:>#18X}              {:>#18X} (fin)", v, p);
         };
         let calculate_virtual_address = |pml4_count: usize,
                                          pdpte_count: usize,
@@ -693,12 +705,12 @@ impl PageManager {
         };
 
         let pml4_table = self.get_top_level_table();
-        for (pml4_count, pml4) in pml4_table.iter().enumerate() {
-            if !pml4.is_present() {
+        for (pml4_count, pml4e) in pml4_table.iter().enumerate() {
+            if !pml4e.is_present() {
                 continue;
             }
             let pdpt = unsafe {
-                &*(physical_address_to_direct_map(pml4.get_address().unwrap())
+                &*(physical_address_to_direct_map(pml4e.get_address().unwrap())
                     .to::<[PDPTE; PDPT_MAX_ENTRY]>())
             };
             for (pdpte_count, pdpte) in pdpt.iter().enumerate() {
@@ -710,11 +722,17 @@ impl PageManager {
                     if start.is_some() && virtual_address < start.unwrap() {
                         continue;
                     }
+                    let pdpte_permission = Permission {
+                        writable: pml4e.is_writable() && pdpte.is_writable(),
+                        executable: !pdpte.is_no_execute(),
+                        user_accessible: pml4e.is_user_accessible() && pdpte.is_user_accessible(),
+                        accessed: pdpte.is_accessed(),
+                        dirty: pdpte.is_dirty(),
+                    };
                     if last_address.0 + MSize::new(1 << (PAGE_SHIFT + 9 * 2)) == virtual_address
                         && last_address.1 + MSize::new(1 << (PAGE_SHIFT + 9 * 2))
                             == pdpte.get_address().unwrap()
-                        && permission.0 == pdpte.is_writable()
-                        && permission.1 == pdpte.is_no_execute()
+                        && permission == pdpte_permission
                     {
                         last_address.0 = virtual_address;
                         last_address.1 = pdpte.get_address().unwrap();
@@ -728,9 +746,7 @@ impl PageManager {
                     print_normal(
                         virtual_address.to_usize(),
                         pdpte.get_address().unwrap().to_usize(),
-                        pdpte.is_writable(),
-                        !pdpte.is_no_execute(),
-                        pdpte.is_accessed(),
+                        &pdpte_permission,
                         "1G",
                     );
                     if end.is_some() && virtual_address >= end.unwrap() {
@@ -738,7 +754,7 @@ impl PageManager {
                     }
                     last_address.0 = virtual_address;
                     last_address.1 = pdpte.get_address().unwrap();
-                    permission = (pdpte.is_writable(), pdpte.is_no_execute());
+                    permission = pdpte_permission;
                     continue;
                 }
                 let pd = unsafe {
@@ -755,11 +771,21 @@ impl PageManager {
                         if start.is_some() && virtual_address < start.unwrap() {
                             continue;
                         }
+                        let pde_permission = Permission {
+                            writable: pml4e.is_writable()
+                                && pdpte.is_writable()
+                                && pde.is_writable(),
+                            executable: !pde.is_no_execute(),
+                            user_accessible: pml4e.is_user_accessible()
+                                && pdpte.is_user_accessible()
+                                && pde.is_user_accessible(),
+                            accessed: pde.is_accessed(),
+                            dirty: pde.is_dirty(),
+                        };
                         if last_address.0 + MSize::new(1 << (PAGE_SHIFT + 9)) == virtual_address
                             && last_address.1 + MSize::new(1 << (PAGE_SHIFT + 9))
                                 == pde.get_address().unwrap()
-                            && permission.0 == pde.is_writable()
-                            && permission.1 == pde.is_no_execute()
+                            && permission == pde_permission
                         {
                             last_address.0 = virtual_address;
                             last_address.1 = pde.get_address().unwrap();
@@ -773,9 +799,7 @@ impl PageManager {
                         print_normal(
                             virtual_address.to_usize(),
                             pde.get_address().unwrap().to_usize(),
-                            pdpte.is_writable(),
-                            !pdpte.is_no_execute(),
-                            pdpte.is_accessed(),
+                            &pde_permission,
                             "2M",
                         );
                         if end.is_some() && virtual_address >= end.unwrap() {
@@ -783,7 +807,7 @@ impl PageManager {
                         }
                         last_address.0 = virtual_address;
                         last_address.1 = pde.get_address().unwrap();
-                        permission = (pde.is_writable(), pde.is_no_execute());
+                        permission = pde_permission;
                         continue;
                     }
                     let pt = unsafe {
@@ -803,11 +827,23 @@ impl PageManager {
                         if start.is_some() && virtual_address < start.unwrap() {
                             continue;
                         }
+                        let pte_permission = Permission {
+                            writable: pml4e.is_writable()
+                                && pdpte.is_writable()
+                                && pde.is_writable()
+                                && pte.is_writable(),
+                            executable: !pte.is_no_execute(),
+                            user_accessible: pml4e.is_user_accessible()
+                                && pdpte.is_user_accessible()
+                                && pde.is_user_accessible()
+                                && pte.is_user_accessible(),
+                            accessed: pte.is_accessed(),
+                            dirty: pte.is_dirty(),
+                        };
                         if last_address.0 + MSize::new(1 << PAGE_SHIFT) == virtual_address
                             && last_address.1 + MSize::new(1 << PAGE_SHIFT)
                                 == pte.get_address().unwrap()
-                            && permission.0 == pte.is_writable()
-                            && permission.1 == pte.is_no_execute()
+                            && permission == pte_permission
                         {
                             last_address.0 = virtual_address;
                             last_address.1 = pte.get_address().unwrap();
@@ -821,9 +857,7 @@ impl PageManager {
                         print_normal(
                             virtual_address.to_usize(),
                             pte.get_address().unwrap().to_usize(),
-                            pte.is_writable(),
-                            !pte.is_no_execute(),
-                            pte.is_accessed(),
+                            &pte_permission,
                             "4K",
                         );
                         if end.is_some() && virtual_address >= end.unwrap() {
@@ -831,7 +865,7 @@ impl PageManager {
                         }
                         last_address.0 = virtual_address;
                         last_address.1 = pte.get_address().unwrap();
-                        permission = (pte.is_writable(), pte.is_no_execute());
+                        permission = pte_permission;
                     }
                 }
             }
