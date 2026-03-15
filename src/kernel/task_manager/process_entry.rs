@@ -8,8 +8,11 @@ use super::{ProcessStatus, TaskError, TaskSignal, ThreadEntry};
 use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
 use crate::kernel::file_manager::File;
-use crate::kernel::memory_manager::MemoryManager;
-use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
+use crate::kernel::memory_manager::{
+    MemoryError, MemoryManager,
+    data_type::{Address, MSize, VAddress},
+};
+use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, Mutex};
 
 use core::mem::offset_of;
 use core::ptr::NonNull;
@@ -22,12 +25,17 @@ pub struct ProcessEntry {
     pub(super) p_list: PtrLinkedListNode<Self>,
     pub(super) children: PtrLinkedList<Self>,
     pub(super) siblings: PtrLinkedListNode<Self>,
-    pub(super) lock: SpinLockFlag,
+    pub(super) lock: IrqSaveSpinLockFlag,
 
     thread: PtrLinkedList<ThreadEntry>,
     signal: TaskSignal,
     status: ProcessStatus,
     memory_manager: *mut MemoryManager,
+    heap_area: (
+        VAddress,
+        MSize, /* mapped size */
+        MSize, /* using size */
+    ),
     process_id: usize,
     parent: Option<NonNull<ProcessEntry>>,
     num_of_thread: usize,
@@ -37,16 +45,17 @@ pub struct ProcessEntry {
 }
 
 impl ProcessEntry {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             p_list: PtrLinkedListNode::new(),
             children: PtrLinkedList::new(),
             siblings: PtrLinkedListNode::new(),
-            lock: SpinLockFlag::new(),
+            lock: IrqSaveSpinLockFlag::new(),
             thread: PtrLinkedList::new(),
             signal: TaskSignal::Normal,
             status: ProcessStatus::New,
             memory_manager: core::ptr::null_mut(),
+            heap_area: (VAddress::new(0), MSize::new(0), MSize::new(0)),
             process_id: 0,
             parent: None,
             num_of_thread: 0,
@@ -94,6 +103,15 @@ impl ProcessEntry {
         }
     }
 
+    pub fn init_heap_size(&mut self, heap_start: VAddress, heap_size: MSize) {
+        let _lock = self.lock.lock();
+        assert_eq!(
+            self.heap_area,
+            (VAddress::new(0), MSize::new(0), MSize::new(0))
+        );
+        self.heap_area = (heap_start, heap_size, MSize::new(0));
+    }
+
     /// Chain `thread` into self.thread(List, ThreadEntry::t_list)
     ///
     /// This function does not check [Self::num_of_threads].
@@ -138,6 +156,11 @@ impl ProcessEntry {
         self.status
     }
 
+    pub fn set_process_status(&mut self, status: ProcessStatus) {
+        let _lock = self.lock.lock();
+        self.status = status;
+    }
+
     pub const fn get_pid(&self) -> usize {
         self.process_id
     }
@@ -155,6 +178,43 @@ impl ProcessEntry {
         let m = self.memory_manager;
         drop(_lock);
         m
+    }
+
+    pub fn get_heap_area(&self) -> (VAddress, MSize) {
+        let _lock = self.lock.lock();
+        (self.heap_area.0, self.heap_area.1)
+    }
+
+    pub fn increate_heap(&mut self, new_address: VAddress) -> Result<VAddress, TaskError> {
+        let _lock = self.lock.lock();
+        if self.heap_area.0.is_zero() {
+            return Err(TaskError::InvalidProcessEntry);
+        } else if new_address.is_zero() {
+            return Ok(self.heap_area.0);
+        } else if new_address < self.heap_area.0 {
+            return Err(TaskError::MemoryError(MemoryError::InvalidAddress));
+        }
+
+        let new_heap_size = new_address - self.heap_area.0;
+        let needed_heap_size = new_heap_size + self.heap_area.2;
+        if needed_heap_size <= self.heap_area.1 {
+            self.heap_area.2 = needed_heap_size;
+            return Ok(new_address);
+        }
+
+        let memory_manager = unsafe { &mut *self.memory_manager };
+        assert!(!memory_manager.is_kernel_memory_manager());
+        let new_map_size = needed_heap_size.page_align_up();
+        assert!(new_map_size > self.heap_area.1);
+        let result = memory_manager.mremap(self.heap_area.0, self.heap_area.1, new_map_size);
+        match result {
+            Ok(_) => {
+                assert_eq!(self.heap_area.0 + new_map_size, new_address);
+                self.heap_area.1 = new_map_size;
+                Ok(new_address)
+            }
+            Err(e) => Err(TaskError::MemoryError(e)),
+        }
     }
 
     /// Search the thread from [Self::thread]
@@ -227,7 +287,7 @@ impl ProcessEntry {
     pub fn add_file(&mut self, f: File) -> usize {
         let mut l = self.files.lock().unwrap();
         l.push(Arc::new(Mutex::new(f)));
-        l.len()
+        l.len() - 1
     }
 
     pub fn remove_file_from_list(&mut self, index: usize) -> Result<Arc<Mutex<File>>, ()> {

@@ -6,8 +6,9 @@ use self::file_info::FileInfo;
 pub use self::{
     path_info::PathInfo,
     vfs::{
-        FILE_PERMISSION_READ, FILE_PERMISSION_WRITE, File, FileDescriptor, FileDescriptorData,
-        FileOperationDriver, FileSeekOrigin,
+        FILE_PERMISSION_DIRECTORY, FILE_PERMISSION_EXECUTE, FILE_PERMISSION_READ,
+        FILE_PERMISSION_WRITE, File, FileDescriptor, FileDescriptorData, FileOperationDriver,
+        FileSeekOrigin,
     },
 };
 
@@ -37,6 +38,10 @@ mod vfs;
 mod xfs;
 
 pub type FInfo = Arc<Mutex<FileInfo>>;
+
+/// Check the permission and attribute strictly
+/// For example: check if [`FILE_PERMISSION_DIRECTORY`] is set.
+pub const FILE_FLAGS_RESTRICT_MODE: u8 = 1;
 
 //#[derive(Clone)]
 pub struct PartitionInfo {
@@ -232,8 +237,19 @@ impl FileManager {
         &mut self,
         file_name: &str,
         current_directory: FInfo,
-        permission_and_flags: u16,
+        permission: u8,
     ) -> Result<FInfo, FileError> {
+        /* TODO: check uid/gid */
+        let mut permission_and_flags = 0;
+        if (permission & FILE_PERMISSION_READ) != 0 {
+            permission_and_flags |= FileInfo::PERMISSION_FLAG_READ;
+        }
+        if (permission & FILE_PERMISSION_WRITE) != 0 {
+            permission_and_flags |= FileInfo::PERMISSION_FLAG_WRITE;
+        }
+        if (permission & FILE_PERMISSION_DIRECTORY) != 0 {
+            permission_and_flags |= FileInfo::FLAGS_DIRECTORY;
+        }
         if file_name == "." || file_name.is_empty() {
             return Ok(current_directory.clone());
         } else if file_name == ".." {
@@ -281,16 +297,15 @@ impl FileManager {
         &mut self,
         file_name: &PathInfo,
         current_directory: Option<&FInfo>,
-        _permission: u8,
+        permission: u8,
     ) -> Result<FInfo, FileError> {
         let mut dir = if file_name.is_absolute_path() {
             self.root.clone()
         } else {
             current_directory.ok_or(FileError::FileNotFound)?.clone()
         };
-        let permission_and_flags = 0; //permission
         for e in file_name.iter() {
-            dir = self._open_file_info(e, dir, permission_and_flags)?;
+            dir = self._open_file_info(e, dir, permission)?;
         }
         Ok(dir.clone())
     }
@@ -299,12 +314,17 @@ impl FileManager {
         &mut self,
         info: &FInfo,
         permission: u8,
+        flags: u8,
     ) -> Result<File, FileError> {
         let f_i = info.lock().unwrap();
-        if (f_i.permission_and_flags & FileInfo::FLAGS_DIRECTORY) != 0
-            || (f_i.permission_and_flags & FileInfo::FLAGS_META_DARA) != 0
-        {
+        if (f_i.permission_and_flags & FileInfo::FLAGS_META_DARA) != 0 {
             return Err(FileError::InvalidFile);
+        } else if (flags & FILE_FLAGS_RESTRICT_MODE) != 0 {
+            if ((permission & FILE_PERMISSION_DIRECTORY) == 0)
+                != ((f_i.permission_and_flags & FileInfo::FLAGS_DIRECTORY) == 0)
+            {
+                return Err(FileError::InvalidFile);
+            }
         }
         /* TODO: permission check based on user/group */
 
@@ -324,9 +344,10 @@ impl FileManager {
         file_name: &PathInfo,
         current_directory: Option<&FInfo>,
         permission: u8,
+        flags: u8,
     ) -> Result<File, FileError> {
         let file_info = self.open_file_info(file_name, current_directory, permission)?;
-        self.open_file_info_as_file(&file_info, permission)
+        self.open_file_info_as_file(&file_info, permission, flags)
     }
 }
 

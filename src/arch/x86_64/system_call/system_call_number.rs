@@ -11,6 +11,7 @@ pub const SYSCALL_EXIT_GROUP: SysCallNumber = 231;
 
 pub const SYSCALL_OPEN: SysCallNumber = 2;
 pub const SYSCALL_CLOSE: SysCallNumber = 3;
+pub const SYSCALL_STAT: SysCallNumber = 4;
 pub const SYSCALL_LSEEK: SysCallNumber = 8;
 
 pub const SYSCALL_READ: SysCallNumber = 0;
@@ -19,6 +20,11 @@ pub const SYSCALL_WRITEV: SysCallNumber = 20;
 
 pub const SYSCALL_SET_TID_ADDRESS: SysCallNumber = 218;
 pub const SYSCALL_ARCH_PRCTL: SysCallNumber = 158;
+pub const SYSCALL_GET_PID: SysCallNumber = 39;
+pub const SYSCALL_GET_UID: SysCallNumber = 102;
+pub const SYSCALL_GET_EUID: SysCallNumber = 107;
+pub const SYSCALL_GET_GID: SysCallNumber = 104;
+pub const SYSCALL_GET_EGID: SysCallNumber = 108;
 
 pub const SYSCALL_BRK: SysCallNumber = 12;
 pub const SYSCALL_MMAP: SysCallNumber = 9;

@@ -18,6 +18,8 @@ pub enum FileSeekOrigin {
 
 pub const FILE_PERMISSION_READ: u8 = 1;
 pub const FILE_PERMISSION_WRITE: u8 = 1 << 1;
+pub const FILE_PERMISSION_EXECUTE: u8 = 1 << 2;
+pub const FILE_PERMISSION_DIRECTORY: u8 = 1 << 7;
 
 pub trait FileOperationDriver {
     fn read(

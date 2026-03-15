@@ -41,7 +41,7 @@ impl<'a> Iterator for PathInfoIter<'a> {
             if e == '/' {
                 let (c, n) = self.s.split_at(index);
                 self.s = n.split_at(1).1;
-                return Some(c);
+                return if c.is_empty() { self.next() } else { Some(c) };
             }
             index += 1;
         }

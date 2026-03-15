@@ -19,6 +19,11 @@ pub const SYSCALL_WRITEV: SysCallNumber = 66;
 
 pub const SYSCALL_SET_TID_ADDRESS: SysCallNumber = 96;
 pub const SYSCALL_ARCH_PRCTL: SysCallNumber = 167;
+pub const SYSCALL_GET_PID: SysCallNumber = 172;
+pub const SYSCALL_GET_UID: SysCallNumber = 174;
+pub const SYSCALL_GET_EUID: SysCallNumber = 175;
+pub const SYSCALL_GET_GID: SysCallNumber = 176;
+pub const SYSCALL_GET_EGID: SysCallNumber = 177;
 
 pub const SYSCALL_BRK: SysCallNumber = 214;
 pub const SYSCALL_MMAP: SysCallNumber = 22;

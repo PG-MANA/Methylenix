@@ -4,20 +4,27 @@
 
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::context::memory_layout::is_user_memory_area;
-use crate::arch::target_arch::device::cpu;
 use crate::arch::target_arch::interrupt::InterruptManager;
-use crate::arch::target_arch::system_call::{self, system_call_number::*};
+use crate::arch::target_arch::system_call::{system_call_number::*, *};
 
-use crate::kernel::file_manager::{FILE_PERMISSION_READ, File, FileSeekOrigin, PathInfo};
+use crate::kernel::file_manager::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
-use crate::kernel::memory_manager::data_type::{
-    Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress,
+use crate::kernel::memory_manager::{
+    data_type::{Address, MOffset, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress},
+    kfree, kmalloc,
 };
-use crate::kernel::memory_manager::{kfree, kmalloc};
 use crate::kernel::network_manager::socket_manager::socket_system_call;
+use crate::kernel::task_manager::{ProcessStatus, TaskStatus};
 
-//const SYSCALL_RETURN_SUCCESS: u64 = 0;
-const SYSCALL_RETURN_ERROR: u64 = u64::MAX;
+pub const SYSCALL_RETURN_SUCCESS: u64 = 0;
+pub const SYSCALL_RETURN_ERROR: u64 = u64::MAX;
+
+#[repr(isize)]
+enum ErrorCode {
+    NoEntry = -2,
+    Invalid = -4,
+    Access = 13,
+}
 
 pub fn system_call_handler(context: &mut ContextData) {
     match context.get_system_call_arguments(0).unwrap() as SysCallNumber {
@@ -26,20 +33,26 @@ pub fn system_call_handler(context: &mut ContextData) {
                 "SysCall: Exit(Return Code: {:#X})",
                 context.get_system_call_arguments(1).unwrap()
             );
-            pr_info!("This thread will be stopped.");
-            loop {
-                unsafe { cpu::halt() };
-            }
+            let irq = InterruptManager::save_and_disable_local_irq();
+            let t = get_cpu_manager_cluster().run_queue.get_running_thread();
+            t.set_task_status(TaskStatus::Stopped);
+            InterruptManager::restore_local_irq(irq);
+            get_cpu_manager_cluster().run_queue.schedule(Some(context));
+            unreachable!();
         }
         SYSCALL_EXIT_GROUP => {
             pr_info!(
                 "SysCall: ExitGroup(Return Code: {:#X})",
                 context.get_system_call_arguments(1).unwrap()
             );
-            pr_info!("This thread will be stopped.");
-            loop {
-                unsafe { cpu::halt() };
-            }
+            let irq = InterruptManager::save_and_disable_local_irq();
+            let t = get_cpu_manager_cluster().run_queue.get_running_thread();
+            t.set_task_status(TaskStatus::Stopped);
+            let p = unsafe { &mut *t.get_process_mut() };
+            p.set_process_status(ProcessStatus::Zombie);
+            InterruptManager::restore_local_irq(irq);
+            get_cpu_manager_cluster().run_queue.schedule(Some(context));
+            unreachable!();
         }
         SYSCALL_WRITE => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
@@ -79,11 +92,10 @@ pub fn system_call_handler(context: &mut ContextData) {
             let mut written_bytes = 0usize;
             let iov = context.get_system_call_arguments(2).unwrap() as usize;
             for i in 0..(context.get_system_call_arguments(3).unwrap() as usize) {
-                use core::mem;
-                let iovec = iov + i * (mem::size_of::<usize>() * 2);
+                let iovec = iov + i * (size_of::<usize>() * 2);
                 if check_user_address(
                     VAddress::new(iovec),
-                    MSize::new(mem::size_of::<usize>() * 2),
+                    MSize::new(size_of::<usize>() * 2),
                     true,
                     false,
                 )
@@ -93,7 +105,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                     break;
                 }
                 let iov_base = unsafe { *(iovec as *const usize) };
-                let iov_len = unsafe { *((iovec + mem::size_of::<usize>()) as *const usize) };
+                let iov_len = unsafe { *((iovec + size_of::<usize>()) as *const usize) };
                 if let Ok(bytes) = system_call_write(&mut file_unlocked, iov_base, iov_len) {
                     written_bytes += bytes;
                 } else {
@@ -148,46 +160,10 @@ pub fn system_call_handler(context: &mut ContextData) {
                     .unwrap_or(SYSCALL_RETURN_ERROR),
             );
         }
-        SYSCALL_OPEN => {
-            const O_RDONLY: u64 = 0;
-            const O_LARGEFILE: u64 = 0o0100000;
-
-            let mut str_len = 0usize;
-            let file_name = context.get_system_call_arguments(1).unwrap() as usize;
-            while unsafe { *((file_name + str_len) as *const u8) } != 0 {
-                str_len += 1;
-            }
-            let mut flag = context.get_system_call_arguments(2).unwrap();
-            flag &= !O_LARGEFILE;
-            if flag == O_RDONLY {
-                if let Ok(s) = core::str::from_utf8(unsafe {
-                    core::slice::from_raw_parts(file_name as *const u8, str_len)
-                }) {
-                    if let Ok(f) = get_kernel_manager_cluster().file_manager.open_file(
-                        PathInfo::new(s),
-                        None,
-                        FILE_PERMISSION_READ,
-                    )
-                    /* TODO: Current Directory*/
-                    {
-                        let process = get_cpu_manager_cluster().run_queue.get_running_process();
-                        let fd = process.add_file(f);
-                        context.set_system_call_return_value(fd as u64);
-                    } else {
-                        pr_warn!("{} is not found.", s);
-                    }
-                } else {
-                    pr_warn!("Failed to convert file name to utf-8");
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
-                }
-            } else {
-                pr_warn!(
-                    "Unsupported flags: {:#X}",
-                    context.get_system_call_arguments(2).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
-            }
-        }
+        SYSCALL_OPEN => match system_call_open(context) {
+            Ok(fd) => context.set_system_call_return_value(fd as _),
+            Err(eno) => context.set_system_call_return_value((eno as isize).cast_unsigned() as _),
+        },
         SYSCALL_LSEEK => {
             const SEEK_SET: u64 = 0x00;
             const SEEK_CUR: u64 = 0x01;
@@ -242,7 +218,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             context.set_system_call_return_value(0);
         }
         SYSCALL_ARCH_PRCTL => {
-            let v = system_call::syscall_arch_prctl(context);
+            let v = syscall_arch_prctl(context);
             context.set_system_call_return_value(v);
         }
         SYSCALL_SET_TID_ADDRESS => {
@@ -259,12 +235,36 @@ pub fn system_call_handler(context: &mut ContextData) {
             );
             InterruptManager::restore_local_irq(flag);
         }
+        SYSCALL_GET_PID => {
+            let irq = InterruptManager::save_and_disable_local_irq();
+            let p = get_cpu_manager_cluster().run_queue.get_running_process();
+            context.set_system_call_return_value(p.get_pid() as _);
+            InterruptManager::restore_local_irq(irq);
+        }
+        SYSCALL_GET_UID | SYSCALL_GET_EUID => {
+            pr_debug!("UID is not implemented, return 0");
+            context.set_system_call_return_value(0);
+        }
+        SYSCALL_GET_GID | SYSCALL_GET_EGID => {
+            pr_debug!("GID is not implemented, return 0");
+            context.set_system_call_return_value(0);
+        }
         SYSCALL_BRK => {
-            pr_debug!(
-                "BRK(Address: {:#X}) is ignored.",
-                context.get_system_call_arguments(1).unwrap()
-            );
-            context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let addr = VAddress::new(context.get_system_call_arguments(1).unwrap() as _);
+            let irq = InterruptManager::save_and_disable_local_irq();
+            let p = get_cpu_manager_cluster().run_queue.get_running_process();
+            let result = p.increate_heap(addr);
+            InterruptManager::restore_local_irq(irq);
+
+            match result {
+                Ok(v) => {
+                    context.set_system_call_return_value(v.to_usize() as _);
+                }
+                Err(e) => {
+                    pr_err!("brk({addr}) was failed: {e:?}");
+                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                }
+            }
         }
         SYSCALL_MMAP => {
             let address = context.get_system_call_arguments(1).unwrap();
@@ -282,7 +282,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                     fd as usize,
                     offset as usize,
                 )
-                .unwrap_or(usize::MAX) as u64,
+                .unwrap_or(SYSCALL_RETURN_ERROR as _) as u64,
             );
         }
         SYSCALL_MUNMAP => {
@@ -506,9 +506,71 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
         }
         s => {
-            pr_err!("SysCall: Unknown({:#X})", s);
-            context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            if !arch_system_call_handler(s, context) {
+                pr_err!("Unknown System Call: {s}");
+                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            }
         }
+    }
+}
+
+fn system_call_open(context: &mut ContextData) -> Result<usize, ErrorCode> {
+    const O_ACCMODE: u64 = 3;
+    const O_RDONLY: u64 = 0;
+    const O_WRONLY: u64 = 1;
+    const O_RDWR: u64 = 2;
+    const O_DIRECTORY: u64 = 0o200000;
+    // const O_LARGEFILE: u64 = 0o0100000;
+
+    let mut str_len = 0usize;
+    let file_name = context.get_system_call_arguments(1).unwrap() as usize;
+    while unsafe { *((file_name + str_len) as *const u8) } != 0 {
+        str_len += 1;
+    }
+    let flag = context.get_system_call_arguments(2).unwrap();
+
+    let mut permission;
+    let mut open_flags = 0;
+    match flag & O_ACCMODE {
+        O_RDONLY => {
+            permission = FILE_PERMISSION_READ;
+        }
+        O_WRONLY => {
+            permission = FILE_PERMISSION_WRITE;
+        }
+        O_RDWR => {
+            permission = FILE_PERMISSION_READ | FILE_PERMISSION_WRITE;
+        }
+        _ => {
+            return Err(ErrorCode::Invalid);
+        }
+    }
+    if (flag & O_DIRECTORY) != 0 {
+        permission |= FILE_PERMISSION_DIRECTORY;
+        open_flags |= FILE_FLAGS_RESTRICT_MODE;
+    }
+    if let Ok(s) = core::str::from_utf8(unsafe {
+        core::slice::from_raw_parts(file_name as *const u8, str_len)
+    }) {
+        /* TODO: Current Directory*/
+        if let Ok(f) = get_kernel_manager_cluster().file_manager.open_file(
+            PathInfo::new(s),
+            None,
+            permission,
+            open_flags,
+        ) {
+            let irq = InterruptManager::save_and_disable_local_irq();
+            let process = get_cpu_manager_cluster().run_queue.get_running_process();
+            let fd = process.add_file(f);
+            InterruptManager::restore_local_irq(irq);
+            Ok(fd)
+        } else {
+            pr_warn!("{} is not found.", s);
+            Err(ErrorCode::NoEntry)
+        }
+    } else {
+        pr_warn!("Failed to convert file name to utf-8");
+        Err(ErrorCode::Access)
     }
 }
 
@@ -547,15 +609,15 @@ fn system_call_memory_map(
     const PROT_EXEC: usize = 0x04;
 
     /* FLAGS */
-    //const MAP_SHARED: usize = 0x01;
-    //const MAP_PRIVATE: usize = 0x02;
+    const MAP_SHARED: usize = 0x01;
+    const MAP_PRIVATE: usize = 0x02;
     //const MAP_FIXED: usize = 0x10;
     const MAP_ANONYMOUS: usize = 0x20;
 
     if size == 0 {
-        pr_err!("Size is zero.");
         return Err(());
     }
+    let address = VAddress::new(address);
     let size = MSize::new(size).page_align_up();
 
     let memory_permission = MemoryPermissionFlags::new(
@@ -568,6 +630,13 @@ fn system_call_memory_map(
         pr_err!("Flags({:#X}) is not anonymous.", flags);
         return Err(());
     }
+    if (flags & MAP_SHARED) != 0 {
+        pr_warn!("Shared mapping is requested, but not implemented.");
+    }
+    if (flags & MAP_PRIVATE) != 0 {
+        pr_warn!("CoW mapping is requested, but not implemented.");
+    }
+
     let memory_options = MemoryOptionFlags::ALLOC | MemoryOptionFlags::USER;
 
     let memory_manager = unsafe {
@@ -577,18 +646,30 @@ fn system_call_memory_map(
             .get_memory_manager())
     };
 
-    if address != 0 {
-        /* Memory Map */
-        pr_warn!("Address({:#X}) will be ignored.", address);
+    let result: Result<VAddress, ()>;
+    if address.is_zero() {
+        /* Memory Allocation */
+        result = memory_manager
+            .alloc_nonlinear_pages(size, memory_permission, Some(memory_options))
+            .map_err(|e| pr_err!("Failed to allocate memory: {e:?}"));
+    } else {
+        /* brk fast path */
+        /* TODO: make brk lazy mapping */
+        let irq = InterruptManager::save_and_disable_local_irq();
+        let p = get_cpu_manager_cluster().run_queue.get_running_process();
+        let (heap, heap_size) = p.get_heap_area();
+        InterruptManager::restore_local_irq(irq);
+        if heap <= address
+            && (address + size) <= (heap + heap_size)
+            && !memory_permission.is_executable()
+        {
+            result = Ok(address);
+        } else {
+            pr_warn!("Mapping memory is not supported");
+            result = Err(());
+        }
     }
-    /* Memory Allocation */
-    let result =
-        memory_manager.alloc_nonlinear_pages(size, memory_permission, Some(memory_options));
-    if let Err(e) = result {
-        pr_err!("Failed to allocate memory: {:?}", e);
-        return Err(());
-    }
-    Ok(result.unwrap().to_usize())
+    result.map(|v| v.to_usize())
 }
 
 fn check_user_address(

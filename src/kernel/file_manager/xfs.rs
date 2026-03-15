@@ -188,6 +188,10 @@ impl XfsDriver {
         self.get_inode_offset_number(inode_number) << self.inode_size_log2
     }
 
+    fn is_directory(&self, inode: &DInodeCore) -> bool {
+        inode.format == XFS_D_INODE_CORE_FORMAT_LOCAL
+    }
+
     fn list_files(&self, partition_info: &PartitionInfo, inode_number: u64, indent: usize) {
         let inode_block = self.get_inode_block(inode_number);
         let inode_offset = self.get_inode_offset(inode_number);
@@ -229,7 +233,7 @@ impl XfsDriver {
             bug_on_err!(free_pages!(inode_buffer));
             return;
         }
-        if inode.format != XFS_D_INODE_CORE_FORMAT_LOCAL {
+        if !self.is_directory(&inode) {
             pr_err!("inode is not the directory format.");
             bug_on_err!(free_pages!(inode_buffer));
             return;
@@ -542,6 +546,9 @@ impl XfsDriver {
         file_info.set_permission_by_mode(u16::from_be(inode.mode));
         file_info.set_uid(u32::from_be(inode.uid));
         file_info.set_gid(u32::from_be(inode.gid));
+        if self.is_directory(&inode) {
+            file_info.set_attribute_directory();
+        }
 
         bug_on_err!(free_pages!(inode_buffer));
         Ok(())
