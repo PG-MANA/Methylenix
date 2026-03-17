@@ -4,7 +4,7 @@
 
 use crate::arch::target_arch::{
     context::{ContextManager, memory_layout::USER_STACK_END_ADDRESS},
-    paging::{PAGE_MASK, PAGE_SIZE_USIZE},
+    paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
 use crate::kernel::{
@@ -99,6 +99,7 @@ pub fn load_and_execute(
         }
     };
     let process_memory_manager = unsafe { &mut *process.get_memory_manager() };
+    let mut max_address = VAddress::new(0);
 
     let result: Result<(), ()> = try {
         for program_header in header.get_program_headers_iter(
@@ -198,6 +199,7 @@ pub fn load_and_execute(
                     Err(())?
                 }
                 bug_on_err!(free_pages!(allocated_memory));
+                max_address = (user_address + aligned_memory_size).max(max_address);
             } else if segment_type == ELF_PROGRAM_HEADER_SEGMENT_RELRO {
                 pr_debug!(
                     "VA: {:#18X}, FS: {:#18X}, FO: {:#18X}, AL: {:#10X}: Relocation(TODO)",
@@ -220,10 +222,20 @@ pub fn load_and_execute(
         );
         return Err(());
     }
+    assert_eq!(max_address & !PAGE_MASK, 0);
 
     /* Setup stack */
     let stack_size = MSize::new(ContextManager::DEFAULT_STACK_SIZE_OF_USER);
     let stack_user_top_address = USER_STACK_END_ADDRESS.to_usize() + 1;
+    if max_address >= VAddress::new(stack_user_top_address) - stack_size {
+        pr_err!("Invalid memory layout");
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+        );
+        return Err(());
+    }
     let stack_kernel_address = alloc_non_linear_pages!(stack_size).map_err(|e| {
         pr_err!("Failed to alloc stack: {:?}", e);
         bug_on_err!(
@@ -340,6 +352,38 @@ pub fn load_and_execute(
         return Err(());
     }
     bug_on_err!(free_pages!(stack_kernel_address));
+
+    /* Prepare heap address */
+    let heap_user_address = max_address;
+    let heap_kernel_address = alloc_non_linear_pages!(PAGE_SIZE).map_err(|e| {
+        pr_err!("Failed to setup the heap: {e:?}");
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+        );
+    })?;
+    if let Err(e) = get_kernel_manager_cluster()
+        .kernel_memory_manager
+        .share_kernel_memory_with_user(
+            process_memory_manager,
+            heap_kernel_address,
+            heap_user_address,
+            MemoryPermissionFlags::new(true, true, false, true),
+            MemoryOptionFlags::USER | MemoryOptionFlags::HEAP,
+        )
+    {
+        pr_err!("Failed to map heap into user: {e:?}");
+        bug_on_err!(free_pages!(heap_kernel_address));
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+        );
+        return Err(());
+    }
+    process.init_heap_size(heap_user_address, PAGE_SIZE);
+    bug_on_err!(free_pages!(heap_kernel_address));
 
     let thread = get_kernel_manager_cluster()
         .task_manager
