@@ -406,18 +406,27 @@ pub fn load_and_execute(
 
     /* Add stdout/stdin */
     use crate::kernel::tty;
-    process.add_file(
-        get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
-            .open_tty_as_file(FILE_PERMISSION_READ)?,
-    ); /* stdin */
-    process.add_file(
-        get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
-            .open_tty_as_file(FILE_PERMISSION_WRITE)?,
-    ); /* stderr */
-    process.add_file(
-        get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
-            .open_tty_as_file(FILE_PERMISSION_WRITE)?,
-    ); /* stderr */
+    assert_eq!(
+        process.add_file(
+            get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
+                .open_tty_as_file(FILE_PERMISSION_READ)?,
+        ),
+        0 /* stdin */
+    );
+    assert_eq!(
+        process.add_file(
+            get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
+                .open_tty_as_file(FILE_PERMISSION_WRITE)?,
+        ),
+        1 /* stdout */
+    );
+    assert_eq!(
+        process.add_file(
+            get_kernel_manager_cluster().kernel_tty_manager[tty::TtyManager::DEFAULT_KERNEL_TTY]
+                .open_tty_as_file(FILE_PERMISSION_WRITE)?,
+        ),
+        2 /* stderr */
+    );
 
     pr_debug!("Execute {}", file_name);
     if let Err(err) = get_kernel_manager_cluster()

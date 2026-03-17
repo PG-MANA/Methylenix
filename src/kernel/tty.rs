@@ -82,7 +82,7 @@ impl TtyManager {
     const DEFAULT_INPUT_BUFFER_SIZE: usize = 512;
     const DEFAULT_OUTPUT_BUFFER_SIZE: usize = 512;
     pub const NUMBER_OF_KERNEL_TTY: usize = 2;
-    pub const DEFAULT_KERNEL_TTY: usize = 1;
+    pub const DEFAULT_KERNEL_TTY: usize = 0;
 
     pub const fn new() -> Self {
         Self {
@@ -142,7 +142,6 @@ impl TtyManager {
 
         if self.output_driver.is_none() {
             return Ok(());
-            //return Err(fmt::Error {});
         }
 
         for c in s.bytes() {
