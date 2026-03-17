@@ -652,6 +652,11 @@ fn system_call_memory_map(
         result = memory_manager
             .alloc_nonlinear_pages(size, memory_permission, Some(memory_options))
             .map_err(|e| pr_err!("Failed to allocate memory: {e:?}"));
+      if let Ok(address) = result && (flags & MAP_ANONYMOUS) != 0 {
+          /* the memory area allocated with `MAP_ANONYMOUS` must be zero cleared */
+          unsafe{
+          core::ptr::write_bytes(address.to::<u8>(),0 ,size.to_usize())};
+      }
     } else {
         /* brk fast path */
         /* TODO: make brk lazy mapping */
@@ -661,7 +666,7 @@ fn system_call_memory_map(
         InterruptManager::restore_local_irq(irq);
         if heap <= address
             && (address + size) <= (heap + heap_size)
-            && !memory_permission.is_executable()
+            && !memory_permission.is_user_accessible()
         {
             result = Ok(address);
         } else {
