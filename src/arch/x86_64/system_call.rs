@@ -9,7 +9,7 @@ use system_call_number::*;
 use crate::arch::target_arch::context::context_data::ContextData;
 use crate::arch::target_arch::device::cpu;
 
-use crate::kernel::system_call::SYSCALL_RETURN_ERROR;
+use crate::kernel::system_call::ErrorCode;
 
 pub fn syscall_arch_prctl(context_data: &mut ContextData) -> u64 {
     const ARCH_SET_FS: u64 = 0x1002;
@@ -26,7 +26,7 @@ pub fn arch_system_call_handler(s: SysCallNumber, context_data: &mut ContextData
     match s {
         SYSCALL_STAT => {
             pr_info!("stat(2) is not supported");
-            context_data.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            context_data.set_system_call_return_value(ErrorCode::Invalid as _);
             true
         }
         _ => false,

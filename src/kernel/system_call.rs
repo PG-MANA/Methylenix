@@ -16,14 +16,24 @@ use crate::kernel::memory_manager::{
 use crate::kernel::network_manager::socket_manager::socket_system_call;
 use crate::kernel::task_manager::{ProcessStatus, TaskStatus};
 
-pub const SYSCALL_RETURN_SUCCESS: u64 = 0;
-pub const SYSCALL_RETURN_ERROR: u64 = u64::MAX;
+use core::ptr::copy_nonoverlapping;
+
+const MAX_PATH_LENGTH: usize = 256;
 
 #[repr(isize)]
-enum ErrorCode {
+#[derive(Debug)]
+pub enum ErrorCode {
+    Permission = -1,
     NoEntry = -2,
+    NoProcess = -3,
     Invalid = -4,
-    Access = 13,
+    Io = -5,
+    BadFileNumber = -9,
+    NoMemory = -12,
+    Access = -13,
+    Fault = -14,
+    Range = -34,
+    NameTooLong = -36,
 }
 
 pub fn system_call_handler(context: &mut ContextData) {
@@ -57,37 +67,32 @@ pub fn system_call_handler(context: &mut ContextData) {
         SYSCALL_WRITE => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
 
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
                 return;
-            }
-            let result = system_call_write(
-                &mut file.unwrap().lock().unwrap(),
-                context.get_system_call_arguments(2).unwrap() as usize,
-                context.get_system_call_arguments(3).unwrap() as usize,
-            );
+            };
             context.set_system_call_return_value(
-                result.map(|r| r as u64).unwrap_or(SYSCALL_RETURN_ERROR),
+                match system_call_write(
+                    &mut file.lock().unwrap(),
+                    context.get_system_call_arguments(2).unwrap() as usize,
+                    context.get_system_call_arguments(3).unwrap() as usize,
+                ) {
+                    Ok(r) => r as u64,
+                    Err(e) => e as u64,
+                },
             );
         }
         SYSCALL_WRITEV => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
 
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
                 return;
-            }
-            let file = file.unwrap();
+            };
             let mut file_unlocked = file.lock().unwrap();
             let mut written_bytes = 0usize;
             let iov = context.get_system_call_arguments(2).unwrap() as usize;
@@ -102,6 +107,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                 .is_err()
                 {
                     pr_err!("{:#X} is not accessible", iovec);
+                    context.set_system_call_return_value(ErrorCode::Fault as _);
                     break;
                 }
                 let iov_base = unsafe { *(iovec as *const usize) };
@@ -114,50 +120,46 @@ pub fn system_call_handler(context: &mut ContextData) {
             }
             drop(file);
             if written_bytes == 0 {
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                context.set_system_call_return_value(ErrorCode::Io as _);
             } else {
                 context.set_system_call_return_value(written_bytes as u64);
             }
         }
         SYSCALL_READ => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
                 return;
-            }
+            };
             let size = MSize::new(context.get_system_call_arguments(3).unwrap() as usize);
             let kernel_buffer = match kmalloc!(size) {
                 Ok(a) => a,
                 Err(e) => {
                     pr_err!("Failed to allocate memory: {:?}", e);
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                    context.set_system_call_return_value(ErrorCode::NoMemory as _);
                     return;
                 }
             };
-            let result = file.unwrap().lock().unwrap().read(kernel_buffer, size);
+            let result = file.lock().unwrap().read(kernel_buffer, size);
             if result.is_ok()
-                && write_data_into_user(
+                && let Err(e) = write_data_into_user(
                     VAddress::new(context.get_system_call_arguments(2).unwrap() as usize),
                     size,
                     kernel_buffer,
                 )
-                .is_err()
             {
-                pr_err!("Failed to copy data into user");
+                pr_err!("Failed to copy data into user: {e:?}");
                 let _ = kfree!(kernel_buffer, size);
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                context.set_system_call_return_value(e as _);
                 return;
             }
             let _ = kfree!(kernel_buffer, size);
             context.set_system_call_return_value(
                 result
                     .map(|r| r.to_usize() as u64)
-                    .unwrap_or(SYSCALL_RETURN_ERROR),
+                    .unwrap_or(ErrorCode::Io as _),
             );
         }
         SYSCALL_OPEN => match system_call_open(context) {
@@ -177,41 +179,39 @@ pub fn system_call_handler(context: &mut ContextData) {
                         "Invalid Seek Option: {:#X}",
                         context.get_system_call_arguments(3).unwrap()
                     );
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                    context.set_system_call_return_value(ErrorCode::Invalid as _);
                     return;
                 }
             };
 
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
+            if let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            {
+                let result = file.lock().unwrap().seek(
+                    MOffset::new(context.get_system_call_arguments(2).unwrap() as usize),
+                    seek_origin,
                 );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
-                return;
+                context.set_system_call_return_value(
+                    result
+                        .map(|r| r.to_usize() as u64)
+                        .unwrap_or(ErrorCode::Io as _),
+                );
+            } else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
             }
-
-            let result = file.unwrap().lock().unwrap().seek(
-                MOffset::new(context.get_system_call_arguments(2).unwrap() as usize),
-                seek_origin,
-            );
-            context.set_system_call_return_value(
-                result
-                    .map(|r| r.to_usize() as u64)
-                    .unwrap_or(SYSCALL_RETURN_ERROR),
-            );
         }
         SYSCALL_CLOSE => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            if let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            {
+                core::mem::take(&mut *file.lock().unwrap());
+                context.set_system_call_return_value(0);
+            } else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
+            }
+        }
                 return;
             }
             core::mem::take(&mut *file.unwrap().lock().unwrap());
@@ -262,7 +262,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                 }
                 Err(e) => {
                     pr_err!("brk({addr}) was failed: {e:?}");
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                    context.set_system_call_return_value(ErrorCode::NoMemory as _);
                 }
             }
         }
@@ -274,15 +274,17 @@ pub fn system_call_handler(context: &mut ContextData) {
             let fd = context.get_system_call_arguments(5).unwrap_or(0);
             let offset = context.get_system_call_arguments(6).unwrap_or(0);
             context.set_system_call_return_value(
-                system_call_memory_map(
+                match system_call_memory_map(
                     address as usize,
                     size as usize,
                     prot as usize,
                     flags as usize,
                     fd as usize,
                     offset as usize,
-                )
-                .unwrap_or(SYSCALL_RETURN_ERROR as _) as u64,
+                ) {
+                    Ok(v) => v as _,
+                    Err(e) => e as _,
+                },
             );
         }
         SYSCALL_MUNMAP => {
@@ -297,7 +299,7 @@ pub fn system_call_handler(context: &mut ContextData) {
             let result = memory_manager.free(VAddress::new(address as usize));
             context.set_system_call_return_value(if let Err(e) = result {
                 pr_err!("Failed to free memory: {:?}", e);
-                SYSCALL_RETURN_ERROR
+                ErrorCode::NoMemory as _
             } else {
                 0
             });
@@ -306,82 +308,71 @@ pub fn system_call_handler(context: &mut ContextData) {
             let domain_number = context.get_system_call_arguments(1).unwrap();
             let socket_type_number = context.get_system_call_arguments(2).unwrap();
             let protocol_number = context.get_system_call_arguments(3).unwrap();
-            let socket = socket_system_call::create_socket(
+            let Ok(socket) = socket_system_call::create_socket(
                 domain_number,
                 socket_type_number,
                 protocol_number,
-            );
-            if let Err(err) = socket {
-                pr_warn!("Failed to create socket: {:?}", err);
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            ) else {
+                pr_warn!("Failed to create socket");
+                context.set_system_call_return_value(ErrorCode::Io as _);
                 return;
-            }
+            };
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let fd = process.add_file(socket.unwrap());
+            let fd = process.add_file(socket);
             context.set_system_call_return_value(fd as u64);
         }
         SYSCALL_BIND => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
                 return;
-            }
-            let file = file.unwrap();
+            };
             let sock_addr_address = context.get_system_call_arguments(2).unwrap();
             let sock_addr_size = context.get_system_call_arguments(3).unwrap();
             if sock_addr_size as usize != size_of::<socket_system_call::SockAddr>() {
                 pr_debug!("Unsupported the size of SockAddr: {sock_addr_size}");
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                context.set_system_call_return_value(ErrorCode::Invalid as _);
                 return;
             }
-            if let Err(err) = socket_system_call::bind_socket(&mut file.lock().unwrap(), unsafe {
+            if socket_system_call::bind_socket(&mut file.lock().unwrap(), unsafe {
                 &*(sock_addr_address as usize as *const socket_system_call::SockAddr)
-            }) {
-                pr_err!("Failed to bind socket: {:?}", err);
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
-                return;
+            })
+            .is_ok()
+            {
+                context.set_system_call_return_value(0);
+            } else {
+                context.set_system_call_return_value(ErrorCode::Io as _);
             }
-            context.set_system_call_return_value(0);
         }
         SYSCALL_LISTEN => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
                 return;
-            }
-            let file = file.unwrap();
+            };
             let max_connection = context.get_system_call_arguments(2).unwrap();
             if let Err(err) = socket_system_call::listen_socket(
                 &mut file.lock().unwrap(),
                 max_connection as usize,
             ) {
                 pr_err!("Failed to listen socket: {:?}", err);
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                context.set_system_call_return_value(ErrorCode::Io as _);
                 return;
             }
             context.set_system_call_return_value(0);
         }
         SYSCALL_ACCEPT => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
                 return;
-            }
+            };
             //let sock_addr_address = context.get_system_call_arguments(2).unwrap();
             //let sock_addr_size_address = context.get_system_call_arguments(3).unwrap();
             /*if sock_addr_size as usize != size_of::<socket_system_call::SockAddr>() {
@@ -389,11 +380,10 @@ pub fn system_call_handler(context: &mut ContextData) {
                 context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
                 return;
             }*/
-            let file = file.unwrap();
             let result = socket_system_call::accept(&mut file.lock().unwrap());
             if let Err(err) = result {
                 pr_debug!("Failed to accept connection: {:?}", err);
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                context.set_system_call_return_value(ErrorCode::Io as _);
                 return;
             }
             let (file, _sock_addr) = result.unwrap();
@@ -408,16 +398,12 @@ pub fn system_call_handler(context: &mut ContextData) {
         }
         SYSCALL_RECVFROM => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
                 return;
-            }
-            let file = file.unwrap();
+            };
             let buffer_size = MSize::new(context.get_system_call_arguments(3).unwrap() as usize);
             let buffer_address = match check_user_address(
                 VAddress::new(context.get_system_call_arguments(2).unwrap() as usize),
@@ -431,7 +417,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                         "Invalid user address: {:#X}",
                         context.get_system_call_arguments(2).unwrap()
                     );
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                    context.set_system_call_return_value(ErrorCode::Invalid as _);
                     return;
                 }
             };
@@ -450,25 +436,21 @@ pub fn system_call_handler(context: &mut ContextData) {
                 }
                 Err(err) => {
                     pr_warn!("Failed to receive data: {:?}", err);
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                    context.set_system_call_return_value(ErrorCode::Io as _);
                 }
             }
         }
         SYSCALL_SENDTO => {
             let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let file = process.get_file(context.get_system_call_arguments(1).unwrap() as usize);
-            if file.is_none() {
-                pr_debug!(
-                    "Unknown file descriptor: {}",
-                    context.get_system_call_arguments(1).unwrap()
-                );
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+            let Some(file) =
+                process.get_file(context.get_system_call_arguments(1).unwrap() as usize)
+            else {
+                context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
                 return;
-            }
-            let file = file.unwrap();
+            };
             let buffer_size = MSize::new(context.get_system_call_arguments(3).unwrap() as usize);
             if buffer_size.is_zero() {
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                context.set_system_call_return_value(ErrorCode::Invalid as _);
             }
             let buffer_address = match check_user_address(
                 VAddress::new(context.get_system_call_arguments(2).unwrap() as usize),
@@ -482,7 +464,7 @@ pub fn system_call_handler(context: &mut ContextData) {
                         "Invalid user address: {:#X}",
                         context.get_system_call_arguments(2).unwrap()
                     );
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                    context.set_system_call_return_value(ErrorCode::Invalid as _);
                     return;
                 }
             };
@@ -501,14 +483,14 @@ pub fn system_call_handler(context: &mut ContextData) {
                 }
                 Err(err) => {
                     pr_err!("Failed to send data: {:?}", err);
-                    context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                    context.set_system_call_return_value(ErrorCode::Io as _);
                 }
             }
         }
         s => {
             if !arch_system_call_handler(s, context) {
                 pr_err!("Unknown System Call: {s}");
-                context.set_system_call_return_value(SYSCALL_RETURN_ERROR);
+                context.set_system_call_return_value(ErrorCode::Fault as _);
             }
         }
     }
@@ -522,12 +504,19 @@ fn system_call_open(context: &mut ContextData) -> Result<usize, ErrorCode> {
     const O_DIRECTORY: u64 = 0o200000;
     // const O_LARGEFILE: u64 = 0o0100000;
 
-    let mut str_len = 0usize;
-    let file_name = context.get_system_call_arguments(1).unwrap() as usize;
-    while unsafe { *((file_name + str_len) as *const u8) } != 0 {
-        str_len += 1;
-    }
-    let flag = context.get_system_call_arguments(2).unwrap();
+    let mut str_buffer = [0; MAX_PATH_LENGTH];
+    let file_name = read_str_from_user(
+        VAddress::new(
+            context
+                .get_system_call_arguments(1)
+                .ok_or(ErrorCode::Invalid)? as usize,
+        ),
+        &mut str_buffer,
+    )
+    .or(Err(ErrorCode::Invalid))?;
+    let flag = context
+        .get_system_call_arguments(2)
+        .ok_or(ErrorCode::Invalid)?;
 
     let mut permission;
     let mut open_flags = 0;
@@ -549,48 +538,46 @@ fn system_call_open(context: &mut ContextData) -> Result<usize, ErrorCode> {
         permission |= FILE_PERMISSION_DIRECTORY;
         open_flags |= FILE_FLAGS_RESTRICT_MODE;
     }
-    if let Ok(s) = core::str::from_utf8(unsafe {
-        core::slice::from_raw_parts(file_name as *const u8, str_len)
-    }) {
-        /* TODO: Current Directory*/
-        if let Ok(f) = get_kernel_manager_cluster().file_manager.open_file(
-            PathInfo::new(s),
-            None,
-            permission,
-            open_flags,
-        ) {
-            let irq = InterruptManager::save_and_disable_local_irq();
-            let process = get_cpu_manager_cluster().run_queue.get_running_process();
-            let fd = process.add_file(f);
-            InterruptManager::restore_local_irq(irq);
-            Ok(fd)
-        } else {
-            pr_warn!("{} is not found.", s);
-            Err(ErrorCode::NoEntry)
-        }
+    /* TODO: Current Directory*/
+    if let Ok(f) = get_kernel_manager_cluster().file_manager.open_file(
+        PathInfo::new(file_name),
+        None,
+        permission,
+        open_flags,
+    ) {
+        let fd = get_cpu_manager_cluster()
+            .run_queue
+            .get_running_process()
+            .add_file(f);
+        Ok(fd)
     } else {
-        pr_warn!("Failed to convert file name to utf-8");
-        Err(ErrorCode::Access)
+        pr_warn!("{} is not found.", file_name);
+        Err(ErrorCode::NoEntry)
     }
 }
 
-fn system_call_write(file: &mut File, data: usize, len: usize) -> Result<usize, ()> {
-    if data == 0 {
-        return if len == 0 { Ok(0) } else { Err(()) };
+fn system_call_write(file: &mut File, user_address: usize, len: usize) -> Result<usize, ErrorCode> {
+    if user_address == 0 {
+        return if len == 0 {
+            Ok(0)
+        } else {
+            Err(ErrorCode::Fault)
+        };
     } else if len == 0 {
         return Ok(0);
     }
     let size = MSize::new(len);
     let kernel_buffer = kmalloc!(size).or_else(|e| {
         pr_err!("Failed to allocate memory: {:?}", e);
-        Err(())
+        Err(ErrorCode::NoMemory)
     })?;
-    read_data_from_user(VAddress::new(data), size, kernel_buffer)?;
+    read_data_from_user(VAddress::new(user_address), size, kernel_buffer)?;
 
     let result = file.write(kernel_buffer, size);
     let _ = kfree!(kernel_buffer, size);
     result.map(|s| s.to_usize()).map_err(|err| {
         pr_err!("Failed to write: {:?}", err);
+        ErrorCode::Io
     })
 }
 
@@ -601,7 +588,7 @@ fn system_call_memory_map(
     flags: usize,
     _fd: usize,
     _offset: usize,
-) -> Result<usize, ()> {
+) -> Result<usize, ErrorCode> {
     /* PROT */
     const PROT_NONE: usize = 0x00;
     const PROT_READ: usize = 0x01;
@@ -615,7 +602,7 @@ fn system_call_memory_map(
     const MAP_ANONYMOUS: usize = 0x20;
 
     if size == 0 {
-        return Err(());
+        return Err(ErrorCode::Invalid);
     }
     let address = VAddress::new(address);
     let size = MSize::new(size).page_align_up();
@@ -628,7 +615,7 @@ fn system_call_memory_map(
     );
     if (flags & MAP_ANONYMOUS) == 0 {
         pr_err!("Flags({:#X}) is not anonymous.", flags);
-        return Err(());
+        return Err(ErrorCode::Invalid);
     }
     if (flags & MAP_SHARED) != 0 {
         pr_warn!("Shared mapping is requested, but not implemented.");
@@ -646,17 +633,21 @@ fn system_call_memory_map(
             .get_memory_manager())
     };
 
-    let result: Result<VAddress, ()>;
+    let result: Result<VAddress, ErrorCode>;
     if address.is_zero() {
         /* Memory Allocation */
         result = memory_manager
             .alloc_nonlinear_pages(size, memory_permission, Some(memory_options))
-            .map_err(|e| pr_err!("Failed to allocate memory: {e:?}"));
-      if let Ok(address) = result && (flags & MAP_ANONYMOUS) != 0 {
-          /* the memory area allocated with `MAP_ANONYMOUS` must be zero cleared */
-          unsafe{
-          core::ptr::write_bytes(address.to::<u8>(),0 ,size.to_usize())};
-      }
+            .map_err(|e| {
+                pr_err!("Failed to allocate memory: {e:?}");
+                ErrorCode::NoMemory
+            });
+        if let Ok(address) = result
+            && (flags & MAP_ANONYMOUS) != 0
+        {
+            /* the memory area allocated with `MAP_ANONYMOUS` must be zero cleared */
+            unsafe { core::ptr::write_bytes(address.to::<u8>(), 0, size.to_usize()) };
+        }
     } else {
         /* brk fast path */
         /* TODO: make brk lazy mapping */
@@ -671,7 +662,7 @@ fn system_call_memory_map(
             result = Ok(address);
         } else {
             pr_warn!("Mapping memory is not supported");
-            result = Err(());
+            result = Err(ErrorCode::Fault);
         }
     }
     result.map(|v| v.to_usize())
@@ -682,39 +673,61 @@ fn check_user_address(
     size: MSize,
     _read: bool,
     _write: bool,
-) -> Result<VAddress, ()> {
+) -> Result<VAddress, ErrorCode> {
     if user_address.is_zero() {
-        return Err(());
+        return Err(ErrorCode::Fault);
     }
     if !is_user_memory_area(user_address) || !is_user_memory_area(user_address + size) {
-        return Err(());
+        return Err(ErrorCode::Fault);
     }
     /*TODO: valid address check including read/write */
     Ok(user_address)
 }
 
-fn read_data_from_user(user_address: VAddress, size: MSize, buffer: VAddress) -> Result<(), ()> {
-    let user_address = check_user_address(user_address, size, true, false)?;
+fn read_data_from_user(
+    user_address: VAddress,
+    size: MSize,
+    buffer: VAddress,
+) -> Result<(), ErrorCode> {
+    let a = check_user_address(user_address, size, true, false)?;
     /* Assume the user address exists on the memory(not swapped out) */
-    unsafe {
-        core::ptr::copy_nonoverlapping(
-            user_address.to_usize() as *const u8,
-            buffer.to_usize() as *mut u8,
-            size.to_usize(),
-        )
-    };
+    unsafe { copy_nonoverlapping(a.to::<u8>(), buffer.to::<u8>(), size.to_usize()) };
     Ok(())
 }
 
-fn write_data_into_user(user_address: VAddress, size: MSize, buffer: VAddress) -> Result<(), ()> {
+fn read_str_from_user(user_address: VAddress, buffer: &mut [u8]) -> Result<&str, ErrorCode> {
+    read_data_from_user(
+        user_address,
+        MSize::new(buffer.len()),
+        VAddress::new(buffer.as_ptr() as usize),
+    )?;
+    let end = buffer
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or(())
+        .or(Err(ErrorCode::NameTooLong))?;
+    core::str::from_utf8(&buffer[0..end]).map_err(|_| ErrorCode::NoEntry)
+}
+
+fn write_data_into_user(
+    user_address: VAddress,
+    size: MSize,
+    buffer: VAddress,
+) -> Result<(), ErrorCode> {
     let user_address = check_user_address(user_address, size, false, true)?;
     /* Assume the user address exists on the memory(not swapped out) */
-    unsafe {
-        core::ptr::copy_nonoverlapping(
-            buffer.to_usize() as *const u8,
-            user_address.to_usize() as *mut u8,
-            size.to_usize(),
-        )
-    };
+    unsafe { copy_nonoverlapping(buffer.to::<u8>(), user_address.to::<u8>(), size.to_usize()) };
+    Ok(())
+}
+
+fn write_str_into_user(user_address: VAddress, user_size: MSize, s: &str) -> Result<(), ErrorCode> {
+    let write_size = MSize::new(s.len() + 1);
+    if user_size > write_size {
+        return Err(ErrorCode::Range);
+    }
+    let a = check_user_address(user_address, MSize::new(s.len() + 1), false, true)?;
+    /* Assume the user address exists on the memory(not swapped out) */
+    unsafe { copy_nonoverlapping(s.as_ptr(), a.to::<u8>(), s.len()) };
+    unsafe { core::ptr::write_volatile((a + MSize::new(s.len())).to::<u8>(), 0) };
     Ok(())
 }
