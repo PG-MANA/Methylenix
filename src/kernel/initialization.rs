@@ -4,10 +4,7 @@
 //! This module contains initialization functions which is not depend on arch.
 //!
 
-use crate::arch::target_arch::{
-    ELF_MACHINE_DEFAULT,
-    device::{cpu, pci::ArchDependPciManager},
-};
+use crate::arch::target_arch::device::{cpu, pci::ArchDependPciManager};
 
 use crate::kernel::{
     application_loader,
@@ -374,13 +371,8 @@ pub fn main_initialization_process() -> ! {
         ("OSVERSION", crate::OS_VERSION),
         ("TARGET", crate::arch::target_arch::TARGET_ARCH_NAME),
     ];
-    const INIT_PROCESS_FILE_PATH: &str = "/sbin/init";
-    let _ = application_loader::load_and_execute(
-        INIT_PROCESS_FILE_PATH,
-        &[],
-        &ENVIRONMENT_VARIABLES,
-        ELF_MACHINE_DEFAULT,
-    );
+    const INIT_PROCESS_PATH: &str = "/sbin/init";
+    let _ = application_loader::load_and_execute(INIT_PROCESS_PATH, &[], &ENVIRONMENT_VARIABLES);
 
     idle()
 }

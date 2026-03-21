@@ -3,6 +3,7 @@
 //!
 
 use crate::arch::target_arch::{
+    ELF_MACHINE_DEFAULT,
     context::{ContextManager, memory_layout::USER_STACK_END_ADDRESS},
     paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE},
 };
@@ -28,7 +29,6 @@ pub fn load_and_execute(
     file_name: &str,
     arguments: &[&str],
     environments: &[(&str, &str)],
-    elf_machine_type: u16,
 ) -> Result<(), ()> {
     pr_debug!("Search {}", file_name);
     let result = get_kernel_manager_cluster().file_manager.open_file(
@@ -71,7 +71,7 @@ pub fn load_and_execute(
         }
     };
     if !header.is_executable_file()
-        || header.get_machine_type() != elf_machine_type
+        || header.get_machine_type() != ELF_MACHINE_DEFAULT
         || !header.is_lsb()
     {
         pr_err!("The file is not executable.");
@@ -428,12 +428,37 @@ pub fn load_and_execute(
         2 /* stderr */
     );
 
+    /* Set current directory */
+    let working_directory = PathInfo::new("/");
+    match get_kernel_manager_cluster().file_manager.open_file(
+        working_directory,
+        None,
+        FILE_PERMISSION_READ | FILE_PERMISSION_WRITE | FILE_PERMISSION_DIRECTORY,
+        FILE_FLAGS_RESTRICT_MODE,
+    ) {
+        Ok(f) => process.set_current_directory(working_directory, f),
+        Err(e) => {
+            pr_err!("Failed to set working directory: {e:?}");
+            bug_on_err!(
+                get_kernel_manager_cluster()
+                    .task_manager
+                    .delete_user_process(process)
+            );
+            return Err(());
+        }
+    }
+
     pr_debug!("Execute {}", file_name);
     if let Err(err) = get_kernel_manager_cluster()
         .task_manager
         .wake_up_thread(thread.unwrap())
     {
         pr_err!("Failed to run the thread: {:?}", err);
+        bug_on_err!(
+            get_kernel_manager_cluster()
+                .task_manager
+                .delete_user_process(process)
+        );
         return Err(());
     }
     Ok(())
