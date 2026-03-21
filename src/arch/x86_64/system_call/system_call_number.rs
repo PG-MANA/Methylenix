@@ -17,6 +17,8 @@ pub const SYSCALL_LSEEK: SysCallNumber = 8;
 pub const SYSCALL_READ: SysCallNumber = 0;
 pub const SYSCALL_WRITE: SysCallNumber = 1;
 pub const SYSCALL_WRITEV: SysCallNumber = 20;
+pub const SYSCALL_GETCWD: SysCallNumber = 79;
+pub const SYSCALL_CHDIR: SysCallNumber = 80;
 
 pub const SYSCALL_SET_TID_ADDRESS: SysCallNumber = 218;
 pub const SYSCALL_ARCH_PRCTL: SysCallNumber = 158;

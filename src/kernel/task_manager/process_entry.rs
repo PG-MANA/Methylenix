@@ -7,7 +7,7 @@ use super::{ProcessStatus, TaskError, TaskSignal, ThreadEntry};
 
 use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::{PtrLinkedList, PtrLinkedListNode};
-use crate::kernel::file_manager::File;
+use crate::kernel::file_manager::{File, PathInfo};
 use crate::kernel::memory_manager::{
     MemoryError, MemoryManager,
     data_type::{Address, MSize, VAddress},
@@ -17,10 +17,10 @@ use crate::kernel::sync::spin_lock::{IrqSaveSpinLockFlag, Mutex};
 use core::mem::offset_of;
 use core::ptr::NonNull;
 
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-#[allow(dead_code)]
 pub struct ProcessEntry {
     pub(super) p_list: PtrLinkedListNode<Self>,
     pub(super) children: PtrLinkedList<Self>,
@@ -36,12 +36,18 @@ pub struct ProcessEntry {
         MSize, /* mapped size */
         MSize, /* using size */
     ),
+    directory: Option<DirectoryInfo>,
     process_id: usize,
     parent: Option<NonNull<ProcessEntry>>,
     num_of_thread: usize,
     privilege_level: u8,
     next_thread_id: usize,
     files: Mutex<Vec<Arc<Mutex<File>>>>,
+}
+
+struct DirectoryInfo {
+    cwd: String,
+    cwd_file: File,
 }
 
 impl ProcessEntry {
@@ -56,6 +62,7 @@ impl ProcessEntry {
             status: ProcessStatus::New,
             memory_manager: core::ptr::null_mut(),
             heap_area: (VAddress::new(0), MSize::new(0), MSize::new(0)),
+            directory: None,
             process_id: 0,
             parent: None,
             num_of_thread: 0,
@@ -110,6 +117,19 @@ impl ProcessEntry {
             (VAddress::new(0), MSize::new(0), MSize::new(0))
         );
         self.heap_area = (heap_start, heap_size, MSize::new(0));
+    }
+
+    pub fn get_current_directory_name(&self) -> Option<String> {
+        let _lock = self.lock.lock();
+        self.directory.as_ref().map(|d| d.cwd.clone())
+    }
+
+    pub fn set_current_directory(&mut self, path: &PathInfo, file: File) {
+        let _lock = self.lock.lock();
+        self.directory = Some(DirectoryInfo {
+            cwd: path.as_str().to_string(),
+            cwd_file: file,
+        });
     }
 
     /// Chain `thread` into self.thread(List, ThreadEntry::t_list)

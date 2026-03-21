@@ -212,10 +212,50 @@ pub fn system_call_handler(context: &mut ContextData) {
                 context.set_system_call_return_value(ErrorCode::BadFileNumber as _);
             }
         }
-                return;
+        SYSCALL_GETCWD => {
+            if let Some(d) = get_cpu_manager_cluster()
+                .run_queue
+                .get_running_process()
+                .get_current_directory_name()
+            {
+                if let Err(e) = write_str_into_user(
+                    VAddress::new(context.get_system_call_arguments(1).unwrap() as usize),
+                    MSize::new(context.get_system_call_arguments(2).unwrap() as usize),
+                    d.as_str(),
+                ) {
+                    context.set_system_call_return_value(e as _)
+                } else {
+                    context.set_system_call_return_value(0);
+                }
+            } else {
+                context.set_system_call_return_value(ErrorCode::NoEntry as _);
             }
-            core::mem::take(&mut *file.unwrap().lock().unwrap());
-            context.set_system_call_return_value(0);
+        }
+        SYSCALL_CHDIR => {
+            let mut buffer = [0u8; MAX_PATH_LENGTH];
+            let Ok(path) = read_str_from_user(
+                VAddress::new(context.get_system_call_arguments(1).unwrap() as usize),
+                &mut buffer,
+            ) else {
+                context.set_system_call_return_value(ErrorCode::Invalid as _);
+                return;
+            };
+            let path = PathInfo::new(path);
+            if let Ok(f) = get_kernel_manager_cluster().file_manager.open_file(
+                path,
+                None,
+                FILE_PERMISSION_READ | FILE_PERMISSION_WRITE | FILE_PERMISSION_DIRECTORY,
+                FILE_FLAGS_RESTRICT_MODE,
+            ) {
+                get_cpu_manager_cluster()
+                    .run_queue
+                    .get_running_process()
+                    .set_current_directory(path, f);
+                context.set_system_call_return_value(0);
+            } else {
+                pr_warn!("{} is not found.", path.as_str());
+                context.set_system_call_return_value(ErrorCode::NoEntry as _);
+            }
         }
         SYSCALL_ARCH_PRCTL => {
             let v = syscall_arch_prctl(context);
