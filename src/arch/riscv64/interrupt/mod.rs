@@ -64,10 +64,15 @@ impl InterruptManager {
         }
     }
 
-    pub fn init(&mut self) {
+    pub fn init_early() {
         unsafe extern "C" {
             fn interrupt_vector();
         }
+        unsafe { cpu::set_scratch(0) };
+        unsafe { cpu::set_tvec(interrupt_vector as *const fn() as usize as u64) };
+    }
+
+    pub fn init(&mut self) {
         get_cpu_manager_cluster().arch_depend_data.interrupt_stack = alloc_pages!(
             MPageOrder::new(0),
             MemoryPermissionFlags::data(),
@@ -75,7 +80,7 @@ impl InterruptManager {
         )
         .expect("Failed to allocate the interrupt stack")
             + PAGE_SIZE;
-        unsafe { cpu::set_tvec(interrupt_vector as *const fn() as usize as u64) };
+        Self::init_early();
     }
 
     pub fn init_ap(&mut self) {
@@ -304,11 +309,34 @@ impl InterruptManager {
                 cpu::SCAUSE_ENVIRONMENT_CALL_U_MODE => {
                     crate::kernel::system_call::system_call_handler(unsafe { &mut *context_data });
                 }
+                cpu::SCAUSE_ILLEGAL_INSTRUCTION => {
+                    if from_user {
+                        unimplemented!("Userland illegal instruction handle is not supported");
+                    }
+                    let context_data = unsafe { &mut *(context_data) };
+                    let instruction = cpu::get_tval() as u32;
+                    if cpu::get_opcode(instruction) == cpu::OPCODE_SYSTEM {
+                        /* Unsupported register */
+                        let register = cpu::get_destination_register(instruction);
+                        if register != 0 {
+                            unsafe {
+                                (&mut *((&mut context_data.registers.x1) as *mut u64
+                                    as *mut [u64; 30]))[register as usize - 1] = 0
+                            };
+                        }
+                    } else {
+                        kprintln!("\n\n!!! Illegal Instruction Fault !!!");
+                        kprintln!("Instruction: {:#18X}", instruction);
+                        kprintln!("Caused Address: {:#18X}", cpu::get_epc());
+                        panic!("Instruction Fault");
+                    }
+                    context_data.registers.sepc += cpu::INSTRUCTION_SIZE as u64;
+                }
                 cpu::SCAUSE_INSTRUCTION_PAGE_FAULT
                 | cpu::SCAUSE_LOAD_PAGE_FAULT
                 | cpu::SCAUSE_STORE_PAGE_FAULT => {
                     if from_user {
-                        unimplemented!("UserLand page fault is not implemented");
+                        unimplemented!("Userland page fault is not implemented");
                     } else {
                         kprintln!("\n\n!!! Kernel Page Fault !!!");
                         kprintln!(

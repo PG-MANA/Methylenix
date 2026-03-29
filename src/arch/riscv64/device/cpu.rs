@@ -25,6 +25,8 @@ pub const SCAUSE_INTERRUPT: u64 = 1 << 63;
 pub const SCAUSE_SUPERVISOR_SOFTWARE_INTERRUPT: u64 = 1;
 pub const SCAUSE_SUPERVISOR_TIMER_INTERRUPT: u64 = 5;
 pub const SCAUSE_SUPERVISOR_EXTERNAL_INTERRUPT: u64 = 9;
+
+pub const SCAUSE_ILLEGAL_INSTRUCTION: u64 = 2;
 pub const SCAUSE_ENVIRONMENT_CALL_U_MODE: u64 = 8;
 pub const SCAUSE_INSTRUCTION_PAGE_FAULT: u64 = 12;
 pub const SCAUSE_LOAD_PAGE_FAULT: u64 = 13;
@@ -33,6 +35,20 @@ pub const SCAUSE_STORE_PAGE_FAULT: u64 = 15;
 pub const SSTATUS_SPP: u64 = 1 << 8;
 pub const SSTATUS_SPIE: u64 = 1 << 5;
 pub const SSTATUS_SIE: u64 = 1 << 1;
+
+pub const INSTRUCTION_SIZE: usize = 4;
+
+pub const OPCODE_SYSTEM: u8 = 0x73;
+
+#[inline(always)]
+pub fn get_opcode(inst: u32) -> u8 {
+    (inst & 0x7F) as u8
+}
+
+#[inline(always)]
+pub fn get_destination_register(inst: u32) -> u8 {
+    ((inst >> 7) & 0b11111) as u8
+}
 
 #[inline(always)]
 pub fn get_instruction_pointer() -> usize {
@@ -154,6 +170,11 @@ pub fn get_epc() -> u64 {
 #[inline(always)]
 pub unsafe fn set_tvec(tvec: u64) {
     unsafe { asm!("csrw stvec, {}", in(reg) tvec) };
+}
+
+#[inline(always)]
+pub unsafe fn set_scratch(scratch: u64) {
+    unsafe { asm!("csrw sscratch, {}", in(reg) scratch) };
 }
 
 #[inline(always)]

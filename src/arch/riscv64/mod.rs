@@ -66,6 +66,9 @@ extern "C" fn boot_main(
         TtyManager::new()
     );
 
+    /* Early exception handler to handle illegal instructions */
+    interrupt::InterruptManager::init_early();
+
     /* Init Early Serial Port */
     init_struct!(
         get_kernel_manager_cluster().serial_port_manager,
