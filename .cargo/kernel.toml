@@ -20,6 +20,7 @@ rustflags = [
 
 [target.riscv64imac-unknown-none-elf]
 rustflags = [
+    "-C", "target-feature=-zaamo",
     "-C", "link-arg=-Tconfig/riscv64/linkerscript.ld",
     "-C", "code-model=large",
     "-C", "relocation-model=pie",
