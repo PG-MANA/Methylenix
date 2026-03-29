@@ -225,7 +225,10 @@ pub fn store_memory_map(memory_map: &mut [EfiMemoryDescriptor; 64]) {
 
     let mut i = 0;
     for e in list.iter() {
-        if e.memory_type != EfiMemoryType::EfiMaxMemoryType && i < memory_map.len() {
+        if e.memory_type != EfiMemoryType::EfiMaxMemoryType
+            && e.number_of_pages > 0
+            && i < memory_map.len()
+        {
             memory_map[i] = *e;
             i += 1;
         }
