@@ -637,7 +637,7 @@ impl PageManager {
     /// Delete the paging cache of the target address and update it.
     ///
     /// This function operates invlpg.
-    pub fn update_page_cache(virtual_address: VAddress, range: MSize) {
+    pub fn update_page_cache(&self, virtual_address: VAddress, range: MSize) {
         for i in MIndex::new(0)..range.to_index() {
             unsafe { cpu::invlpg((virtual_address + i.to_offset()).to_usize()) };
         }

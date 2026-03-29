@@ -463,7 +463,6 @@ impl PageManager {
             Err(PagingError::InvalidPageTable)
         } else {
             cpu::flush_data_cache_all();
-            // TODO: flush TLB
             Ok(())
         }
     }
@@ -521,24 +520,25 @@ impl PageManager {
             | ((self.asid as u64) << SATP_ASID_OFFSET)
             | (direct_map_to_physical_address(self.page_table).to_usize() >> PAGE_SHIFT) as u64;
         unsafe { cpu::set_atp(satp) };
-        // TODO: flush TLB
+        cpu::flush_tlb_all();
     }
 
     /// Delete the paging cache of the target address and update it.
-    ///
-    /// Currently, RISC-V does not have any TLB maintenance instructions.
-    /// So, only flush data cache.
-    pub fn update_page_cache(_virtual_address: VAddress, _range: MSize) {
-        Self::update_page_cache_all()
+    pub fn update_page_cache(&self, virtual_address: VAddress, range: MSize) {
+        if range > PAGE_SIZE * MSize::new(16) {
+            Self::update_page_cache_all();
+        } else {
+            cpu::flush_data_cache_all();
+            for i in MIndex::new(0)..range.to_index() {
+                cpu::flush_tlb((virtual_address + i.to_offset()).to_usize(), self.asid);
+            }
+        }
     }
 
     /// Delete all TLBs
-    ///
-    /// Currently, RISC-V does not have any TLB maintenance instructions.
-    /// So, only flush data cache.
     pub fn update_page_cache_all() {
         cpu::flush_data_cache_all();
-        // TODO: flush TLB
+        cpu::flush_tlb_all();
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -202,7 +202,7 @@ impl VirtualMemoryManager {
     }
 
     fn _update_paging(&self, address: VAddress, range: MSize) {
-        PageManager::update_page_cache(address, range);
+        self.page_manager.update_page_cache(address, range);
     }
 
     pub fn update_paging(&self, address: VAddress, range: MSize) {

@@ -620,7 +620,7 @@ impl PageManager {
     /// Delete the paging cache of the target address and update it.
     ///
     /// This function operates `tlbi vaelis`.
-    pub fn update_page_cache(virtual_address: VAddress, range: MSize) {
+    pub fn update_page_cache(&self, virtual_address: VAddress, range: MSize) {
         if range.to_index().to_usize() > 16 {
             Self::update_page_cache_all()
         } else {

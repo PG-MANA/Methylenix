@@ -75,7 +75,7 @@ impl InterruptManager {
         )
         .expect("Failed to allocate the interrupt stack")
             + PAGE_SIZE;
-        unsafe { cpu::set_stvec(interrupt_vector as *const fn() as usize as u64) };
+        unsafe { cpu::set_tvec(interrupt_vector as *const fn() as usize as u64) };
     }
 
     pub fn init_ap(&mut self) {
@@ -391,7 +391,7 @@ interrupt_vector:
     sd      t1, (8 * 32)(sp)
     // Restore CPU's tp from the top of sscratch
     ld      tp, (8 * 33)(sp)
-    // All regiters except user stack were saved,
+    // All registers except user stack were saved,
     // then store the user stack and clear sscratch to indicate the kernel mode
     csrrw   t0, sscratch, x0
     sd      t0, (8 * 1)(sp)
@@ -489,7 +489,7 @@ interrupt_vector:
     sd      t1, (8 * 32)(sp)
     addi    t0, sp, {c}
     sd      t0, (8 * 1)(sp)
-    // tp must have a vaild pointer
+    // tp must have a valid pointer
 
     // Call the handler
     mv      a0, sp

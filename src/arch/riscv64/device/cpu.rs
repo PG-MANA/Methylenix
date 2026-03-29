@@ -152,8 +152,8 @@ pub fn get_epc() -> u64 {
 }
 
 #[inline(always)]
-pub unsafe fn set_stvec(stvec: u64) {
-    unsafe { asm!("csrw stvec, {}", in(reg) stvec) };
+pub unsafe fn set_tvec(tvec: u64) {
+    unsafe { asm!("csrw stvec, {}", in(reg) tvec) };
 }
 
 #[inline(always)]
@@ -169,6 +169,16 @@ pub fn memory_barrier() {
 #[inline(always)]
 pub fn instruction_barrier() {
     unsafe { asm!("fence.i") };
+}
+
+#[inline(always)]
+pub fn flush_tlb(address: usize, asid: u16) {
+    unsafe { asm!("sfence.vma {}, {}", in(reg) address, in(reg) asid) };
+}
+
+#[inline(always)]
+pub fn flush_tlb_all() {
+    unsafe { asm!("sfence.vma x0, x0") };
 }
 
 #[inline(always)]
