@@ -102,8 +102,18 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
 
     /* Free usable memory area */
     for entry in boot_information.memory_map.iter() {
+        if entry.memory_type == EfiMemoryType::EfiMaxMemoryType {
+            continue;
+        }
+        pr_info!(
+            "[{:#016X}~{:#016X}] {}",
+            entry.physical_start,
+            MSize::new((entry.number_of_pages as usize) << 12)
+                .to_end_address(PAddress::new(entry.physical_start))
+                .to_usize(),
+            entry.memory_type
+        );
         match entry.memory_type {
-            EfiMemoryType::EfiMaxMemoryType => continue,
             EfiMemoryType::EfiConventionalMemory
             | EfiMemoryType::EfiBootServicesCode
             | EfiMemoryType::EfiLoaderCode => {
@@ -116,14 +126,6 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
             }
             _ => {}
         }
-        pr_info!(
-            "[{:#016X}~{:#016X}] {}",
-            entry.physical_start,
-            MSize::new((entry.number_of_pages as usize) << 12)
-                .to_end_address(PAddress::new(entry.physical_start))
-                .to_usize(),
-            entry.memory_type
-        );
     }
 
     /* Set up Virtual Memory Manager */
@@ -154,6 +156,16 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
             entry.is_segment_executable(),
             false,
         );
+        pr_info!(
+            "VA: [{:#016X}~{:#016X}] => PA: [{:#016X}~{:#016X}] (R: {}, W: {}, E: {})",
+            virtual_address,
+            virtual_address + aligned_size.to_usize(),
+            physical_address,
+            physical_address + aligned_size.to_usize(),
+            permission.is_readable(),
+            permission.is_writable(),
+            permission.is_executable()
+        );
         match virtual_memory_manager.map_address(
             PAddress::new(physical_address),
             Some(VAddress::new(virtual_address)),
@@ -175,16 +187,6 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
                 panic!("Mapping ELF Section was failed: {:?}", e);
             }
         };
-        pr_info!(
-            "VA: [{:#016X}~{:#016X}] => PA: [{:#016X}~{:#016X}] (R: {}, W: {}, E: {})",
-            virtual_address,
-            virtual_address + aligned_size.to_usize(),
-            physical_address,
-            physical_address + aligned_size.to_usize(),
-            permission.is_readable(),
-            permission.is_writable(),
-            permission.is_executable()
-        );
     }
 
     /* Set up Memory Manager */
