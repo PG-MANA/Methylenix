@@ -17,7 +17,7 @@ use crate::kernel::{
             table::{bgrt::BgrtManager, mcfg::McfgManager},
         },
         boot_information::BootInformation,
-        efi::protocol::graphics_output_protocol,
+        efi::protocol::graphics_output_protocol::EfiGraphicsPixelFormat,
         pci::PciManager,
     },
     file_manager::FileManager,
@@ -62,23 +62,30 @@ pub fn init_work_queue() {
 pub fn init_graphic_by_boot_information(boot_information: &BootInformation) -> bool {
     init_struct!(
         get_kernel_manager_cluster().graphic_manager,
-        GraphicManager::new()
+        GraphicManager::default()
     );
     if let Some(graphic_info) = &boot_information.graphic_info {
-        if graphic_info.info.pixel_format == graphics_output_protocol::EfiGraphicsPixelFormat::PixelRedGreenBlueReserved8BitPerColor {
+        if graphic_info.info.pixel_format
+            == EfiGraphicsPixelFormat::PixelRedGreenBlueReserved8BitPerColor
+        {
             get_kernel_manager_cluster()
                 .graphic_manager
-                .init_by_efi_information(
-                graphic_info.frame_buffer_base,
-                graphic_info.frame_buffer_size,
-                &graphic_info.info,
-            );
+                .set_frame_buffer(
+                    PAddress::new(graphic_info.frame_buffer_base),
+                    graphic_info.info.horizontal_resolution as usize,
+                    graphic_info.info.vertical_resolution as usize,
+                    32,
+                );
             get_kernel_manager_cluster()
                 .graphic_manager
-                .set_frame_buffer_memory_permission();
+                .remap_frame_buffer()
+                .expect("Failed to remap frame buffer");
             return true;
         } else {
-            pr_warn!("Unsupported pixel format: {:?}", graphic_info.info.pixel_format);
+            pr_warn!(
+                "Unsupported pixel format: {:?}",
+                graphic_info.info.pixel_format
+            );
         }
     }
     false

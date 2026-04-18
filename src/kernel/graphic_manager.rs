@@ -1,136 +1,339 @@
-/*
- * Graphic Manager
- * いずれはstdio.rsみたいなのを作ってそれのサブモジュールにしたい
- */
+//!
+//! Graphic Manager
+//!
+//! This module handles writing string or bitmap to frame buffer
+//!
 
 pub mod font;
-pub mod frame_buffer_manager;
-pub mod text_buffer_driver;
 
-use self::font::FontManager;
-use self::font::FontType;
-use self::frame_buffer_manager::FrameBufferManager;
-use self::text_buffer_driver::TextBufferDriver;
+use self::font::{FontManager, FontType};
 
-use crate::arch::target_arch::device::text::TextDriver;
-
-use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;
-use crate::kernel::drivers::multiboot::FrameBufferInfo;
-use crate::kernel::memory_manager::data_type::{Address, VAddress};
-use crate::kernel::sync::spin_lock::{Mutex, SpinLockFlag};
-use crate::kernel::tty::Writer;
+use crate::kernel::memory_manager::data_type::{
+    Address, MSize, MemoryPermissionFlags, PAddress, VAddress,
+};
+use crate::kernel::memory_manager::{MemoryError, io_remap};
+use crate::kernel::sync::spin_lock::Mutex;
+use crate::kernel::tty::{TextColor, Writer};
 
 use core::fmt;
+use core::ptr::{copy, read_unaligned, read_volatile, write_unaligned, write_volatile};
 
-pub struct GraphicManager {
-    lock: SpinLockFlag,
-    text: Mutex<TextDriver>,
-    graphic: Mutex<FrameBufferManager>,
-    is_text_mode: bool,
-    font: Mutex<FontManager>,
-    cursor: Mutex<Cursor>,
-    is_font_loaded: bool,
-}
-
-struct Cursor {
+#[derive(Default, Copy, Clone, Debug)]
+struct Point {
     x: usize,
     y: usize,
 }
 
-impl GraphicManager {
-    pub const fn new() -> Self {
+impl Point {
+    const fn new(x: usize, y: usize) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Default)]
+struct FrameBuffer {
+    address: usize,
+    size: Point,
+    color_depth: u8,
+}
+
+pub struct GraphicManager {
+    frame_buffer: Mutex<FrameBuffer>,
+    font: Mutex<Option<FontManager>>,
+    text_cursor: Mutex<Point>,
+}
+
+impl Default for GraphicManager {
+    fn default() -> Self {
         Self {
-            lock: SpinLockFlag::new(),
-            is_text_mode: false,
-            text: Mutex::new(TextDriver::new()),
-            graphic: Mutex::new(FrameBufferManager::new()),
-            font: Mutex::new(FontManager::new()),
-            cursor: Mutex::new(Cursor { x: 0, y: 0 }),
-            is_font_loaded: false,
+            frame_buffer: Mutex::new(FrameBuffer::default()),
+            font: Mutex::new(None),
+            text_cursor: Mutex::new(Point::default()),
         }
     }
+}
 
-    pub const fn is_text_mode(&self) -> bool {
-        self.is_text_mode
-    }
-
-    pub fn set_frame_buffer_memory_permission(&mut self) -> bool {
-        let _lock = self.lock.lock();
-        if self.is_text_mode {
-            self.text
-                .lock()
-                .unwrap()
-                .set_frame_buffer_memory_permission()
-        } else {
-            self.graphic
-                .lock()
-                .unwrap()
-                .set_frame_buffer_memory_permission()
-        }
-    }
-
-    pub fn init_by_efi_information(
+impl GraphicManager {
+    pub fn set_frame_buffer(
         &mut self,
-        base_address: usize,
-        memory_size: usize,
-        pixel_info: &EfiGraphicsOutputModeInformation,
+        address: PAddress,
+        width: usize,
+        height: usize,
+        color_depth: u8,
     ) {
-        let _lock = self.lock.lock();
-        self.graphic
-            .lock()
-            .unwrap()
-            .init_by_efi_information(base_address, memory_size, pixel_info);
+        *self.frame_buffer.lock().unwrap() = FrameBuffer {
+            address: address.to_usize(),
+            size: Point::new(width, height),
+            color_depth,
+        };
     }
 
-    pub fn init_by_multiboot_information(&mut self, frame_buffer_info: &FrameBufferInfo) {
-        let _lock = self.lock.lock();
-        if !self
-            .graphic
-            .lock()
-            .unwrap()
-            .init_by_multiboot_information(frame_buffer_info)
-        {
-            self.text
-                .lock()
-                .unwrap()
-                .init_by_multiboot_information(frame_buffer_info);
-            self.is_text_mode = true;
+    pub fn remap_frame_buffer(&mut self) -> Result<(), MemoryError> {
+        let mut frame_buffer = self.frame_buffer.lock().unwrap();
+        io_remap!(
+            PAddress::new(frame_buffer.address),
+            MSize::new(
+                frame_buffer.size.x
+                    * frame_buffer.size.y
+                    * (frame_buffer.color_depth >> 3) as usize,
+            ),
+            MemoryPermissionFlags::data()
+        )
+        .map(|a| frame_buffer.address = a.to_usize())
+    }
+
+    pub fn load_font(&mut self, font_address: VAddress, size: MSize, font_type: FontType) -> bool {
+        let Some(font_manager) = FontManager::new(font_address, size, font_type) else {
+            return false;
+        };
+        /* TODO: treat old font */
+        self.font.lock().unwrap().replace(font_manager);
+        true
+    }
+
+    /* Graphic section */
+    fn _fill(frame_buffer: &FrameBuffer, start: Point, end: Point, color: u32) {
+        assert!(start.x < end.x);
+        assert!(start.y < end.y);
+        assert!(end.x <= frame_buffer.size.x);
+        assert!(end.y <= frame_buffer.size.y);
+
+        if frame_buffer.color_depth == 32 {
+            for y in start.y..end.y {
+                for x in start.x..end.x {
+                    unsafe {
+                        write_volatile(
+                            (frame_buffer.address + ((y * frame_buffer.size.x + x) * 4))
+                                as *mut u32,
+                            color,
+                        )
+                    };
+                }
+            }
+        } else if frame_buffer.color_depth == 24 {
+            for y in start.y..end.y {
+                for x in start.x..end.x {
+                    let dot =
+                        (frame_buffer.address + (y * frame_buffer.size.x + x) * 3) as *mut u32;
+                    let mut current = unsafe { read_unaligned(dot) };
+                    current &= 0x000000ff;
+                    current |= color;
+                    unsafe { write_unaligned(dot, current) };
+                }
+            }
         }
     }
 
-    pub fn clear_screen(&mut self) {
-        let _lock = self.lock.lock();
-        if self.is_text_mode {
-            self.text.lock().unwrap().clear_screen();
+    fn _scroll(frame_buffer: &FrameBuffer, from: Point, to: Point, size: Point) {
+        assert!(from.x + size.x <= frame_buffer.size.x);
+        assert!(from.y + size.y <= frame_buffer.size.y);
+        assert!(to.x <= from.x);
+        assert!(to.y <= from.y);
+        if frame_buffer.color_depth == 32 {
+            for y in 0..size.y {
+                unsafe {
+                    copy(
+                        (frame_buffer.address + ((from.y + y) * frame_buffer.size.x + from.x) * 4)
+                            as *mut u32,
+                        (frame_buffer.address + ((to.y + y) * frame_buffer.size.x + to.x) * 4)
+                            as *mut u32,
+                        size.x,
+                    )
+                };
+            }
+        } else if frame_buffer.color_depth == 24 {
+            for y in 0..size.y {
+                unsafe {
+                    copy(
+                        (frame_buffer.address + ((from.y + y) * frame_buffer.size.x + from.x) * 3)
+                            as *mut u8,
+                        (frame_buffer.address + ((to.y + y) * frame_buffer.size.x + to.x) * 3)
+                            as *mut u8,
+                        size.x * 3,
+                    )
+                };
+            }
+        }
+    }
+
+    fn _scroll_screen(frame_buffer: &FrameBuffer, height: usize) {
+        assert!(height < frame_buffer.size.y);
+        let color_depth_byte = (frame_buffer.color_depth >> 3) as usize;
+        let mut src = frame_buffer.address + height * frame_buffer.size.x * color_depth_byte;
+        let mut dst = frame_buffer.address;
+        let end = frame_buffer.address
+            + (frame_buffer.size.y - height) * frame_buffer.size.x * color_depth_byte;
+        let quad_word_copy_end = if (end & 7) == 0 { end - 8 } else { end & !7 };
+
+        while dst < quad_word_copy_end {
+            unsafe { write_volatile(dst as *mut u64, read_volatile(src as *const u64)) };
+            src += 1 << 3;
+            dst += 1 << 3;
+        }
+        while dst < end {
+            unsafe { write_volatile(dst as *mut u8, read_volatile(src as *const u8)) };
+            src += 1 << 3;
+            src += 1;
+            dst += 1;
+        }
+    }
+
+    fn _write_monochrome_bitmap(
+        frame_buffer: &FrameBuffer,
+        buffer: usize,
+        size: Point,
+        offset: Point,
+        front_color: u32,
+        back_color: u32,
+        is_not_aligned_data: bool,
+    ) {
+        assert!(frame_buffer.color_depth == 32 || frame_buffer.color_depth == 24);
+        let screen_depth_byte = frame_buffer.color_depth as usize >> 3;
+        let bitmap_padding = if is_not_aligned_data { 0 } else { size.x & 7 };
+        let mut bitmap_pointer = buffer;
+        let mut bitmap_mask = 0x80;
+        let mut buffer_pointer =
+            frame_buffer.address + (offset.y * frame_buffer.size.x + offset.x) * screen_depth_byte;
+
+        if frame_buffer.color_depth == 32 {
+            for _ in 0..size.y {
+                for _ in 0..size.x {
+                    unsafe {
+                        write_volatile(
+                            buffer_pointer as *mut u32,
+                            if (*(bitmap_pointer as *const u8) & bitmap_mask) != 0 {
+                                front_color
+                            } else {
+                                back_color
+                            },
+                        )
+                    };
+                    buffer_pointer += screen_depth_byte;
+                    bitmap_mask >>= 1;
+                    if bitmap_mask == 0 {
+                        bitmap_pointer += 1;
+                        bitmap_mask = 0x80;
+                    }
+                }
+                buffer_pointer += (frame_buffer.size.x - size.x) * screen_depth_byte;
+                if !is_not_aligned_data {
+                    bitmap_pointer += bitmap_padding;
+                    bitmap_mask = 0x80;
+                }
+            }
         } else {
-            self.graphic.lock().unwrap().clear_screen();
+            for _ in 0..size.y {
+                for _ in 0..size.x {
+                    let dot = buffer_pointer as *mut u32;
+                    let mut current;
+                    unsafe {
+                        current = read_unaligned(dot);
+                        current &= 0x000000ff;
+                        if (*(bitmap_pointer as *const u8) & bitmap_mask) != 0 {
+                            current |= front_color
+                        } else {
+                            current |= back_color
+                        };
+                        write_unaligned(dot, current & 0xffffff);
+                    }
+                    buffer_pointer += screen_depth_byte;
+                    bitmap_mask >>= 1;
+                    if bitmap_mask == 0 {
+                        bitmap_pointer += 1;
+                        bitmap_mask = 0x80;
+                    }
+                }
+                buffer_pointer += (frame_buffer.size.x - size.x) * screen_depth_byte;
+                if !is_not_aligned_data {
+                    bitmap_pointer += bitmap_padding;
+                    bitmap_mask = 0x80;
+                }
+            }
         }
     }
 
-    pub fn load_font(
-        &mut self,
-        virtual_font_address: VAddress,
-        size: usize,
-        font_type: FontType,
-    ) -> bool {
-        let _lock = self.lock.lock();
-        self.is_font_loaded = self
-            .font
-            .lock()
-            .unwrap()
-            .load(virtual_font_address, size, font_type);
-        self.is_font_loaded
+    fn _write_bitmap(
+        frame_buffer: &FrameBuffer,
+        buffer: usize,
+        depth: u8,
+        size: Point,
+        offset: Point,
+        is_not_aligned_data: bool,
+    ) {
+        assert!(frame_buffer.color_depth == 32 || frame_buffer.color_depth == 24);
+        let screen_depth_byte = frame_buffer.color_depth as usize / 8;
+        let bitmap_depth_byte = depth as usize / 8;
+        let bitmap_aligned_bitmap_width_pointer = if is_not_aligned_data {
+            size.x
+        } else {
+            ((size.x * bitmap_depth_byte - 1) & !3) + 4
+        };
+
+        if frame_buffer.color_depth == 32 {
+            for height_pointer in (0..size.y).rev() {
+                for width_pointer in 0..size.x {
+                    unsafe {
+                        write_volatile(
+                            (frame_buffer.address
+                                + ((height_pointer + offset.y) * frame_buffer.size.x
+                                    + offset.x
+                                    + width_pointer)
+                                    * screen_depth_byte) as *mut u32,
+                            read_unaligned(
+                                (buffer
+                                    + (size.y - height_pointer - 1)
+                                        * bitmap_aligned_bitmap_width_pointer
+                                    + width_pointer * bitmap_depth_byte)
+                                    as *const u32,
+                            ),
+                        );
+                    }
+                }
+            }
+        } else {
+            for height_pointer in (0..size.y).rev() {
+                for width_pointer in 0..size.x {
+                    let dot = (frame_buffer.address
+                        + ((height_pointer + offset.y) * frame_buffer.size.x
+                            + offset.x
+                            + width_pointer)
+                            * screen_depth_byte) as *mut u32;
+                    let mut current;
+                    unsafe {
+                        current = read_unaligned(dot);
+                        current &= 0x000000ff;
+                        current |= read_unaligned(
+                            (buffer
+                                + (size.y - height_pointer) * bitmap_aligned_bitmap_width_pointer
+                                + width_pointer * bitmap_depth_byte)
+                                as *const u32,
+                        ) & 0xffffff;
+                        write_unaligned(dot, current);
+                    }
+                }
+            }
+        }
     }
+
+    pub fn clear_screen(&self) {
+        let frame_buffer = self.frame_buffer.lock().unwrap();
+        Self::_fill(
+            &frame_buffer,
+            Point::new(0, 0),
+            Point::new(frame_buffer.size.x, frame_buffer.size.y),
+            0,
+        );
+    }
+
+    /* string rendering section */
 
     fn draw_string(&self, s: &str, foreground_color: u32, background_color: u32) -> fmt::Result {
-        /* assume locked */
-        if !self.is_font_loaded {
-            return Err(fmt::Error {});
-        }
-        let mut cursor = self.cursor.lock().unwrap();
         let mut font_manager = self.font.lock().unwrap();
-        let mut frame_buffer_manager = self.graphic.lock().unwrap();
-        let frame_buffer_size = frame_buffer_manager.get_frame_buffer_size();
+        let Some(font_manager) = font_manager.as_mut() else {
+            return Ok(());
+        };
+        let mut cursor = self.text_cursor.lock().unwrap();
+        let framer_buffer = self.frame_buffer.lock().unwrap();
 
         for c in s.chars() {
             if c == '\n' {
@@ -139,6 +342,7 @@ impl GraphicManager {
             } else if c == '\r' {
                 cursor.x = 0;
             } else if c.is_control() {
+                /* Ignore */
             } else {
                 let font_data = font_manager.get_font_data(c);
                 if font_data.is_none() {
@@ -148,30 +352,28 @@ impl GraphicManager {
                 let font_bottom = font_manager.get_ascent() as isize - font_data.y_offset as isize;
                 let font_top = font_bottom as usize - font_data.height as usize;
                 let font_left = font_data.x_offset as usize;
-                if frame_buffer_size.0 < cursor.x + font_data.width as usize {
+                if framer_buffer.size.x < cursor.x + font_data.width as usize {
                     cursor.x = 0;
                     cursor.y += font_manager.get_max_font_height();
                 }
-                if frame_buffer_size.1 < cursor.y + font_manager.get_max_font_height() {
+                if framer_buffer.size.y < cursor.y + font_manager.get_max_font_height() {
                     let scroll_y =
-                        font_manager.get_max_font_height() + cursor.y - frame_buffer_size.1;
-                    frame_buffer_manager.scroll_screen(scroll_y);
-                    frame_buffer_manager.fill(
-                        0,
-                        frame_buffer_size.1 - scroll_y,
-                        frame_buffer_size.0,
-                        frame_buffer_size.1,
+                        font_manager.get_max_font_height() + cursor.y - framer_buffer.size.y;
+                    Self::_scroll_screen(&framer_buffer, scroll_y);
+                    Self::_fill(
+                        &framer_buffer,
+                        Point::new(0, framer_buffer.size.y - scroll_y),
+                        Point::new(framer_buffer.size.x, framer_buffer.size.y),
                         0,
                     ); /* erase the last line */
                     cursor.y -= scroll_y;
                 }
 
-                frame_buffer_manager.write_monochrome_bitmap(
+                Self::_write_monochrome_bitmap(
+                    &framer_buffer,
                     font_data.bitmap_address.to_usize(),
-                    font_data.width as usize,
-                    font_data.height as usize,
-                    cursor.x + font_left,
-                    cursor.y + font_top,
+                    Point::new(font_data.width as usize, font_data.height as usize),
+                    Point::new(cursor.x + font_left, cursor.y + font_top),
                     foreground_color,
                     background_color,
                     true,
@@ -182,34 +384,9 @@ impl GraphicManager {
         Ok(())
     }
 
-    pub fn puts(&self, string: &str, foreground_color: u32, background_color: u32) -> bool {
-        let _lock = if let Ok(l) = self.lock.try_lock() {
-            l
-        } else {
-            return true;
-        };
-        if self.is_text_mode {
-            self.text.lock().unwrap().puts(string)
-        } else if self.is_font_loaded {
-            self.draw_string(string, foreground_color, background_color)
-                .is_ok()
-        } else {
-            true
-        }
-    }
-
     pub fn get_frame_buffer_size(&self) -> (usize /*x*/, usize /*y*/) {
-        self.graphic.lock().unwrap().get_frame_buffer_size()
-    }
-
-    pub fn fill(&mut self, start_x: usize, start_y: usize, end_x: usize, end_y: usize, color: u32) {
-        if !self.is_text_mode {
-            let _lock = self.lock.lock();
-            self.graphic
-                .lock()
-                .unwrap()
-                .fill(start_x, start_y, end_x, end_y, color);
-        }
+        let f = self.frame_buffer.lock().unwrap();
+        (f.size.x, f.size.y)
     }
 
     pub fn write_bitmap(
@@ -220,36 +397,23 @@ impl GraphicManager {
         size_y: usize,
         offset_x: usize,
         offset_y: usize,
-    ) -> bool {
-        if !self.is_text_mode {
-            let _lock = self.lock.lock();
-            self.graphic
-                .lock()
-                .unwrap()
-                .write_bitmap(buffer, depth, size_x, size_y, offset_x, offset_y, false)
-        } else {
-            false
-        }
+    ) {
+        Self::_write_bitmap(
+            &self.frame_buffer.lock().unwrap(),
+            buffer,
+            depth,
+            Point::new(size_x, size_y),
+            Point::new(offset_x, offset_y),
+            false, /*TODO: consider*/
+        )
     }
 }
 
 impl Writer for GraphicManager {
-    fn write(
-        &self,
-        buf: &[u8],
-        size_to_write: usize,
-        foreground_color: u32,
-        background_color: u32,
-    ) -> fmt::Result {
-        use core::str;
-        if let Ok(s) = str::from_utf8(buf.split_at(size_to_write).0) {
-            if self.puts(s, foreground_color, background_color) {
-                Ok(())
-            } else {
-                Err(fmt::Error {})
-            }
-        } else {
-            Err(fmt::Error {})
-        }
+    fn write(&self, buf: &[u8], foreground: TextColor, background: TextColor) -> fmt::Result {
+        let Ok(s) = str::from_utf8(buf) else {
+            return Err(fmt::Error);
+        };
+        self.draw_string(s, foreground.to_u32(), background.to_u32())
     }
 }

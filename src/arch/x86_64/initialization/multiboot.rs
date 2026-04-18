@@ -12,8 +12,12 @@ use crate::arch::target_arch::{
 
 use crate::kernel::{
     collections::init_struct,
-    drivers::{efi::memory_map::EfiMemoryType, multiboot::MultiBootInformation},
-    graphic_manager::font::FontType,
+    drivers::{
+        device::vga_text::{CrtAddress, VgaTextDriver},
+        efi::memory_map::EfiMemoryType,
+        multiboot::MultiBootInformation,
+    },
+    graphic_manager::{GraphicManager, font::FontType},
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
         MemoryManager,
@@ -294,37 +298,89 @@ pub fn init_memory_by_multiboot_information(
     MultiBootInformation::new(new_mbi_address.to_usize(), false)
 }
 
+pub fn init_graphic_early(multiboot_information: &MultiBootInformation) {
+    init_struct!(
+        get_kernel_manager_cluster().graphic_manager,
+        GraphicManager::default()
+    );
+    let frame_buffer_info = &multiboot_information.framebuffer_info;
+    if frame_buffer_info.mode == 1 {
+        /* FrameBuffer */
+        get_kernel_manager_cluster()
+            .graphic_manager
+            .set_frame_buffer(
+                PAddress::new(frame_buffer_info.address as usize),
+                frame_buffer_info.width as usize,
+                frame_buffer_info.height as usize,
+                frame_buffer_info.depth,
+            );
+        get_kernel_manager_cluster().graphic_manager.clear_screen();
+        get_kernel_manager_cluster().kernel_tty_manager[1]
+            .open(&get_kernel_manager_cluster().graphic_manager);
+    } else if frame_buffer_info.mode == 2 {
+        /* VGA Text */
+        let vga_text = VgaTextDriver::new(
+            frame_buffer_info.address as usize,
+            frame_buffer_info.width as u16,
+            frame_buffer_info.height as u16,
+            CrtAddress::Io(0x03d4),
+        );
+        vga_text.init();
+        init_struct!(
+            get_kernel_manager_cluster()
+                .arch_depend_data
+                .vga_text_driver,
+            vga_text
+        );
+        get_kernel_manager_cluster().kernel_tty_manager[1].open(
+            &get_kernel_manager_cluster()
+                .arch_depend_data
+                .vga_text_driver,
+        );
+    } else {
+        pr_warn!("Unknown framebuffer mode: {}", frame_buffer_info.mode);
+    }
+}
+
 /// Init GraphicManager with ModuleInfo of MultibootInformation
 ///
 /// This function loads font data from module info of MultibootInformation.
 /// And clear screen.
 pub fn init_graphic(multiboot_information: &MultiBootInformation) {
-    if get_kernel_manager_cluster().graphic_manager.is_text_mode() {
-        return;
-    }
-
-    /* Load font */
-    for module in multiboot_information.modules.iter() {
-        if module.name == "font.pf2" {
-            let vm_address = io_remap!(
-                PAddress::new(module.start_address),
-                MSize::new(module.end_address - module.start_address),
-                MemoryPermissionFlags::rodata(),
-                MemoryOptionFlags::PRE_RESERVED
-            );
-            if let Ok(vm_address) = vm_address {
-                let result = get_kernel_manager_cluster().graphic_manager.load_font(
-                    vm_address,
-                    module.end_address - module.start_address,
-                    FontType::Pff2,
+    if multiboot_information.framebuffer_info.mode == 1 {
+        get_kernel_manager_cluster()
+            .graphic_manager
+            .remap_frame_buffer()
+            .expect("Failed to remap the framebuffer");
+        /* Load font */
+        for module in multiboot_information.modules.iter() {
+            if module.name == "font.pf2" {
+                let vm_address = io_remap!(
+                    PAddress::new(module.start_address),
+                    MSize::new(module.end_address - module.start_address),
+                    MemoryPermissionFlags::rodata(),
+                    MemoryOptionFlags::PRE_RESERVED
                 );
-                if !result {
-                    pr_err!("Cannot load font data!");
+                if let Ok(vm_address) = vm_address {
+                    let result = get_kernel_manager_cluster().graphic_manager.load_font(
+                        vm_address,
+                        MSize::new(module.end_address - module.start_address),
+                        FontType::Pff2,
+                    );
+                    if !result {
+                        pr_err!("Cannot load font data!");
+                    }
+                    break;
+                } else {
+                    pr_err!("mapping font data was failed: {:?}", vm_address.err());
                 }
-                break;
-            } else {
-                pr_err!("mapping font data was failed: {:?}", vm_address.err());
             }
         }
+    } else if multiboot_information.framebuffer_info.mode == 2 {
+        get_kernel_manager_cluster()
+            .arch_depend_data
+            .vga_text_driver
+            .remap_buffer()
+            .expect("Failed to remap the VGA Text area");
     }
 }

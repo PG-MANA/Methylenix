@@ -7,19 +7,16 @@
 use super::BitmapFontData;
 use super::font_cache::FontCache;
 
-use crate::kernel::memory_manager::data_type::{Address, VAddress};
+use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
 pub struct Pff2FontManager {
-    base_address: usize,
+    base_address: VAddress,
     /* max_font_width: u16, */
     max_font_height: u16,
     ascent: u16,
     decent: u16,
-    char_index_address: usize,
-    char_index_size: usize,
-    /* data_address: usize, */
-    /* data_size: usize, */
-    /* font_point_size: u16, */
+    char_index_address: VAddress,
+    char_index_size: MSize,
     font_cache: FontCache,
 }
 
@@ -41,93 +38,75 @@ struct Pff2FontData {
 }
 
 impl Pff2FontManager {
-    const CHAR_INDEX_SIZE: usize = size_of::<Pff2CharIndex>();
+    const SIGNATURE: [u8; 12] = [
+        0x46, 0x49, 0x4c, 0x45, 0x00, 0x00, 0x00, 0x04, 0x50, 0x46, 0x46, 0x32,
+    ];
+    const CHAR_INDEX_SIZE: MSize = MSize::new(size_of::<Pff2CharIndex>());
 
-    pub const fn new() -> Self {
-        Self {
-            base_address: 0,
-            max_font_height: 0,
-            /* max_font_width: 0, */
-            ascent: 0,
-            decent: 0,
-            char_index_address: 0,
-            char_index_size: 0,
-            /* data_address: 0, */
-            /* data_size: 0, */
-            /* font_point_size: 0, */
-            font_cache: FontCache::new(),
-        }
-    }
-
-    pub fn load(&mut self, virtual_font_file_address: VAddress, size: usize) -> bool {
+    pub fn new(base_address: VAddress, size: MSize) -> Option<Self> {
         /* Check the file structure */
-        if unsafe { *(virtual_font_file_address.to_usize() as *const [u8; 12]) }
-            != [
-                0x46, 0x49, 0x4c, 0x45, 0x00, 0x00, 0x00, 0x04, 0x50, 0x46, 0x46, 0x32,
-            ]
-        /* FILE PFF2*/
-        {
-            return false;
+        if unsafe { *(base_address.to_usize() as *const [u8; 12]) } != Self::SIGNATURE {
+            return None;
         }
-        self.base_address = virtual_font_file_address.to_usize();
 
-        let mut pointer = 12;
+        let mut pointer = MSize::new(12);
+        let mut max_font_height = None;
+        let mut ascent = None;
+        let mut decent = None;
+        let mut char_index_address = None;
+        let mut char_index_size = None;
 
         while pointer < size {
-            use core::{str, u16, u32};
-
             let section_type =
-                str::from_utf8(unsafe { &*((self.base_address + pointer) as *const [u8; 4]) })
+                str::from_utf8(unsafe { &*((base_address + pointer).to::<[u8; 4]>()) })
                     .unwrap_or("");
-            let section_length = u32::from_be_bytes(unsafe {
-                *((self.base_address + pointer + 4) as *const [u8; 4])
-            }) as usize;
-            pointer += 8;
+            pointer += MSize::new(4);
+            let section_length = MSize::new(u32::from_be_bytes(unsafe {
+                *((base_address + pointer).to::<[u8; 4]>())
+            }) as usize);
+            pointer += MSize::new(4);
 
             match section_type {
-                "NAME" | "FAMI" | "WEIG" | "SLAN" => {}
-                "PTSZ" => {
-                    /* self.font_point_size = u16::from_be_bytes(unsafe {
-                        *((self.base_address + pointer) as *const [u8; 2])
-                    }); */
-                }
-                "MAXW" => {
-                    /* self.max_font_width = u16::from_be_bytes(unsafe {
-                        *((self.base_address + pointer) as *const [u8; 2])
-                    }); */
-                }
+                "NAME" | "FAMI" | "WEIG" | "SLAN" | "PTSZ" | "MAXW" => {}
                 "MAXH" => {
-                    self.max_font_height = u16::from_be_bytes(unsafe {
-                        *((self.base_address + pointer) as *const [u8; 2])
-                    });
+                    max_font_height = Some(u16::from_be_bytes(unsafe {
+                        *((base_address + pointer).to::<[u8; 2]>())
+                    }));
                 }
                 "ASCE" => {
-                    self.ascent = u16::from_be_bytes(unsafe {
-                        *((self.base_address + pointer) as *const [u8; 2])
-                    });
+                    ascent = Some(u16::from_be_bytes(unsafe {
+                        *((base_address + pointer).to::<[u8; 2]>())
+                    }));
                 }
                 "DESC" => {
-                    self.decent = u16::from_be_bytes(unsafe {
-                        *((self.base_address + pointer) as *const [u8; 2])
-                    });
+                    decent = Some(u16::from_be_bytes(unsafe {
+                        *((base_address + pointer).to::<[u8; 2]>())
+                    }));
                 }
                 "CHIX" => {
-                    self.char_index_address = self.base_address + pointer;
-                    self.char_index_size = section_length;
+                    char_index_address = Some(base_address + pointer);
+                    char_index_size = Some(section_length);
                 }
                 "DATA" => {
-                    /* self.data_address = self.base_address + pointer; */
-                    /* self.data_size = section_length; */
                     break;
                 }
                 _ => {
-                    return false;
+                    return None;
                 }
             };
             pointer += section_length;
         }
-        self.build_ascii_cache();
-        true
+        let mut s = Self {
+            base_address,
+            max_font_height: max_font_height?,
+            ascent: ascent?,
+            decent: decent?,
+            char_index_address: char_index_address?,
+            char_index_size: char_index_size?,
+            font_cache: FontCache::default(),
+        };
+        s.build_ascii_cache();
+        Some(s)
     }
 
     fn build_ascii_cache(&mut self) {
@@ -136,7 +115,7 @@ impl Pff2FontManager {
         for a in ' '..'\x7f' {
             let char_utf32 = [0, 0, 0, a as u8];
             let char_index = {
-                let next_entry = unsafe { &*(pointer as *const Pff2CharIndex) };
+                let next_entry = unsafe { &*(pointer.to::<Pff2CharIndex>()) };
                 if next_entry.code == char_utf32 {
                     next_entry
                 } else {
@@ -145,7 +124,7 @@ impl Pff2FontManager {
                     let mut entry;
 
                     loop {
-                        entry = unsafe { &*(pointer as *const Pff2CharIndex) };
+                        entry = unsafe { &*(pointer.to::<Pff2CharIndex>()) };
                         if entry.code == char_utf32 {
                             break;
                         }
@@ -159,8 +138,8 @@ impl Pff2FontManager {
             };
 
             let pff2_font_data = unsafe {
-                &*((u32::from_be_bytes(char_index.offset) as usize + self.base_address)
-                    as *const Pff2FontData)
+                &*((self.base_address + MSize::new(u32::from_be_bytes(char_index.offset) as usize))
+                    .to::<Pff2FontData>())
             };
             let font_data = Self::pff2_font_data_to_font_data(pff2_font_data);
 
@@ -215,7 +194,7 @@ impl Pff2FontManager {
             let limit = self.char_index_address + self.char_index_size;
 
             loop {
-                entry = unsafe { &*(pointer as *const Pff2CharIndex) };
+                entry = unsafe { &*(pointer.to::<Pff2CharIndex>()) };
                 if entry.code == char_utf32 {
                     break;
                 }
@@ -227,8 +206,8 @@ impl Pff2FontManager {
             entry
         };
         let pff2_font_data = unsafe {
-            &*((u32::from_be_bytes(char_index.offset) as usize + self.base_address)
-                as *const Pff2FontData)
+            &*((self.base_address + MSize::new(u32::from_be_bytes(char_index.offset) as usize))
+                .to::<Pff2FontData>())
         };
         Some(Self::pff2_font_data_to_font_data(pff2_font_data))
     }

@@ -12,14 +12,17 @@ pub struct FontCache {
     normal: [(char, BitmapFontData); Self::DEFAULT_CACHE_LEN],
 }
 
-impl FontCache {
-    const DEFAULT_CACHE_LEN: usize = 64;
-    pub const fn new() -> Self {
+impl Default for FontCache {
+    fn default() -> Self {
         Self {
-            ascii: [BitmapFontData::new_const(); 0x7f - 0x20],
-            normal: [('\0', BitmapFontData::new_const()); Self::DEFAULT_CACHE_LEN],
+            ascii: [BitmapFontData::default(); 0x7f - 0x20],
+            normal: [('\0', BitmapFontData::default()); Self::DEFAULT_CACHE_LEN],
         }
     }
+}
+
+impl FontCache {
+    const DEFAULT_CACHE_LEN: usize = 64;
 
     pub fn add_ascii_font_cache(&mut self, c: char, font_data: BitmapFontData) {
         assert!(c.is_ascii());

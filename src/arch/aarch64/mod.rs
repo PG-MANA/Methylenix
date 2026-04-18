@@ -11,7 +11,6 @@ pub mod device {
     pub mod generic_timer;
     pub mod pci;
     pub mod serial_port;
-    pub mod text;
 }
 
 mod initialization;
@@ -110,17 +109,16 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     }
 
     /* Initialize Graphic */
-    if init_graphic_by_boot_information(&boot_information) {
-        if let Some((address, size)) = boot_information.font_address
-            && get_kernel_manager_cluster().graphic_manager.load_font(
-                VAddress::new(address),
-                size,
-                FontType::Pff2,
-            )
-        {
-            get_kernel_manager_cluster().kernel_tty_manager[1]
-                .open(&get_kernel_manager_cluster().graphic_manager);
-        }
+    if init_graphic_by_boot_information(&boot_information)
+        && let Some((address, size)) = boot_information.font_address
+        && get_kernel_manager_cluster().graphic_manager.load_font(
+            VAddress::new(address),
+            MSize::new(size),
+            FontType::Pff2,
+        )
+    {
+        get_kernel_manager_cluster().kernel_tty_manager[1]
+            .open(&get_kernel_manager_cluster().graphic_manager);
     }
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);

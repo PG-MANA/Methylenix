@@ -10,19 +10,17 @@ pub mod interrupt;
 pub mod paging;
 pub mod system_call;
 
-use self::device::cpu;
-use self::device::io_apic::IoApicManager;
-use self::device::local_apic_timer::LocalApicTimer;
-use self::device::serial_port::SerialPortManager;
-use self::initialization::multiboot::{init_graphic, init_memory_by_multiboot_information};
-use self::initialization::*;
+use self::device::{
+    cpu, io_apic::IoApicManager, local_apic_timer::LocalApicTimer, serial_port::SerialPortManager,
+};
+use self::initialization::{multiboot::*, *};
 
 use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::device::vga_text::VgaTextDriver;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 pub use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64 as ELF_MACHINE_DEFAULT;
-use crate::kernel::graphic_manager::GraphicManager;
 use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
@@ -37,6 +35,7 @@ pub struct ArchDependedCpuManagerCluster {
 
 pub struct ArchDependedKernelManagerCluster {
     pub io_apic_manager: Mutex<IoApicManager>,
+    vga_text_driver: VgaTextDriver,
 }
 
 pub const TARGET_ARCH_NAME: &str = "x86_64";
@@ -81,16 +80,7 @@ pub extern "C" fn multiboot_main(
     )));
 
     /* Init Graphic */
-    init_struct!(
-        get_kernel_manager_cluster().graphic_manager,
-        GraphicManager::new()
-    );
-    get_kernel_manager_cluster()
-        .graphic_manager
-        .init_by_multiboot_information(&multiboot_information.framebuffer_info);
-    get_kernel_manager_cluster().graphic_manager.clear_screen();
-    get_kernel_manager_cluster().kernel_tty_manager[1]
-        .open(&get_kernel_manager_cluster().graphic_manager);
+    init_graphic_early(&multiboot_information);
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
     pr_info!(
@@ -101,12 +91,6 @@ pub extern "C" fn multiboot_main(
 
     /* Init the memory management system */
     let multiboot_information = init_memory_by_multiboot_information(multiboot_information);
-    if !get_kernel_manager_cluster()
-        .graphic_manager
-        .set_frame_buffer_memory_permission()
-    {
-        panic!("Cannot map memory for frame buffer");
-    }
 
     /* Set up graphic */
     init_graphic(&multiboot_information);

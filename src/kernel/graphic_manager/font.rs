@@ -8,9 +8,9 @@
 pub mod font_cache;
 pub mod pff2;
 
-use self::pff2::Pff2FontManager;
+use pff2::Pff2FontManager;
 
-use crate::kernel::memory_manager::data_type::VAddress;
+use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct BitmapFontData {
@@ -22,8 +22,8 @@ pub struct BitmapFontData {
     pub bitmap_address: VAddress,
 }
 
-impl BitmapFontData {
-    pub const fn new_const() -> Self {
+impl Default for BitmapFontData {
+    fn default() -> Self {
         Self {
             width: 8,
             height: 16,
@@ -44,20 +44,11 @@ pub struct FontManager {
 }
 
 impl FontManager {
-    pub const fn new() -> Self {
-        Self {
-            manager: Pff2FontManager::new(),
-        }
-    }
-
-    pub fn load(
-        &mut self,
-        virtual_font_address: VAddress,
-        size: usize,
-        font_type: FontType,
-    ) -> bool {
+    pub fn new(font_address: VAddress, size: MSize, font_type: FontType) -> Option<Self> {
         match font_type {
-            FontType::Pff2 => self.manager.load(virtual_font_address, size),
+            FontType::Pff2 => Some(Self {
+                manager: Pff2FontManager::new(font_address, size)?,
+            }),
         }
     }
 

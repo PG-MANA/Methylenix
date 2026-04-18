@@ -19,6 +19,7 @@ pub mod device {
     pub mod nvme;
     #[allow(dead_code)]
     pub mod serial_port;
+    pub mod vga_text;
 }
 pub mod dtb;
 pub mod multiboot;

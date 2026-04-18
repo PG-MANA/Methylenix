@@ -11,7 +11,6 @@ pub mod device {
     pub mod pci;
     pub mod sbi;
     pub mod serial_port;
-    pub mod text;
 }
 
 mod initialization;
@@ -25,7 +24,6 @@ pub use crate::kernel::file_manager::elf::ELF_MACHINE_RISCV as ELF_MACHINE_DEFAU
 use crate::kernel::{
     collections::{init_struct, ptr_linked_list::PtrLinkedList},
     drivers::{boot_information::BootInformation, dtb::DtbManager},
-    graphic_manager::GraphicManager,
     initialization::*,
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::data_type::VAddress,
@@ -113,12 +111,7 @@ extern "C" fn boot_main(
     }
 
     /* Initialize Graphic */
-    init_struct!(
-        get_kernel_manager_cluster().graphic_manager,
-        GraphicManager::new()
-    );
-    get_kernel_manager_cluster().kernel_tty_manager[1]
-        .open(&get_kernel_manager_cluster().graphic_manager);
+    init_graphic_by_boot_information(&boot_information);
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
     pr_info!("BootInformation: ACPI: {acpi_available}, DTB: {dtb_available}");
