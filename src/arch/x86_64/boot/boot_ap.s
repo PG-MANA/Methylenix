@@ -52,7 +52,7 @@ ap_setup_long_mode:
     mov     $(ljmpl_64_address - ap_entry), %eax
     add     %ebx, (%ebx, %eax)          /* add base address */
 
-    mov     $pml4, %eax
+    lea     pml4, %eax
     mov     %eax, %cr3
     mov     %cr4, %eax
     or      $(1 << 5), %eax
@@ -81,35 +81,35 @@ ap_init_long_mode:
     mov     %ax, %ds
     mov     %ax, %fs
     mov     %ax, %gs
-    lgdt    gdtr_64bit_1
+    movabs  $gdtr_64bit_1, %rax
+    lgdt    (%rax)
     /* Set stack */
     mov     $(ap_os_stack_address - ap_entry), %eax
     add     %ebx, %eax                  /* EBX has base address */
     mov     (%eax), %rsp
     movabs  $ap_boot_main, %rax
-    jmp    *%rax                        /* "*" means absolute jmp */
+    jmp     *%rax
 
-
-.align  16
+.align      16
 
 gdt_32bit:
     /* NULL DESCRIPTOR */
     .quad   0
-.equ gdt_32bit_code_segment_descriptor, . - gdt_32bit
+    .equ    gdt_32bit_code_segment_descriptor, . - gdt_32bit
     /* Code */
     .word   0xffff, 0x0000, 0x9b00, 0x00cf
-.equ gdt_32bit_data_segment_descriptor, . - gdt_32bit
+    .equ    gdt_32bit_data_segment_descriptor, . - gdt_32bit
     /* R/W */
     .word   0xffff, 0x0000, 0x9200, 0x00cf
     .word   0
 gdtr_32bit:
-    .word  . - gdt_32bit - 1
-    .long  gdt_32bit - ap_entry
+    .word   . - gdt_32bit - 1
+    .long   gdt_32bit - ap_entry
 
-.align 8
+.align      8
 
 ap_os_stack_address:
     .quad   0
 
 ap_entry_end:
-.size   ap_entry, ap_entry_end - ap_entry
+.size       ap_entry, ap_entry_end - ap_entry

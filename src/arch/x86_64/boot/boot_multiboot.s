@@ -11,7 +11,7 @@
 .equ        MULTIBOOT_CHECK_MAGIC, 0x36d76289       /* multiboot2 magic code */
 .equ        BOOT_FROM_MULTIBOOT_MARK, 1
 
-.section    .text.32
+.section    .text.boot
 .align      4
 
 .type   boot_multiboot, %function
@@ -39,7 +39,7 @@ bad_magic:
   jmp   fin
 .size   bad_magic, . - bad_magic
 
-.section    .data.32
+.section    .data.boot
 .align      4
 
 .type   boot_error_str, %object

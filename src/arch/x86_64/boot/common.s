@@ -12,7 +12,7 @@
 .global tss_descriptor, tss_descriptor_address, tss
 .global pd, pdpt, pml4
 
-.section .data.32
+.section .data.boot
 
 .align  0x1000
 /* PAGE DIRECTORY (8byte * 512) * 4 */
@@ -33,68 +33,61 @@ pdpt:
 pml4:
 .skip   0x1000
 
-.align  16
-.type   gdtr_64bit_0, %object
+.align      16
+.type       gdtr_64bit_0, %object
 gdtr_64bit_0:
-  .word gdt_end - gdt - 1                  /* The byte size of descriptors */
-  .quad gdt - KERNEL_MAP_START_ADDRESS
-.size   gdtr_64bit_0, . - gdtr_64bit_0
+  .word     gdt_end - gdt - 1
+  .quad     gdt - KERNEL_MAP_START_ADDRESS
+.size       gdtr_64bit_0, . - gdtr_64bit_0
 
-.align  16
-.type   gdtr_64bit_1, %object
+.section    .data
+
+.align      16
+.type       gdtr_64bit_1, %object
 gdtr_64bit_1:
-  .word gdt_end - gdt - 1                  /* The byte size of descriptors */
-  .quad gdt
-.size   gdtr_64bit_1, . - gdtr_64bit_1
+  .word     gdt_end - gdt - 1
+  .quad     gdt
+.size       gdtr_64bit_1, . - gdtr_64bit_1
 
-.section .data
-
-.align  16
-/* OS STACK */
-.type   os_stack, %object
-.size   os_stack, OS_STACK_SIZE
-os_stack:
-.skip   OS_STACK_SIZE
-
-.align  16
-.type   gdt, %object
-.size   gdt, gdt_end - gdt
+.align      16
+.type       gdt, %object
+.size       gdt, gdt_end - gdt
 gdt:
     /* NULL DESCRIPTOR */
-    .quad    0
+    .quad   0
 
 .equ  main_code_segment_descriptor, . - gdt
-    .quad    (1 << 41) | (1 << 43) | (1 << 44) | (1 << 47) | (1 << 53)
+    .quad   (1 << 41) | (1 << 43) | (1 << 44) | (1 << 47) | (1 << 53)
 
 .equ main_data_segment_descriptor, . - gdt
-    .quad    (1 << 41) | (1 << 44) | (1 << 47) | (1 << 53)
+    .quad   (1 << 41) | (1 << 44) | (1 << 47) | (1 << 53)
 
 .equ user_data_segment_descriptor, . - gdt
-    .quad    (1 << 41) | (1 << 44) | (3 << 45) | (1 << 47) | (1 << 53)
+    .quad   (1 << 41) | (1 << 44) | (3 << 45) | (1 << 47) | (1 << 53)
 
 .equ user_code_segment_descriptor, . - gdt
-    .quad    (1 << 41) | (1 << 43) | (1 << 44) | (3 << 45) | (1 << 47) | (1 << 53)
+    .quad   (1 << 41) | (1 << 43) | (1 << 44) | (3 << 45) | (1 << 47) | (1 << 53)
 
 tss_descriptor_address:
 .equ  tss_descriptor, tss_descriptor_address - gdt
-    .word    (tss_end - tss) & 0xffff               /* Limit(Low) */
-    .word    0                                      /* Base(Low) */
-    .byte    0                                      /* Base(middle) */
-    .byte    0b10001001                             /* 64bit TSS + DPL:0 + P:1 */
-    .byte    ((tss_end - tss) & 0xff0000) >> 0x10   /* Limit(High)+Granularity */
-    .byte    0                                      /* Base(Middle high) */
-    .long    0                                      /* Base(High) */
-    .word    0                                      /* Reserved */
-    .word    0                                      /* Reserved */
+    .word   (tss_end - tss) & 0xffff              /* Limit(Low) */
+    .word   0                                     /* Base(Low) */
+    .byte   0                                     /* Base(middle) */
+    .byte   0b10001001                            /* 64bit TSS + DPL:0 + P:1 */
+    .byte   ((tss_end - tss) & 0xff0000) >> 0x10  /* Limit(High)+Granularity */
+    .byte   0                                     /* Base(Middle high) */
+    .long   0                                     /* Base(High) */
+    .word   0                                     /* Reserved */
+    .word   0                                     /* Reserved */
 gdt_end:
 
-.align   16
+.align      16
+.type       tss, %object
+.size       tss, tss_end - tss
 
-.type   tss, %object
-.size   tss, tss_end - tss
 tss:
   .rept     25
-    .long    0
+    .long   0
   .endr
   .word     0
   .word     tss_io_map - tss
@@ -102,5 +95,13 @@ tss_io_map:
   .rept     IO_MAP_SIZE / 8
     .byte   0xff
   .endr
-  .byte     0xff   /* See 19.5.2 "I/O Permission Bit Map" Intel SDM Vol.1 */
+  .byte     0xff
 tss_end:
+
+.section    .bss
+
+.align      16
+.type       os_stack, %object
+.size       os_stack, OS_STACK_SIZE
+os_stack:
+.skip       OS_STACK_SIZE

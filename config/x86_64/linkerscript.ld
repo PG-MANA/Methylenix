@@ -12,11 +12,9 @@ SECTIONS {
     KEEP(*(.header.*))
   }
 
-  .boot32 : ALIGN(8) {
-    *(.text.32)
-    *(.data.32)
-    *(.rodata.32)
-    *(.bss.32)
+  .boot : ALIGN(8) {
+    *(.text.boot)
+    *(.data.boot)
   }
 
   . += __KERNEL_MAP_START_ADDRESS;

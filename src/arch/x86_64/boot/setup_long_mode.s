@@ -10,16 +10,15 @@
 .extern tss_descriptor_address, tss, pd, pdpt, pml4
 .extern __KERNEL_MAP_START_ADDRESS
 
-.section .text.32
+.section .text.boot
 
 .type   setup_long_mode, %function
 setup_long_mode:
   /* Check if cpu supports x86_64 */
-  /* https://wiki.osdev.org/setting_up_long_mode#detection_of_cpuid */
-  mov  $0xff, %al
-  out  %al, $0x21
+  mov   $0xff, %al
+  out   %al, $0x21
   nop
-  out  %al, $0xa1
+  out   %al, $0xa1
   cli
 
   pushfd
@@ -94,9 +93,14 @@ pdpte_setup:
   or    $(1 << 31 | 1), %eax    /* Set PG flag */
   lgdt  gdtr_64bit_0
   mov   %eax, %cr0
-  ljmp $main_code_segment_descriptor, $init_long_mode
+  ljmp  $main_code_segment_descriptor, $jmp_to_init_long_mode
 
+.code64
+jmp_to_init_long_mode:
+  movabs  $init_long_mode, %rax
+  jmp     *%rax
 
+.code32
 only_x86:
 cpuid_not_supported:
   mov   $LONG_MODE_ERROR_STR_SIZE, %ecx
@@ -110,7 +114,7 @@ fin:
 
 .size   setup_long_mode, . - setup_long_mode
 
-.section .data.32
+.section .data.boot
 .align   4
 
 .type   long_mode_error_str, %object

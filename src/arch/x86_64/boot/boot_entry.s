@@ -7,7 +7,7 @@
 .global     boot_entry
 .extern     boot_multiboot     /* at boot_multiboot.s */
 
-.section    .text.32
+.section    .text.boot
 
 .type       boot_entry, %function
 boot_entry:
