@@ -16,12 +16,15 @@ use crate::kernel::{
             device::AcpiDeviceManager,
             table::{bgrt::BgrtManager, mcfg::McfgManager},
         },
+        boot_information::BootInformation,
+        efi::protocol::graphics_output_protocol,
         pci::PciManager,
     },
     file_manager::FileManager,
+    graphic_manager::GraphicManager,
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
-        data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, VAddress},
+        data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
         io_remap, mremap,
     },
     sync::spin_lock::Mutex,
@@ -47,6 +50,38 @@ pub fn init_work_queue() {
     get_cpu_manager_cluster()
         .work_queue
         .init_cpu_work_queue(&mut get_kernel_manager_cluster().task_manager);
+}
+
+/// Init [`GraphicManager`] with [`BootInformation`]
+///
+/// This function will get framebuffer information and remap the address.
+/// Do not call this before initializing memory manager.
+///
+/// If suitable framebuffer was found, this will process and return true.
+/// Otherwise, this will do nothing and return false.
+pub fn init_graphic_by_boot_information(boot_information: &BootInformation) -> bool {
+    init_struct!(
+        get_kernel_manager_cluster().graphic_manager,
+        GraphicManager::new()
+    );
+    if let Some(graphic_info) = &boot_information.graphic_info {
+        if graphic_info.info.pixel_format == graphics_output_protocol::EfiGraphicsPixelFormat::PixelRedGreenBlueReserved8BitPerColor {
+            get_kernel_manager_cluster()
+                .graphic_manager
+                .init_by_efi_information(
+                graphic_info.frame_buffer_base,
+                graphic_info.frame_buffer_size,
+                &graphic_info.info,
+            );
+            get_kernel_manager_cluster()
+                .graphic_manager
+                .set_frame_buffer_memory_permission();
+            return true;
+        } else {
+            pr_warn!("Unsupported pixel format: {:?}", graphic_info.info.pixel_format);
+        }
+    }
+    false
 }
 
 /// Init AcpiManager without parsing AML

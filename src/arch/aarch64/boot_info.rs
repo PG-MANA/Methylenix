@@ -1,6 +1,7 @@
 //!
 //! BootInformation Structure from bootloader
 //!
+//! TODO: merge with [`crate::kernel::drivers::boot_information`]
 
 use crate::kernel::drivers::efi::EfiSystemTable;
 use crate::kernel::drivers::efi::protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation;

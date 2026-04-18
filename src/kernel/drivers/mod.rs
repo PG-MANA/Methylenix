@@ -3,6 +3,12 @@
 //!
 
 pub mod acpi;
+// TODO: merge them
+#[cfg(target_arch = "aarch64")]
+pub mod boot_information {
+    pub use crate::arch::target_arch::boot_info::BootInformation;
+}
+#[cfg(not(target_arch = "aarch64"))]
 pub mod boot_information;
 pub mod efi;
 pub mod device {
