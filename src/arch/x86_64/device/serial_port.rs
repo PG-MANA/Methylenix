@@ -7,7 +7,7 @@ use crate::arch::target_arch::device::cpu::{in_byte, out_byte};
 
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-use crate::kernel::tty::Writer;
+use crate::kernel::tty::{TextColor, Writer};
 
 /// SerialPortManager
 ///
@@ -118,15 +118,14 @@ impl Writer for SerialPortManager {
     fn write(
         &self,
         buf: &[u8],
-        size_to_write: usize,
-        _foreground_color: u32,
-        _background_color: u32,
+        _foreground_color: TextColor,
+        _background_color: TextColor,
     ) -> core::fmt::Result {
         let _lock = self.write_lock.lock();
         if self.port == 0 {
             return Err(core::fmt::Error {});
         }
-        for c in buf[0..size_to_write].iter() {
+        for c in buf {
             if *c as char == '\n' && !self._send(b'\r') {
                 return Err(core::fmt::Error {});
             }

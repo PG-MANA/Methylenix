@@ -13,7 +13,7 @@ use crate::kernel::memory_manager::data_type::{
 };
 use crate::kernel::memory_manager::io_remap;
 use crate::kernel::sync::spin_lock::SpinLockFlag;
-use crate::kernel::tty::Writer;
+use crate::kernel::tty::{TextColor, Writer};
 
 use core::fmt;
 
@@ -171,12 +171,11 @@ impl Writer for SerialPortManager {
     fn write(
         &self,
         buf: &[u8],
-        size_to_write: usize,
-        _foreground_color: u32,
-        _background_color: u32,
+        _foreground_color: TextColor,
+        _background_color: TextColor,
     ) -> fmt::Result {
         let _lock = self.lock.lock();
-        for e in buf[0..size_to_write].iter() {
+        for e in buf {
             if !(self.wait_buffer)(self.base_address) {
                 return Err(fmt::Error {});
             }

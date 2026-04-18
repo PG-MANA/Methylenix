@@ -24,18 +24,40 @@ pub struct TtyManager {
     input_queue: Fifo<u8, { Self::DEFAULT_INPUT_BUFFER_SIZE }>,
     output_queue: Fifo<u8, { Self::DEFAULT_OUTPUT_BUFFER_SIZE }>,
     output_driver: Option<&'static dyn Writer>,
-    text_color: (u32, u32),
+    // TODO: remove
+    text_color: (TextColor, TextColor),
     input_wait_queue: WaitQueue,
 }
 
 pub trait Writer {
-    fn write(
-        &self,
-        buf: &[u8],
-        size_to_write: usize,
-        foreground_color: u32,
-        background_color: u32,
-    ) -> fmt::Result;
+    fn write(&self, buf: &[u8], foreground: TextColor, background: TextColor) -> fmt::Result;
+}
+
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub enum TextColor {
+    Black,
+    Green,
+    Cyan,
+    Red,
+    Orange,
+    Yellow,
+    White,
+    Custom(u32),
+}
+
+impl TextColor {
+    pub fn to_u32(&self) -> u32 {
+        match self {
+            TextColor::Black => 0x0000_0000,
+            TextColor::Green => 0x0000_FF00,
+            TextColor::Cyan => 0x0055_FFFF,
+            TextColor::Orange => 0x00FF_7F27,
+            TextColor::Red => 0x00FF_0000,
+            TextColor::Yellow => 0x00FF_FF00,
+            TextColor::White => 0xFFFF_FFFF,
+            TextColor::Custom(c) => *c,
+        }
+    }
 }
 
 macro_rules! kprint {
@@ -91,7 +113,7 @@ impl TtyManager {
             input_queue: Fifo::new(0),
             output_queue: Fifo::new(0),
             output_driver: None,
-            text_color: (0x55FFFF, 0x000000),
+            text_color: (TextColor::White, TextColor::Black),
             input_wait_queue: WaitQueue::new(),
         }
     }
@@ -164,9 +186,9 @@ impl TtyManager {
     }
 
     fn _flush(&mut self) -> fmt::Result {
-        if self.output_driver.is_none() {
+        let Some(writer) = &mut self.output_driver else {
             return Ok(());
-        }
+        };
         /* output_driver must be some and locked */
         let mut buffer: [u8; Self::DEFAULT_OUTPUT_BUFFER_SIZE] =
             [unsafe { MaybeUninit::zeroed().assume_init() }; Self::DEFAULT_OUTPUT_BUFFER_SIZE];
@@ -175,30 +197,27 @@ impl TtyManager {
             buffer[pointer] = e;
             pointer += 1;
             if pointer == Self::DEFAULT_OUTPUT_BUFFER_SIZE {
-                self.output_driver
-                    .unwrap()
-                    .write(&buffer, pointer, self.text_color.0, self.text_color.1)
-                    .or_else(|err| {
-                        self.output_driver = None;
-                        Err(err)
-                    })?;
+                if let Err(e) = writer.write(&buffer, self.text_color.0, self.text_color.1) {
+                    self.output_driver = None;
+                    return Err(e);
+                };
                 pointer = 0;
             }
         }
-        self.output_driver
-            .unwrap()
-            .write(&buffer, pointer, self.text_color.0, self.text_color.1)
+        writer
+            .write(&buffer[0..pointer], self.text_color.0, self.text_color.1)
             .or_else(|err| {
                 self.output_driver = None;
                 Err(err)
             })
     }
 
+    // TODO: remove when println become free from TtyManager
     fn change_font_color(
         &mut self,
-        foreground_color: u32,
-        background_color: u32,
-    ) -> Option<(u32, u32)> {
+        foreground_color: TextColor,
+        background_color: TextColor,
+    ) -> Option<(TextColor, TextColor)> {
         let _lock = self.output_lock.lock();
         let _ = self._flush();
         let old = self.text_color;
@@ -282,13 +301,13 @@ pub fn kernel_print(args: fmt::Arguments) {
 #[track_caller]
 pub fn print_debug_message(level: usize, args: fmt::Arguments) {
     use core::panic::Location;
-    let level = match level {
-        3 => ("[ERROR]", (0xFF0000, 0x000000)),
-        4 => ("[WARN]", (0xFF7F27, 0x000000)),
-        5 => ("[NOTICE]", (0xFFFF00, 0x000000)),
-        6 => ("[INFO]", (0x55FFFF, 0x000000)),
-        7 => ("[DEBUG]", (0x55FFFF, 0x000000)),
-        _ => ("[???]", (0x55FFFF, 0x000000)),
+    let (prefix, (foreground, background)) = match level {
+        3 => ("[ERROR]", (TextColor::Red, TextColor::Black)),
+        4 => ("[WARN]", (TextColor::Orange, TextColor::Black)),
+        5 => ("[NOTICE]", (TextColor::Yellow, TextColor::Black)),
+        6 => ("[INFO]", (TextColor::Cyan, TextColor::Black)),
+        7 => ("[DEBUG]", (TextColor::White, TextColor::Black)),
+        _ => ("[???]", (TextColor::White, TextColor::Black)),
     };
     let file = Location::caller().file(); //THINKING: filename only
     let line = Location::caller().line();
@@ -296,10 +315,10 @@ pub fn print_debug_message(level: usize, args: fmt::Arguments) {
         if tty.output_driver.is_none() {
             continue;
         }
-        let original_color = tty.change_font_color(level.1.0, level.1.1);
-        let _ = tty.write_fmt(format_args!("{} {}:{} | {}\n", level.0, file, line, args));
-        if let Some(c) = original_color {
-            tty.change_font_color(c.0, c.1);
+        let original_color = tty.change_font_color(foreground, background);
+        let _ = tty.write_fmt(format_args!("{} {}:{} | {}\n", prefix, file, line, args));
+        if let Some((f, b)) = original_color {
+            tty.change_font_color(f, b);
         }
     }
 }
