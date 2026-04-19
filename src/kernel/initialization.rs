@@ -4,7 +4,9 @@
 //! This module contains initialization functions which is not depend on arch.
 //!
 
+use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
 use crate::arch::target_arch::device::{cpu, pci::ArchDependPciManager};
+use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE_USIZE};
 
 use crate::kernel::{
     application_loader,
@@ -16,16 +18,25 @@ use crate::kernel::{
             device::AcpiDeviceManager,
             table::{bgrt::BgrtManager, mcfg::McfgManager},
         },
-        boot_information::BootInformation,
-        efi::protocol::graphics_output_protocol::EfiGraphicsPixelFormat,
+        boot_information::*,
+        efi::{
+            EFI_PAGE_SIZE, memory_map::EfiMemoryType,
+            protocol::graphics_output_protocol::EfiGraphicsPixelFormat,
+        },
         pci::PciManager,
     },
-    file_manager::FileManager,
-    graphic_manager::GraphicManager,
+    file_manager::{FileManager, elf::ELF_PROGRAM_HEADER_SEGMENT_LOAD},
+    graphic_manager::{GraphicManager, font::FontType},
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
+        MemoryManager,
         data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
-        io_remap, mremap,
+        io_remap,
+        memory_allocator::MemoryAllocator,
+        mremap,
+        physical_memory_manager::PhysicalMemoryManager,
+        system_memory_manager::{SystemMemoryManager, get_physical_memory_manager},
+        virtual_memory_manager::VirtualMemoryManager,
     },
     sync::spin_lock::Mutex,
     task_manager::run_queue::RunQueue,
@@ -52,6 +63,156 @@ pub fn init_work_queue() {
         .init_cpu_work_queue(&mut get_kernel_manager_cluster().task_manager);
 }
 
+/// Memory Areas for PhysicalMemoryManager
+pub static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] =
+    [0; PAGE_SIZE_USIZE * 2];
+
+/// Init memory system based on [`BootInformation`].
+/// This function sets up [`PhysicalMemoryManager`] which manages where is free
+/// and [`VirtualMemoryManager`] which manages which process is using what area of virtual memory.
+/// After that, this will set up MemoryManager.
+/// If one of the processes is failed, this will panic.
+pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
+    /* Set up Physical Memory Manager */
+    let mut physical_memory_manager = PhysicalMemoryManager::new();
+    unsafe {
+        physical_memory_manager.add_memory_entry_pool(
+            &raw const MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as usize,
+            size_of_val(
+                (&raw const MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)
+                    .as_ref()
+                    .unwrap(),
+            ),
+        );
+    }
+
+    let mut max_usable_memory_address = PAddress::new(0);
+
+    /* Free usable memory area */
+    for entry in boot_information.memory_map.iter() {
+        if entry.memory_type == EfiMemoryType::MaxMemoryType {
+            continue;
+        }
+        pr_info!(
+            "[{:#016X}~{:#016X}] {}",
+            entry.physical_start,
+            MSize::new((entry.number_of_pages as usize) << 12)
+                .to_end_address(PAddress::new(entry.physical_start))
+                .to_usize(),
+            entry.memory_type
+        );
+        match entry.memory_type {
+            EfiMemoryType::ConventionalMemory
+            | EfiMemoryType::BootServicesCode
+            | EfiMemoryType::LoaderCode => {
+                let start_address = PAddress::new(entry.physical_start);
+                let size = MSize::new((entry.number_of_pages as usize) * EFI_PAGE_SIZE);
+                bug_on_err!(physical_memory_manager.free(start_address, size, true));
+                if start_address + size > max_usable_memory_address {
+                    max_usable_memory_address = start_address + size;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /* Set up Virtual Memory Manager */
+    let mut virtual_memory_manager = VirtualMemoryManager::new();
+    virtual_memory_manager.init_system(&mut physical_memory_manager);
+    init_struct!(
+        get_kernel_manager_cluster().system_memory_manager,
+        SystemMemoryManager::new(physical_memory_manager)
+    );
+    get_kernel_manager_cluster()
+        .system_memory_manager
+        .init_pools(&mut virtual_memory_manager);
+
+    for entry in boot_information.elf_program_headers.iter() {
+        let virtual_address = entry.get_virtual_address() as usize;
+        let physical_address = entry.get_physical_address() as usize;
+        if entry.get_segment_type() != ELF_PROGRAM_HEADER_SEGMENT_LOAD
+            || (virtual_address & !PAGE_MASK) != 0
+            || (physical_address & !PAGE_MASK) != 0
+            || entry.get_memory_size() == 0
+        {
+            continue;
+        }
+        let aligned_size = MemoryManager::size_align(MSize::new(entry.get_memory_size() as usize));
+        let permission = MemoryPermissionFlags::new(
+            entry.is_segment_readable(),
+            entry.is_segment_writable(),
+            entry.is_segment_executable(),
+            false,
+        );
+        pr_info!(
+            "VA: [{:#016X}~{:#016X}] => PA: [{:#016X}~{:#016X}] (R: {}, W: {}, E: {})",
+            virtual_address,
+            virtual_address + aligned_size.to_usize(),
+            physical_address,
+            physical_address + aligned_size.to_usize(),
+            permission.is_readable(),
+            permission.is_writable(),
+            permission.is_executable()
+        );
+        match virtual_memory_manager.map_address(
+            PAddress::new(physical_address),
+            Some(VAddress::new(virtual_address)),
+            aligned_size,
+            permission,
+            MemoryOptionFlags::KERNEL,
+            get_physical_memory_manager(),
+        ) {
+            Ok(address) => {
+                assert_eq!(
+                    address,
+                    VAddress::new(virtual_address),
+                    "Virtual Address is different from Physical Address: V:{:#X} P:{:#X}",
+                    address.to_usize(),
+                    virtual_address
+                );
+            }
+            Err(e) => {
+                panic!("Mapping ELF Section was failed: {:?}", e);
+            }
+        };
+    }
+
+    /* Set up Memory Manager */
+    init_struct!(
+        get_kernel_manager_cluster().kernel_memory_manager,
+        MemoryManager::new(virtual_memory_manager)
+    );
+
+    /* Adjust Memory Pointer */
+    /* `efi_memory_map_address` and `elf_program_headers_address` are already direct mapped. */
+    if let Some(system_table) = &mut boot_information.efi_system_table {
+        system_table.set_configuration_table(
+            physical_address_to_direct_map(PAddress::new(system_table.get_configuration_table()))
+                .to_usize(),
+        );
+    }
+    /*boot_information.font_address = boot_information.font_address.map(|a| {
+        (
+            (physical_address_to_direct_map(PAddress::new(a.0)).to_usize()),
+            a.1,
+        )
+    });*/
+
+    /* Apply paging */
+    get_kernel_manager_cluster()
+        .kernel_memory_manager
+        .set_paging_table();
+
+    /* Set up Kernel Memory Allocator */
+    let mut memory_allocator = MemoryAllocator::new();
+    memory_allocator
+        .init()
+        .expect("Failed to init MemoryAllocator");
+    init_struct!(get_cpu_manager_cluster().memory_allocator, memory_allocator);
+
+    /* TODO: free EfiLoaderData area excepting kernel area */
+}
+
 /// Init [`GraphicManager`] with [`BootInformation`]
 ///
 /// This function will get framebuffer information and remap the address.
@@ -71,7 +232,7 @@ pub fn init_graphic_by_boot_information(boot_information: &BootInformation) -> b
             get_kernel_manager_cluster()
                 .graphic_manager
                 .set_frame_buffer(
-                    PAddress::new(graphic_info.frame_buffer_base),
+                    graphic_info.frame_buffer_address,
                     graphic_info.info.horizontal_resolution as usize,
                     graphic_info.info.vertical_resolution as usize,
                     32,
@@ -89,6 +250,21 @@ pub fn init_graphic_by_boot_information(boot_information: &BootInformation) -> b
         }
     }
     false
+}
+
+/// Load font into [`GraphicManager`]
+///
+/// Currently, supports PFF2 font only.
+pub fn init_graphic_font_by_boot_information(boot_information: &BootInformation) -> bool {
+    let Some(font_info) = &boot_information.font_info else {
+        return false;
+    };
+    /* TODO: reserve memory */
+    get_kernel_manager_cluster().graphic_manager.load_font(
+        font_info.font_address,
+        MSize::new(font_info.font_size.get()),
+        FontType::Pff2,
+    )
 }
 
 /// Init AcpiManager without parsing AML

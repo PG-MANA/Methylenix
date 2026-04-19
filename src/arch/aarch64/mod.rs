@@ -2,7 +2,6 @@
 //! Armv8-A(AArch64) Boot Routines
 //!
 
-pub mod boot_info;
 pub mod context;
 
 pub mod device {
@@ -19,7 +18,6 @@ pub mod paging;
 pub mod system_call;
 
 use self::{
-    boot_info::BootInformation,
     device::{
         generic_timer::{GenericTimer, SystemCounter},
         serial_port::SerialPortManager,
@@ -31,11 +29,10 @@ use self::{
 pub use crate::kernel::file_manager::elf::ELF_MACHINE_AA64 as ELF_MACHINE_DEFAULT;
 use crate::kernel::{
     collections::{init_struct, ptr_linked_list::PtrLinkedList},
-    drivers::dtb::DtbManager,
-    graphic_manager::font::FontType,
+    drivers::{boot_information::BootInformation, dtb::DtbManager},
     initialization::*,
     manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster},
-    memory_manager::data_type::{MSize, VAddress},
+    memory_manager::data_type::VAddress,
     timer_manager::IntervalTimer,
     tty::TtyManager,
 };
@@ -110,12 +107,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
 
     /* Initialize Graphic */
     if init_graphic_by_boot_information(&boot_information)
-        && let Some((address, size)) = boot_information.font_address
-        && get_kernel_manager_cluster().graphic_manager.load_font(
-            VAddress::new(address),
-            MSize::new(size),
-            FontType::Pff2,
-        )
+        && init_graphic_font_by_boot_information(&boot_information)
     {
         get_kernel_manager_cluster().kernel_tty_manager[1]
             .open(&get_kernel_manager_cluster().graphic_manager);

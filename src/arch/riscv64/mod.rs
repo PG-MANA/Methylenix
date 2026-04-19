@@ -111,7 +111,12 @@ extern "C" fn boot_main(
     }
 
     /* Initialize Graphic */
-    init_graphic_by_boot_information(&boot_information);
+    if init_graphic_by_boot_information(&boot_information)
+        && init_graphic_font_by_boot_information(&boot_information)
+    {
+        get_kernel_manager_cluster().kernel_tty_manager[1]
+            .open(&get_kernel_manager_cluster().graphic_manager);
+    }
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
     pr_info!("BootInformation: ACPI: {acpi_available}, DTB: {dtb_available}");

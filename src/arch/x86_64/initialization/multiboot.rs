@@ -3,7 +3,7 @@
 //!
 //! This module is called by boot function.
 
-use super::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
+use crate::kernel::initialization::MEMORY_FOR_PHYSICAL_MEMORY_MANAGER;
 
 use crate::arch::target_arch::{
     context::memory_layout::{KERNEL_MAP_START_ADDRESS, kernel_area_to_physical_address},
@@ -94,17 +94,17 @@ pub fn init_memory_by_multiboot_information(
             continue;
         }
         match entry.memory_type {
-            EfiMemoryType::EfiReservedMemoryType |
-            EfiMemoryType::EfiBootServicesData/* for BGRT */ |
-            EfiMemoryType::EfiRuntimeServicesCode |
-            EfiMemoryType::EfiRuntimeServicesData |
-            EfiMemoryType::EfiUnusableMemory |
-            EfiMemoryType::EfiACPIReclaimMemory |
-            EfiMemoryType::EfiACPIMemoryNVS |
-            EfiMemoryType::EfiMemoryMappedIO |
-            EfiMemoryType::EfiMemoryMappedIOPortSpace |
-            EfiMemoryType::EfiPalCode |
-            EfiMemoryType::EfiPersistentMemory => {
+            EfiMemoryType::ReservedMemoryType |
+            EfiMemoryType::BootServicesData/* for BGRT */ |
+            EfiMemoryType::RuntimeServicesCode |
+            EfiMemoryType::RuntimeServicesData |
+            EfiMemoryType::UnusableMemory |
+            EfiMemoryType::ACPIReclaimMemory |
+            EfiMemoryType::ACPIMemoryNVS |
+            EfiMemoryType::MemoryMappedIO |
+            EfiMemoryType::MemoryMappedIOPortSpace |
+            EfiMemoryType::PalCode |
+            EfiMemoryType::PersistentMemory => {
                 if let Err(e) =
                     physical_memory_manager.reserve_memory(
                         PAddress::new(entry.physical_start),

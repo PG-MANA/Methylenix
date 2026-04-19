@@ -30,9 +30,6 @@ use crate::kernel::{
 
 use core::sync::atomic::AtomicBool;
 
-/// Memory Areas for PhysicalMemoryManager
-static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; PAGE_SIZE_USIZE * 2];
-
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 
 /// Init TaskManager

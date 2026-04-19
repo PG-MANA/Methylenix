@@ -6,32 +6,26 @@
 //!
 
 use crate::arch::target_arch::{
-    context::{ContextManager, memory_layout::physical_address_to_direct_map},
+    context::ContextManager,
     device::{cpu, jh7110_timer::Jh7110Timer, sbi},
     get_hartid,
     interrupt::{InterruptManager, plicv1::PlatformLevelInterruptController},
-    paging::{PAGE_MASK, PAGE_SIZE, PAGE_SIZE_USIZE},
+    paging::{PAGE_SIZE, PAGE_SIZE_USIZE},
 };
 
 use crate::kernel::{
-    collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
+    collections::{guid::Guid, init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::{
-        acpi::table::madt::MadtManager,
-        boot_information::BootInformation,
-        dtb::DtbManager,
-        efi::{EFI_DTB_TABLE_GUID, EFI_PAGE_SIZE, memory_map::EfiMemoryType},
+        acpi::table::madt::MadtManager, boot_information::BootInformation, dtb::DtbManager,
+        efi::EFI_DTB_TABLE_GUID,
     },
-    file_manager::elf::ELF_PROGRAM_HEADER_SEGMENT_LOAD,
     initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{CpuManagerCluster, get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
-        MemoryManager, alloc_pages, alloc_pages_with_physical_address,
+        alloc_pages, alloc_pages_with_physical_address,
         data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
         free_pages,
         memory_allocator::MemoryAllocator,
-        physical_memory_manager::PhysicalMemoryManager,
-        system_memory_manager::{SystemMemoryManager, get_physical_memory_manager},
-        virtual_memory_manager::VirtualMemoryManager,
     },
     task_manager::{TaskManager, run_queue::RunQueue},
     timer_manager::LocalTimerManager,
@@ -40,9 +34,6 @@ use crate::kernel::{
 use core::sync::atomic::AtomicBool;
 
 use alloc::boxed::Box;
-
-/// Memory Areas for PhysicalMemoryManager
-static mut MEMORY_FOR_PHYSICAL_MEMORY_MANAGER: [u8; PAGE_SIZE_USIZE * 2] = [0; PAGE_SIZE_USIZE * 2];
 
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
 
@@ -77,152 +68,6 @@ pub fn setup_cpu_manager_cluster(
     cpu_manager.cpu_id = hartid as usize;
     cpu_manager.arch_depend_data.hartid = hartid;
     cpu_manager
-}
-
-/// Init memory system based on boot information.
-/// This function sets up PhysicalMemoryManager which manages where is free
-/// and [`VirtualMemoryManager`] which manages which process is using what area of virtual memory.
-/// After that, this will set up MemoryManager.
-/// If one of the processes is failed, this will panic.
-pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
-    /* Set up Physical Memory Manager */
-    let mut physical_memory_manager = PhysicalMemoryManager::new();
-    unsafe {
-        physical_memory_manager.add_memory_entry_pool(
-            &raw const MEMORY_FOR_PHYSICAL_MEMORY_MANAGER as usize,
-            size_of_val(
-                (&raw const MEMORY_FOR_PHYSICAL_MEMORY_MANAGER)
-                    .as_ref()
-                    .unwrap(),
-            ),
-        );
-    }
-
-    let mut max_usable_memory_address = PAddress::new(0);
-
-    /* Free usable memory area */
-    for entry in boot_information.memory_map.iter() {
-        if entry.memory_type == EfiMemoryType::EfiMaxMemoryType {
-            continue;
-        }
-        pr_info!(
-            "[{:#016X}~{:#016X}] {}",
-            entry.physical_start,
-            MSize::new((entry.number_of_pages as usize) << 12)
-                .to_end_address(PAddress::new(entry.physical_start))
-                .to_usize(),
-            entry.memory_type
-        );
-        match entry.memory_type {
-            EfiMemoryType::EfiConventionalMemory
-            | EfiMemoryType::EfiBootServicesCode
-            | EfiMemoryType::EfiLoaderCode => {
-                let start_address = PAddress::new(entry.physical_start);
-                let size = MSize::new((entry.number_of_pages as usize) * EFI_PAGE_SIZE);
-                bug_on_err!(physical_memory_manager.free(start_address, size, true));
-                if start_address + size > max_usable_memory_address {
-                    max_usable_memory_address = start_address + size;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /* Set up Virtual Memory Manager */
-    let mut virtual_memory_manager = VirtualMemoryManager::new();
-    virtual_memory_manager.init_system(&mut physical_memory_manager);
-    init_struct!(
-        get_kernel_manager_cluster().system_memory_manager,
-        SystemMemoryManager::new(physical_memory_manager)
-    );
-    get_kernel_manager_cluster()
-        .system_memory_manager
-        .init_pools(&mut virtual_memory_manager);
-
-    for entry in boot_information.elf_program_headers.iter() {
-        let virtual_address = entry.get_virtual_address() as usize;
-        let physical_address = entry.get_physical_address() as usize;
-        if entry.get_segment_type() != ELF_PROGRAM_HEADER_SEGMENT_LOAD
-            || (virtual_address & !PAGE_MASK) != 0
-            || (physical_address & !PAGE_MASK) != 0
-            || entry.get_memory_size() == 0
-        {
-            continue;
-        }
-        let aligned_size = MemoryManager::size_align(MSize::new(entry.get_memory_size() as usize));
-        let permission = MemoryPermissionFlags::new(
-            entry.is_segment_readable(),
-            entry.is_segment_writable(),
-            entry.is_segment_executable(),
-            false,
-        );
-        pr_info!(
-            "VA: [{:#016X}~{:#016X}] => PA: [{:#016X}~{:#016X}] (R: {}, W: {}, E: {})",
-            virtual_address,
-            virtual_address + aligned_size.to_usize(),
-            physical_address,
-            physical_address + aligned_size.to_usize(),
-            permission.is_readable(),
-            permission.is_writable(),
-            permission.is_executable()
-        );
-        match virtual_memory_manager.map_address(
-            PAddress::new(physical_address),
-            Some(VAddress::new(virtual_address)),
-            aligned_size,
-            permission,
-            MemoryOptionFlags::KERNEL,
-            get_physical_memory_manager(),
-        ) {
-            Ok(address) => {
-                assert_eq!(
-                    address,
-                    VAddress::new(virtual_address),
-                    "Virtual Address is different from Physical Address: V:{:#X} P:{:#X}",
-                    address.to_usize(),
-                    virtual_address
-                );
-            }
-            Err(e) => {
-                panic!("Mapping ELF Section was failed: {:?}", e);
-            }
-        };
-    }
-
-    /* Set up Memory Manager */
-    init_struct!(
-        get_kernel_manager_cluster().kernel_memory_manager,
-        MemoryManager::new(virtual_memory_manager)
-    );
-
-    /* Adjust Memory Pointer */
-    /* `efi_memory_map_address` and `elf_program_headers_address` are already direct mapped. */
-    if let Some(system_table) = &mut boot_information.efi_system_table {
-        system_table.set_configuration_table(
-            physical_address_to_direct_map(PAddress::new(system_table.get_configuration_table()))
-                .to_usize(),
-        );
-    }
-    /*boot_information.font_address = boot_information.font_address.map(|a| {
-        (
-            (physical_address_to_direct_map(PAddress::new(a.0)).to_usize()),
-            a.1,
-        )
-    });*/
-
-    /* Apply paging */
-    get_kernel_manager_cluster()
-        .kernel_memory_manager
-        .set_paging_table();
-
-    /* Set up Kernel Memory Allocator */
-    let mut memory_allocator = MemoryAllocator::new();
-    memory_allocator
-        .init()
-        .expect("Failed to init MemoryAllocator");
-    init_struct!(get_cpu_manager_cluster().memory_allocator, memory_allocator);
-
-    /* TODO: free EfiLoaderData area excepting kernel area */
 }
 
 /// Init InterruptManager
@@ -300,18 +145,20 @@ pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
                 .init_with_dtb())
 }
 
+fn find_vendor_table(boot_information: &BootInformation, guid: Guid) -> Option<usize> {
+    boot_information.efi_system_table.as_ref().and_then(|t| {
+        t.get_configuration_table_slice()
+            .iter()
+            .find(|e| e.vendor_guid == guid)
+            .map(|e| e.vendor_table)
+    })
+}
+
 /// Init Device Tree Blob Manager
 pub fn init_dtb(boot_information: &BootInformation, mut dtb_address: Option<usize>) -> bool {
     let mut dtb_manager = DtbManager::new();
-    if dtb_address.is_none()
-        && let Some(system_table) = &boot_information.efi_system_table
-    {
-        for e in unsafe { system_table.get_configuration_table_slice() } {
-            if e.vendor_guid == EFI_DTB_TABLE_GUID {
-                dtb_address = Some(e.vendor_table);
-                break;
-            }
-        }
+    if dtb_address.is_none() {
+        dtb_address = find_vendor_table(boot_information, EFI_DTB_TABLE_GUID);
     }
     if dtb_address.is_none() {
         init_struct!(

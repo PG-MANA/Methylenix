@@ -11,7 +11,7 @@ use crate::kernel::drivers::efi::memory_map::{
 
 const fn create_available_memory(base_address: usize, size: usize) -> EfiMemoryDescriptor {
     EfiMemoryDescriptor {
-        memory_type: EfiMemoryType::EfiConventionalMemory,
+        memory_type: EfiMemoryType::ConventionalMemory,
         physical_start: base_address,
         virtual_start: base_address,
         number_of_pages: (size >> paging::PAGE_SHIFT) as u64, /* round down */
@@ -24,7 +24,7 @@ const fn create_allocated_memory(
     number_of_pages: usize,
 ) -> EfiMemoryDescriptor {
     EfiMemoryDescriptor {
-        memory_type: EfiMemoryType::EfiLoaderData,
+        memory_type: EfiMemoryType::LoaderData,
         physical_start: base_address,
         virtual_start: base_address,
         number_of_pages: number_of_pages as u64,
@@ -33,7 +33,7 @@ const fn create_allocated_memory(
 }
 
 static mut MEMORY_LIST: [EfiMemoryDescriptor; 64] = [EfiMemoryDescriptor {
-    memory_type: EfiMemoryType::EfiMaxMemoryType,
+    memory_type: EfiMemoryType::MaxMemoryType,
     physical_start: 0,
     virtual_start: 0,
     number_of_pages: 0,
@@ -43,7 +43,7 @@ static mut MEMORY_LIST: [EfiMemoryDescriptor; 64] = [EfiMemoryDescriptor {
 pub fn allocate_pages(pages: usize) -> Option<usize> {
     let list = unsafe { (&raw mut MEMORY_LIST).as_mut().unwrap() };
     let e = list.iter_mut().find(|e| {
-        e.memory_type == EfiMemoryType::EfiConventionalMemory && e.number_of_pages >= pages as u64
+        e.memory_type == EfiMemoryType::ConventionalMemory && e.number_of_pages >= pages as u64
     })?;
     let page = e.physical_start;
     e.physical_start += pages << paging::PAGE_SHIFT;
@@ -51,11 +51,11 @@ pub fn allocate_pages(pages: usize) -> Option<usize> {
     e.number_of_pages -= pages as u64;
 
     for e in list.iter_mut() {
-        if e.memory_type == EfiMemoryType::EfiMaxMemoryType {
+        if e.memory_type == EfiMemoryType::MaxMemoryType {
             *e = create_allocated_memory(page, pages);
             return Some(page);
         }
-        if e.memory_type != EfiMemoryType::EfiLoaderData {
+        if e.memory_type != EfiMemoryType::LoaderData {
             continue;
         }
         if e.physical_start + (e.number_of_pages << paging::PAGE_SHIFT) as usize == page {
@@ -85,7 +85,7 @@ fn reserve_memory(start: usize, size: usize, memory_type: EfiMemoryType) {
     let mut new_size = 0;
 
     for e in list.iter_mut() {
-        if e.memory_type != EfiMemoryType::EfiConventionalMemory {
+        if e.memory_type != EfiMemoryType::ConventionalMemory {
             continue;
         }
         let entry_start = e.physical_start;
@@ -94,7 +94,7 @@ fn reserve_memory(start: usize, size: usize, memory_type: EfiMemoryType) {
 
         if (start..end).contains(&entry_start) && (start..end).contains(&entry_end) {
             e.number_of_pages = 0;
-            e.memory_type = EfiMemoryType::EfiMaxMemoryType;
+            e.memory_type = EfiMemoryType::MaxMemoryType;
             break;
         } else {
             let mut contained = false;
@@ -124,13 +124,13 @@ fn reserve_memory(start: usize, size: usize, memory_type: EfiMemoryType) {
     if new_start != 0 {
         assert_ne!(new_size, 0);
         list.iter_mut()
-            .find(|e| e.memory_type == EfiMemoryType::EfiMaxMemoryType)
+            .find(|e| e.memory_type == EfiMemoryType::MaxMemoryType)
             .map(|e| *e = create_available_memory(new_start, new_size))
             .expect("Failed to insert the entry");
     }
 
     list.iter_mut()
-        .find(|e| e.memory_type == EfiMemoryType::EfiMaxMemoryType)
+        .find(|e| e.memory_type == EfiMemoryType::MaxMemoryType)
         .map(|e| {
             *e = EfiMemoryDescriptor {
                 memory_type,
@@ -155,7 +155,7 @@ pub fn init_memory_allocator(dtb: &crate::dtb::DtbManager, loader_area: &[(usize
         if i < list.len() {
             let number_of_pages = (size >> paging::PAGE_SHIFT) as u64;
             list[i] = EfiMemoryDescriptor {
-                memory_type: EfiMemoryType::EfiConventionalMemory,
+                memory_type: EfiMemoryType::ConventionalMemory,
                 physical_start: base,
                 virtual_start: base,
                 number_of_pages,
@@ -174,7 +174,7 @@ pub fn init_memory_allocator(dtb: &crate::dtb::DtbManager, loader_area: &[(usize
             i = 0;
             while let Some((base, size)) = dtb.read_reg_property(&n, i) {
                 println!("Reserved:\t[{base:#18X} ~ {:#18X}]", base + size);
-                reserve_memory(base, size, EfiMemoryType::EfiUnusableMemory);
+                reserve_memory(base, size, EfiMemoryType::UnusableMemory);
                 i += 1;
             }
         }
@@ -182,7 +182,7 @@ pub fn init_memory_allocator(dtb: &crate::dtb::DtbManager, loader_area: &[(usize
 
     for e in loader_area {
         println!("Reserved:\t[{:#18X} ~ {:#18X}]", e.0, e.0 + e.1);
-        reserve_memory(e.0, e.1, EfiMemoryType::EfiLoaderData);
+        reserve_memory(e.0, e.1, EfiMemoryType::LoaderData);
     }
 }
 
@@ -198,7 +198,7 @@ pub fn store_memory_map(memory_map: &mut [EfiMemoryDescriptor; 64]) {
             let a = x.last_mut().unwrap();
             let Some(b) = y
                 .iter_mut()
-                .find(|e| e.memory_type != EfiMemoryType::EfiMaxMemoryType)
+                .find(|e| e.memory_type != EfiMemoryType::MaxMemoryType)
             else {
                 break;
             };
@@ -209,7 +209,7 @@ pub fn store_memory_map(memory_map: &mut [EfiMemoryDescriptor; 64]) {
             {
                 a.number_of_pages += b.number_of_pages;
                 *b = EfiMemoryDescriptor {
-                    memory_type: EfiMemoryType::EfiMaxMemoryType,
+                    memory_type: EfiMemoryType::MaxMemoryType,
                     physical_start: 0,
                     virtual_start: 0,
                     number_of_pages: 0,
@@ -225,7 +225,7 @@ pub fn store_memory_map(memory_map: &mut [EfiMemoryDescriptor; 64]) {
 
     let mut i = 0;
     for e in list.iter() {
-        if e.memory_type != EfiMemoryType::EfiMaxMemoryType
+        if e.memory_type != EfiMemoryType::MaxMemoryType
             && e.number_of_pages > 0
             && i < memory_map.len()
         {
@@ -234,7 +234,7 @@ pub fn store_memory_map(memory_map: &mut [EfiMemoryDescriptor; 64]) {
         }
     }
     memory_map[i..].fill(EfiMemoryDescriptor {
-        memory_type: EfiMemoryType::EfiMaxMemoryType,
+        memory_type: EfiMemoryType::MaxMemoryType,
         physical_start: 0,
         virtual_start: 0,
         number_of_pages: 0,

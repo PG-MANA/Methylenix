@@ -5,26 +5,59 @@
 //
 
 use crate::kernel::drivers::efi::{
-    EfiSystemTable, memory_map::EfiMemoryDescriptor,
+    EfiSystemTable,
+    memory_map::{EfiMemoryAttribute, EfiMemoryDescriptor, EfiMemoryType},
     protocol::graphics_output_protocol::EfiGraphicsOutputModeInformation,
 };
 use crate::kernel::file_manager::elf::{Elf64Header, Elf64ProgramHeader};
+use crate::kernel::memory_manager::data_type::{PAddress, VAddress};
 
 use core::num::NonZeroUsize;
+
+pub type BootInformationMemoryMap = [EfiMemoryDescriptor; 64];
 
 #[derive(Clone)]
 pub struct BootInformation {
     pub elf_header_buffer: [u8; size_of::<Elf64Header>()],
     pub elf_program_headers: [Elf64ProgramHeader; 16],
-    pub memory_map: [EfiMemoryDescriptor; 64],
+    pub memory_map: BootInformationMemoryMap,
     pub efi_system_table: Option<EfiSystemTable>,
     pub dtb_address: Option<NonZeroUsize>,
     pub graphic_info: Option<GraphicInfo>,
+    pub font_info: Option<FontInfo>,
+}
+
+impl Default for BootInformation {
+    fn default() -> Self {
+        use core::array;
+        Self {
+            elf_header_buffer: [0; size_of::<Elf64Header>()],
+            elf_program_headers: array::repeat(Elf64ProgramHeader::default()),
+            memory_map: array::repeat(EfiMemoryDescriptor {
+                memory_type: EfiMemoryType::MaxMemoryType,
+                physical_start: 0,
+                virtual_start: 0,
+                number_of_pages: 0,
+                attribute: EfiMemoryAttribute::EfiMemoryUc,
+            }),
+            efi_system_table: None,
+            dtb_address: None,
+            graphic_info: None,
+            font_info: None,
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct GraphicInfo {
-    pub frame_buffer_base: usize,
-    pub frame_buffer_size: usize,
+    pub frame_buffer_address: PAddress,
+    pub frame_buffer_size: NonZeroUsize,
     pub info: EfiGraphicsOutputModeInformation,
+}
+
+/// Contains the loaded font information
+#[derive(Clone)]
+pub struct FontInfo {
+    pub font_address: VAddress,
+    pub font_size: NonZeroUsize,
 }
