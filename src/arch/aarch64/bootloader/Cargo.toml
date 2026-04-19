@@ -1,8 +1,0 @@
-[package]
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-version.workspace = true
-name = "methylenix_loader"
-description = "The boot loader for Methylenix"
-keywords = ["bootloader", "boot-loader", "seccamp", "security-camp"]

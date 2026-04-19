@@ -172,6 +172,7 @@ fn build_loader_x86_64(
     -1
 }
 
+#[expect(unused_variables)]
 fn build_loader_aarch64(
     cargo: &str,
     _base_dir: &Path,
@@ -186,28 +187,7 @@ fn build_loader_aarch64(
     let loader_name = "methylenix_loader.efi";
     let deploy_name = "BOOTAA64.EFI";
 
-    let status = Command::new(cargo)
-        .current_dir(loader_path)
-        .args(["build", format!("--{build_type}").as_str()])
-        .status();
-    if !matches!(status.as_ref().map(|s| s.success()), Ok(true)) {
-        eprintln!("Building the boot loader is failed: {status:?}");
-        return status.map_or(-1, |s| s.code().unwrap_or(-1));
-    }
-
-    /* Copy the loader to the output dir */
-    if let Err(err) = fs::create_dir_all(&efi_path) {
-        eprintln!("Failed to create the output dir: {err:?}");
-        return -1;
-    }
-    let binary_path = target_dir
-        .join(loader_arch)
-        .join(build_type)
-        .join(loader_name);
-    if let Err(err) = fs::copy(binary_path, efi_path.join(deploy_name)) {
-        eprintln!("Failed to copy the kernel: {err:?}");
-        return -1;
-    }
+    println!("TODO: New Loader...");
     0
 }
 
