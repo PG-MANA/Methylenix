@@ -1,10 +1,11 @@
 //!
 //! Simple Memory Allocator
 //!
-//! Supported: Baremetal(DTB), UEFI
 
 use crate::arch::target_arch::paging;
 
+use crate::kernel::drivers::boot_information::BootInformationMemoryMap;
+use crate::kernel::drivers::dtb::DtbManager;
 use crate::kernel::drivers::efi::memory_map::{
     EfiMemoryAttribute, EfiMemoryDescriptor, EfiMemoryType,
 };
@@ -32,13 +33,14 @@ const fn create_allocated_memory(
     }
 }
 
-static mut MEMORY_LIST: [EfiMemoryDescriptor; 64] = [EfiMemoryDescriptor {
+// TODO: replace with const default function
+static mut MEMORY_LIST: BootInformationMemoryMap = [EfiMemoryDescriptor {
     memory_type: EfiMemoryType::MaxMemoryType,
     physical_start: 0,
     virtual_start: 0,
     number_of_pages: 0,
     attribute: EfiMemoryAttribute::EfiMemoryUc,
-}; 64];
+}; 32];
 
 pub fn allocate_pages(pages: usize) -> Option<usize> {
     let list = unsafe { (&raw mut MEMORY_LIST).as_mut().unwrap() };
@@ -143,7 +145,7 @@ fn reserve_memory(start: usize, size: usize, memory_type: EfiMemoryType) {
         .expect("Failed to insert the entry");
 }
 
-pub fn init_memory_allocator(dtb: &crate::dtb::DtbManager, loader_area: &[(usize, usize)]) {
+pub fn init_memory_allocator(dtb: &DtbManager, loader_area: &[(usize, usize)]) {
     let memory = dtb
         .search_node(b"memory", None)
         .expect("Failed to get memory node");
@@ -186,7 +188,7 @@ pub fn init_memory_allocator(dtb: &crate::dtb::DtbManager, loader_area: &[(usize
     }
 }
 
-pub fn store_memory_map(memory_map: &mut [EfiMemoryDescriptor; 64]) {
+pub fn store_memory_map(memory_map: &mut BootInformationMemoryMap) {
     let list = unsafe { (&raw mut MEMORY_LIST).as_mut().unwrap() };
 
     /* Sort entries by the address and Merge continuous entries */
@@ -208,13 +210,7 @@ pub fn store_memory_map(memory_map: &mut [EfiMemoryDescriptor; 64]) {
                     == b.physical_start
             {
                 a.number_of_pages += b.number_of_pages;
-                *b = EfiMemoryDescriptor {
-                    memory_type: EfiMemoryType::MaxMemoryType,
-                    physical_start: 0,
-                    virtual_start: 0,
-                    number_of_pages: 0,
-                    attribute: EfiMemoryAttribute::EfiMemoryWb,
-                };
+                *b = EfiMemoryDescriptor::default();
                 merged = true;
             }
         }
@@ -233,11 +229,5 @@ pub fn store_memory_map(memory_map: &mut [EfiMemoryDescriptor; 64]) {
             i += 1;
         }
     }
-    memory_map[i..].fill(EfiMemoryDescriptor {
-        memory_type: EfiMemoryType::MaxMemoryType,
-        physical_start: 0,
-        virtual_start: 0,
-        number_of_pages: 0,
-        attribute: EfiMemoryAttribute::EfiMemoryUc,
-    });
+    memory_map[i..].fill_with(EfiMemoryDescriptor::default);
 }

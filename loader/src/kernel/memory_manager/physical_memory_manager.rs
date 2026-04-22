@@ -1,5 +1,5 @@
+use crate::allocate_pages;
 use crate::kernel::memory_manager::data_type::*;
-use crate::memory::allocate_pages;
 
 pub struct PhysicalMemoryManager {}
 

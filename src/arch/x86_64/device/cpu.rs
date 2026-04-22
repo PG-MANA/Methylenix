@@ -1,15 +1,23 @@
-//!
-//! x86_64 Specific Instruction
-//!
-//! This module is the collection of inline assembly functions.
-//! All functions are unsafe, please be careful.  
-//!
+//
+// x86_64 Specific Instruction
+//
+// This module is the collection of inline assembly functions.
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 
 use core::arch::{asm, naked_asm};
+
+#[inline(always)]
+pub fn get_stack_pointer() -> usize {
+    let result: usize;
+    unsafe { asm!("mov {}, rsp", out(reg) result) };
+    result
+}
 
 #[inline(always)]
 pub unsafe fn enable_interrupt() {
@@ -44,6 +52,11 @@ pub fn flush_data_cache_all() {
 #[inline(always)]
 pub fn flush_data_cache(_: VAddress, _: MSize) {
     flush_data_cache_all()
+}
+
+#[inline(always)]
+pub fn flush_all_cache() {
+    flush_data_cache_all();
 }
 
 #[inline(always)]
@@ -366,7 +379,7 @@ pub unsafe extern "C" fn task_switch(
                 mov     [rsi + 512 + 8 * 17], rax
                 mov     rax, gs
                 mov     [rsi + 512 + 8 * 18], rax
-                mov     rcx, 0xC0000102 /* read swap_gs_base */
+                mov     ecx, 0xC0000102 /* read swap_gs_base */
                 xor     rax, rax
                 rdmsr
                 shl     rdx, 32

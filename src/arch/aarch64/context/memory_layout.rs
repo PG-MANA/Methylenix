@@ -21,8 +21,13 @@ pub const USER_STACK_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff
 pub const USER_START_ADDRESS: VAddress = VAddress::new(0) + PAGE_SIZE;
 pub const USER_END_ADDRESS: VAddress = VAddress::new(0x0000_7fff_ffff_ffff);
 
-pub static mut DIRECT_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_0000_0000_0000);
-pub static mut HIGH_MEMORY_START_ADDRESS: VAddress = VAddress::new(0xffff_0000_0000_0000);
+pub static mut DIRECT_MAP_START_ADDRESS: VAddress = VAddress::new(0xffff_ff00_0000_0000);
+pub static mut HIGH_MEMORY_START_ADDRESS: VAddress = VAddress::new(0xffff_ff00_0000_0000);
+
+const _ADDRESS_RANGE_CHECK: () = const {
+    assert!(crate::arch::target_arch::device::cpu::TCR_EL1_T1SZ_VALUE == 64 - 40);
+    assert!(crate::arch::target_arch::device::cpu::TCR_EL1_T0SZ_VALUE == 64 - 39);
+};
 
 pub fn get_direct_map_base_address() -> PAddress {
     DIRECT_MAP_BASE_ADDRESS

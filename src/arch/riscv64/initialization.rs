@@ -14,7 +14,7 @@ use crate::arch::target_arch::{
 };
 
 use crate::kernel::{
-    collections::{guid::Guid, init_struct, ptr_linked_list::PtrLinkedListNode},
+    collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::{
         acpi::table::madt::MadtManager, boot_information::BootInformation, dtb::DtbManager,
         efi::EFI_DTB_TABLE_GUID,
@@ -145,30 +145,23 @@ pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
                 .init_with_dtb())
 }
 
-fn find_vendor_table(boot_information: &BootInformation, guid: Guid) -> Option<usize> {
-    boot_information.efi_system_table.as_ref().and_then(|t| {
-        t.get_configuration_table_slice()
-            .iter()
-            .find(|e| e.vendor_guid == guid)
-            .map(|e| e.vendor_table)
-    })
-}
-
 /// Init Device Tree Blob Manager
-pub fn init_dtb(boot_information: &BootInformation, mut dtb_address: Option<usize>) -> bool {
+pub fn init_dtb(boot_information: &BootInformation) -> bool {
     let mut dtb_manager = DtbManager::new();
-    if dtb_address.is_none() {
-        dtb_address = find_vendor_table(boot_information, EFI_DTB_TABLE_GUID);
-    }
-    if dtb_address.is_none() {
+    let Some(dtb_address) = boot_information.dtb_address.map(|a| a.get()).or_else(|| {
+        boot_information
+            .efi_system_table
+            .as_ref()
+            .and_then(|t| t.find_vendor_table(EFI_DTB_TABLE_GUID))
+    }) else {
         init_struct!(
             get_kernel_manager_cluster().arch_depend_data.dtb_manager,
             dtb_manager
         );
         return false;
-    }
+    };
 
-    if !dtb_manager.init(PAddress::new(dtb_address.unwrap())) {
+    if !dtb_manager.init(PAddress::new(dtb_address)) {
         pr_warn!("Failed to initialize DTB.");
         init_struct!(
             get_kernel_manager_cluster().arch_depend_data.dtb_manager,

@@ -20,7 +20,7 @@ use crate::kernel::{
         },
         boot_information::*,
         efi::{
-            EFI_PAGE_SIZE, memory_map::EfiMemoryType,
+            EFI_ACPI_2_0_TABLE_GUID, EFI_PAGE_SIZE, memory_map::EfiMemoryType,
             protocol::graphics_output_protocol::EfiGraphicsPixelFormat,
         },
         pci::PciManager,
@@ -294,6 +294,22 @@ pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
     }
     set_manger(acpi_manager, device_manager);
     true
+}
+
+/// Init AcpiManager without parsing AML
+///
+/// This function get ACPI's RSDP Pointer from [`BootInformation::efi_system_table`]
+/// and pass it to [`init_acpi_early`].
+///
+/// If the ACPI Table is not found or [`init_acpi_early`] returns false, this returns false.
+/// For more information, please see [`init_acpi_early`].
+pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -> bool {
+    boot_information
+        .efi_system_table
+        .as_ref()
+        .and_then(|t| t.find_vendor_table(EFI_ACPI_2_0_TABLE_GUID))
+        .map(|rsdp_ptr| init_acpi_early(rsdp_ptr))
+        .unwrap_or(false)
 }
 
 /// Init AcpiManager and AcpiEventManager with parsing AML

@@ -100,7 +100,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
         panic!("Neither ACPI nor DTB is available");
     }
 
-    /* Detect serial port*/
+    /* Detect serial port */
     if !init_serial_port(acpi_available, dtb_available) {
         pr_err!("Failed to setup the serial port");
     }
@@ -114,7 +114,7 @@ extern "C" fn boot_main(boot_information: *const BootInformation) -> ! {
     }
 
     kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
-    pr_info!("Booted from UEFI Loader (ACPI: {acpi_available}, DTB: {dtb_available})");
+    pr_info!("BootInformation: ACPI: {acpi_available}, DTB: {dtb_available}");
     pr_info!("CurrentEL: {}", device::cpu::get_current_el());
 
     init_interrupt(acpi_available, dtb_available);

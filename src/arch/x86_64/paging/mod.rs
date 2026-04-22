@@ -1,16 +1,13 @@
-//!
-//! Paging Manager
-//!
-//! These modules treat the paging system of x86_64.
-//! Currently, this module can handle 4K, 2M, and 1G paging.
-//!
-//! This does not handle memory status(which process using what memory area).
-//! This is the back-end of VirtualMemoryManager.
-//!
-//! The paging system of x86_64 is the system translate from "linear-address" to physical address.
-//! With 4-level paging, virtual address is substantially same as linear address.
-//! VirtualMemoryManager call this manager to set up the translation from virtual address to physical address.
-//! Therefore, the name of argument is unified as not "linear address" but "virtual address".
+//
+// Paging Manager
+//
+// These modules treat the paging system of x86_64.
+//
+// This does not handle memory status(which process using what memory area).
+// This is the back-end of VirtualMemoryManager.
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 mod pde;
 mod pdpte;

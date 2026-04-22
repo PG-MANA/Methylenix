@@ -217,10 +217,12 @@ pub fn wake_up_application_processors() {
         /* boot/boot_ap.s */
         fn ap_entry();
         fn ap_entry_end();
-        static mut ap_os_stack_address: u64;
+        static mut ap_information_address: [u64; 2];
     }
     let ap_entry_address = ap_entry as *const fn() as usize;
     let ap_entry_end_address = ap_entry_end as *const fn() as usize;
+    let ap_stack_address = unsafe { core::ptr::addr_of_mut!(ap_information_address[0]) } as usize;
+    let ap_cr3_address = unsafe { core::ptr::addr_of_mut!(ap_information_address[1]) } as usize;
 
     /* Copy boot code for application processors */
     let vector = ((boot_address.to_usize() >> PAGE_SHIFT) & 0xff) as u8;
@@ -245,12 +247,35 @@ pub fn wake_up_application_processors() {
         )
         .expect("Failed to alloc stack for AP");
     unsafe {
-        *(physical_address_to_direct_map(PAddress::new(
-            (core::ptr::addr_of_mut!(ap_os_stack_address) as usize) - ap_entry_address
-                + boot_address.to_usize(),
-        ))
-        .to_usize() as *mut u64) =
-            physical_address_to_direct_map(stack.1 + stack_size).to_usize() as u64
+        core::ptr::write_volatile(
+            physical_address_to_direct_map(PAddress::new(
+                ap_stack_address - ap_entry_address + boot_address.to_usize(),
+            ))
+            .to::<u64>(),
+            physical_address_to_direct_map(stack.1 + stack_size).to_usize() as u64,
+        )
+    };
+
+    /* Map the trampoline address directly and set page table address */
+    unsafe {
+        get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .map_physical_address_directly(
+                boot_address,
+                PAGE_SIZE,
+                MemoryPermissionFlags::new(true, true, true, false),
+                MemoryOptionFlags::DO_NOT_FREE_PHYSICAL_ADDRESS,
+            )
+            .expect("Failed to map trampoline code")
+    };
+    unsafe {
+        core::ptr::write_volatile(
+            physical_address_to_direct_map(PAddress::new(
+                ap_cr3_address - ap_entry_address + boot_address.to_usize(),
+            ))
+            .to::<u64>(),
+            cpu::get_cr3() as u64,
+        )
     };
 
     let timer = get_kernel_manager_cluster()
@@ -297,11 +322,12 @@ pub fn wake_up_application_processors() {
     }
 
     /* Free boot_address */
-    bug_on_err!(unsafe {
+    unsafe {
         get_kernel_manager_cluster()
             .kernel_memory_manager
-            .free_physical_memory(boot_address, PAGE_SIZE)
-    });
+            .unmap_physical_address_directly(boot_address, PAGE_SIZE)
+            .expect("Failed to unmap trampoline code")
+    };
 
     /* Free temporary stack */
     bug_on_err!(
@@ -318,7 +344,7 @@ pub fn wake_up_application_processors() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn ap_boot_main() -> ! {
+extern "C" fn ap_boot_main() -> ! {
     /* Extern Assembly Symbols */
     unsafe extern "C" {
         pub static gdt: u64; /* boot/common.s */

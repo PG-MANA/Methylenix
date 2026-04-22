@@ -1,10 +1,13 @@
-//!
-//! Paging Manager
-//!
-//! These modules treat the paging system of AArch64.
-//!
-//! This does not handle memory status(which process using what memory area).
-//! This is the back-end of VirtualMemoryManager.
+//
+// Paging Manager
+//
+// These modules treat the paging system of AArch64.
+//
+// This does not handle memory status(which process using what memory area).
+// This is the back-end of VirtualMemoryManager.
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 mod table_entry;
 
@@ -126,13 +129,26 @@ impl PageManager {
                 | (MAIR_DEVICE_MEMORY_ATTRIBUTE << (MAIR_DEVICE_MEMORY_INDEX << 3))
         };
         unsafe { cpu::set_mair(mair) };
-        /* TODO: Setup TCR_EL1 from scratch */
-        let tcr_el1 = cpu::get_tcr();
-        let t1sz = (tcr_el1 & cpu::TCR_EL1_T1SZ) >> cpu::TCR_EL1_T1SZ_OFFSET;
+
+        /* Setup TCR_EL1 from scratch */
+        let id_aa64mmfr0 = cpu::get_id_aa64mmfr0();
+        let t1sz = cpu::TCR_EL1_T1SZ_VALUE;
+        let t0sz = cpu::TCR_EL1_T0SZ_VALUE;
+        let pa_range = (id_aa64mmfr0 & cpu::ID_AA64MMFR0_EL1_PA_RANGE)
+            >> cpu::ID_AA64MMFR0_EL1_PA_RANGE_OFFSET;
+        let tcr_el1 = (pa_range << cpu::TCR_EL1_IPS_OFFSET)
+            | cpu::TCR_EL1_TG1_4KB
+            | cpu::TCR_EL1_SH1_INNER_SHAREABLE
+            | cpu::TCR_EL1_IRGN1_INNER_SHAREABLE
+            | (t1sz << cpu::TCR_EL1_T1SZ_OFFSET)
+            | cpu::TCR_EL1_TG0_4KB
+            | cpu::TCR_EL1_SH0_INNER_SHAREABLE
+            | cpu::TCR_EL1_IRGN0_INNER_SHAREABLE
+            | (t0sz << cpu::TCR_EL1_T0SZ_OFFSET);
 
         /* Set memory address information */
         unsafe {
-            HIGH_MEMORY_START_ADDRESS = VAddress::new(((1 << t1sz) - 1) << (64 - t1sz));
+            HIGH_MEMORY_START_ADDRESS = VAddress::new(usize::MAX ^ ((1 << (64 - t1sz)) - 1));
             DIRECT_MAP_START_ADDRESS = HIGH_MEMORY_START_ADDRESS;
         }
 
@@ -150,7 +166,6 @@ impl PageManager {
     ) -> Result<(), PagingError> {
         self.page_table = PageTableType::User(Self::alloc_page_table(pm_manager)?);
         self.tcr = system_page_manager.tcr;
-        /* TODO: Adjust TCR_EL1 for user */
 
         Ok(())
     }

@@ -66,3 +66,15 @@ pub struct EfiMemoryDescriptor {
     pub number_of_pages: u64,
     pub attribute: EfiMemoryAttribute,
 }
+
+impl Default for EfiMemoryDescriptor {
+    fn default() -> Self {
+        Self {
+            memory_type: EfiMemoryType::MaxMemoryType,
+            physical_start: 0,
+            virtual_start: 0,
+            number_of_pages: 0,
+            attribute: EfiMemoryAttribute::EfiMemoryWb,
+        }
+    }
+}

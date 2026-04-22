@@ -8,7 +8,17 @@
 #[macro_use]
 mod print;
 
-mod memory;
+#[cfg(target_os = "uefi")]
+mod efi;
+
+#[cfg(target_os = "uefi")]
+pub use efi::memory::allocate_pages;
+
+#[cfg(target_os = "none")]
+mod baremetal;
+
+#[cfg(target_os = "none")]
+pub use baremetal::memory::allocate_pages;
 
 /// Those modules are imported from the kernel source code.
 /// The symbolic link may be invalid on some environments,
@@ -48,11 +58,23 @@ pub mod kernel {
 }
 
 pub mod arch {
+    #[cfg(target_arch = "aarch64")]
+    pub mod aarch64;
+
+    #[cfg(target_arch = "aarch64")]
+    pub use aarch64 as target_arch;
+
     #[cfg(target_arch = "riscv64")]
     pub mod riscv;
 
     #[cfg(target_arch = "riscv64")]
     pub use riscv as target_arch;
+
+    #[cfg(target_arch = "x86_64")]
+    pub mod x86_64;
+
+    #[cfg(target_arch = "x86_64")]
+    pub use x86_64 as target_arch;
 }
 
 const KERNEL_STACK_PAGES: usize = 64;
@@ -63,18 +85,25 @@ use arch::target_arch::context::memory_layout;
 use arch::target_arch::device::cpu;
 use arch::target_arch::paging::{PAGE_MASK, PAGE_SHIFT, PAGE_SIZE, PAGE_SIZE_USIZE, PageManager};
 
-use kernel::drivers::boot_information;
-use kernel::drivers::dtb;
+use kernel::drivers::boot_information::BootInformation;
 use kernel::file_manager::elf;
 use kernel::memory_manager::{data_type::*, physical_memory_manager::PhysicalMemoryManager};
 
-use core::mem::MaybeUninit;
+#[cfg(target_os = "none")]
+use kernel::drivers::dtb;
+
+#[cfg(target_os = "uefi")]
+use kernel::drivers::efi::{EfiHandle, EfiStatus, EfiSystemTable};
 
 #[cfg(target_os = "none")]
 #[unsafe(link_section = ".kernel")]
 static KERNEL: &[u8] = include_bytes!("../../bin/kernel.elf");
 
-static mut BOOT_INFO: MaybeUninit<boot_information::BootInformation> = MaybeUninit::uninit();
+#[cfg(target_os = "uefi")]
+const KERNEL_PATH: &str = "\\kernel.elf";
+
+#[cfg(target_os = "uefi")]
+const FONT_PATH: &str = "\\font";
 
 /// The main function booted without UEFI
 ///
@@ -103,12 +132,8 @@ extern "C" fn baremetal_main(
     loader_end_address: usize,
 ) -> ! {
     use core::ffi::CStr;
-    unsafe extern "C" {
-        static __LOADER_END: usize;
-    }
-    let stack_base_address =
-        (cpu::get_stack_pointer() & PAGE_MASK) - PAGE_SIZE_USIZE * LOADER_STACK_PAGES;
-    let stack_end_address = stack_base_address + PAGE_SIZE_USIZE * (LOADER_STACK_PAGES + 1);
+    let stack_end_address = (cpu::get_stack_pointer() & PAGE_MASK) + PAGE_SIZE_USIZE * 2;
+    let stack_base_address = stack_end_address - PAGE_SIZE_USIZE * (LOADER_STACK_PAGES + 1);
     let loader_end_address = (loader_end_address & PAGE_MASK) + PAGE_SIZE_USIZE;
 
     /* Parse arguments */
@@ -118,7 +143,7 @@ extern "C" fn baremetal_main(
             unsafe { CStr::from_ptr(args[n]) }
                 .to_str()
                 .ok()
-                .and_then(str_to_usize)
+                .and_then(baremetal::str_to_usize)
         } else {
             None
         }
@@ -135,15 +160,15 @@ extern "C" fn baremetal_main(
         let wait_offset = get_arg(3).map(|o| o as u32);
         let wait_value = get_arg(4).map(|v| v as u32);
 
-        print::set_uart_address(address, wait_offset, wait_value);
+        print::serial_port::init(address, wait_offset, wait_value);
         uart_address = Some(address);
     }
 
     println!("Boot Loader version {}", env!("CARGO_PKG_VERSION"));
     println!("Loader range:\t[{loader_base_address:#18X} ~ {loader_end_address:#18X}]");
     println!("Stack  range:\t[{stack_base_address:#18X} ~ {stack_end_address:#18X}]");
+    arch::target_arch::dump_system();
 
-    let boot_information = unsafe { (&raw mut BOOT_INFO).as_mut().unwrap() };
     let dtb = dtb::DtbManager::new(dtb_address).expect("Failed to get DTB");
 
     /* Initialize memory allocator */
@@ -159,8 +184,17 @@ extern "C" fn baremetal_main(
                 + PAGE_SIZE_USIZE,
         ),
     ];
-    memory::init_memory_allocator(&dtb, loader_area.as_slice());
+    baremetal::memory::init_memory_allocator(&dtb, loader_area.as_slice());
     let mut pm_manager = PhysicalMemoryManager::new();
+
+    /* Set up BootInformation */
+    const { assert!(size_of::<BootInformation>() <= PAGE_SIZE_USIZE) };
+    let boot_information_address =
+        allocate_pages(1).expect("Failed to allocate the memory for the boot information");
+    let boot_information = boot_information_address as *mut BootInformation;
+    unsafe { boot_information.write(BootInformation::default()) };
+    let boot_information = unsafe { boot_information.as_mut().unwrap() };
+    boot_information.dtb_address = core::num::NonZeroUsize::new(dtb_address);
 
     /* Load kernel ELF and map them */
     let elf_address = KERNEL.as_ptr() as usize;
@@ -168,40 +202,38 @@ extern "C" fn baremetal_main(
         unsafe { core::ptr::copy_nonoverlapping((elf_address + offset) as *const u8, dst, size) };
     };
     println!("Load the kernel...");
-    let entry_point = load_kernel(read_func, &mut pm_manager, unsafe {
-        boot_information.assume_init_mut()
-    });
+    let entry_point = load_kernel(read_func, &mut pm_manager, boot_information);
     println!("Kernel's entry point: {entry_point:#X}");
 
     /* Set up the page table */
     let page_manager =
         init_paging(&mut pm_manager).expect("Failed to allocate a page for page tables");
-    map_kernel(&mut pm_manager, &page_manager, unsafe {
-        boot_information
-            .assume_init_ref()
-            .elf_program_headers
-            .as_slice()
-    });
+    map_kernel(
+        &mut pm_manager,
+        &page_manager,
+        boot_information.elf_program_headers.as_slice(),
+    );
     map_direct_area(&mut pm_manager, &page_manager);
     map_loader(&mut pm_manager, &page_manager, loader_area.as_slice());
     if let Some(uart_address) = uart_address {
-        map_uart(&mut pm_manager, &page_manager, uart_address);
+        map_device(
+            &mut pm_manager,
+            &page_manager,
+            uart_address,
+            PAGE_SIZE_USIZE,
+        );
     }
 
     println!("Dump the initial page table for the kernel");
     page_manager.dump_table(None, None);
 
     /* Allocate the kernel stack */
-    let kernel_stack = memory::allocate_pages(KERNEL_STACK_PAGES)
-        .expect("Failed to allocate the stack")
+    let kernel_stack = allocate_pages(KERNEL_STACK_PAGES).expect("Failed to allocate the stack")
         + (KERNEL_STACK_PAGES * PAGE_SIZE_USIZE)
         + memory_layout::get_direct_map_start_address().to_usize();
 
     /* Store the memory map and freeze the memory allocator */
-    memory::store_memory_map(unsafe { &mut boot_information.assume_init_mut().memory_map });
-
-    /* Adjust the address to the direct mapped address */
-    adjust_boot_info(unsafe { boot_information.assume_init_mut() });
+    baremetal::memory::store_memory_map(&mut boot_information.memory_map);
 
     /* Set up the system registers if necessary */
     arch::target_arch::setup_environment();
@@ -213,8 +245,142 @@ extern "C" fn baremetal_main(
     unsafe {
         arch::target_arch::jump_to_kernel(
             entry_point,
-            dtb_address,
-            boot_information.as_ptr() as _,
+            memory_layout::physical_address_to_direct_map_loader(PAddress::new(
+                boot_information_address,
+            ))
+            .to_usize(),
+            kernel_stack,
+            page_manager,
+        )
+    }
+}
+
+#[cfg(target_os = "uefi")]
+#[unsafe(no_mangle)]
+extern "efiapi" fn efi_main(
+    main_handle: EfiHandle,
+    system_table: *const EfiSystemTable,
+) -> EfiStatus {
+    if system_table.is_null() {
+        return EfiStatus::Aborted;
+    }
+    let system_table = unsafe { &*system_table };
+    if !system_table.verify() {
+        return EfiStatus::Aborted;
+    }
+    let boot_services = unsafe { &*system_table.get_boot_services() };
+    unsafe {
+        efi::BOOT_SERVICES = boot_services;
+        efi::MAIN_HANDLE = main_handle;
+    }
+
+    let stack_end_address = (cpu::get_stack_pointer() & PAGE_MASK) + PAGE_SIZE_USIZE * 2;
+    let stack_base_address = stack_end_address - PAGE_SIZE_USIZE * (LOADER_STACK_PAGES + 1);
+    let trampoline_base_address =
+        (arch::target_arch::jump_to_kernel as *const () as usize) & PAGE_MASK;
+    let loader_area = [
+        (trampoline_base_address, PAGE_SIZE_USIZE),
+        (stack_base_address, stack_end_address - stack_base_address),
+    ];
+
+    /* Set up println */
+    let output_protocol = system_table.get_console_output_protocol();
+    if !output_protocol.is_null() {
+        print::efi_text_output::init(unsafe { &*output_protocol });
+    }
+
+    println!("Boot Loader version {}", env!("CARGO_PKG_VERSION"));
+    arch::target_arch::dump_system();
+
+    /* Initialize memory allocator */
+    let mut pm_manager = PhysicalMemoryManager::new();
+
+    /* Set up BootInformation */
+    const { assert!(size_of::<BootInformation>() <= PAGE_SIZE_USIZE) };
+    let boot_information_address =
+        allocate_pages(1).expect("Failed to allocate the memory for the boot information");
+    let boot_information = boot_information_address as *mut BootInformation;
+    unsafe { boot_information.write(BootInformation::default()) };
+    let boot_information = unsafe { boot_information.as_mut().unwrap() };
+
+    /* Load kernel ELF and map them */
+    let file_handler = match efi::open_file(main_handle, boot_services, KERNEL_PATH) {
+        Ok(h) => h,
+        Err(e) => {
+            pr_err!("Failed to open the kernel file: {e:?}");
+            return e;
+        }
+    };
+
+    let read_func =
+        |offset: usize, size: usize, dst: *mut u8| efi::read_file(&file_handler, offset, size, dst);
+    println!("Load the kernel...");
+    let entry_point = load_kernel(read_func, &mut pm_manager, boot_information);
+    efi::close_file(file_handler);
+    println!("Kernel's entry point: {entry_point:#X}");
+
+    /* Set up the page table */
+    let page_manager =
+        init_paging(&mut pm_manager).expect("Failed to allocate a page for page tables");
+    map_kernel(
+        &mut pm_manager,
+        &page_manager,
+        boot_information.elf_program_headers.as_slice(),
+    );
+    map_direct_area(&mut pm_manager, &page_manager);
+    map_loader(&mut pm_manager, &page_manager, loader_area.as_slice());
+
+    /* Set up graphic */
+    if let Some(i) = efi::detect_graphics(boot_services) {
+        map_device(
+            &mut pm_manager,
+            &page_manager,
+            i.frame_buffer_address.to_usize(),
+            i.frame_buffer_size.get(),
+        );
+        boot_information.graphic_info = Some(i);
+        if let Some(font_info) = efi::load_font_file(main_handle, boot_services) {
+            boot_information.font_info = Some(font_info);
+        }
+    }
+
+    println!("Dump the initial page table for the kernel");
+    page_manager.dump_table(None, None);
+
+    /* Allocate the kernel stack */
+    let kernel_stack = allocate_pages(KERNEL_STACK_PAGES).expect("Failed to allocate the stack")
+        + (KERNEL_STACK_PAGES * PAGE_SIZE_USIZE)
+        + memory_layout::get_direct_map_start_address().to_usize();
+
+    /* Store the memory map and freeze the memory allocator */
+    let mut memory_map_key = efi::memory::store_memory_map(boot_services, boot_information);
+
+    /* Set up the system registers if necessary */
+    arch::target_arch::setup_environment();
+
+    /* Exit Boot Services */
+    println!("Exit boot services");
+    let mut r = EfiStatus::Success;
+    for _ in 0..5 {
+        r = (boot_services.exit_boot_services)(main_handle, memory_map_key);
+        if r != EfiStatus::Success {
+            memory_map_key = efi::memory::store_memory_map(boot_services, boot_information);
+        } else {
+            break;
+        }
+    }
+    assert_eq!(r, EfiStatus::Success, "Failed to exit boot services: {r:?}");
+    boot_information.efi_system_table = Some((&*system_table).clone());
+
+    cpu::flush_all_cache();
+    unsafe { cpu::disable_interrupt() };
+    unsafe {
+        arch::target_arch::jump_to_kernel(
+            entry_point,
+            memory_layout::physical_address_to_direct_map_loader(PAddress::new(
+                boot_information_address,
+            ))
+            .to_usize(),
             kernel_stack,
             page_manager,
         )
@@ -224,7 +390,7 @@ extern "C" fn baremetal_main(
 fn load_kernel<F>(
     read: F,
     pm_manager: &mut PhysicalMemoryManager,
-    boot_information: &mut boot_information::BootInformation,
+    boot_information: &mut BootInformation,
 ) -> usize
 where
     F: Fn(usize, usize, *mut u8),
@@ -412,6 +578,10 @@ fn map_direct_area(pm_manager: &mut PhysicalMemoryManager, page_manager: &PageMa
         .expect("Failed to setup direct map");
 }
 
+#[cfg(target_arch = "aarch64")]
+fn map_loader(_: &mut PhysicalMemoryManager, _: &PageManager, _: &[(usize, usize)]) {}
+
+#[cfg(not(target_arch = "aarch64"))]
 fn map_loader(
     pm_manager: &mut PhysicalMemoryManager,
     page_manager: &PageManager,
@@ -434,50 +604,31 @@ fn map_loader(
     }
 }
 
-fn map_uart(
+#[cfg(target_arch = "aarch64")]
+fn map_device(_: &mut PhysicalMemoryManager, _: &PageManager, _: usize, _: usize) {}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn map_device(
     pm_manager: &mut PhysicalMemoryManager,
     page_manager: &PageManager,
-    uart_address: usize,
+    address: usize,
+    size: usize,
 ) {
-    let address = PAddress::new(uart_address & PAGE_MASK);
+    assert_ne!(size, 0);
+    let aligned_address = address & PAGE_MASK;
+    let aligned_size = ((size - 1 + (address - aligned_address)) & PAGE_MASK) + PAGE_SIZE_USIZE;
     page_manager
         .associate_address(
             pm_manager,
-            address,
-            unsafe { address.to_direct_mapped_v_address() },
-            PAGE_SIZE,
+            PAddress::new(aligned_address),
+            VAddress::new(aligned_address),
+            MSize::new(aligned_size),
             MemoryPermissionFlags::new(true, true, false, false),
             MemoryOptionFlags::KERNEL
                 | MemoryOptionFlags::IO_MAP
                 | MemoryOptionFlags::DEVICE_MEMORY,
         )
-        .expect("Failed to map the serial port area");
-}
-
-fn adjust_boot_info(_boot_info: &mut boot_information::BootInformation) {}
-
-fn str_to_usize(s: &str) -> Option<usize> {
-    let radix;
-    let start;
-    match s.get(0..2) {
-        Some("0x") => {
-            radix = 16;
-            start = s.get(2..);
-        }
-        Some("0o") => {
-            radix = 8;
-            start = s.get(2..);
-        }
-        Some("0b") => {
-            radix = 2;
-            start = s.get(2..);
-        }
-        _ => {
-            radix = 10;
-            start = Some(s);
-        }
-    }
-    usize::from_str_radix(start?, radix).ok()
+        .expect("Failed to map the device");
 }
 
 #[panic_handler]
@@ -492,6 +643,15 @@ pub fn panic(info: &core::panic::PanicInfo) -> ! {
         );
     } else {
         println!("Message: {}", info.message());
+    }
+    #[cfg(target_os = "uefi")]
+    if !unsafe { efi::BOOT_SERVICES.is_null() } {
+        (unsafe { &*efi::BOOT_SERVICES }.exit)(
+            unsafe { efi::MAIN_HANDLE },
+            EfiStatus::Aborted,
+            0,
+            core::ptr::null(),
+        );
     }
     loop {
         unsafe { cpu::idle() };

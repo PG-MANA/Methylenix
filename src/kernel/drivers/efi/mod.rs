@@ -10,7 +10,7 @@ pub mod protocol {
 }
 pub mod memory_map;
 
-use self::memory_map::{EfiAllocateType, EfiMemoryType};
+use self::memory_map::{EfiAllocateType, EfiMemoryDescriptor, EfiMemoryType};
 use self::protocol::simple_text_output_protocol::EfiSimpleTextOutputProtocol;
 
 use crate::kernel::collections::guid::Guid;
@@ -75,10 +75,15 @@ pub struct EfiBootServices {
     raise_tpl: usize,
     restore_tpl: usize,
     pub allocate_pages:
-        extern "efiapi" fn(EfiAllocateType, EfiMemoryType, usize, &mut usize) -> EfiStatus,
+        extern "efiapi" fn(EfiAllocateType, EfiMemoryType, usize, *mut usize) -> EfiStatus,
     free_pages: usize,
-    pub get_memory_map:
-        extern "efiapi" fn(&mut usize, usize, &mut usize, &mut usize, &mut u32) -> EfiStatus,
+    pub get_memory_map: extern "efiapi" fn(
+        *mut usize,
+        *mut EfiMemoryDescriptor,
+        *mut usize,
+        *mut usize,
+        *mut u32,
+    ) -> EfiStatus,
     allocate_pool: usize,
     free_pool: usize,
     create_event: usize,
@@ -107,7 +112,7 @@ pub struct EfiBootServices {
     connect_controller: usize,
     disconnect_controller: usize,
     pub open_protocol:
-        extern "efiapi" fn(EfiHandle, &Guid, usize, EfiHandle, EfiHandle, u32) -> EfiStatus,
+        extern "efiapi" fn(EfiHandle, *const Guid, usize, EfiHandle, EfiHandle, u32) -> EfiStatus,
     close_protocol: usize,
     open_protocol_information: usize,
     protocols_per_handle: usize,
@@ -195,5 +200,12 @@ impl EfiSystemTable {
                 self.get_number_of_configuration_tables(),
             )
         }
+    }
+
+    pub fn find_vendor_table(&self, guid: Guid) -> Option<usize> {
+        self.get_configuration_table_slice()
+            .iter()
+            .find(|e| e.vendor_guid == guid)
+            .map(|e| e.vendor_table)
     }
 }

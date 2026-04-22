@@ -6,8 +6,7 @@
 
 .global setup_long_mode
 .extern init_long_mode
-.extern main_code_segment_descriptor, tss_descriptor, gdtr_64bit_0 /* at common.asm */
-.extern tss_descriptor_address, tss, pd, pdpt, pml4
+.extern main_code_segment_descriptor, tss_descriptor, gdtr_64bit_temp /* at common.s */
 .extern __KERNEL_MAP_START_ADDRESS
 
 .section .text.boot
@@ -40,7 +39,6 @@ setup_long_mode:
   mov   $0x80000001, %eax
   cpuid
   test  $(1 << 29), %edx        /* Long Mode Enable Bit */
-  /* (AMD64 Architecture Programmer’s Manual, Volume 2: System Programming - 14.8 Long-Mode Initialization Example) */
   jz    only_x86
 
   /* Paging */
@@ -52,7 +50,7 @@ pde_setup:
   mov   $0x200000, %eax         /* eax = 2MB(direct mapping) */
   mul   %ecx                    /* eax = eax * ecx(0..2048) */
   or    $0b10000011, %eax       /* Present + R/W + Huge */
-  mov   %eax, pd(, %ecx, 8)      /* pd[ecx * 8] = eax (higher 32bit is zero) */
+  mov   %eax, pd(, %ecx, 8)     /* pd[ecx * 8] = eax (higher 32bit is zero) */
   inc   %ecx
   cmp   $2048, %ecx
   jne   pde_setup               /* ecx != 512 * 4 */
@@ -63,7 +61,7 @@ pdpte_setup:
   mul   %ecx
   add   $pd, %eax               /* eax = 4096 * ecx + pd(edx) */
   or    $0b11, %eax             /* Present + R/W */
-  mov   %eax, pdpt(, %ecx, 8)    /* pdpt[ecx * 8] = eax (higher 32bit is zero) */
+  mov   %eax, pdpt(, %ecx, 8)   /* pdpt[ecx * 8] = eax (higher 32bit is zero) */
   inc   %ecx
   cmp   $4, %ecx
   jne   pdpte_setup
@@ -86,12 +84,12 @@ pdpte_setup:
   or    $(1 << 5), %eax
   mov   %eax, %cr4              /* Set PAE flag */
   mov   $0xc0000080, %ecx
-  rdmsr                         /* Model-specific register */
+  rdmsr
   or    $(1 << 8 | 1 << 11), %eax
   wrmsr                         /* Set LME and NXE flags */
   mov   %cr0, %eax
   or    $(1 << 31 | 1), %eax    /* Set PG flag */
-  lgdt  gdtr_64bit_0
+  lgdt  gdtr_64bit_temp
   mov   %eax, %cr0
   ljmp  $main_code_segment_descriptor, $jmp_to_init_long_mode
 

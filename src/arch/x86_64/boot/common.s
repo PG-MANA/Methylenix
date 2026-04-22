@@ -7,11 +7,12 @@
 .equ DIRECT_MAP_START_ADDRESS,  0xffffa00000000000
 .equ KERNEL_MAP_START_ADDRESS,  0xffffff8000000000
 
-.global os_stack, OS_STACK_SIZE, gdt, gdtr_64bit_0, gdtr_64bit_1, KERNEL_MAP_START_ADDRESS
+.global os_stack, OS_STACK_SIZE, gdt, gdtr_64bit_temp, gdtr_64bit_main, KERNEL_MAP_START_ADDRESS
 .global main_code_segment_descriptor, user_code_segment_descriptor, user_data_segment_descriptor
 .global tss_descriptor, tss_descriptor_address, tss
 .global pd, pdpt, pml4
 
+/* `.data.boot` section must be accessed only from `.text.boot` */
 .section .data.boot
 
 .align  0x1000
@@ -34,20 +35,20 @@ pml4:
 .skip   0x1000
 
 .align      16
-.type       gdtr_64bit_0, %object
-gdtr_64bit_0:
+.type       gdtr_64bit_temp, %object
+gdtr_64bit_temp:
   .word     gdt_end - gdt - 1
   .quad     gdt - KERNEL_MAP_START_ADDRESS
-.size       gdtr_64bit_0, . - gdtr_64bit_0
+.size       gdtr_64bit_temp, . - gdtr_64bit_temp
 
 .section    .data
 
 .align      16
-.type       gdtr_64bit_1, %object
-gdtr_64bit_1:
+.type       gdtr_64bit_main, %object
+gdtr_64bit_main:
   .word     gdt_end - gdt - 1
   .quad     gdt
-.size       gdtr_64bit_1, . - gdtr_64bit_1
+.size       gdtr_64bit_main, . - gdtr_64bit_main
 
 .align      16
 .type       gdt, %object

@@ -59,9 +59,9 @@ pub fn get_instruction_pointer() -> usize {
 
 #[inline(always)]
 pub fn get_stack_pointer() -> usize {
-    let result: u64;
+    let result: usize;
     unsafe { asm!("mv {}, sp", out(reg) result) };
-    result as usize
+    result
 }
 
 #[inline(always)]

@@ -22,7 +22,7 @@ pub struct EfiSimpleFileProtocol {
 #[repr(C)]
 pub struct EfiFileProtocol {
     revision: u64,
-    pub open: extern "efiapi" fn(&Self, &mut *const Self, *const u16, u64, u64) -> EfiStatus,
+    pub open: extern "efiapi" fn(&Self, *mut *const Self, *const u16, u64, u64) -> EfiStatus,
     pub close: extern "efiapi" fn(&Self) -> EfiStatus,
     delete: usize,
     pub read: extern "efiapi" fn(&Self, buffer_size: *mut usize, buffer: *mut u8) -> EfiStatus,

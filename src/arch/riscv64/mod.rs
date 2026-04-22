@@ -47,11 +47,7 @@ pub struct ArchDependedCpuManagerCluster {
 pub const TARGET_ARCH_NAME: &str = "riscv64";
 
 #[unsafe(no_mangle)]
-extern "C" fn boot_main(
-    hartid: u64,
-    dtb_address: usize,
-    boot_information: *const BootInformation,
-) -> ! {
+extern "C" fn boot_main(hartid: u64, boot_information: *const BootInformation) -> ! {
     let mut boot_information = unsafe { &*boot_information }.clone();
 
     /* Initialize Kernel TTY (Early) */
@@ -100,12 +96,12 @@ extern "C" fn boot_main(
 
     /* Initialize ACPI and DTB */
     let acpi_available = false; //init_acpi_early_by_boot_information(&boot_information);
-    let dtb_available = init_dtb(&boot_information, Some(dtb_address));
+    let dtb_available = init_dtb(&boot_information);
     if !acpi_available && !dtb_available {
         panic!("Neither ACPI nor DTB is available");
     }
 
-    /* Detect serial port*/
+    /* Detect serial port */
     if !init_serial_port(acpi_available, dtb_available) {
         pr_err!("Failed to setup the serial port");
     }

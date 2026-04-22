@@ -16,16 +16,12 @@ use crate::arch::target_arch::{
 };
 
 use crate::kernel::{
-    collections::{guid::Guid, init_struct, ptr_linked_list::PtrLinkedListNode},
+    collections::{init_struct, ptr_linked_list::PtrLinkedListNode},
     drivers::{
-        acpi::{
-            AcpiManager,
-            device::AcpiDeviceManager,
-            table::{gtdt::GtdtManager, madt::MadtManager},
-        },
+        acpi::table::{gtdt::GtdtManager, madt::MadtManager},
         boot_information::BootInformation,
         dtb::DtbManager,
-        efi::{EFI_ACPI_2_0_TABLE_GUID, EFI_DTB_TABLE_GUID},
+        efi::EFI_DTB_TABLE_GUID,
     },
     initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{CpuManagerCluster, get_cpu_manager_cluster, get_kernel_manager_cluster},
@@ -35,11 +31,11 @@ use crate::kernel::{
         free_pages,
         memory_allocator::MemoryAllocator,
     },
-    sync::spin_lock::Mutex,
     task_manager::{TaskManager, run_queue::RunQueue},
     timer_manager::{IntervalTimer, LocalTimerManager},
 };
 
+use core::arch::global_asm;
 use core::sync::atomic::AtomicBool;
 
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
@@ -180,53 +176,15 @@ pub fn init_serial_port(acpi_available: bool, dtb_available: bool) -> bool {
                 .init_with_dtb())
 }
 
-fn find_vendor_table(boot_information: &BootInformation, guid: Guid) -> Option<usize> {
-    boot_information.efi_system_table.as_ref().and_then(|t| {
-        t.get_configuration_table_slice()
-            .iter()
-            .find(|e| e.vendor_guid == guid)
-            .map(|e| e.vendor_table)
-    })
-}
-
-/// Init AcpiManager without parsing AML
-///
-/// This function initializes ACPI Manager.
-/// ACPI Manager will parse some tables and return.
-/// If succeeded, this will move it into kernel_manager_cluster.
-pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -> bool {
-    let mut acpi_manager = AcpiManager::new();
-    let mut device_manager = AcpiDeviceManager::new();
-    let set_manger = |a: AcpiManager, d: AcpiDeviceManager| {
-        init_struct!(get_kernel_manager_cluster().acpi_manager, Mutex::new(a));
-        init_struct!(get_kernel_manager_cluster().acpi_device_manager, d);
-    };
-
-    let Some(rsdp_address) = find_vendor_table(boot_information, EFI_ACPI_2_0_TABLE_GUID) else {
-        set_manger(acpi_manager, device_manager);
-        return false;
-    };
-
-    if !acpi_manager.init(rsdp_address, &mut device_manager) {
-        pr_warn!("Failed to initialize ACPI.");
-        set_manger(acpi_manager, device_manager);
-        return false;
-    }
-    if let Some(e) = acpi_manager.create_acpi_event_manager() {
-        init_struct!(get_kernel_manager_cluster().acpi_event_manager, e);
-    } else {
-        pr_err!("Failed to initialize ACPI Event Manager");
-        set_manger(acpi_manager, device_manager);
-        return false;
-    }
-    set_manger(acpi_manager, device_manager);
-    true
-}
-
 /// Init Device Tree Blob Manager
 pub fn init_dtb(boot_information: &BootInformation) -> bool {
     let mut dtb_manager = DtbManager::new();
-    let Some(dtb_address) = find_vendor_table(boot_information, EFI_DTB_TABLE_GUID) else {
+    let Some(dtb_address) = boot_information.dtb_address.map(|a| a.get()).or_else(|| {
+        boot_information
+            .efi_system_table
+            .as_ref()
+            .and_then(|t| t.find_vendor_table(EFI_DTB_TABLE_GUID))
+    }) else {
         init_struct!(
             get_kernel_manager_cluster().arch_depend_data.dtb_manager,
             dtb_manager
@@ -539,6 +497,95 @@ pub fn wake_up_application_processors(acpi_available: bool, dtb_available: bool)
         pr_info!("Found {} CPUs", num_of_cpu);
     }
 }
+
+global_asm!(
+    "
+.global     ap_entry, ap_entry_end
+.section    .text
+.type       ap_entry, %function
+.align      2
+ap_entry:
+    mrs x2, currentel
+    lsr x2, x2, 2
+    cmp x2, 2
+    b.ne 3f
+    /* EL2 */
+    mov x3, (0b11 << 24) /* SMEN */ | (0b11 << 20) /* FPEN */ | (0b11 << 16) /* ZEN */
+    msr cptr_el2, x3
+    /* is FEAT_VHE supported? */
+    mrs x2, id_aa64mmfr1_el1
+    tst x2, (0b1111 << 8)
+    b.ne 2f
+    /*  FEAT_VHE is not supported */
+    /* Jump to EL1 */
+    mov x3, (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 1) | (1 << 0)
+    msr cnthctl_el2, x3
+    adr x2, 3f
+    msr elr_el2, x2
+    mov x3, 0xC5
+    msr spsr_el2, x3
+    mov x2, (1 << 47) | (1 << 41) | (1 << 40)
+    orr x2, x2, (1 << 31)
+    orr x2, x2, (1 << 19)
+    msr hcr_el2, x2
+    eret
+2:
+    /* FEAT_VHE is supported */
+    mov x2, (1 << 31) /* RW */ | (1 << 27) /* TGE */
+    orr x2, x2, (1 << 34) /* E2H */
+    msr hcr_el2, x2
+    isb
+3:
+    /* EL1 or EL2(E2H) */
+    mrs x6, DAIF
+    orr x6, x6, (1 << 6) | (1 << 7)
+    msr DAIF, x6
+    isb
+    adr x30, ap_entry_end
+    ldp  x1,  x2, [x30, #(16 * 0)] /* x1: TCR_EL1,   x2: TTBR1_EL1 */
+    ldp  x3,  x4, [x30, #(16 * 1)] /* x3: SCTLR_EL1, x4: MAIR_EL1 */
+    ldp  x5,  x6, [x30, #(16 * 2)] /* x5: VBAR_EL1,  x6: Stack Pointer */
+    ldp  x7, xzr, [x30, #(16 * 3)] /* x7: Entry Point */
+    msr tcr_el1,    x1
+    msr ttbr1_el1,  x2
+    msr mair_el1,   x4
+    msr vbar_el1,   x5
+    mov sp,         x6
+    isb
+    msr sctlr_el1,  x3
+    br  x7
+.align  4
+ap_entry_end:
+.size   ap_entry, ap_entry_end - ap_entry
+
+.global     ap_temporary_interrupt_vector
+.balign     0x800
+ap_temporary_interrupt_vector:
+/* synchronous_current_el_stack_pointer_0 */
+    msr elr_el1, x7
+    eret
+
+.balign 0x080
+/* irq_current_el_stack_pointer_0 */
+    b   ap_temporary_interrupt_vector
+
+.balign 0x080
+/* fiq_current_el_stack_pointer_0 */
+    b   ap_temporary_interrupt_vector
+
+.balign 0x080
+/* s_error_current_el_stack_pointer_0 */
+    b   ap_temporary_interrupt_vector
+
+.balign 0x080
+/* synchronous_current_el_stack_pointer_x */
+    msr elr_el1, x7
+    eret
+
+.balign     0x800
+.size   ap_temporary_interrupt_vector, . - ap_temporary_interrupt_vector
+"
+);
 
 pub extern "C" fn ap_boot_main() -> ! {
     /* Setup CPU Manager, it contains individual data of CPU */

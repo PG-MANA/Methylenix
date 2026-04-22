@@ -18,6 +18,7 @@ use self::initialization::{multiboot::*, *};
 use crate::kernel::collections::init_struct;
 use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
 use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::drivers::boot_information::BootInformation;
 use crate::kernel::drivers::device::vga_text::VgaTextDriver;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
 pub use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64 as ELF_MACHINE_DEFAULT;
@@ -70,14 +71,14 @@ pub extern "C" fn multiboot_main(
     get_kernel_manager_cluster().kernel_tty_manager[0]
         .open(&get_kernel_manager_cluster().serial_port_manager);
 
-    /* Load the multiboot information */
-    let multiboot_information = MultiBootInformation::new(mbi_address, true);
-
     /* Setup BSP CPU Manager Cluster */
     init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
     setup_cpu_manager_cluster(Some(VAddress::from(
         &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _,
     )));
+
+    /* Load the multiboot information */
+    let multiboot_information = MultiBootInformation::new(mbi_address, true);
 
     /* Init Graphic */
     init_graphic_early(&multiboot_information);
@@ -92,14 +93,11 @@ pub extern "C" fn multiboot_main(
     /* Init the memory management system */
     let multiboot_information = init_memory_by_multiboot_information(multiboot_information);
 
-    /* Set up graphic */
-    init_graphic(&multiboot_information);
-
     /* Init interrupt */
     init_interrupt(kernel_cs, user_cs);
 
-    /* Setup Serial Port */
-    get_kernel_manager_cluster().serial_port_manager.init();
+    /* Set up graphic */
+    init_graphic(&multiboot_information);
 
     /* Setup ACPI */
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
@@ -114,6 +112,75 @@ pub extern "C" fn multiboot_main(
         get_kernel_manager_cluster().acpi_manager = Mutex::new(AcpiManager::new());
     }
 
+    boot_latter_half(kernel_cs, user_cs, user_ss)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn boot_main(
+    boot_information: *const BootInformation,
+    kernel_cs: u16,
+    user_cs: u16,
+    user_ss: u16,
+) -> ! {
+    let mut boot_information = unsafe { &*boot_information }.clone();
+    /* Enable fxsave and fxrstor and fs/gs_base */
+    unsafe {
+        cpu::enable_sse();
+        cpu::enable_fs_gs_base();
+    }
+
+    /* Initialize Kernel TTY (Early) */
+    init_struct!(
+        get_kernel_manager_cluster().kernel_tty_manager[0],
+        TtyManager::new()
+    );
+    init_struct!(
+        get_kernel_manager_cluster().kernel_tty_manager[1],
+        TtyManager::new()
+    );
+    /* Initialize Serial Port */
+    init_struct!(
+        get_kernel_manager_cluster().serial_port_manager,
+        SerialPortManager::new(0x3F8 /* COM1 */)
+    );
+    get_kernel_manager_cluster().kernel_tty_manager[0]
+        .open(&get_kernel_manager_cluster().serial_port_manager);
+
+    /* Setup BSP CPU Manager Cluster */
+    init_struct!(get_kernel_manager_cluster().cpu_list, PtrLinkedList::new());
+    setup_cpu_manager_cluster(Some(VAddress::from(
+        &(get_kernel_manager_cluster().boot_strap_cpu_manager) as *const _,
+    )));
+
+    /* Initialize Memory System */
+    init_memory_by_boot_information(&mut boot_information);
+
+    /* Init interrupt */
+    init_interrupt(kernel_cs, user_cs);
+
+    /* Initialize Graphic */
+    if init_graphic_by_boot_information(&boot_information)
+        && init_graphic_font_by_boot_information(&boot_information)
+    {
+        get_kernel_manager_cluster().kernel_tty_manager[1]
+            .open(&get_kernel_manager_cluster().graphic_manager);
+    }
+
+    kprintln!("{} Version {}", crate::OS_NAME, crate::OS_VERSION);
+
+    /* Initialize ACPI */
+    assert!(
+        init_acpi_early_by_boot_information(&boot_information),
+        "ACPI is not available."
+    );
+
+    boot_latter_half(kernel_cs, user_cs, user_ss)
+}
+
+fn boot_latter_half(kernel_cs: u16, user_cs: u16, user_ss: u16) -> ! {
+    /* Setup Serial Port */
+    get_kernel_manager_cluster().serial_port_manager.init();
+
     /* Init Timers */
     init_local_timer();
     init_global_timer();
@@ -126,6 +193,7 @@ pub extern "C" fn multiboot_main(
         main_arch_depend_initialization_process,
         idle,
     );
+
     init_work_queue();
 
     wake_up_application_processors();

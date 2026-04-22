@@ -1,15 +1,16 @@
-//!
-//! AArch64 Specific Instruction
-//!
-//! This module is the collection of inline assembly functions.
-//! All functions are unsafe, please be careful.  
-//!
+//
+// AArch64 Specific Instruction
+//
+// This module is the collection of inline assembly functions.
+//
+// This comment is not the doc comment because this file is included by the loader.
+//
 
 use crate::arch::target_arch::context::context_data::ContextData;
 
 use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 
-use core::arch::{asm, global_asm, naked_asm};
+use core::arch::{asm, naked_asm};
 
 const DAIF_IRQ: u64 = 1 << 7;
 const DAIF_FIQ: u64 = 1 << 6;
@@ -23,20 +24,39 @@ pub const SPSR_F: u64 = 1 << 6;
 
 pub const TCR_EL1_TBI0_OFFSET: u64 = 37;
 pub const TCR_EL1_TBI0: u64 = 1 << TCR_EL1_TBI0_OFFSET;
+pub const TCR_EL1_IPS_OFFSET: u64 = 32;
+//pub const TCR_EL1_IPS: u64 = 0b111<< TCR_EL1_IPS_OFFSET;
+pub const TCR_EL1_TG1_OFFSET: u64 = 30;
+pub const TCR_EL1_TG1: u64 = 0b11 << TCR_EL1_TG1_OFFSET;
+pub const TCR_EL1_TG1_4KB: u64 = 0b10 << TCR_EL1_TG1_OFFSET;
+pub const TCR_EL1_SH1_OFFSET: u64 = 28;
+pub const TCR_EL1_SH1: u64 = 0b11 << TCR_EL1_SH1_OFFSET;
+pub const TCR_EL1_SH1_INNER_SHAREABLE: u64 = 0b11 << TCR_EL1_SH1_OFFSET;
+pub const TCR_EL1_IRGN1_OFFSET: u64 = 24;
+pub const TCR_EL1_IRGN1: u64 = 0b11 << TCR_EL1_IRGN1_OFFSET;
+pub const TCR_EL1_IRGN1_INNER_SHAREABLE: u64 = 0b11 << TCR_EL1_IRGN1_OFFSET;
 pub const TCR_EL1_T1SZ_OFFSET: u64 = 16;
 pub const TCR_EL1_T1SZ: u64 = 0b111111 << TCR_EL1_T1SZ_OFFSET;
 pub const TCR_EL1_TG0_OFFSET: u64 = 14;
 pub const TCR_EL1_TG0: u64 = 0b11 << TCR_EL1_TG0_OFFSET;
+pub const TCR_EL1_TG0_4KB: u64 = 0b00 << TCR_EL1_TG0_OFFSET;
 pub const TCR_EL1_SH0_OFFSET: u64 = 12;
 pub const TCR_EL1_SH0: u64 = 0b11 << TCR_EL1_SH0_OFFSET;
+pub const TCR_EL1_SH0_INNER_SHAREABLE: u64 = 0b11 << TCR_EL1_SH0_OFFSET;
 pub const TCR_EL1_ORGN0_OFFSET: u64 = 10;
 pub const TCR_EL1_ORGN0: u64 = 0b11 << TCR_EL1_ORGN0_OFFSET;
 pub const TCR_EL1_IRGN0_OFFSET: u64 = 8;
 pub const TCR_EL1_IRGN0: u64 = 0b11 << TCR_EL1_IRGN0_OFFSET;
+pub const TCR_EL1_IRGN0_INNER_SHAREABLE: u64 = 0b11 << TCR_EL1_IRGN0_OFFSET;
 pub const TCR_EL1_EPD0_OFFSET: u64 = 7;
 pub const TCR_EL1_EPD0: u64 = 1 << TCR_EL1_EPD0_OFFSET;
 pub const TCR_EL1_T0SZ_OFFSET: u64 = 0;
 pub const TCR_EL1_T0SZ: u64 = 0b111111 << TCR_EL1_T0SZ_OFFSET;
+
+/// Kernel Area's address range
+pub const TCR_EL1_T1SZ_VALUE: u64 = 64 - 40;
+/// Userland Area's address range
+pub const TCR_EL1_T0SZ_VALUE: u64 = 64 - 39;
 
 pub const CTR_EL0_DMIN_LINE_OFFSET: u64 = 16;
 pub const CTR_EL0_DMIN_LINE: u64 = 0b1111 << CTR_EL0_DMIN_LINE_OFFSET;
@@ -47,8 +67,15 @@ pub const ESR_EL1_EC_OFFSET: u64 = 26;
 pub const ESR_EL1_EC: u64 = 0b111111 << ESR_EL1_EC_OFFSET;
 pub const ESR_EL1_EC_SVC: u64 = 0b010101;
 
-//pub const ID_AA64MMFR0_EL1_PA_RANGE_OFFSET: u64 = 0;
-//pub const ID_AA64MMFR0_EL1_PA_RANGE: u64 = 0b1111 << ID_AA64MMFR0_EL1_PA_RANGE_OFFSET;
+pub const ID_AA64MMFR0_EL1_PA_RANGE_OFFSET: u64 = 0;
+pub const ID_AA64MMFR0_EL1_PA_RANGE: u64 = 0b1111 << ID_AA64MMFR0_EL1_PA_RANGE_OFFSET;
+
+#[inline(always)]
+pub fn get_stack_pointer() -> usize {
+    let result: usize;
+    unsafe { asm!("mov {}, sp", out(reg) result) };
+    result
+}
 
 #[inline(always)]
 pub unsafe fn enable_interrupt() {
@@ -95,7 +122,7 @@ pub unsafe fn save_daif_and_disable_irq_fiq() -> u64 {
 #[inline(always)]
 pub fn get_daif() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, daif", out(reg) result) };
+    unsafe { asm!("mrs {}, daif", out(reg) result) };
     result
 }
 
@@ -103,7 +130,7 @@ pub fn get_daif() -> u64 {
 pub unsafe fn restore_irq_fiq(daif: u64) {
     unsafe {
         asm!("  dsb ish
-            msr DAIF, {:x}", in(reg) daif)
+            msr DAIF, {}", in(reg) daif)
     };
 }
 
@@ -128,56 +155,78 @@ pub unsafe fn idle() {
 #[inline(always)]
 pub fn is_interrupt_enabled() -> bool {
     let daif: u64;
-    unsafe { asm!("mrs {:x}, DAIF", out(reg) daif) };
+    unsafe { asm!("mrs {}, DAIF", out(reg) daif) };
     (daif & (DAIF_FIQ | DAIF_IRQ)) == 0
 }
 
 #[inline(always)]
 pub fn get_cpu_base_address() -> usize {
     let result: usize;
-    unsafe { asm!("mrs {:x}, tpidr_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, tpidr_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub unsafe fn set_cpu_base_address(address: u64) {
-    unsafe { asm!("msr tpidr_el1, {:x}", in(reg) address) };
+    unsafe { asm!("msr tpidr_el1, {}", in(reg) address) };
 }
 
 #[inline(always)]
 pub unsafe fn set_ttbr0(ttbr0: u64) {
-    unsafe { asm!("msr ttbr0_el1, {:x}", in(reg) ttbr0) };
+    unsafe { asm!("msr ttbr0_el1, {}", in(reg) ttbr0) };
 }
 
 #[inline(always)]
 pub fn get_ttbr1() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, ttbr1_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, ttbr1_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub unsafe fn set_ttbr1(ttbr1: u64) {
-    unsafe { asm!("msr ttbr1_el1, {:x}", in(reg) ttbr1) };
+    unsafe { asm!("msr ttbr1_el1, {}", in(reg) ttbr1) };
 }
 
 #[inline(always)]
-pub unsafe fn get_id_aa64mmfr0() -> u64 {
+pub fn get_id_aa64mmfr0() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, id_aa64mmfr0_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, id_aa64mmfr0_el1", out(reg) result) };
+    result
+}
+
+#[inline(always)]
+pub const fn convert_pa_range_to_pa_bits(id_aa64mmfr0: u64) -> u64 {
+    match (id_aa64mmfr0 & ID_AA64MMFR0_EL1_PA_RANGE) >> ID_AA64MMFR0_EL1_PA_RANGE_OFFSET {
+        0b0000 => 32,
+        0b0001 => 36,
+        0b0010 => 40,
+        0b0011 => 42,
+        0b0100 => 44,
+        0b0101 => 48,
+        0b0110 => 52,
+        0b0111 => 56,
+        _ => 56, /* reserved, assume supported 56 bits*/
+    }
+}
+
+#[inline(always)]
+pub fn get_id_aa64mmfr1() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {}, id_aa64mmfr1_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub fn get_tcr() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, tcr_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, tcr_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub unsafe fn set_tcr(tcr: u64) {
-    unsafe { asm!("msr tcr_el1, {:x}", in(reg) tcr) };
+    unsafe { asm!("msr tcr_el1, {}", in(reg) tcr) };
 }
 
 #[inline(always)]
@@ -193,19 +242,19 @@ pub const fn get_t1sz(tcr: u64) -> u64 {
 #[inline(always)]
 pub fn get_mair() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, mair_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, mair_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub unsafe fn set_mair(mair: u64) {
-    unsafe { asm!("msr mair_el1, {:x}", in(reg) mair) };
+    unsafe { asm!("msr mair_el1, {}", in(reg) mair) };
 }
 
 #[inline(always)]
 pub fn tlbi_vaae1is(target: u64) {
     data_barrier();
-    unsafe { asm!("tlbi vaae1is, {:x}", in(reg) target >> 12) };
+    unsafe { asm!("tlbi vaae1is, {}", in(reg) target >> 12) };
     data_barrier();
     instruction_barrier();
 }
@@ -239,7 +288,7 @@ pub fn flush_data_cache(virtual_address: VAddress, size: MSize) {
     let end_address = ((virtual_address + size).to_usize() & cache_mask) + cache_size;
 
     while address <= end_address {
-        unsafe { asm!("dc cvac, {:x}", in(reg) address) };
+        unsafe { asm!("dc cvac, {}", in(reg) address) };
         address += word_size;
     }
     instruction_barrier();
@@ -248,7 +297,7 @@ pub fn flush_data_cache(virtual_address: VAddress, size: MSize) {
 pub fn flush_data_cache_all() {
     let clidr: u64;
     data_barrier();
-    unsafe { asm!("mrs {:x}, clidr_el1", out(reg) clidr) };
+    unsafe { asm!("mrs {}, clidr_el1", out(reg) clidr) };
     /* Check All Cache Type */
     for cache_level in 0..7 {
         let ccsidr: u64;
@@ -267,7 +316,7 @@ pub fn flush_data_cache_all() {
             }
         }
         unsafe {
-            asm!("msr csselr_el1, {:x}\nisb\nmrs {:x}, ccsidr_el1",
+            asm!("msr csselr_el1, {}\nisb\nmrs {}, ccsidr_el1",
             in(reg) cache_level << 1,
             out(reg) ccsidr)
         };
@@ -279,13 +328,13 @@ pub fn flush_data_cache_all() {
         for set in 0..=num_sets {
             for way in 0..=associativity {
                 unsafe {
-                    asm!("dc cisw, {:x}", in(reg) (way << a) | (set << l) | (cache_level << 1))
+                    asm!("dc cisw, {}", in(reg) (way << a) | (set << l) | (cache_level << 1))
                 };
             }
         }
     }
     data_barrier();
-    unsafe { asm!("msr csselr_el1, {:x}", in(reg) 0) };
+    unsafe { asm!("msr csselr_el1, {}", in(reg) 0u64) };
 }
 
 #[inline(always)]
@@ -312,108 +361,125 @@ pub fn get_ctr_el0() -> u64 {
 
 #[inline(always)]
 pub unsafe fn set_vbar(address: u64) {
-    unsafe { asm!("msr vbar_el1, {:x}", in(reg) address) };
+    unsafe { asm!("msr vbar_el1, {}", in(reg) address) };
 }
 
 #[inline(always)]
 pub fn get_esr() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, esr_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, esr_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub fn get_far() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, far_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, far_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub fn get_elr() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, elr_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, elr_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub fn get_sctlr() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, sctlr_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, sctlr_el1", out(reg) result) };
     result
+}
+
+#[inline(always)]
+pub unsafe fn set_cptr(cptr: u64) {
+    unsafe { asm!("msr cptr_el2, {}", in(reg) cptr) };
+}
+
+#[inline(always)]
+pub fn get_hcr() -> u64 {
+    let result: u64;
+    unsafe { asm!("mrs {}, hcr_el2", out(reg) result) };
+    result
+}
+
+#[inline(always)]
+pub unsafe fn set_hcr(hcr: u64) {
+    unsafe { asm!("msr hcr_el2, {}", in(reg) hcr) };
 }
 
 #[inline(always)]
 pub fn get_icc_sre() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, icc_sre_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, icc_sre_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub fn get_icc_hppir1() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, icc_hppir1_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, icc_hppir1_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub fn get_icc_iar1() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, icc_iar1_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, icc_iar1_el1", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_ctlr_el1(icc_ctlr: u64) {
-    unsafe { asm!("msr icc_iar1_el1, {:x}", in(reg) icc_ctlr) };
+    unsafe { asm!("msr icc_iar1_el1, {}", in(reg) icc_ctlr) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_sre(icc_sre: u64) {
-    unsafe { asm!("msr icc_sre_el1, {:x}", in(reg) icc_sre) };
+    unsafe { asm!("msr icc_sre_el1, {}", in(reg) icc_sre) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_igrpen1(icc_igrpen1: u64) {
-    unsafe { asm!("msr icc_igrpen1_el1, {:x}", in(reg) icc_igrpen1) };
+    unsafe { asm!("msr icc_igrpen1_el1, {}", in(reg) icc_igrpen1) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_igrpen0(icc_igrpen0: u64) {
-    unsafe { asm!("msr icc_igrpen0_el1, {:x}", in(reg) icc_igrpen0) };
+    unsafe { asm!("msr icc_igrpen0_el1, {}", in(reg) icc_igrpen0) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_eoir1(icc_eoir1: u64) {
-    unsafe { asm!("msr icc_eoir1_el1, {:x}", in(reg) icc_eoir1) };
+    unsafe { asm!("msr icc_eoir1_el1, {}", in(reg) icc_eoir1) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_pmr(icc_pmr: u64) {
-    unsafe { asm!("msr icc_pmr_el1, {:x}", in(reg) icc_pmr) };
+    unsafe { asm!("msr icc_pmr_el1, {}", in(reg) icc_pmr) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_bpr1(icc_bpr: u64) {
-    unsafe { asm!("msr icc_bpr1_el1, {:x}", in(reg) icc_bpr) };
+    unsafe { asm!("msr icc_bpr1_el1, {}", in(reg) icc_bpr) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_bpr0(icc_bpr: u64) {
-    unsafe { asm!("msr icc_bpr0_el1, {:x}", in(reg) icc_bpr) };
+    unsafe { asm!("msr icc_bpr0_el1, {}", in(reg) icc_bpr) };
 }
 
 #[inline(always)]
 pub unsafe fn set_icc_sgi1r_el1(icc_sgi1r: u64) {
-    unsafe { asm!("msr icc_sgi1r_el1, {:x}", in(reg) icc_sgi1r) };
+    unsafe { asm!("msr icc_sgi1r_el1, {}", in(reg) icc_sgi1r) };
 }
 
 #[inline(always)]
 pub fn get_cntcr() -> u64 {
     let result: u64;
     instruction_barrier();
-    unsafe { asm!("mrs {:x}, cntcr_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, cntcr_el1", out(reg) result) };
     result
 }
 
@@ -421,31 +487,31 @@ pub fn get_cntcr() -> u64 {
 pub fn get_cntpct() -> u64 {
     let result: u64;
     instruction_barrier();
-    unsafe { asm!("mrs {:x}, cntpct_el0", out(reg) result) };
+    unsafe { asm!("mrs {}, cntpct_el0", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub fn get_cntfrq() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, cntfrq_el0", out(reg) result) };
+    unsafe { asm!("mrs {}, cntfrq_el0", out(reg) result) };
     result
 }
 
 #[inline(always)]
 pub unsafe fn set_cntp_ctl(cntp_ctl: u64) {
-    unsafe { asm!("msr cntp_ctl_el0, {:x}", in(reg) cntp_ctl) };
+    unsafe { asm!("msr cntp_ctl_el0, {}", in(reg) cntp_ctl) };
 }
 
 #[inline(always)]
 pub unsafe fn set_cntp_tval(cntp_tval: u64) {
-    unsafe { asm!("msr cntp_tval_el0, {:x}", in(reg) cntp_tval) };
+    unsafe { asm!("msr cntp_tval_el0, {}", in(reg) cntp_tval) };
 }
 
 #[inline(always)]
 pub fn get_mpidr() -> u64 {
     let result: u64;
-    unsafe { asm!("mrs {:x}, mpidr_el1", out(reg) result) };
+    unsafe { asm!("mrs {}, mpidr_el1", out(reg) result) };
     result
 }
 
@@ -605,92 +671,3 @@ pub unsafe extern "C" fn task_switch(
         )
     };
 }
-
-global_asm!(
-    "
-.global     ap_entry, ap_entry_end
-.section    .text
-.type       ap_entry, %function
-.align      2
-ap_entry:
-    mrs x2, currentel
-    lsr x2, x2, 2
-    cmp x2, 2
-    b.ne 3f
-    /* EL2 */
-    mov x3, (0b11 << 24) /* SMEN */ | (0b11 << 20) /* FPEN */ | (0b11 << 16) /* ZEN */
-    msr cptr_el2, x3
-    /* is FEAT_VHE supported? */
-    mrs x2, id_aa64mmfr1_el1
-    tst x2, (0b1111 << 8)
-    b.ne 2f
-    /*  FEAT_VHE is not supported */
-    /* Jump to EL1 */
-    mov x3, (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 1) | (1 << 0)
-    msr cnthctl_el2, x3
-    adr x2, 3f
-    msr elr_el2, x2
-    mov x3, 0xC5
-    msr spsr_el2, x3
-    mov x2, (1 << 47) | (1 << 41) | (1 << 40)
-    orr x2, x2, (1 << 31)
-    orr x2, x2, (1 << 19)
-    msr hcr_el2, x2
-    eret
-2:
-    /* FEAT_VHE is supported */
-    mov x2, (1 << 31) /* RW */ | (1 << 27) /* TGE */
-    orr x2, x2, (1 << 34) /* E2H */
-    msr hcr_el2, x2
-    isb
-3:
-    /* EL1 or EL2(E2H) */
-    mrs x6, DAIF
-    orr x6, x6, (1 << 6) | (1 << 7)
-    msr DAIF, x6
-    isb
-    adr x30, ap_entry_end
-    ldp  x1,  x2, [x30, #(16 * 0)] /* x1: TCR_EL1,   x2: TTBR1_EL1 */
-    ldp  x3,  x4, [x30, #(16 * 1)] /* x3: SCTLR_EL1, x4: MAIR_EL1 */
-    ldp  x5,  x6, [x30, #(16 * 2)] /* x5: VBAR_EL1,  x6: Stack Pointer */
-    ldp  x7, xzr, [x30, #(16 * 3)] /* x7: Entry Point */
-    msr tcr_el1,    x1
-    msr ttbr1_el1,  x2
-    msr mair_el1,   x4
-    msr vbar_el1,   x5
-    mov sp,         x6
-    isb
-    msr sctlr_el1,  x3
-    br  x7
-.align  4
-ap_entry_end:
-.size   ap_entry, ap_entry_end - ap_entry
-
-.global     ap_temporary_interrupt_vector
-.balign     0x800
-ap_temporary_interrupt_vector:
-/* synchronous_current_el_stack_pointer_0 */
-    msr elr_el1, x7
-    eret
-
-.balign 0x080
-/* irq_current_el_stack_pointer_0 */
-    b   ap_temporary_interrupt_vector
-
-.balign 0x080
-/* fiq_current_el_stack_pointer_0 */
-    b   ap_temporary_interrupt_vector
-
-.balign 0x080
-/* s_error_current_el_stack_pointer_0 */
-    b   ap_temporary_interrupt_vector
-
-.balign 0x080
-/* synchronous_current_el_stack_pointer_x */
-    msr elr_el1, x7
-    eret
-
-.balign     0x800
-.size   ap_temporary_interrupt_vector, . - ap_temporary_interrupt_vector
-"
-);
