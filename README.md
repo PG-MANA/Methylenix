@@ -31,7 +31,7 @@ Therefore, I named this OS Methylene-nix, Methylenix.
 - Support multi-processors
 - Support ACPI Machine Language
     - Developed the interpreter
-- Support a simple GUI
+- Support a simple graphic
     - Show the debug messages
 - Read data from NVMe
 - Support some file systems
@@ -45,7 +45,7 @@ Therefore, I named this OS Methylene-nix, Methylenix.
 
 - x86_64
 - AArch64
-- RISC-V 64 (RV64IMAC)
+- RISCV64 (RV64IMAC)
 
 ## License
 
@@ -69,22 +69,37 @@ limitations under the License.
 
 - rustc (nightly)
 - cargo
-- grub2-mkrescue (x86_64 only)
 
 ### Steps
 
-#### x86_64
+#### x86_64 with GRUB2
+
+Before compile, you have to install `grub2-mkrescue`.
 
 ```shell
 git clone https://github.com/PG-MANA/Methylenix.git
 cd Methylenix
 rustup target add x86_64-unknown-none
-cargo xtask build x86_64 --release
+cargo xtask build x86_64 --release --loader grub
 ```
 
 The kernel will be placed in `bin/`.
 
-You can download built images from https://repo.taprix.org/pg_mana/methylenix/images/x86_64 .
+You can download built images from [Repository](https://repo.taprix.org/pg_mana/methylenix/images/x86_64/grub/).
+
+#### x86_64 with UEFI
+
+```shell
+git clone https://github.com/PG-MANA/Methylenix.git
+cd Methylenix
+rustup target add x86_64-unknown-uefi
+rustup target add x86_64-unknown-none
+cargo xtask build x86_64 --release --loader uefi
+```
+
+The kernel will be placed in `bin/`.
+
+You can download built images from [Repository](https://repo.taprix.org/pg_mana/methylenix/images/x86_64/uefi/).
 
 ### AArch64
 
@@ -98,9 +113,9 @@ cargo xtask build aarch64 --release
 
 The kernel will be placed in `bin/`.
 
-You can download built images from https://repo.taprix.org/pg_mana/methylenix/images/aarch64 .
+You can download built images from [Repository](https://repo.taprix.org/pg_mana/methylenix/images/aarch64/).
 
-### RISC-V 64
+### RISCV64
 
 ```shell
 git clone https://github.com/PG-MANA/Methylenix.git
@@ -111,29 +126,33 @@ cargo xtask build riscv64 --release
 
 The kernel will be placed in `bin/` and the bootable image will be placed at `bin/Kernel`.
 
-You can download built images from https://repo.taprix.org/pg_mana/methylenix/images/riscv64 .
+You can download built images from [Repository](https://repo.taprix.org/pg_mana/methylenix/images/riscv64/).
 
 ## Run on the QEMU
 
 ### x86_64
 
 ```shell
+# with GRUB2
 qemu-system-x86_64  -cpu qemu64,+fsgsbase -m 2G --cdrom bin/img/boot.iso
 
 # or (OVMF)
 qemu-system-x86_64  -cpu qemu64,+fsgsbase -m 2G --cdrom bin/img/boot.iso \
                     -bios /usr/bin/OVMF/OVMF.fd
 
-# or (to emulate host cpu)
-qemu-system-x86_64  -cpu host --enable-kvm -smp 4 -m 2G --cdrom bin/img/boot.iso \
-                    -bios /usr/bin/OVMF/OVMF.fd
-
 # NIC and NVMe Emulation
+qemu-system-x86_64  -cpu host --enable-kvm -smp 4 -m 2G -M q35 -nographic \
+                    -bios /usr/bin/OVMF/OVMF.fd  \
+                    -device nvme,serial=12345678 -device nvme-ns,drive=nvm1 \
+                    -drive file=/path/to/main.qcow2,format=qcow2,if=none,media=disk,id=nvm1 \
+                    -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56
+
+# with UEFI
 qemu-system-x86_64  -cpu host --enable-kvm -smp 4 -m 2G -M q35 -nographic \
                     -bios /usr/bin/OVMF/OVMF.fd  \
                     -device nvme,serial=12345678 -device nvme-ns,drive=nvm1 -device nvme-ns,drive=nvm2 \
                     -drive file=/path/to/main.qcow2,format=qcow2,if=none,media=disk,id=nvm1 \
-                    -drive file=fat:ro:/path/to/bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
+                    -drive file=fat:ro:bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
                     -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56
 ```
 
@@ -145,7 +164,7 @@ qemu-system-aarch64 -cpu cortex-a55 -smp 4 -m 2G -M virt,gic-version=3,secure=of
                     -bios /path/to/OVMF_AA64.fd  \
                     -device nvme,serial=12345678 -device nvme-ns,drive=nvm1 -device nvme-ns,drive=nvm2 \
                     -drive file=/path/to/main.qcow2,format=qcow2,if=none,media=disk,id=nvm1 \
-                    -drive file=fat:ro:/path/to/bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
+                    -drive file=fat:ro:bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
                     -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56
 ```
 
@@ -161,7 +180,7 @@ qemu-system-aarch64 -cpu max -smp 4 -m 2G -M virt -nographic \
                     -bios /path/to/fw_payload.bin \
                     -device nvme,serial=12345678 -device nvme-ns,drive=nvm1 -device nvme-ns,drive=nvm2 \
                     -drive file=/path/to/main.qcow2,format=qcow2,if=none,media=disk,id=nvm1 \
-                    -drive file=fat:ro:/path/to/bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
+                    -drive file=fat:ro:bin/,format=raw,if=none,media=disk,id=nvm2,readonly=on \
                     -netdev user,id=net0,hostfwd=tcp::7777-:8080 -device e1000e,netdev=net0,mac=52:54:00:12:34:56
 ```
 
