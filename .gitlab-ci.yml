@@ -2,13 +2,24 @@ image: "rust:latest"
 stages:
   - build
 
-build_x86_64:
+build_x86_64_grub:
   stage: build
   script:
     - apt-get update && apt-get install -y grub-efi-amd64-bin xorriso mtools
     - rustup default nightly
     - rustup target add x86_64-unknown-none
     - cargo xtask build x86_64 --release --loader grub
+  artifacts:
+    paths:
+      - bin/
+
+build_x86_64_uefi:
+  stage: build
+  script:
+    - rustup default nightly
+    - rustup target add x86_64-unknown-none
+    - rustup target add x86_64-unknown-uefi
+    - cargo xtask build x86_64 --release
   artifacts:
     paths:
       - bin/
