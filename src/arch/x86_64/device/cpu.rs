@@ -285,12 +285,18 @@ pub unsafe extern "C" fn run_task(_context_data_address: *const ContextData) -> 
                 je      3f
                 mov     gs, ax
 3:
+                /* Write swap_gs_base and swapgs (if needed) */
+                mov     rax, [rdi + 512 + 8 * 19]
+                mov     rdx, rax
+                shr     rdx, 32
+                mov     ecx, 0xC0000102                 /* swap_gs_base */
+                wrmsr
                 mov     rax, cs
-                cmp     [rdi + 512 + 8 * 24], rax // Compare current CS and next CS
+                /* Compare current CS and next CS */
+                cmp     [rdi + 512 + 8 * 24], rax
                 je      4f
                 mov     rax, [rdi + 512 + 8 * 19]
                 swapgs
-                wrgsbase    rax
 4:
                 mov     rax, [rdi + 512 + 8 * 20]
                 mov     es, ax
