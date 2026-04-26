@@ -114,7 +114,7 @@ impl InterruptManager {
         let irq_handler_list_address = irq_handler_list as *const fn() as usize;
         let irq_handler_entry_size = (irq_handler_list_end as *const fn() as usize
             - irq_handler_list_address)
-            / (IDT_MAX - IDT_DEVICE_MIN + 1);
+            / (IDT_MAX - IDT_DEVICE_MIN);
         let interrupt_info = get_interrupt_info_mut();
         let _lock = interrupt_info.lock.lock();
         for (i, e) in interrupt_info.idt[IDT_DEVICE_MIN..=IDT_MAX]
@@ -496,32 +496,33 @@ impl InterruptManager {
 }
 
 global_asm!("
-.macro  handler index, max
-sub     rsp, ({0} + 1) * 8 // +1 is for stack alignment
-mov     [rsp +  5 * 8], rsi
-mov     rsi, \\index
-jmp     handler_entry
-.align  8
-.if     \\max - \\index - 1
-handler \"(\\index+1)\",\\max
+.macro      handler index, max
+sub         rsp, ({0} + 1 /* stack alignment */) * 8
+mov         [rsp +  5 * 8], rsi
+mov         rsi, \\index
+jmp         handler_entry
+.if         \\max - \\index - 1
+handler     \"(\\index + 1)\", \\max
 .endif
 .endm
-
-.macro handler_block base, end
-handler \\base, (\\base + 0x10)
-.if     \\end - \\base
-handler_block \"(\\base + 0x10)\",\\end
-.endif
-.endm 
 
 .section    .text
 .type       irq_handler_list, %function
 irq_handler_list:
-handler_block  0x20, 0x40
-handler_block  0x50, 0x70
-handler_block  0x80, 0xa0
-handler_block  0xb0, 0xd0
-handler_block  0xe0, 0xf0
+handler     0x20, 0x30
+handler     0x30, 0x40
+handler     0x40, 0x50
+handler     0x50, 0x60
+handler     0x60, 0x70
+handler     0x70, 0x80
+handler     0x80, 0x90
+handler     0x90, 0xA0
+handler     0xA0, 0xB0
+handler     0xB0, 0xC0
+handler     0xC0, 0xD0
+handler     0xD0, 0xE0
+handler     0xE0, 0xF0
+handler     0xF0, 0x100
 irq_handler_list_end:
 .size   irq_handler_list, irq_handler_list_end - irq_handler_list
 
