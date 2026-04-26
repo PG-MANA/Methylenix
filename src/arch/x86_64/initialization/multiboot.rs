@@ -287,12 +287,14 @@ pub fn init_memory_by_multiboot_information(
         .kernel_memory_manager
         .free(mapped_multiboot_address_base)
         .expect("Cannot free the map of multiboot information.");
-    let _ = get_kernel_manager_cluster()
-        .kernel_memory_manager
-        .free_physical_memory(
-            PAddress::new(multiboot_information.address),
-            MSize::new(multiboot_information.size),
-        ); /* It may be already freed */
+    bug_on_err!(unsafe {
+        get_kernel_manager_cluster()
+            .kernel_memory_manager
+            .free_physical_memory(
+                PAddress::new(multiboot_information.address),
+                MSize::new(multiboot_information.size),
+            )
+    });
 
     /* Store managers to cluster */
     MultiBootInformation::new(new_mbi_address.to_usize(), false)

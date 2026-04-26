@@ -306,11 +306,11 @@ pub fn wake_up_application_processors() {
     }
 
     /* Free boot_address */
-    bug_on_err!(
+    bug_on_err!(unsafe {
         get_kernel_manager_cluster()
             .kernel_memory_manager
             .free_physical_memory(boot_address, PAGE_SIZE)
-    );
+    });
 
     /* Free temporary stack */
     bug_on_err!(

@@ -1147,7 +1147,7 @@ impl VirtualMemoryManager {
     ) -> Result<(), MemoryError> {
         assert!(self.lock.is_locked());
         self.page_manager
-            .unassociate_address(virtual_address, size, pm_manager)
+            .unassociate_address(pm_manager, virtual_address, size)
             .map_err(|e| MemoryError::PagingError(e))
     }
 
@@ -1378,6 +1378,46 @@ impl VirtualMemoryManager {
             pr_err!("Entry is not found.");
             Err(MemoryError::InvalidAddress)
         }
+    }
+
+    pub unsafe fn map_physical_address_directly(
+        &mut self,
+        physical_address: PAddress,
+        size: MSize,
+        permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        self.lock.lock();
+        let result = self
+            .page_manager
+            .associate_address(
+                pm_manager,
+                physical_address,
+                unsafe { physical_address.to_direct_mapped_v_address() },
+                size,
+                permission,
+                option,
+            )
+            .map_err(|e| MemoryError::PagingError(e));
+        self.lock.unlock();
+        result
+    }
+
+    pub unsafe fn unmap_physical_address_directly(
+        &mut self,
+        physical_address: PAddress,
+        size: MSize,
+        pm_manager: &mut PhysicalMemoryManager,
+    ) -> Result<(), MemoryError> {
+        self.lock.lock();
+        let result = self.unassociate_address(
+            unsafe { physical_address.to_direct_mapped_v_address() },
+            size,
+            pm_manager,
+        );
+        self.lock.unlock();
+        result
     }
 
     fn adjust_vm_entries(&mut self) {

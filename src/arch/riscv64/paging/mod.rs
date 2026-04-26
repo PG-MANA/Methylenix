@@ -376,9 +376,9 @@ impl PageManager {
     /// When a huge table was used and the mapped size is different from expected size, this will return error.
     pub fn unassociate_address(
         &self,
+        pm_manager: &mut PhysicalMemoryManager,
         virtual_address: VAddress,
         mut size: MSize,
-        pm_manager: &mut PhysicalMemoryManager,
     ) -> Result<(), PagingError> {
         if (virtual_address.to_usize() & !PAGE_MASK) != 0 {
             return Err(PagingError::AddressIsNotAligned);

@@ -48,6 +48,7 @@ pub enum MemoryError {
     MapAddressFailed,
     InternalError,
     EntryPoolRunOut,
+    NotPermitted,
     PagingError(PagingError),
     AllocError(core::alloc::AllocError),
 }
@@ -283,13 +284,72 @@ impl MemoryManager {
         /* Freeing Physical Memory will be done by Virtual Memory Manager, if it is needed. */
     }
 
-    pub fn free_physical_memory(
+    /// Map physical address to virtual address directly
+    ///
+    /// This function maps address as virtual address = physical address.
+    /// For example, the trampoline code may need map short section.
+    ///
+    /// You must call [`Self::io_remap`] if you want to access the specified physical address.
+    ///
+    /// # Safety
+    /// This function does not manage the status of memory map.
+    /// The caller must ensure that the virtual address is available until calling [`Self::unmap_physical_address_directly`].
+    pub unsafe fn map_physical_address_directly(
+        &mut self,
+        address: PAddress,
+        size: MSize,
+        permission: MemoryPermissionFlags,
+        option: MemoryOptionFlags,
+    ) -> Result<(), MemoryError> {
+        if !self.is_kernel_memory_manager() {
+            return Err(MemoryError::NotPermitted);
+        }
+        unsafe {
+            self.virtual_memory_manager.map_physical_address_directly(
+                address,
+                size,
+                permission,
+                option,
+                get_physical_memory_manager(),
+            )
+        }
+    }
+
+    /// Unmap the physical address mapped by [`Self::map_physical_address_directly`]
+    ///
+    /// # Safety
+    /// This function does not manage the status of memory map.
+    /// `address` must be the same value passed to  [`Self::map_physical_address_directly`].
+    pub unsafe fn unmap_physical_address_directly(
         &mut self,
         address: PAddress,
         size: MSize,
     ) -> Result<(), MemoryError> {
-        /* initializing use only */
+        if !self.is_kernel_memory_manager() {
+            return Err(MemoryError::NotPermitted);
+        }
+        unsafe {
+            self.virtual_memory_manager.unmap_physical_address_directly(
+                address,
+                size,
+                get_physical_memory_manager(),
+            )
+        }
+    }
 
+    /// Release the physical address without managing memory map
+    ///
+    /// This function marks the physical address as available.
+    /// You can free physical address which was not available boot time, but become available later.
+    ///
+    /// # Safety
+    /// This function does not manage the status of memory map.
+    /// `address` must be available.
+    pub unsafe fn free_physical_memory(
+        &mut self,
+        address: PAddress,
+        size: MSize,
+    ) -> Result<(), MemoryError> {
         if let Err(err) = get_physical_memory_manager().free(address, size, false) {
             pr_err!("Failed to free physical memory: {:?}", err);
             Err(err)
@@ -432,7 +492,7 @@ impl MemoryManager {
     }
 
     #[inline] /* want to be const... */
-    pub fn page_align<T: Address>(address: T, size: MSize) -> (T /*address*/, MSize /*size*/) {
+    pub fn page_align<T: Address>(address: T, size: MSize) -> (T, MSize) {
         if size.is_zero() && (address.to_usize() & PAGE_MASK) == 0 {
             (address, MSize::new(0))
         } else {
