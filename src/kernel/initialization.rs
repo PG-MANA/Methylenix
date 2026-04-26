@@ -17,7 +17,7 @@ use crate::kernel::{
     collections::init_struct,
     drivers::{
         acpi::{
-            AcpiManager,
+            AcpiManager, RSDP,
             device::AcpiDeviceManager,
             table::{bgrt::BgrtManager, mcfg::McfgManager},
         },
@@ -34,7 +34,7 @@ use crate::kernel::{
     memory_manager::{
         MemoryManager,
         data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
-        io_remap,
+        free_pages, io_remap,
         memory_allocator::MemoryAllocator,
         mremap,
         physical_memory_manager::PhysicalMemoryManager,
@@ -272,15 +272,14 @@ pub fn init_graphic_font_by_boot_information(boot_information: &BootInformation)
 /// This function initializes ACPI Manager.
 /// ACPI Manager will parse some tables and return.
 /// If succeeded, this will move it into kernel_manager_cluster.
-pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
+pub fn init_acpi_early(rsdp: &RSDP) -> bool {
     let mut acpi_manager = AcpiManager::new();
     let mut device_manager = AcpiDeviceManager::new();
     let set_manger = |a: AcpiManager, d: AcpiDeviceManager| {
         init_struct!(get_kernel_manager_cluster().acpi_manager, Mutex::new(a));
         init_struct!(get_kernel_manager_cluster().acpi_device_manager, d);
     };
-
-    if !acpi_manager.init(rsdp_ptr, &mut device_manager) {
+    if !acpi_manager.init(rsdp, &mut device_manager) {
         pr_warn!("Cannot init ACPI.");
         set_manger(acpi_manager, device_manager);
         return false;
@@ -304,12 +303,29 @@ pub fn init_acpi_early(rsdp_ptr: usize) -> bool {
 /// If the ACPI Table is not found or [`init_acpi_early`] returns false, this returns false.
 /// For more information, please see [`init_acpi_early`].
 pub fn init_acpi_early_by_boot_information(boot_information: &BootInformation) -> bool {
-    boot_information
+    let Some(rsdp_physical_address) = boot_information
         .efi_system_table
         .as_ref()
         .and_then(|t| t.find_vendor_table(EFI_ACPI_2_0_TABLE_GUID))
-        .map(|rsdp_ptr| init_acpi_early(rsdp_ptr))
-        .unwrap_or(false)
+    else {
+        return false;
+    };
+
+    match io_remap!(
+        PAddress::new(rsdp_physical_address),
+        MSize::new(size_of::<RSDP>()),
+        MemoryPermissionFlags::rodata()
+    ) {
+        Ok(a) => {
+            let rsdp = unsafe { core::ptr::read(a.to::<RSDP>()) };
+            bug_on_err!(free_pages!(a));
+            init_acpi_early(&rsdp)
+        }
+        Err(e) => {
+            pr_err!("Failed to map RSDP: {e:?}");
+            false
+        }
+    }
 }
 
 /// Init AcpiManager and AcpiEventManager with parsing AML

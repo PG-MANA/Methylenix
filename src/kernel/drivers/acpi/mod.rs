@@ -76,7 +76,7 @@ pub struct AcpiManager {
 }
 
 #[repr(C, packed)]
-struct RSDP {
+pub struct RSDP {
     signature: [u8; 8],
     checksum: u8,
     oem_id: [u8; 6],
@@ -99,10 +99,7 @@ impl AcpiManager {
         }
     }
 
-    pub fn init(&mut self, rsdp_ptr: usize, device_manager: &mut AcpiDeviceManager) -> bool {
-        /* rsdp_ptr is the pointer of RSDP. */
-        /* *rsdp_ptr must be readable. */
-        let rsdp = unsafe { &*(rsdp_ptr as *const RSDP) };
+    pub fn init(&mut self, rsdp: &RSDP, device_manager: &mut AcpiDeviceManager) -> bool {
         if rsdp.signature != *b"RSD PTR " {
             pr_err!("RSDP Signature is not correct.");
             return false;
@@ -122,7 +119,6 @@ impl AcpiManager {
         self.enabled = true;
 
         device_manager.pm_timer = self.get_fadt_manager().get_acpi_pm_timer();
-
         true
     }
 
@@ -190,7 +186,7 @@ impl AcpiManager {
         &self.xsdt_manager
     }
 
-    /* FADT must exists */
+    /* FADT must exist */
     pub fn get_fadt_manager(&self) -> &FadtManager {
         assert!(self.is_available());
         self.xsdt_manager.get_fadt_manager()
@@ -542,9 +538,7 @@ impl AcpiManager {
     }
 
     fn evaluate_edge_trigger_event(&self, event_number: u8) -> Result<(), ()> {
-        let mut interpreter = if let Some(i) = &self.aml_interpreter {
-            i.clone()
-        } else {
+        let Some(mut interpreter) = self.aml_interpreter.as_ref().map(|i| i.clone()) else {
             pr_err!("AmlInterpreter is not available.");
             return Err(());
         };
@@ -577,9 +571,7 @@ impl AcpiManager {
     }
 
     fn evaluate_level_trigger_event(&self, event_number: u8) -> Result<(), ()> {
-        let mut interpreter = if let Some(i) = &self.aml_interpreter {
-            i.clone()
-        } else {
+        let Some(mut interpreter) = self.aml_interpreter.as_ref().map(|i| i.clone()) else {
             pr_err!("AmlInterpreter is not available.");
             return Err(());
         };

@@ -15,9 +15,8 @@ use self::device::{
 };
 use self::initialization::{multiboot::*, *};
 
-use crate::kernel::collections::init_struct;
-use crate::kernel::collections::ptr_linked_list::PtrLinkedList;
-use crate::kernel::drivers::acpi::AcpiManager;
+use crate::kernel::collections::{init_struct, ptr_linked_list::PtrLinkedList};
+use crate::kernel::drivers::acpi::{AcpiManager, RSDP};
 use crate::kernel::drivers::boot_information::BootInformation;
 use crate::kernel::drivers::device::vga_text::VgaTextDriver;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
@@ -103,7 +102,9 @@ pub extern "C" fn multiboot_main(
 
     /* Setup ACPI */
     if let Some(rsdp_address) = multiboot_information.new_acpi_rsdp_ptr {
-        if !init_acpi_early(rsdp_address) {
+        /* `rsdp_address` points a copy of RSDP in the multiboot_information */
+        let rsdp = unsafe { &*(rsdp_address as *const RSDP) };
+        if !init_acpi_early(rsdp) {
             pr_err!("Failed Init ACPI.");
         }
     } else if multiboot_information.old_acpi_rsdp_ptr.is_some() {
