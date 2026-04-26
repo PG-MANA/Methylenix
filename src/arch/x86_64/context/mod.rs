@@ -20,11 +20,8 @@ use crate::kernel::memory_manager::data_type::{Address, MSize, VAddress};
 pub struct ContextManager {
     system_ss: u16,
     system_cs: u16,
-    #[allow(dead_code)]
     user_ss: u16,
-    #[allow(dead_code)]
     user_cs: u16,
-    system_page_table_address: usize,
 }
 
 impl ContextManager {
@@ -41,24 +38,15 @@ impl ContextManager {
             system_ss: 0,
             user_cs: 0,
             user_ss: 0,
-            system_page_table_address: 0,
         }
     }
 
     /// Init Context Manager with system code/stack segment and user code/stack segment.
-    pub fn init(
-        &mut self,
-        system_cs: u16,
-        system_ss: u16,
-        user_cs: u16,
-        user_ss: u16,
-        system_page_table_address: usize,
-    ) {
+    pub fn init(&mut self, system_cs: u16, system_ss: u16, user_cs: u16, user_ss: u16) {
         self.system_cs = system_cs;
         self.system_ss = system_ss;
         self.user_ss = user_ss;
         self.user_cs = user_cs;
-        self.system_page_table_address = system_page_table_address;
     }
 
     /// Create system context data
@@ -85,7 +73,6 @@ impl ContextManager {
             (stack_address + stack_size).to_usize() - 8, /* For SystemV ABI Stack Alignment */
             self.system_cs as u64,
             self.system_ss as u64,
-            //self.system_page_table_address,
         ))
     }
 
@@ -134,7 +121,6 @@ impl ContextManager {
             self.user_cs as u64,
             self.user_ss as u64,
             arguments,
-            //pg_manager.get_page_table_address().to_usize(),
         ))
     }
 

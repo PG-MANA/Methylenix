@@ -14,60 +14,61 @@ pub struct ContextData {
 #[repr(C)]
 #[derive(Default, Clone)]
 pub struct Registers {
-    pub rax: u64,
     /* +  0 */
-    pub rdx: u64,
+    pub rax: u64,
     /* +  1 */
-    pub rcx: u64,
+    pub rdx: u64,
     /* +  2 */
-    pub rbx: u64,
+    pub rcx: u64,
     /* +  3 */
-    pub rbp: u64,
+    pub rbx: u64,
     /* +  4 */
-    pub rsi: u64,
+    pub rbp: u64,
     /* +  5 */
-    pub rdi: u64,
+    pub rsi: u64,
     /* +  6 */
-    pub r8: u64,
+    pub rdi: u64,
     /* +  7 */
-    pub r9: u64,
+    pub r8: u64,
     /* +  8 */
-    pub r10: u64,
+    pub r9: u64,
     /* +  9 */
-    pub r11: u64,
+    pub r10: u64,
     /* + 10 */
-    pub r12: u64,
+    pub r11: u64,
     /* + 11 */
-    pub r13: u64,
+    pub r12: u64,
     /* + 12 */
-    pub r14: u64,
+    pub r13: u64,
     /* + 13 */
-    pub r15: u64,
+    pub r14: u64,
     /* + 14 */
-    pub ds: u64,
+    pub r15: u64,
     /* + 15 */
-    pub fs: u64,
+    pub ds: u64,
     /* + 16 */
-    pub fs_base: u64,
+    pub fs: u64,
     /* + 17 */
-    pub gs: u64,
+    pub fs_base: u64,
     /* + 18 */
-    pub gs_base: u64,
+    pub gs: u64,
     /* + 19 */
-    pub es: u64,
+    pub gs_base: u64,
     /* + 20 */
-    pub ss: u64,
+    pub es: u64,
     /* + 21 */
-    pub rsp: u64,
+    pub ss: u64,
     /* + 22 */
-    pub rflags: u64,
+    pub rsp: u64,
     /* + 23 */
-    pub cs: u64,
+    pub rflags: u64,
     /* + 24 */
-    pub rip: u64,
+    pub cs: u64,
     /* + 25 */
-    pub cr3: u64,
+    pub rip: u64,
     /* + 26 */
+    pub cr3: u64,
+    /* + 27 */
     pub padding: u64,
 }
 
@@ -108,7 +109,6 @@ impl ContextData {
         stack: usize,
         cs: u64,
         ss: u64,
-        //cr3: usize,
     ) -> Self {
         let mut data = Self::new();
         data.registers.rip = entry_address as u64;
@@ -167,7 +167,6 @@ impl ContextData {
     pub fn fork_context_data(original_context: &Self, entry_address: usize, stack: usize) -> Self {
         let mut forked_data = Self::new();
         forked_data.registers.rip = entry_address as u64;
-        forked_data.registers.cr3 = original_context.registers.cr3;
         forked_data.registers.cs = original_context.registers.cs;
         forked_data.registers.ss = original_context.registers.ss;
         forked_data.registers.rflags = 0x202;

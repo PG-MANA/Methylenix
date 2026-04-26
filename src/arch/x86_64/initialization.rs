@@ -47,13 +47,7 @@ pub fn init_task(
     let mut run_queue = RunQueue::new();
     let mut task_manager = TaskManager::new();
 
-    context_manager.init(
-        system_cs,
-        0, /*is it ok?*/
-        user_cs,
-        user_ss,
-        cpu::get_cr3(),
-    );
+    context_manager.init(system_cs, 0 /*is it ok?*/, user_cs, user_ss);
 
     run_queue.init().expect("Failed to init RunQueue");
 
