@@ -30,6 +30,7 @@ use crate::kernel::{
         data_type::{Address, MSize, MemoryOptionFlags, MemoryPermissionFlags, PAddress, VAddress},
         free_pages,
         memory_allocator::MemoryAllocator,
+        physical_memory_manager::PhysicalMemoryManager,
     },
     task_manager::{TaskManager, run_queue::RunQueue},
     timer_manager::{IntervalTimer, LocalTimerManager},
@@ -39,6 +40,9 @@ use core::arch::global_asm;
 use core::sync::atomic::AtomicBool;
 
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
+
+/// Called from [`crate::kernel::initialization::init_memory_by_boot_information`]
+pub fn reserve_arch_depended_memory(_pm_manager: &mut PhysicalMemoryManager) {}
 
 /// Setup Per CPU struct
 ///

@@ -4,9 +4,12 @@
 //! This module contains initialization functions which is not depend on arch.
 //!
 
-use crate::arch::target_arch::context::memory_layout::physical_address_to_direct_map;
+use crate::arch::target_arch::context::memory_layout::{
+    KERNEL_MAP_START_ADDRESS, physical_address_to_direct_map,
+};
 use crate::arch::target_arch::device::{cpu, pci::ArchDependPciManager};
 use crate::arch::target_arch::paging::{PAGE_MASK, PAGE_SIZE_USIZE};
+use crate::arch::target_arch::reserve_arch_depended_memory;
 
 use crate::kernel::{
     application_loader,
@@ -116,6 +119,8 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
         }
     }
 
+    reserve_arch_depended_memory(&mut physical_memory_manager);
+
     /* Set up Virtual Memory Manager */
     let mut virtual_memory_manager = VirtualMemoryManager::new();
     virtual_memory_manager.init_system(&mut physical_memory_manager);
@@ -132,6 +137,7 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
         let physical_address = entry.get_physical_address() as usize;
         if entry.get_segment_type() != ELF_PROGRAM_HEADER_SEGMENT_LOAD
             || (virtual_address & !PAGE_MASK) != 0
+            || (virtual_address < KERNEL_MAP_START_ADDRESS.to_usize())
             || (physical_address & !PAGE_MASK) != 0
             || entry.get_memory_size() == 0
         {
@@ -191,12 +197,6 @@ pub fn init_memory_by_boot_information(boot_information: &mut BootInformation) {
                 .to_usize(),
         );
     }
-    /*boot_information.font_address = boot_information.font_address.map(|a| {
-        (
-            (physical_address_to_direct_map(PAddress::new(a.0)).to_usize()),
-            a.1,
-        )
-    });*/
 
     /* Apply paging */
     get_kernel_manager_cluster()

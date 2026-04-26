@@ -21,13 +21,15 @@ use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::boot_information::BootInformation;
 use crate::kernel::drivers::device::vga_text::VgaTextDriver;
 use crate::kernel::drivers::multiboot::MultiBootInformation;
-pub use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64 as ELF_MACHINE_DEFAULT;
 use crate::kernel::initialization::*;
 use crate::kernel::manager_cluster::{get_cpu_manager_cluster, get_kernel_manager_cluster};
 use crate::kernel::memory_manager::data_type::VAddress;
 use crate::kernel::sync::spin_lock::Mutex;
 use crate::kernel::timer_manager::IntervalTimer;
 use crate::kernel::tty::TtyManager;
+
+pub use self::initialization::reserve_arch_depended_memory;
+pub use crate::kernel::file_manager::elf::ELF_MACHINE_AMD64 as ELF_MACHINE_DEFAULT;
 
 pub struct ArchDependedCpuManagerCluster {
     pub local_apic_timer: LocalApicTimer,

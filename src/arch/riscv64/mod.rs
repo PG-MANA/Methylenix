@@ -20,7 +20,6 @@ pub mod system_call;
 
 use self::{device::serial_port::SerialPortManager, initialization::*};
 
-pub use crate::kernel::file_manager::elf::ELF_MACHINE_RISCV as ELF_MACHINE_DEFAULT;
 use crate::kernel::{
     collections::{init_struct, ptr_linked_list::PtrLinkedList},
     drivers::{boot_information::BootInformation, dtb::DtbManager},
@@ -30,6 +29,9 @@ use crate::kernel::{
     timer_manager::IntervalTimer,
     tty::TtyManager,
 };
+
+pub use self::initialization::reserve_arch_depended_memory;
+pub use crate::kernel::file_manager::elf::ELF_MACHINE_RISCV as ELF_MACHINE_DEFAULT;
 
 use alloc::boxed::Box;
 

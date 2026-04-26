@@ -20,8 +20,8 @@ use crate::kernel::{
     initialization::{idle, init_task_ap, init_work_queue},
     manager_cluster::{CpuManagerCluster, get_cpu_manager_cluster, get_kernel_manager_cluster},
     memory_manager::{
-        data_type::{Address, MSize, MemoryPermissionFlags, PAddress, VAddress},
-        memory_allocator::MemoryAllocator,
+        data_type::*, memory_allocator::MemoryAllocator,
+        physical_memory_manager::PhysicalMemoryManager,
     },
     sync::spin_lock::Mutex,
     task_manager::{TaskManager, run_queue::RunQueue},
@@ -31,6 +31,13 @@ use crate::kernel::{
 use core::sync::atomic::AtomicBool;
 
 pub static AP_BOOT_COMPLETE_FLAG: AtomicBool = AtomicBool::new(false);
+
+/// Called from [`crate::kernel::initialization::init_memory_by_boot_information`]
+pub fn reserve_arch_depended_memory(pm_manager: &mut PhysicalMemoryManager) {
+    pm_manager
+        .reserve_memory(PAddress::new(0), PAGE_SIZE, MOrder::new(0))
+        .expect("Failed to reserve boot code area");
+}
 
 /// Init TaskManager
 pub fn init_task(
