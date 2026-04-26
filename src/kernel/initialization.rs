@@ -66,7 +66,7 @@ pub fn init_graphic_by_boot_information(boot_information: &BootInformation) -> b
     );
     if let Some(graphic_info) = &boot_information.graphic_info {
         if graphic_info.info.pixel_format
-            == EfiGraphicsPixelFormat::PixelRedGreenBlueReserved8BitPerColor
+            == EfiGraphicsPixelFormat::PixelBlueGreenRedReserved8BitPerColor
         {
             get_kernel_manager_cluster()
                 .graphic_manager
