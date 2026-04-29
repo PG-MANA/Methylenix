@@ -80,12 +80,11 @@ impl Ecam {
 
     pub fn delete_pci_device_struct(&mut self, pci_dev: PciDevice) {
         if let Some(address) = pci_dev.base_address {
-            if let Err(e) = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(address)
-            {
-                pr_err!("Failed to free memory mapping: {:?}", e);
-            }
+            bug_on_err!(
+                get_kernel_manager_cluster()
+                    .kernel_memory_manager
+                    .free(address)
+            );
         }
     }
 

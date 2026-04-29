@@ -1420,18 +1420,18 @@ impl core::fmt::Debug for AmlVariable {
             AmlVariable::IndexField(b) => {
                 let index = b.index_register.try_lock();
                 let data = b.data_register.try_lock();
-                if index.is_ok() && data.is_ok() {
+                if let Ok(i) = index
+                    && let Ok(d) = data
+                {
                     f.debug_struct("IndexField")
-                        .field("IndexRegister", &*index.unwrap())
-                        .field("DataRegister", &*data.unwrap())
+                        .field("IndexRegister", &*i)
+                        .field("DataRegister", &*d)
                         .field("BitIndex", &b.bit_index)
                         .field("NumberOfBits", &b.num_of_bits)
                         .field("AccessAlign", &b.access_align)
                         .field("GlobalLock", &b.should_lock_global_lock)
                         .finish()
                 } else {
-                    drop(index);
-                    drop(data);
                     f.debug_struct("IndexField")
                         .field("BitIndex", &b.bit_index)
                         .field("NumberOfBits", &b.num_of_bits)

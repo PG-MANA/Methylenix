@@ -375,17 +375,17 @@ impl DtbManager {
             match self._search_node(node_name, &mut pointer, address_cells, size_cells) {
                 Ok(Some(n)) => return Some(n),
                 Ok(None) => {
-                    match self.read_node(pointer).map(|n| *n) {
-                        Ok(Self::FDT_END) | Err(_) => {
+                    match self.read_node(pointer) {
+                        Ok(&Self::FDT_END) | Err(_) => {
                             return None;
                         }
-                        Ok(Self::FDT_BEGIN_NODE) => { /* Continue */ }
-                        Ok(Self::FDT_END_NODE) | Ok(Self::FDT_NOP) => {
+                        Ok(&Self::FDT_BEGIN_NODE) => { /* Continue */ }
+                        Ok(&Self::FDT_END_NODE) | Ok(&Self::FDT_NOP) => {
                             pointer += Self::FDT_NODE_BYTE;
                             /* Continue */
                         }
                         Ok(n) => {
-                            pr_err!("Unexpected Node: {:#X}", u32::from_be_bytes(n));
+                            pr_err!("Unexpected Node: {:#X}", u32::from_be_bytes(*n));
                             return None;
                         }
                     }
@@ -497,9 +497,7 @@ impl DtbManager {
     }
 
     pub fn read_reg_property(&self, node: &DtbNodeInfo, index: usize) -> Option<(usize, usize)> {
-        let Some(info) = self.get_property(node, &Self::PROP_REG) else {
-            return None;
-        };
+        let info = self.get_property(node, &Self::PROP_REG)?;
         let mut address: usize = 0;
         let mut size: usize = 0;
         let offset =

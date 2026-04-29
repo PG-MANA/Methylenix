@@ -323,17 +323,17 @@ impl DtbManager {
             match self._search_node(node_name, &mut pointer, address_cells, size_cells) {
                 Ok(Some(n)) => return Some(n),
                 Ok(None) => {
-                    match self.read_node(pointer).map(|n| *n) {
-                        Ok(Self::FDT_END) | Err(_) => {
+                    match self.read_node(pointer) {
+                        Ok(&Self::FDT_END) | Err(_) => {
                             return None;
                         }
-                        Ok(Self::FDT_BEGIN_NODE) => { /* Continue */ }
-                        Ok(Self::FDT_END_NODE) | Ok(Self::FDT_NOP) => {
+                        Ok(&Self::FDT_BEGIN_NODE) => { /* Continue */ }
+                        Ok(&Self::FDT_END_NODE) | Ok(&Self::FDT_NOP) => {
                             pointer += Self::FDT_NODE_BYTE;
                             /* Continue */
                         }
                         Ok(n) => {
-                            pr_err!("Unexpected Node: {:#X}", u32::from_be_bytes(n));
+                            pr_err!("Unexpected Node: {:#X}", u32::from_be_bytes(*n));
                             return None;
                         }
                     }
@@ -497,9 +497,7 @@ impl DtbManager {
     }
 
     pub fn read_reg_property(&self, node: &DtbNodeInfo, index: usize) -> Option<(usize, usize)> {
-        let Some(info) = self.get_property(node, &Self::PROP_REG) else {
-            return None;
-        };
+        let info = self.get_property(node, &Self::PROP_REG)?;
         let mut address: usize = 0;
         let mut size: usize = 0;
         let offset =
@@ -548,14 +546,11 @@ impl<'a> Iterator for SubNodeIter<'a> {
     type Item = DtbNodeInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(current) = &self.node_info else {
-            return None;
-        };
+        let current = self.node_info.as_ref()?;
         let mut next_pointer = current.base_address;
-        let next_node;
 
         let _ = self.dtb_manager._skip_to_next_node(&mut next_pointer);
-        if self
+        let next_node = if self
             .dtb_manager
             .read_node(next_pointer)
             .map(|n| *n == DtbManager::FDT_BEGIN_NODE)
@@ -565,14 +560,14 @@ impl<'a> Iterator for SubNodeIter<'a> {
             let _ = self
                 .dtb_manager
                 .compare_string(&mut next_pointer, b"", b"@"); // Skip name
-            next_node = Some(DtbNodeInfo {
+            Some(DtbNodeInfo {
                 base_address: next_pointer,
                 address_cells: current.address_cells,
                 size_cells: current.size_cells,
-            });
+            })
         } else {
-            next_node = None;
-        }
+            None
+        };
         core::mem::replace(&mut self.node_info, next_node)
     }
 }

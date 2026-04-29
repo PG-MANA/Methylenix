@@ -166,10 +166,10 @@ impl AmlInterpreter {
 
         let method = match self.evaluator.search_aml_variable(method_name, None, false) {
             Ok(v) => {
-                if let AmlVariable::Method(m) = &*v.lock().unwrap() {
+                if let AmlVariable::Method(m) = &*v.lock()? {
                     m.clone()
                 } else {
-                    pr_err!("Expected a method, but found {:?}", &*v.lock().unwrap());
+                    pr_err!("Expected a method, but found {:?}", &*v.lock()?);
                     return Err(());
                 }
             }
@@ -224,7 +224,7 @@ impl AmlStream {
         (self.limit - self.pointer).to_usize()
     }
 
-    fn read<T: ?Sized + Copy>(&mut self) -> Result<T, AmlError> {
+    fn read<T: Copy>(&mut self) -> Result<T, AmlError> {
         self.check_pointer(size_of::<T>())?;
         let d = unsafe { core::ptr::read_unaligned(self.pointer.to_usize() as *const T) };
         self.pointer += MSize::new(size_of::<T>());

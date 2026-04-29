@@ -590,50 +590,45 @@ impl Evaluator {
         };
 
         /* Search from the Variable Tree */
-        if let Some(relative_name) =
-            name.get_relative_name(self.variable_tree.get_current_scope_name())
+        if let Some(n) = name.get_relative_name(self.variable_tree.get_current_scope_name())
+            && let Some(v) = self.variable_tree.find_data_from_current_scope(&n)?
         {
-            if let Some(v) = self
-                .variable_tree
-                .find_data_from_current_scope(&relative_name)?
-            {
-                restore_status(self)?;
-                return Ok(v);
-            }
+            restore_status(self)?;
+            return Ok(v);
         }
         if name.len() > 1
+            && preferred_search_scope.is_none()
             && self
                 .term_list_hierarchy
                 .last()
                 .map(|s| !s.get_scope_name().is_child(name))
                 .unwrap_or(false)
-            && preferred_search_scope.is_none()
+            && let Some(v) = self.search_aml_variable_by_absolute_path(name)?
         {
-            if let Some(v) = self.search_aml_variable_by_absolute_path(name)? {
-                restore_status(self)?;
-                return Ok(v);
-            }
+            restore_status(self)?;
+            return Ok(v);
         }
+
         let single_name = name.get_single_name_path();
-        if let Some(s_n) = single_name.as_ref() {
-            if let Some(v) = self.variable_tree.find_data_from_current_scope(s_n)? {
-                restore_status(self)?;
-                return Ok(v);
-            }
+        if let Some(n) = single_name.as_ref()
+            && let Some(v) = self.variable_tree.find_data_from_current_scope(n)?
+        {
+            restore_status(self)?;
+            return Ok(v);
         }
 
         /* Search from the current TermList */
-        if let Some(current_term_list) = self.term_list_hierarchy.last().cloned() {
-            if let Some(v) = self.search_aml_variable_by_parsing_term_list(
+        if let Some(current_term_list) = self.term_list_hierarchy.last().cloned()
+            && let Some(v) = self.search_aml_variable_by_parsing_term_list(
                 name,
                 single_name.as_ref(),
                 current_term_list,
                 None,
                 false,
-            )? {
-                restore_status(self)?;
-                return Ok(v);
-            }
+            )?
+        {
+            restore_status(self)?;
+            return Ok(v);
         }
 
         let search_scope = preferred_search_scope
@@ -664,16 +659,16 @@ impl Evaluator {
                 .move_current_scope(term_list.get_scope_name())?;
 
             if !name.is_absolute_path() {
-                if let Some(s_n) = single_name.as_ref() {
-                    if let Some(v) = self.variable_tree.find_data_from_current_scope(s_n)? {
-                        restore_status(self, term_list_hierarchy_back_up)?;
-                        return Ok(v);
-                    }
-                } else if let Some(r_n) = name.get_relative_name(term_list.get_scope_name()) {
-                    if let Some(v) = self.variable_tree.find_data_from_current_scope(&r_n)? {
-                        restore_status(self, term_list_hierarchy_back_up)?;
-                        return Ok(v);
-                    }
+                if let Some(n) = single_name.as_ref()
+                    && let Some(v) = self.variable_tree.find_data_from_current_scope(n)?
+                {
+                    restore_status(self, term_list_hierarchy_back_up)?;
+                    return Ok(v);
+                } else if let Some(n) = name.get_relative_name(term_list.get_scope_name())
+                    && let Some(v) = self.variable_tree.find_data_from_current_scope(&n)?
+                {
+                    restore_status(self, term_list_hierarchy_back_up)?;
+                    return Ok(v);
                 }
             }
 
@@ -1704,7 +1699,7 @@ impl Evaluator {
                     .get_current_tick();
                 while mutex_object
                     .0
-                    .fetch_update(Ordering::Acquire, Ordering::Relaxed, |current_level| {
+                    .try_update(Ordering::SeqCst, Ordering::SeqCst, |current_level| {
                         if current_level <= mutex_object.1 {
                             Some(current_level + 1)
                         } else {

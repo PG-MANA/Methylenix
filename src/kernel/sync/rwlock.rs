@@ -51,7 +51,7 @@ impl<T: ?Sized> RwLock<T> {
             synchronize(self.readers.as_ptr());
             if self
                 .readers
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
                     if x == usize::MAX { None } else { Some(x + 1) }
                 })
                 .is_ok()

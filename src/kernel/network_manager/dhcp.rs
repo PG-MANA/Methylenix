@@ -423,8 +423,8 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
         return Err(());
     }
 
-    match packet_type {
-        &DHCP_MESSAGE_TYPE_PACK => {
+    match *packet_type {
+        DHCP_MESSAGE_TYPE_PACK => {
             pr_debug!(
                 "Request is accepted: My IPv4 Address is {}",
                 AddressPrinter {
@@ -435,7 +435,7 @@ pub fn get_ipv4_address_sync(device_id: usize) -> Result<u32, ()> {
             );
             Ok(offered_address)
         }
-        &DHCP_MESSAGE_TYPE_PNACK => {
+        DHCP_MESSAGE_TYPE_PNACK => {
             pr_debug!(
                 "Request is not accepted: Offered IPv4 Address: {}",
                 AddressPrinter {

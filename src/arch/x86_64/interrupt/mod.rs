@@ -305,8 +305,7 @@ impl InterruptManager {
             get_kernel_manager_cluster()
                 .arch_depend_data
                 .io_apic_manager
-                .lock()
-                .unwrap()
+                .lock()?
                 .set_redirect(
                     self.local_apic.get_apic_id(),
                     irq,

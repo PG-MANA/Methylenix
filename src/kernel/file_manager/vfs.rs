@@ -74,7 +74,7 @@ impl FileOperationDriver for StubDriver {
 
 pub enum FileDescriptorData {
     Address(usize),
-    Data(alloc::boxed::Box<dyn core::any::Any>),
+    Data(alloc::boxed::Box<dyn Any>),
 }
 
 pub struct FileDescriptor {

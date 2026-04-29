@@ -75,12 +75,11 @@ impl BgrtManager {
 impl Drop for BgrtManager {
     fn drop(&mut self) {
         if !self.base_address.is_zero() {
-            if let Err(e) = get_kernel_manager_cluster()
-                .kernel_memory_manager
-                .free(self.base_address)
-            {
-                pr_warn!("Cannot free BGRT: {:?}", e);
-            }
+            bug_on_err!(
+                get_kernel_manager_cluster()
+                    .kernel_memory_manager
+                    .free(self.base_address)
+            );
         }
     }
 }

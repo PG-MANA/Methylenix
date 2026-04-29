@@ -57,8 +57,7 @@ impl PciDeviceDriver for SmbusManager {
         pr_debug!("SMBus Interrupt Pin: INT{}#", (int_pin + b'A') as char);
         let resource_data = get_kernel_manager_cluster()
             .acpi_manager
-            .lock()
-            .unwrap()
+            .lock()?
             .search_interrupt_information_with_evaluation_aml(pci_dev.bus, pci_dev.device, int_pin);
         if resource_data.is_none() {
             pr_err!("Cannot detect irq.");

@@ -4,8 +4,6 @@
 
 use crate::kernel::drivers::efi::memory_map::EfiMemoryDescriptor;
 
-use core::mem;
-
 #[derive(Clone)]
 #[repr(C)]
 pub struct MemoryMapEntry {
@@ -51,10 +49,10 @@ pub struct EfiMemoryMapInfo {
 impl MemoryMapInfo {
     pub fn new(map: &MultibootTagMemoryMap) -> Self {
         Self {
-            num_of_entries: (map.size as usize - mem::size_of::<MultibootTagMemoryMap>())
+            num_of_entries: (map.size as usize - size_of::<MultibootTagMemoryMap>())
                 / map.entry_size as usize,
             address: map as *const MultibootTagMemoryMap as usize
-                + mem::size_of::<MultibootTagMemoryMap>(),
+                + size_of::<MultibootTagMemoryMap>(),
             entry_size: map.entry_size as usize,
             count: 0,
         }
@@ -79,10 +77,10 @@ impl Iterator for MemoryMapInfo {
 impl EfiMemoryMapInfo {
     pub fn new(map: &MultibootTagEfiMemoryMap) -> Self {
         Self {
-            num_of_entries: (map.size as usize - mem::size_of::<MultibootTagEfiMemoryMap>())
+            num_of_entries: (map.size as usize - size_of::<MultibootTagEfiMemoryMap>())
                 / map.descriptor_size as usize,
             address: map as *const MultibootTagEfiMemoryMap as usize
-                + mem::size_of::<MultibootTagMemoryMap>(),
+                + size_of::<MultibootTagMemoryMap>(),
             entry_size: map.descriptor_size as usize,
             count: 0,
         }
