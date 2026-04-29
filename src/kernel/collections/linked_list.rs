@@ -297,7 +297,7 @@ impl<T> Allocator<T> for GeneralAllocator<T> {
     }
 }
 
-/// The LinkedList with  [`crate::kernel::memory_manager::kmalloc`]  and  [`crate::kernel::memory_manager::kfree`].
+/// The LinkedList with  [`kmalloc`]  and  [`kfree`].
 pub type GeneralLinkedList<T> = LinkedList<T, GeneralAllocator<Node<T>>>;
 
 impl<T> GeneralLinkedList<T> {
@@ -308,7 +308,7 @@ impl<T> GeneralLinkedList<T> {
     }
 }
 
-/// The LinkedList with [`crate::kernel::memory_manager::memory_allocator::LocalSlabAllocator`].
+/// The LinkedList with [`LocalSlabAllocator`].
 pub type LocalSlabAllocLinkedList<T> = LinkedList<T, LocalSlabAllocator<Node<T>>>;
 
 impl<T> LocalSlabAllocLinkedList<T> {
@@ -331,7 +331,7 @@ impl<T> Allocator<T> for LocalSlabAllocator<T> {
     }
 }
 
-/// The LinkedList with [`crate::kernel::memory_manager::memory_allocator::GlobalSlabAllocator`].
+/// The LinkedList with [`GlobalSlabAllocator`].
 pub type GlobalSlabAllocLinkedList<T> = LinkedList<T, GlobalSlabAllocator<Node<T>>>;
 
 impl<T> GlobalSlabAllocLinkedList<T> {

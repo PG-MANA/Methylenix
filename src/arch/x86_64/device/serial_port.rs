@@ -12,7 +12,6 @@ use crate::kernel::tty::{TextColor, Writer};
 /// SerialPortManager
 ///
 /// SerialPortManager has SpinLockFlag inner.
-/// Default Fifo size is 256 byte. In the future, it may be variable by using vec<u8>
 pub struct SerialPortManager {
     port: u16,
     write_lock: SpinLockFlag,

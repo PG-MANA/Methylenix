@@ -235,10 +235,10 @@ impl InterruptManager {
     ///
     ///  * function: the handler to call when the interruption occurs
     ///  * irq: If the target device interrupts by irq, set this argument.
-    ///         If this is some(irq), this function will call [`super::device::io_apic::IoApicManager::set_redirect`].
+    ///     If this is some(irq), this function will call [`super::device::io_apic::IoApicManager::set_redirect`].
     ///  * index: the index of IDT to connect handler
     ///  * privilege_level: the ring level to allow interrupt. If you want to allow user interrupt,
-    ///                     set this to 3.
+    ///     set this to 3.
     ///
     ///  If index <= 32(means CPU internal exception) or index > 0xFF(means intel reserved area),
     ///  this function will return false.
@@ -353,7 +353,7 @@ impl InterruptManager {
     /// Save current the interrupt status and disable interrupt
     ///
     /// This function disables interrupt and return interrupt status before disable interrupt.
-    /// The return value will be used by [`restore_local_irq`].
+    /// The return value will be used by [`Self::restore_local_irq`].
     /// This can be nested called.
     pub fn save_and_disable_local_irq() -> StoredIrqData {
         let r_flags = cpu::get_r_flags();
@@ -361,9 +361,9 @@ impl InterruptManager {
         StoredIrqData { r_flags }
     }
 
-    /// Restore the interrupt status before calling [`save_and_disable_local_irq`]
+    /// Restore the interrupt status before calling [`Self::save_and_disable_local_irq`]
     ///
-    /// If the interrupt was enabled before calling [`save_and_disable_local_irq`],
+    /// If the interrupt was enabled before calling [`Self::save_and_disable_local_irq`],
     /// this will enable interrupt, otherwise this will not change the interrupt status.
     pub fn restore_local_irq(original: StoredIrqData) {
         unsafe { cpu::set_r_flags(original.r_flags) };

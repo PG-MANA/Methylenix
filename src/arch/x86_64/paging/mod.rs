@@ -457,7 +457,7 @@ impl PageManager {
     ///
     /// This function searches target page entry(PDPTE, PDE, PTE) and disable present flag.
     /// After disabling, this calls [`Self::cleanup_page_table`] to collect freed page tables.
-    /// If target entry is not exists, this function will return [`PagingError:EntryIsNotFound`].
+    /// If target entry is not exists, this function will return [`PagingError::EntryIsNotFound`].
     /// When huge table was used and the mapped size is different from expected size, this will return error.
     pub fn unassociate_address(
         &self,

@@ -74,9 +74,7 @@ impl InterruptManager {
 
     /// Create InterruptManager with invalid data.
     ///
-    /// Before use, **you must call [`init`]**.
-    ///
-    /// [`init`]: #method.init
+    /// Before use, **you must call [`Self::init`]**.
     pub const fn new() -> InterruptManager {
         InterruptManager {
             lock: IrqSaveSpinLockFlag::new(),
@@ -215,7 +213,7 @@ impl InterruptManager {
     /// Save current the interrupt status and disable interrupt
     ///
     /// This function disables interrupt and returns interrupt status before disabling interrupt.
-    /// The return value will be used by [`restore_local_irq`].
+    /// The return value will be used by [`Self::restore_local_irq`].
     /// This can be nested called.
     pub fn save_and_disable_local_irq() -> StoredIrqData {
         StoredIrqData {
@@ -223,9 +221,9 @@ impl InterruptManager {
         }
     }
 
-    /// Restore the interrupt status before calling [`save_and_disable_local_irq`]
+    /// Restore the interrupt status before calling [`Self::save_and_disable_local_irq`]
     ///
-    /// If the interrupt was enabled before calling [`save_and_disable_local_irq`],
+    /// If the interrupt was enabled before calling [`Self::save_and_disable_local_irq`],
     ///  this will enable interrupt, otherwise this will not change the interrupt status.
     pub fn restore_local_irq(original: StoredIrqData) {
         unsafe { cpu::restore_irq_fiq(original.daif) };

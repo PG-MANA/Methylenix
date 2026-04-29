@@ -132,10 +132,10 @@ impl ProcessEntry {
         });
     }
 
-    /// Chain `thread` into self.thread(List, ThreadEntry::t_list)
+    /// Chain `thread` into [`Self::thread`]
     ///
-    /// This function does not check [Self::num_of_threads].
-    /// [Self::lock] must be locked.
+    /// This function does not check [`Self::num_of_thread`].
+    /// [`Self::lock`] must be locked.
     fn set_thread_into_thread_list(
         &mut self,
         thread: &mut ThreadEntry,
@@ -237,10 +237,10 @@ impl ProcessEntry {
         }
     }
 
-    /// Search the thread from [Self::thread]
+    /// Search the thread from [`Self::thread`]
     ///
     /// This function searches the thread having specified t_id.
-    /// [Self::lock] must be locked.
+    /// [`Self::lock`] must be locked.
     pub fn get_thread_mut(&mut self, t_id: usize) -> Option<&mut ThreadEntry> {
         assert!(self.lock.is_locked());
         if self.num_of_thread == 0 {
@@ -252,7 +252,7 @@ impl ProcessEntry {
 
     /// Add thread into ThreadList.
     ///
-    /// This function adds `thread` into [Self::thread] or [Self::single_thread].
+    /// This function adds `thread` into [Self::thread].
     /// [Self::lock] must be locked and `thread` must be unlocked.
     pub fn add_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());
@@ -268,8 +268,8 @@ impl ProcessEntry {
 
     /// Remove `thread` from ThreadList.
     ///
-    /// This function removes thread from [Self::t_list] and adjusts the list.
-    /// [Self::lock] must be locked, and `thread` must be unlocked.
+    /// This function removes `thread` from [`Self::thread`] and adjusts the list.
+    /// [`Self::lock`] must be locked, and `thread` must be unlocked.
     pub fn remove_thread(&mut self, thread: &mut ThreadEntry) -> Result<(), TaskError> {
         assert!(self.lock.is_locked());
         assert!(!thread.lock.is_locked());
