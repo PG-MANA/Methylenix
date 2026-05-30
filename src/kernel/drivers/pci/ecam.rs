@@ -2,7 +2,8 @@
 //! PCIe Enhanced Configuration Access Mechanism
 //!
 
-use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
+use crate::kernel::drivers::acpi::{AcpiManager, table::mcfg::McfgManager};
+use crate::kernel::drivers::dtb::DtbManager;
 use crate::kernel::drivers::pci::PciDevice;
 use crate::kernel::manager_cluster::get_kernel_manager_cluster;
 use crate::kernel::memory_manager::data_type::{
@@ -17,24 +18,86 @@ pub struct Ecam {
 }
 
 impl Ecam {
-    pub fn new(mcfg: McfgManager) -> Self {
-        /* Currently supports one segment only */
-        let info = mcfg
-            .get_base_address_info(0)
-            .expect("Failed to get Base Address information");
+    pub fn new_acpi(acpi_manager: &AcpiManager) -> Option<Self> {
+        if acpi_manager.is_available() {
+            if let Some(mcfg_manager) = acpi_manager
+                .get_table_manager()
+                .get_table_manager::<McfgManager>()
+            {
+                /* Currently supports one segment only */
+                let info = mcfg_manager
+                    .get_base_address_info(0)
+                    .expect("Failed to get Base Address information");
 
-        pr_info!(
-            "PCI Bus Base Address: {:#X}, Bus: {} ~ {}",
-            info.base_address,
-            info.start_bus,
-            info.end_bus
-        );
+                pr_info!(
+                    "PCI Bus Base Address: {:#X}, Bus: {} ~ {}",
+                    info.base_address,
+                    info.start_bus,
+                    info.end_bus
+                );
 
-        Self {
-            ecam_base_address: PAddress::new(info.base_address as usize),
-            start_bus: info.start_bus,
-            end_bus: info.end_bus,
+                return Some(Self {
+                    ecam_base_address: PAddress::new(info.base_address as usize),
+                    start_bus: info.start_bus,
+                    end_bus: info.end_bus,
+                });
+            }
         }
+        None
+    }
+
+    pub fn new_dtb(dtb: &DtbManager) -> Option<Self> {
+        let Some(info) = dtb.search_node(b"pci", None) else {
+            return None;
+        };
+        if !dtb.is_node_operational(&info) {
+            return None;
+        }
+        /* TODO: Compatible Check */
+        let Some((address, size)) = dtb.read_reg_property(&info, 0) else {
+            return None;
+        };
+        let start_bus;
+        let mut end_bus;
+        if let Some(bus_range) = dtb.get_property(&info, b"bus-range") {
+            if let Some(s) = dtb.read_property_as_u32(&bus_range, 0)
+                && let Some(e) = dtb.read_property_as_u32(&bus_range, 1)
+            {
+                start_bus = s;
+                end_bus = e;
+            } else {
+                pr_warn!("Invalid Bus Range");
+                return None;
+            }
+            /* Check if the range is compatible with the size */
+            let end_bus_from_size = (size >> 20) as u32;
+            if end_bus > end_bus_from_size
+                || (end_bus == end_bus_from_size && (size & ((1 << 20) - 1)) != 0)
+            {
+                pr_warn!(
+                    "The PCI bus range({start_bus:#x} ~ {end_bus:#x} is not compatible with the size({size:#x})"
+                );
+                if end_bus == end_bus_from_size {
+                    end_bus = end_bus_from_size - 1;
+                } else {
+                    end_bus = end_bus_from_size;
+                }
+            }
+        } else {
+            pr_warn!("The PCI bus range is not specified, calculate from the size({size:#x})");
+            start_bus = 0;
+            end_bus = (size >> 20) as u32;
+        }
+        pr_info!("Address: {address:#x}, Size: {size:#x}, Bus: {start_bus:#x} ~ {end_bus:#x}");
+        if start_bus >= u8::MAX as _ || end_bus >= u8::MAX as _ {
+            pr_err!("Invalid bus range: {start_bus:#x} ~ {end_bus:#x}");
+            return None;
+        }
+        Some(Self {
+            ecam_base_address: PAddress::new(address),
+            start_bus: start_bus as u8,
+            end_bus: end_bus as u8,
+        })
     }
 
     fn get_mmio_base_address(&self, bus: u8, device: u8, function: u8) -> PAddress {

@@ -9,10 +9,11 @@ use self::ecam::Ecam;
 
 use crate::arch::target_arch::device::pci::{ArchDependPciManager, setup_arch_depend_devices};
 
-use crate::kernel::drivers::acpi::table::mcfg::McfgManager;
+use crate::kernel::drivers::acpi::AcpiManager;
 use crate::kernel::drivers::device::ethernet::i210::I210Manager;
 use crate::kernel::drivers::device::lpc::LpcManager;
 use crate::kernel::drivers::device::nvme::NvmeManager;
+use crate::kernel::drivers::dtb::DtbManager;
 use crate::kernel::memory_manager::data_type::{MSize, VAddress};
 
 use alloc::vec::Vec;
@@ -65,11 +66,18 @@ impl PciManager {
         }
     }
 
-    pub fn new_ecam(mcfg: McfgManager) -> Self {
-        Self {
-            access: PciAccessType::Ecam(Ecam::new(mcfg)),
+    pub fn new_acpi(acpi: &AcpiManager) -> Option<Self> {
+        Some(Self {
+            access: PciAccessType::Ecam(Ecam::new_acpi(acpi)?),
             device_list: Vec::new(),
-        }
+        })
+    }
+
+    pub fn new_dtb(dtb: &DtbManager) -> Option<Self> {
+        Some(Self {
+            access: PciAccessType::Ecam(Ecam::new_dtb(dtb)?),
+            device_list: Vec::new(),
+        })
     }
 
     pub fn build_device_tree(&mut self) -> Result<(), ()> {

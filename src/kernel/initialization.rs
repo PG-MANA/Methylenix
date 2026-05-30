@@ -16,12 +16,9 @@ use crate::kernel::{
     block_device::BlockDeviceManager,
     collections::init_struct,
     drivers::{
-        acpi::{
-            AcpiManager, RSDP,
-            device::AcpiDeviceManager,
-            table::{bgrt::BgrtManager, mcfg::McfgManager},
-        },
+        acpi::{AcpiManager, RSDP, device::AcpiDeviceManager, table::bgrt::BgrtManager},
         boot_information::*,
+        dtb::DtbManager,
         efi::{
             EFI_ACPI_2_0_TABLE_GUID, EFI_PAGE_SIZE, memory_map::EfiMemoryType,
             protocol::graphics_output_protocol::EfiGraphicsPixelFormat,
@@ -374,23 +371,23 @@ pub fn init_acpi_later() -> bool {
 /// Init PciManager without scanning all bus
 ///
 /// This function should be called before `init_acpi_later`.
-pub fn init_pci_early() -> bool {
-    let acpi_manager = get_kernel_manager_cluster().acpi_manager.lock().unwrap();
-
-    let pci_manager;
-    if acpi_manager.is_available() {
-        if let Some(mcfg_manager) = acpi_manager
-            .get_table_manager()
-            .get_table_manager::<McfgManager>()
-        {
-            drop(acpi_manager);
-            pci_manager = PciManager::new_ecam(mcfg_manager);
-        } else {
-            pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
-        }
-    } else {
-        pci_manager = PciManager::new_arch_depend(ArchDependPciManager::new());
+pub fn init_pci_early(
+    acpi_manager: Option<&AcpiManager>,
+    dtb_manager: Option<&DtbManager>,
+) -> bool {
+    let mut pci_manager = None;
+    if let Some(acpi_manager) = acpi_manager
+        && acpi_manager.is_available()
+    {
+        pci_manager = PciManager::new_acpi(acpi_manager);
     }
+    if let Some(dtb_manager) = dtb_manager
+        && pci_manager.is_none()
+    {
+        pci_manager = PciManager::new_dtb(dtb_manager);
+    }
+    let pci_manager =
+        pci_manager.unwrap_or_else(|| PciManager::new_arch_depend(ArchDependPciManager::new()));
     init_struct!(get_kernel_manager_cluster().pci_manager, pci_manager);
     if let Err(err) = get_kernel_manager_cluster().pci_manager.build_device_tree() {
         pr_err!("Failed to build PCI device tree: {:?}", err);
@@ -589,6 +586,8 @@ pub fn idle() -> ! {
 }
 
 /// Main process called after finishing arch-depend initializations
+///
+/// Before jumping this function, [`init_acpi_ealry`] and [`init_pci_early`] must be called.
 pub fn main_initialization_process() -> ! {
     pr_info!("Entered main initialization process");
 
@@ -596,10 +595,6 @@ pub fn main_initialization_process() -> ! {
 
     init_block_devices_and_file_system_early();
     init_network_manager_early();
-
-    if !init_pci_early() {
-        pr_err!("Cannot init PCI Manager.");
-    }
 
     if !init_acpi_later() {
         pr_err!("Cannot init ACPI devices.");

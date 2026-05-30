@@ -161,5 +161,12 @@ fn main_arch_depend_initialization_process() -> ! {
         pr_err!("Failed to setup interrupt of SerialPort");
     }
 
+    if !init_pci_early(
+        Some(&get_kernel_manager_cluster().acpi_manager.lock().unwrap()),
+        Some(&get_kernel_manager_cluster().arch_depend_data.dtb_manager),
+    ) {
+        pr_err!("Cannot init PCI Manager.");
+    }
+
     main_initialization_process()
 }

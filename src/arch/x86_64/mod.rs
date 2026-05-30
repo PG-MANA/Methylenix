@@ -216,5 +216,12 @@ fn main_arch_depend_initialization_process() -> ! {
         .local_apic_timer
         .start_interrupt();
 
+    if !init_pci_early(
+        Some(&get_kernel_manager_cluster().acpi_manager.lock().unwrap()),
+        None,
+    ) {
+        pr_err!("Cannot init PCI Manager.");
+    }
+
     main_initialization_process()
 }
