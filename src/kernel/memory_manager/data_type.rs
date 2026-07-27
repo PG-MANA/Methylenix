@@ -469,7 +469,6 @@ const impl SubAssign for MIndex {
 }
 
 impl Step for MIndex {
-    #[inline]
     fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
         if start.0 <= end.0 {
             let r = end.0.overflowing_sub(start.0);
@@ -483,14 +482,22 @@ impl Step for MIndex {
         }
     }
 
-    #[inline]
     fn forward_checked(start: Self, count: usize) -> Option<Self> {
         start.0.checked_add(count).map(Self)
     }
 
-    #[inline]
+    fn forward_overflowing(start: Self, count: usize) -> (Self, bool) {
+        let (s, o) = start.0.overflowing_add(count);
+        (Self(s), o)
+    }
+
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
         start.0.checked_sub(count).map(Self)
+    }
+
+    fn backward_overflowing(start: Self, count: usize) -> (Self, bool) {
+        let (s, o) = start.0.overflowing_sub(count);
+        (Self(s), o)
     }
 }
 
