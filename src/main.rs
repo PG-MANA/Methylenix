@@ -1,6 +1,5 @@
 #![no_std]
 #![no_main]
-#![feature(allocator_api)]
 #![feature(array_try_from_fn)]
 #![feature(const_ops)]
 #![feature(const_convert)]

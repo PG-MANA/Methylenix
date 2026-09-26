@@ -287,8 +287,7 @@ impl FileManager {
             f.partition = f_i.partition;
         }
         f.parent = Some(Arc::downgrade(&current_directory));
-        let f = Arc::try_new(Mutex::new(f))
-            .map_err(|e| FileError::MemoryError(MemoryError::from(e)))?;
+        let f = Arc::new(Mutex::new(f));
         f_i.child.push_back(f.clone())?;
         Ok(f)
     }
